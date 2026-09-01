@@ -2538,6 +2538,24 @@ a:hover{color:var(--color-accent)}
 </nav>
 </sc-if>
 
+<sc-if value="{{ isVerifying }}" hint-placeholder-val="{{ false }}">
+<div style="max-width:420px;margin:0 auto;padding:120px 20px 40px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:var(--space-3)">
+  <sc-if value="{{ verifyPending }}" hint-placeholder-val="{{ true }}">
+  <div class="card elev-md" style="width:100%;padding:var(--space-8)">
+    <div style="font-size:17px;margin-bottom:8px">Confirming your email&hellip;</div>
+    <div style="font-size:13px;color:var(--color-neutral-500);line-height:1.5">One moment.</div>
+  </div>
+  </sc-if>
+  <sc-if value="{{ verifyFailed }}" hint-placeholder-val="{{ false }}">
+  <div class="card elev-md" style="width:100%;padding:var(--space-8)">
+    <div style="font-size:17px;margin-bottom:8px">{{ verifyErrorTitle }}</div>
+    <div style="font-size:13px;color:var(--color-neutral-500);line-height:1.5">{{ verifyErrorMessage }}</div>
+  </div>
+  <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ returnToEntry }}">Return to start</button>
+  </sc-if>
+</div>
+</sc-if>
+
 <sc-if value="{{ isEntry }}" hint-placeholder-val="{{ true }}">
 <div style="max-width:420px;margin:0 auto;padding:88px 20px 40px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:var(--space-4)">
   <sc-if value="{{ showResumeBanner }}" hint-placeholder-val="{{ false }}">
@@ -2634,7 +2652,10 @@ a:hover{color:var(--color-accent)}
     <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6;border-top:1px solid var(--color-divider);padding-top:var(--space-3)">Checking a box means we'll attempt every source available to us in that category. Leaving it unchecked means that category's fields may show Unable to Verify, or more precisely, Not Verified, since nothing was ever attempted.</div>
   </div>
   <div style="font-size:11px;color:var(--color-neutral-600)">Uploads are rate-limited to prevent this step being used to spam confirmation email.</div>
-  <button type="button" class="btn btn-primary btn-block" sc-camel-on-click="{{ sendConfirmation }}">Send confirmation</button>
+  <sc-if value="{{ emailSendError }}" hint-placeholder-val="{{ false }}">
+  <div style="font-size:12px;color:#e2735c">{{ emailSendError }}</div>
+  </sc-if>
+  <button type="button" class="btn btn-primary btn-block" disabled="{{ emailSendPending }}" sc-camel-on-click="{{ sendConfirmation }}">{{ sendConfirmationLabel }}</button>
   <button type="button" class="btn btn-ghost" style="font-size:12px;opacity:0.7" sc-camel-on-click="{{ simulateLeave }}">(prototype only) simulate leaving &amp; coming back before finishing</button>
 </div>
 </sc-if>
@@ -4326,6 +4347,9 @@ a:hover{color:var(--color-accent)}
 </x-dc>
 <script type="text/x-dc" data-dc-script="">
 class Component extends DCLogic {
+  SUPABASE_FN_URL = 'https://ihmypoduvrzymasgactc.supabase.co/functions/v1';
+  SUPABASE_ANON_KEY = 'sb_publishable_o3S1LP0utVvxTXPRb2aZxg_Fz2FWwBj';
+
   PARTNERS = [
     { key: 'linkedin', label: 'LinkedIn' },
     { key: 'indeed', label: 'Indeed' },
@@ -4802,7 +4826,10 @@ class Component extends DCLogic {
 
   getInitialState() {
     const seededSkills = this.seedSkillItems();
-    return { screen: 'entry', cookie: false, overlayOpen: false, overlayTab: 0, fileName: null, email: '', tier: null, draft: null, accountTab: 'profile',
+    const verifyToken = new URLSearchParams(window.location.search).get('verify_token');
+    return { screen: verifyToken ? 'verifying' : 'entry', verifyToken, verifyStatus: verifyToken ? 'pending' : null, verifyErrorReason: null,
+    emailSendPending: false, emailSendError: null,
+    cookie: false, overlayOpen: false, overlayTab: 0, fileName: null, email: '', tier: null, draft: null, accountTab: 'profile',
     retractOpenBeta: false, retractSubmittedBeta: false,
     epsilonReopenFormOpen: false, epsilonReopened: false,
     profileFirst: 'Alex', profileLast: 'Rivera',
@@ -5327,6 +5354,56 @@ class Component extends DCLogic {
       const raw = localStorage.getItem('verifi_draft');
       if (raw) this.setState({ draft: JSON.parse(raw) });
     } catch (e) {}
+    if (this.state.verifyToken) this.confirmEmailToken(this.state.verifyToken);
+  }
+
+  async sendVerificationEmail(email, purpose = 'signup') {
+    this.setState({ emailSendPending: true, emailSendError: null });
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/send-verification', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, purpose }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ emailSendPending: false, emailSendError: "Couldn't reach the server. Check your connection and try again." });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      this.setState({ emailSendPending: false, emailSendError: "Couldn't send that verification email. Please try again." });
+      return;
+    }
+    this.setState({ emailSendPending: false, emailSendError: null, screen: 'checkEmail' });
+    this.saveDraft({ screen: 'checkEmail' });
+  }
+
+  async confirmEmailToken(token) {
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/confirm-verification', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ verifyStatus: 'error', verifyErrorReason: 'network' });
+      return;
+    }
+    if (res.ok && data.ok) {
+      if (data.purpose === 'signup') {
+        this.clearDraft();
+        this.setState({ screen: 'tiers', draft: null, verifyStatus: 'success', email: data.email || this.state.email });
+        return;
+      }
+      // Placeholder for non-signup purposes (e.g. 'email_change'). Real handling lands
+      // with the Profile Info email-change screen; for now just record success.
+      this.setState({ verifyStatus: 'success' });
+      return;
+    }
+    this.setState({ verifyStatus: 'error', verifyErrorReason: (data && data.error) || 'unknown' });
   }
 
   resetAll() {
@@ -5428,7 +5505,7 @@ class Component extends DCLogic {
       cancelReactivate: (e) => { pd(e); this.setState({ screen: 'entry' }); },
       logOff: () => this.guardedNav(() => { this.addActivityLog('Logged off'); this.setState({ screen: 'returning' }); }),
       isAccount: s.screen === 'account',
-      showTopNav: s.screen !== 'account' && s.screen !== 'returning',
+      showTopNav: s.screen !== 'account' && s.screen !== 'returning' && s.screen !== 'verifying',
       tabIsProfile: s.accountTab === 'profile',
       tabProfileClass: s.accountTab === 'profile' ? 'btn-secondary' : 'btn-ghost',
       selectTabProfile: () => this.guardedNav(() => this.setState({ accountTab: 'profile' })),
@@ -6001,6 +6078,27 @@ class Component extends DCLogic {
       isPreview: s.screen === 'preview',
       isCheckEmail: s.screen === 'checkEmail',
       isTiers: s.screen === 'tiers',
+      isVerifying: s.screen === 'verifying',
+      verifyPending: s.verifyStatus === 'pending',
+      verifyFailed: s.verifyStatus === 'error',
+      verifyErrorTitle: {
+        not_found: "We can't find that verification link.",
+        already_used: 'This link was already used.',
+        expired: 'This verification link has expired.',
+        network: "Couldn't reach the server.",
+      }[s.verifyErrorReason] || 'Something went wrong.',
+      verifyErrorMessage: {
+        not_found: "This link doesn't match any pending verification. Double-check you copied the full link, or request a new one.",
+        already_used: 'This email was already confirmed with this link. If you meant to log in, use the login screen instead.',
+        expired: 'Verification links expire after a while for security. Please request a new confirmation email.',
+        network: 'Check your connection and try opening the link again.',
+      }[s.verifyErrorReason] || 'We were unable to confirm this link. Please request a new confirmation email.',
+      returnToEntry: () => {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('verify_token');
+        window.history.replaceState({}, '', url);
+        this.setState({ screen: 'entry', verifyStatus: null, verifyErrorReason: null, verifyToken: null });
+      },
       hasFile: !!s.fileName,
       noFile: !s.fileName,
       fileName: s.fileName,
@@ -6008,7 +6106,10 @@ class Component extends DCLogic {
       goPreview: () => { this.setState({ screen: 'preview' }); this.saveDraft({ screen: 'preview' }); },
       email: s.email,
       setEmail: (e) => this.setState({ email: e.target.value }),
-      sendConfirmation: () => { this.setState({ screen: 'checkEmail' }); this.saveDraft({ screen: 'checkEmail' }); },
+      emailSendPending: s.emailSendPending,
+      emailSendError: s.emailSendError,
+      sendConfirmationLabel: s.emailSendPending ? 'Sending…' : 'Send confirmation',
+      sendConfirmation: () => { if (!s.emailSendPending) this.sendVerificationEmail(s.email); },
       devConfirm: () => { this.clearDraft(); this.setState({ screen: 'tiers', draft: null }); },
       showResumeBanner: !!s.draft && s.screen === 'entry',
       draftFileName: s.draft ? s.draft.fileName : null,
