@@ -2556,17 +2556,60 @@ a:hover{color:var(--color-accent)}
 </div>
 </sc-if>
 
-<sc-if value="{{ isEntry }}" hint-placeholder-val="{{ true }}">
+<sc-if value="{{ isSignupDetails }}" hint-placeholder-val="{{ true }}">
 <div style="max-width:420px;margin:0 auto;padding:88px 20px 40px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:var(--space-4)">
   <sc-if value="{{ showResumeBanner }}" hint-placeholder-val="{{ false }}">
     <div class="card elev-sm" style="width:100%;text-align:left">
-      <div style="font-size:14px;margin-bottom:6px">We saved your in-progress upload ({{ draftFileName }}). Pick up where you left off?</div>
+      <div style="font-size:14px;margin-bottom:6px">We saved your in-progress signup ({{ draftFileName }}). Pick up where you left off?</div>
       <div style="display:flex;gap:var(--space-2)">
         <button type="button" class="btn btn-primary" sc-camel-on-click="{{ resumeDraft }}">Continue</button>
         <button type="button" class="btn btn-ghost" sc-camel-on-click="{{ discardDraft }}">Start a new upload</button>
       </div>
     </div>
   </sc-if>
+  <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:26px;margin:0">Let's get started</h1>
+  <p style="margin:0;color:var(--color-neutral-400);font-size:15px;line-height:1.4">A few details before we look at your resume.</p>
+
+  <div class="card elev-sm" style="width:100%;padding:var(--space-6);display:flex;flex-direction:column;gap:var(--space-3);text-align:left">
+    <div class="field">
+      <label for="signup-name">Full name</label>
+      <input class="input" id="signup-name" type="text" placeholder="Jordan Lee" value="{{ fullName }}" sc-camel-on-change="{{ setFullName }}">
+    </div>
+    <div class="field">
+      <label for="signup-phone">Phone number</label>
+      <input class="input" id="signup-phone" type="tel" placeholder="(555) 012-3456" value="{{ phone }}" sc-camel-on-change="{{ setPhone }}">
+    </div>
+    <div class="field">
+      <label for="signup-email">Email</label>
+      <input class="input" id="signup-email" type="email" placeholder="you@email.com" value="{{ email }}" sc-camel-on-change="{{ setEmail }}">
+    </div>
+  </div>
+
+  <sc-if value="{{ duplicateCheckError }}" hint-placeholder-val="{{ false }}">
+    <div style="font-size:12px;color:#e2735c">{{ duplicateCheckError }}</div>
+  </sc-if>
+  <button type="button" class="btn btn-primary btn-block" disabled="{{ duplicateCheckPending }}" sc-camel-on-click="{{ checkDuplicateAndContinue }}">{{ duplicateCheckLabel }}</button>
+
+  <div style="margin-top:var(--space-2);font-size:13px;color:var(--color-neutral-400);line-height:1.6">
+    <div>Already have an account? <a href="#" sc-camel-on-click="{{ goLogin }}">click here</a>.</div>
+    <div>Not sure where to start? <a href="#" sc-camel-on-click="{{ openHelp }}">Open Help Me Start</a>.</div>
+  </div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isDuplicateFound }}" hint-placeholder-val="{{ false }}">
+<div style="max-width:420px;margin:0 auto;padding:120px 20px 40px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:var(--space-3)">
+  <div class="card elev-md" style="width:100%;padding:var(--space-8)">
+    <div style="font-size:17px;margin-bottom:8px">We found an existing account.</div>
+    <div style="font-size:13px;color:var(--color-neutral-500);line-height:1.5">An account already exists with this email address or phone number.</div>
+  </div>
+  <button type="button" class="btn btn-primary" sc-camel-on-click="{{ goLogin }}">Log in instead</button>
+  <button type="button" class="btn btn-ghost" sc-camel-on-click="{{ backToSignupDetails }}">That's not right, let me re-check my details</button>
+</div>
+</sc-if>
+
+<sc-if value="{{ isEntry }}" hint-placeholder-val="{{ false }}">
+<div style="max-width:420px;margin:0 auto;padding:88px 20px 40px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:var(--space-4)">
   <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:26px;margin:0">Upload your resume</h1>
   <p style="margin:0;color:var(--color-neutral-400);font-size:15px;line-height:1.4">We render and verify it against what's actually printed on the document.</p>
 
@@ -2588,7 +2631,6 @@ a:hover{color:var(--color-accent)}
   <button type="button" class="btn btn-secondary btn-block" sc-camel-on-click="{{ openHelp }}">Help me start: I don't have a resume ready</button>
 
   <div style="margin-top:var(--space-4);font-size:13px;color:var(--color-neutral-400);line-height:1.6">
-    <div>Already have an account? No need to upload again, <a href="#" sc-camel-on-click="{{ goLogin }}">click here</a>.</div>
     <div>Not sure where to start? <a href="#" sc-camel-on-click="{{ openHelp }}">Open Help Me Start</a>.</div>
   </div>
 </div>
@@ -2625,11 +2667,7 @@ a:hover{color:var(--color-accent)}
       <div style="font-size:12px;color:var(--color-neutral-500);margin-top:4px">Rendered &amp; verified against what's actually printed, not the file's hidden text layer.</div>
     </div>
   </div>
-  <div class="field">
-    <label for="email-input">Email</label>
-    <input class="input" id="email-input" type="email" placeholder="you@email.com" value="{{ email }}" sc-camel-on-change="{{ setEmail }}">
-  </div>
-  <div style="font-size:12px;color:var(--color-neutral-500)">Used for account access only. Kept separate from your verified resume data.</div>
+  <div style="font-size:12px;color:var(--color-neutral-500)">Confirmation email: <strong style="color:var(--color-neutral-300)">{{ email }}</strong>. Used for account access only. Kept separate from your verified resume data.</div>
   <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
     <div style="display:flex;flex-direction:column;gap:var(--space-2)">
       <div style="font-size:15px">What should we verify?</div>
@@ -4827,8 +4865,9 @@ class Component extends DCLogic {
   getInitialState() {
     const seededSkills = this.seedSkillItems();
     const verifyToken = new URLSearchParams(window.location.search).get('verify_token');
-    return { screen: verifyToken ? 'verifying' : 'entry', verifyToken, verifyStatus: verifyToken ? 'pending' : null, verifyErrorReason: null,
+    return { screen: verifyToken ? 'verifying' : 'signupDetails', verifyToken, verifyStatus: verifyToken ? 'pending' : null, verifyErrorReason: null,
     emailSendPending: false, emailSendError: null,
+    fullName: '', phone: '', duplicateCheckPending: false, duplicateCheckError: null,
     cookie: false, overlayOpen: false, overlayTab: 0, fileName: null, email: '', tier: null, draft: null, accountTab: 'profile',
     retractOpenBeta: false, retractSubmittedBeta: false,
     epsilonReopenFormOpen: false, epsilonReopened: false,
@@ -5379,6 +5418,32 @@ class Component extends DCLogic {
     this.saveDraft({ screen: 'checkEmail' });
   }
 
+  async checkDuplicateAccount(email, phone) {
+    this.setState({ duplicateCheckPending: true, duplicateCheckError: null });
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/check-duplicate-account', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, phone }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ duplicateCheckPending: false, duplicateCheckError: "Couldn't reach the server. Check your connection and try again." });
+      return;
+    }
+    if (!res.ok) {
+      this.setState({ duplicateCheckPending: false, duplicateCheckError: (data && data.error) || "Couldn't check that email and phone number. Please try again." });
+      return;
+    }
+    if (data.exists) {
+      this.setState({ duplicateCheckPending: false, duplicateCheckError: null, screen: 'duplicateFound' });
+      return;
+    }
+    this.setState({ duplicateCheckPending: false, duplicateCheckError: null, screen: 'entry' });
+    this.saveDraft({ screen: 'entry' });
+  }
+
   async confirmEmailToken(token) {
     let res, data;
     try {
@@ -5412,7 +5477,7 @@ class Component extends DCLogic {
   }
 
   saveDraft(fields) {
-    const draft = { fileName: this.state.fileName, email: this.state.email, screen: this.state.screen, ...fields };
+    const draft = { fileName: this.state.fileName, email: this.state.email, fullName: this.state.fullName, phone: this.state.phone, screen: this.state.screen, ...fields };
     try { localStorage.setItem('verifi_draft', JSON.stringify(draft)); } catch (e) {}
   }
 
@@ -5490,8 +5555,8 @@ class Component extends DCLogic {
     return {
       noop: openPlaceholder,
       cookieToggleLabel: s.cookie ? 'Demo: saved-login cookie (on)' : 'Demo: simulate saved-login cookie',
-      toggleCookie: () => this.setState(st => ({ cookie: !st.cookie, screen: !st.cookie ? 'returning' : 'entry' })),
-      bypassCookie: (e) => { pd(e); this.setState({ cookie: false, screen: 'entry' }); },
+      toggleCookie: () => this.setState(st => ({ cookie: !st.cookie, screen: !st.cookie ? 'returning' : 'signupDetails' })),
+      bypassCookie: (e) => { pd(e); this.setState({ cookie: false, screen: 'signupDetails' }); },
       goLogin: (e) => { pd(e); this.setState({ screen: 'returning' }); },
       goAccount: () => {
         if (this.state.deletionScheduled) { this.setState({ screen: 'reactivate' }); return; }
@@ -5502,7 +5567,7 @@ class Component extends DCLogic {
         this.addActivityLog('Account reactivated');
         this.enterAccount(); this.addActivityLog('Logged in');
       },
-      cancelReactivate: (e) => { pd(e); this.setState({ screen: 'entry' }); },
+      cancelReactivate: (e) => { pd(e); this.setState({ screen: 'signupDetails' }); },
       logOff: () => this.guardedNav(() => { this.addActivityLog('Logged off'); this.setState({ screen: 'returning' }); }),
       isAccount: s.screen === 'account',
       showTopNav: s.screen !== 'account' && s.screen !== 'returning' && s.screen !== 'verifying',
@@ -6072,6 +6137,8 @@ class Component extends DCLogic {
       retractSubmittedBeta: s.retractSubmittedBeta,
       openRetractBeta: () => this.setState({ retractOpenBeta: true }),
       submitRetractBeta: () => this.setState({ retractOpenBeta: false, retractSubmittedBeta: true }),
+      isSignupDetails: s.screen === 'signupDetails',
+      isDuplicateFound: s.screen === 'duplicateFound',
       isEntry: s.screen === 'entry',
       isReturning: s.screen === 'returning',
       isReactivate: s.screen === 'reactivate',
@@ -6097,7 +6164,7 @@ class Component extends DCLogic {
         const url = new URL(window.location.href);
         url.searchParams.delete('verify_token');
         window.history.replaceState({}, '', url);
-        this.setState({ screen: 'entry', verifyStatus: null, verifyErrorReason: null, verifyToken: null });
+        this.setState({ screen: 'signupDetails', verifyStatus: null, verifyErrorReason: null, verifyToken: null });
       },
       hasFile: !!s.fileName,
       noFile: !s.fileName,
@@ -6106,14 +6173,23 @@ class Component extends DCLogic {
       goPreview: () => { this.setState({ screen: 'preview' }); this.saveDraft({ screen: 'preview' }); },
       email: s.email,
       setEmail: (e) => this.setState({ email: e.target.value }),
+      fullName: s.fullName,
+      setFullName: (e) => this.setState({ fullName: e.target.value }),
+      phone: s.phone,
+      setPhone: (e) => this.setState({ phone: e.target.value }),
+      duplicateCheckPending: s.duplicateCheckPending,
+      duplicateCheckError: s.duplicateCheckError,
+      duplicateCheckLabel: s.duplicateCheckPending ? 'Checking…' : 'Continue',
+      checkDuplicateAndContinue: () => { if (!s.duplicateCheckPending) this.checkDuplicateAccount(s.email, s.phone); },
+      backToSignupDetails: () => this.setState({ screen: 'signupDetails', duplicateCheckError: null }),
       emailSendPending: s.emailSendPending,
       emailSendError: s.emailSendError,
       sendConfirmationLabel: s.emailSendPending ? 'Sending…' : 'Send confirmation',
       sendConfirmation: () => { if (!s.emailSendPending) this.sendVerificationEmail(s.email); },
       devConfirm: () => { this.clearDraft(); this.setState({ screen: 'tiers', draft: null }); },
-      showResumeBanner: !!s.draft && s.screen === 'entry',
+      showResumeBanner: !!s.draft && s.screen === 'signupDetails',
       draftFileName: s.draft ? s.draft.fileName : null,
-      resumeDraft: () => { const d = s.draft; this.setState({ screen: d.screen, fileName: d.fileName, email: d.email || '', draft: null }); },
+      resumeDraft: () => { const d = s.draft; this.setState({ screen: d.screen, fileName: d.fileName, email: d.email || '', fullName: d.fullName || '', phone: d.phone || '', draft: null }); },
       discardDraft: () => { this.clearDraft(); this.setState({ draft: null }); },
       simulateLeave: () => { this.saveDraft({}); window.location.reload(); },
       freeBorder: s.tier === 'free' ? 'var(--color-accent)' : 'var(--color-divider)',
