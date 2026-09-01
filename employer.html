@@ -1,0 +1,3572 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>
+// GENERATED from dc-runtime/src/*.ts — do not edit. Rebuild with `cd dc-runtime && bun run build`.
+"use strict";
+(() => {
+  var __defProp = Object.defineProperty;
+  var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+  var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
+
+  // src/react.ts
+  function getReact() {
+    const R = window.React;
+    if (!R) throw new Error("dc-runtime: window.React is not available yet");
+    return R;
+  }
+  function getReactDOM() {
+    const RD = window.ReactDOM;
+    if (!RD) throw new Error("dc-runtime: window.ReactDOM is not available yet");
+    return RD;
+  }
+  var h = ((...args) => getReact().createElement(
+    ...args
+  ));
+
+  // src/parse.ts
+  function parseDcDocument(doc) {
+    const dc = doc.querySelector("x-dc");
+    if (!dc) return null;
+    const scriptEl = doc.querySelector("script[data-dc-script]");
+    const { props, preview } = parseDataProps(
+      scriptEl?.getAttribute("data-props") ?? null
+    );
+    return {
+      template: dc.innerHTML,
+      js: scriptEl ? scriptEl.textContent || "" : "",
+      props,
+      preview
+    };
+  }
+  function parseDcText(src) {
+    const openMatch = /\x3cx-dc(?:\s[^>]*)?>/.exec(src);
+    if (!openMatch) return null;
+    const close = src.lastIndexOf("\x3c/x-dc>");
+    if (close === -1 || close < openMatch.index) return null;
+    const template = src.slice(openMatch.index + openMatch[0].length, close);
+    const doc = new DOMParser().parseFromString(src, "text/html");
+    const scriptEl = doc.querySelector("script[data-dc-script]");
+    const { props, preview } = parseDataProps(
+      scriptEl?.getAttribute("data-props") ?? null
+    );
+    return {
+      template,
+      js: scriptEl ? scriptEl.textContent || "" : "",
+      props,
+      preview
+    };
+  }
+  function parseDataProps(raw) {
+    if (!raw) return { props: null, preview: null };
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return { props: null, preview: null };
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { props: null, preview: null };
+    }
+    const obj = parsed;
+    const preview = obj.$preview && typeof obj.$preview === "object" ? obj.$preview : null;
+    const rest = {};
+    for (const k of Object.keys(obj)) {
+      if (k[0] !== "$") rest[k] = obj[k];
+    }
+    return { props: Object.keys(rest).length ? rest : null, preview };
+  }
+  function dcNameFromPath(pathname) {
+    let p = pathname || "";
+    try {
+      p = decodeURIComponent(p);
+    } catch {
+    }
+    const base = p.split("/").pop() || "Root";
+    return base.replace(/\.dc\.html$/, "").replace(/\.html?$/, "") || "Root";
+  }
+
+  // src/boot.ts
+  var BASE_CSS = `
+    .sc-placeholder{background:color-mix(in srgb,currentColor 8%,transparent);
+      border:1px solid color-mix(in srgb,currentColor 50%,transparent);
+      border-radius:2px;box-sizing:border-box;overflow:hidden}
+    @keyframes sc-shine{0%{background-position:100% 50%}100%{background-position:0% 50%}}
+    html.sc-dc-streaming .sc-placeholder,
+    html.sc-dc-streaming .sc-interp.sc-missing{position:relative;
+      background:color-mix(in srgb,currentColor 5%,transparent);
+      border-color:transparent}
+    html.sc-dc-streaming .sc-placeholder::before,
+    html.sc-dc-streaming .sc-interp.sc-missing::before{content:'';
+      position:absolute;inset:0;pointer-events:none;
+      background:linear-gradient(90deg,rgba(217,119,87,0) 25%,rgba(247,225,211,.95) 37%,rgba(217,119,87,0) 63%);
+      background-size:400% 100%;animation:sc-shine 1.4s ease infinite}
+    html.sc-dc-streaming .sc-placeholder:nth-child(n+9 of .sc-placeholder)::before,
+    html.sc-dc-streaming .sc-interp.sc-missing:nth-child(n+9 of .sc-interp.sc-missing)::before{animation:none;
+      background:color-mix(in srgb,currentColor 8%,transparent)}
+    .sc-placeholder-error{padding:4px 8px;font:11px/1.4 ui-monospace,monospace;
+      color:color-mix(in srgb,currentColor 70%,transparent);word-break:break-word}
+    .sc-interp.sc-missing{display:inline-block;width:2em;height:1em;overflow:hidden;
+      vertical-align:text-bottom;background:rgba(255,255,255,.3);border:1px solid rgba(0,0,0,.5);
+      border-radius:2px;box-sizing:border-box;color:transparent;
+      user-select:none}
+    .sc-interp.sc-unresolved{font-family:ui-monospace,monospace;font-size:.85em;
+      color:color-mix(in srgb,currentColor 50%,transparent);
+      background:color-mix(in srgb,currentColor 10%,transparent);border-radius:3px;
+      padding:0 3px}
+    .sc-host.sc-has-error{position:relative}
+    .sc-logic-error{position:absolute;top:8px;left:8px;z-index:2147483647;max-width:60ch;
+      padding:6px 10px;background:#b00020;color:#fff;font:12px/1.4 ui-monospace,monospace;
+      border-radius:4px;white-space:pre-wrap;pointer-events:none}
+    /* Mirrors PRINT_BASELINE_CSS in apps/web deck-stage-export.ts \u2014 keep both
+       in sync until dc-runtime regains a build step. */
+    @media print {
+      @page { margin: 0.5cm; }
+      figure, table { break-inside: avoid; }
+      #dc-root, #dc-root > .sc-host { height: auto; }
+      *, *::before, *::after {
+        print-color-adjust: exact; -webkit-print-color-adjust: exact;
+        backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
+        animation-delay: -99s !important; animation-duration: .001s !important;
+        animation-iteration-count: 1 !important; animation-fill-mode: both !important;
+        animation-play-state: running !important; transition-duration: 0s !important;
+      }
+    }
+  `;
+  var FULL_PAGE_CSS = "html,body{height:100%;margin:0}#dc-root,#dc-root>.sc-host{height:100%}";
+  function rootNameForDocument(doc, loc) {
+    let bootPath = loc.pathname || "";
+    if (!/\.dc\.html?$/i.test(safeDecode(bootPath))) {
+      try {
+        bootPath = new URL(doc.baseURI || "/").pathname;
+      } catch {
+      }
+    }
+    return dcNameFromPath(bootPath);
+  }
+  function safeDecode(s) {
+    try {
+      return decodeURIComponent(s);
+    } catch {
+      return s;
+    }
+  }
+  function boot(runtime, doc = document) {
+    const parsed = parseDcDocument(doc);
+    if (!parsed) return null;
+    const React = getReact();
+    const rootName = rootNameForDocument(doc, location);
+    runtime.markFetched(rootName);
+    runtime.setRootName(rootName);
+    runtime.adoptParsed(rootName, parsed);
+    if (!window.__resources) {
+      fetch(location.href).then((res) => res.ok ? res.text() : "").then((t) => {
+        const raw = t ? parseDcText(t) : null;
+        if (raw?.template) runtime.updateHtml(rootName, raw.template);
+      }).catch(() => {
+      });
+    }
+    const dc = doc.querySelector("x-dc");
+    const hostEl = doc.createElement("div");
+    hostEl.id = "dc-root";
+    dc.replaceWith(hostEl);
+    if (!parsed.preview) {
+      const s = doc.createElement("style");
+      s.textContent = FULL_PAGE_CSS;
+      doc.head.appendChild(s);
+    }
+    const Root = runtime.getDC(rootName);
+    const entry = runtime.registry.get(rootName);
+    function StandaloneRoot() {
+      const [, setTick] = React.useState(0);
+      React.useEffect(() => {
+        const sub = () => setTick((n) => n + 1);
+        entry.subs.add(sub);
+        return () => {
+          entry.subs.delete(sub);
+        };
+      }, []);
+      const defaults = React.useMemo(() => {
+        const d = {};
+        for (const k in entry.propsMeta || {}) {
+          const v = entry.propsMeta?.[k]?.default;
+          if (v !== void 0) d[k] = v;
+        }
+        return d;
+      }, [entry.propsMeta]);
+      return h(Root, { ...defaults, ...entry.propOverrides || {} });
+    }
+    const ReactDOM = getReactDOM();
+    if (ReactDOM.createRoot)
+      ReactDOM.createRoot(hostEl).render(h(StandaloneRoot));
+    else ReactDOM.render(h(StandaloneRoot), hostEl);
+    return rootName;
+  }
+
+  // src/expr.ts
+  var IDENT_RE = /^[A-Za-z_$][A-Za-z0-9_$]*/;
+  var NUMBER_RE = /^-?\d+(\.\d+)?$/;
+  function resolve(vals, src) {
+    const expr = String(src).trim();
+    if (!expr) return void 0;
+    if (expr[0] === "(" && expr[expr.length - 1] === ")" && parensWrapWhole(expr)) {
+      return resolve(vals, expr.slice(1, -1));
+    }
+    const eq = findTopLevelEquality(expr);
+    if (eq) {
+      const lv = resolve(vals, expr.slice(0, eq.index));
+      const rv = resolve(vals, expr.slice(eq.index + eq.op.length));
+      switch (eq.op) {
+        case "===":
+          return lv === rv;
+        case "!==":
+          return lv !== rv;
+        case "==":
+          return lv == rv;
+        default:
+          return lv != rv;
+      }
+    }
+    if (expr[0] === "!") return !resolve(vals, expr.slice(1));
+    if (expr === "true") return true;
+    if (expr === "false") return false;
+    if (expr === "null") return null;
+    if (expr === "undefined") return void 0;
+    if (NUMBER_RE.test(expr)) return Number(expr);
+    if (expr.length >= 2 && (expr[0] === '"' || expr[0] === "'") && expr[expr.length - 1] === expr[0]) {
+      return expr.slice(1, -1);
+    }
+    return resolvePath(vals, expr);
+  }
+  function parensWrapWhole(expr) {
+    let depth = 0;
+    for (let i = 0; i < expr.length - 1; i++) {
+      if (expr[i] === "(") depth++;
+      else if (expr[i] === ")") {
+        depth--;
+        if (depth === 0) return false;
+      }
+    }
+    return true;
+  }
+  function findTopLevelEquality(expr) {
+    let depth = 0;
+    for (let i = 0; i < expr.length; i++) {
+      const c = expr[i];
+      if (c === "[" || c === "(") depth++;
+      else if (c === "]" || c === ")") depth--;
+      else if (depth === 0 && (c === "=" || c === "!") && expr[i + 1] === "=") {
+        if (i > 0 && (expr[i - 1] === "=" || expr[i - 1] === "!")) continue;
+        if (!expr.slice(0, i).trim()) continue;
+        const op = expr[i + 2] === "=" ? c + "==" : c + "=";
+        return { index: i, op };
+      }
+    }
+    return null;
+  }
+  function resolvePath(vals, expr) {
+    const head = expr.match(IDENT_RE);
+    if (!head) return void 0;
+    let cur = vals == null ? void 0 : vals[head[0]];
+    let i = head[0].length;
+    while (i < expr.length) {
+      if (expr[i] === ".") {
+        const m = expr.slice(i + 1).match(IDENT_RE) || expr.slice(i + 1).match(/^\d+/);
+        if (!m) return void 0;
+        cur = cur == null ? void 0 : cur[m[0]];
+        i += 1 + m[0].length;
+      } else if (expr[i] === "[") {
+        let depth = 1;
+        let j = i + 1;
+        while (j < expr.length && depth > 0) {
+          if (expr[j] === "[") depth++;
+          else if (expr[j] === "]") {
+            depth--;
+            if (depth === 0) break;
+          }
+          j++;
+        }
+        if (depth !== 0) return void 0;
+        const key = resolve(vals, expr.slice(i + 1, j));
+        cur = cur == null ? void 0 : cur[key];
+        i = j + 1;
+      } else {
+        return void 0;
+      }
+    }
+    return cur;
+  }
+
+  // src/encode.ts
+  var CAMEL_ATTR = "sc-camel-";
+  var INLINE_TEXT_TAGS = new Set(
+    "a abbr b bdi bdo br cite code del dfn em i ins kbd mark q s samp small span strike strong sub sup u var wbr".split(
+      " "
+    )
+  );
+  var RAW_WRAP = {
+    select: "sc-raw-select",
+    table: "sc-raw-table",
+    tbody: "sc-raw-tbody",
+    thead: "sc-raw-thead",
+    tfoot: "sc-raw-tfoot",
+    tr: "sc-raw-tr",
+    td: "sc-raw-td",
+    th: "sc-raw-th",
+    caption: "sc-raw-caption"
+  };
+  var RAW_UNWRAP = Object.fromEntries(
+    Object.entries(RAW_WRAP).map(([k, v]) => [v, k])
+  );
+  var EVENT_MAP = {
+    onclick: "onClick",
+    onchange: "onChange",
+    oninput: "onInput",
+    onsubmit: "onSubmit",
+    onkeydown: "onKeyDown",
+    onkeyup: "onKeyUp",
+    onkeypress: "onKeyPress",
+    onmousedown: "onMouseDown",
+    onmouseup: "onMouseUp",
+    onmouseenter: "onMouseEnter",
+    onmouseleave: "onMouseLeave",
+    onfocus: "onFocus",
+    onblur: "onBlur",
+    ondoubleclick: "onDoubleClick",
+    oncontextmenu: "onContextMenu",
+    onmousemove: "onMouseMove",
+    onmouseover: "onMouseOver",
+    onmouseout: "onMouseOut",
+    onpointerdown: "onPointerDown",
+    onpointerup: "onPointerUp",
+    onpointermove: "onPointerMove",
+    onpointerenter: "onPointerEnter",
+    onpointerleave: "onPointerLeave",
+    onpointercancel: "onPointerCancel",
+    onpointerover: "onPointerOver",
+    onpointerout: "onPointerOut",
+    ongotpointercapture: "onGotPointerCapture",
+    onlostpointercapture: "onLostPointerCapture",
+    ontouchstart: "onTouchStart",
+    ontouchend: "onTouchEnd",
+    ontouchmove: "onTouchMove",
+    ontouchcancel: "onTouchCancel",
+    ondragstart: "onDragStart",
+    ondragend: "onDragEnd",
+    ondragenter: "onDragEnter",
+    ondragleave: "onDragLeave",
+    ondragover: "onDragOver",
+    onanimationstart: "onAnimationStart",
+    onanimationend: "onAnimationEnd",
+    onanimationiteration: "onAnimationIteration",
+    ontransitionend: "onTransitionEnd"
+  };
+  var ATTRS = `(?:[^>"']|"[^"]*"|'[^']*')*`;
+  var IMPORT_SELF_CLOSE_RE = new RegExp(
+    "<(x-import|dc-import)(" + ATTRS + ")/>",
+    "gi"
+  );
+  var CAMEL_ATTR_RE = /(\s)([a-z]+[A-Z][A-Za-z0-9]*)(\s*=)/g;
+  function encodeCamelAttrs(html) {
+    return html.replace(
+      CAMEL_ATTR_RE,
+      (_, sp, name, eq) => sp + CAMEL_ATTR + name.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase()) + eq
+    );
+  }
+  function encodeCase(html) {
+    html = html.replace(
+      IMPORT_SELF_CLOSE_RE,
+      (_, t, a) => "<" + t + a + "></" + t + ">"
+    );
+    html = html.replace(/\x3chelmet(\s|>)/gi, "\x3csc-helmet$1");
+    html = html.replace(/<\/helmet\s*>/gi, "</sc-helmet>");
+    html = encodeCamelAttrs(html);
+    for (const [real, alias] of Object.entries(RAW_WRAP)) {
+      html = html.replace(
+        new RegExp("(</?)" + real + "(?=[\\s>])", "gi"),
+        "$1" + alias
+      );
+    }
+    return html;
+  }
+  function kebabToCamel(s) {
+    return s.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+  }
+  function cssToObj(css) {
+    const o = {};
+    for (const decl of css.split(";")) {
+      const i = decl.indexOf(":");
+      if (i < 0) continue;
+      const prop = decl.slice(0, i).trim();
+      o[prop.startsWith("--") ? prop : kebabToCamel(prop)] = decl.slice(i + 1).trim();
+    }
+    return o;
+  }
+  function compileAttr(raw) {
+    const whole = raw.match(/^\s*\{\{([\s\S]+?)\}\}\s*$/);
+    if (whole) {
+      const path = whole[1];
+      return (vals) => resolve(vals, path);
+    }
+    if (raw.includes("{{")) {
+      const parts = raw.split(/\{\{([\s\S]+?)\}\}/g);
+      return (vals) => parts.map((s, i) => i & 1 ? resolve(vals, s) ?? "" : s).join("");
+    }
+    return () => raw;
+  }
+
+  // src/compile.ts
+  function collectProps(node, kind, host) {
+    const propGetters = [];
+    const pseudoClasses = [];
+    let hintSize = null;
+    for (const { name, value } of [...node.attributes]) {
+      if (name === "sc-name" || name === "data-dc-tpl") continue;
+      let key = name;
+      if (key.startsWith(CAMEL_ATTR))
+        key = kebabToCamel(key.slice(CAMEL_ATTR.length));
+      if (key === "hint-size") {
+        hintSize = value;
+        continue;
+      }
+      if (key.startsWith("style-")) {
+        pseudoClasses.push(host.pseudoClass(key.slice(6), value));
+        continue;
+      }
+      if (kind !== "dom") {
+        if (key.includes("-") && !(kind === "x-import" && (key.startsWith("aria-") || key.startsWith("data-"))))
+          key = kebabToCamel(key);
+      } else {
+        if (key === "class") key = "className";
+        else if (key === "for") key = "htmlFor";
+        else if (key.startsWith("on"))
+          key = EVENT_MAP[key] || "on" + key[2].toUpperCase() + key.slice(3);
+      }
+      propGetters.push([key, compileAttr(value)]);
+    }
+    return { propGetters, pseudoClasses, hintSize };
+  }
+  var HOST_STYLE_PROPS = /* @__PURE__ */ new Set([
+    "position",
+    "left",
+    "right",
+    "top",
+    "bottom",
+    "inset",
+    "width",
+    "height",
+    "z-index",
+    "transform"
+  ]);
+  function hostPositionStyle(style) {
+    const all = typeof style === "string" ? cssToObj(style) : style != null && typeof style === "object" ? style : null;
+    if (!all) return void 0;
+    const out = {};
+    for (const [k, v] of Object.entries(all)) {
+      const kebab = k.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());
+      if (HOST_STYLE_PROPS.has(kebab)) out[k] = v;
+    }
+    return Object.keys(out).length ? out : void 0;
+  }
+  function compileTemplate(html, host) {
+    const tpl = document.createElement("template");
+    //! nosemgrep: direct-inner-html-assignment
+    tpl.innerHTML = encodeCase(html);
+    let tplN = 0;
+    (function stamp(node) {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        node.setAttribute("data-dc-tpl", String(tplN++));
+      }
+      for (const c of node.childNodes) stamp(c);
+    })(tpl.content);
+    const builders = walkChildren(tpl.content, host);
+    const render = ((vals, ctx) => builders.map((b, i) => b(vals || {}, ctx, i)));
+    render.__annotated = tpl.innerHTML;
+    return render;
+  }
+  function walkChildren(node, host) {
+    return [...node.childNodes].map((c) => walk(c, host)).filter((b) => b != null);
+  }
+  var SLIDE_ID_VALUE_RE = /^[0-9a-f]{8}$/;
+  var DECK_CONTROL_FLOW_RE = /^(sc-if|sc-for|sc-else|dc-import|x-import)$/;
+  var DECK_AUX_RE = /^(template|script|style|sc-helmet|helmet)$/;
+  function isDeckMountTag(el) {
+    if (el.localName === "deck-stage") return true;
+    return el.localName === "x-import" && (el.getAttribute("component-from-global-scope") || "") === "deck-stage";
+  }
+  function walkDeckChildren(el, host) {
+    const pairs = [...el.childNodes].map((c) => ({ c, b: walk(c, host) })).filter((p) => p.b !== null);
+    const kids = pairs.map((p) => p.b);
+    const seen = /* @__PURE__ */ new Set();
+    const wsSeen = /* @__PURE__ */ new Map();
+    const keys = [];
+    const nextSlideId = new Array(pairs.length);
+    {
+      let upcoming = null;
+      for (let j = pairs.length - 1; j >= 0; j--) {
+        const n = pairs[j].c;
+        if (n.nodeType === Node.ELEMENT_NODE) {
+          const t = n.localName;
+          upcoming = !DECK_AUX_RE.test(t) && !DECK_CONTROL_FLOW_RE.test(t) ? n.getAttribute("data-om-slide-id") : null;
+        }
+        nextSlideId[j] = upcoming;
+      }
+    }
+    for (let j = 0; j < pairs.length; j++) {
+      const { c } = pairs[j];
+      if (c.nodeType === Node.TEXT_NODE) {
+        if ((c.nodeValue ?? "").trim() === "") {
+          const base = nextSlideId[j] ? "omid-ws:" + nextSlideId[j] : "omid-ws:aux";
+          const n = wsSeen.get(base) ?? 0;
+          wsSeen.set(base, n + 1);
+          keys.push(n === 0 ? base : base + ":" + n);
+          continue;
+        }
+        return { kids, keys: null };
+      }
+      if (c.nodeType !== Node.ELEMENT_NODE) {
+        keys.push(j);
+        continue;
+      }
+      const child = c;
+      const tag = child.localName;
+      if (DECK_AUX_RE.test(tag)) {
+        keys.push(j);
+        continue;
+      }
+      if (DECK_CONTROL_FLOW_RE.test(tag)) return { kids, keys: null };
+      const v = child.getAttribute("data-om-slide-id");
+      if (!v || !SLIDE_ID_VALUE_RE.test(v) || seen.has(v)) {
+        return { kids, keys: null };
+      }
+      seen.add(v);
+      keys.push("omid:" + v);
+    }
+    return { kids, keys };
+  }
+  function renderDeckKids(kids, kidKeys, vals, ctx) {
+    return kids.map((b, j) => {
+      const k = kidKeys ? kidKeys[j] : j;
+      const out = b(vals, ctx, k);
+      return kidKeys != null && typeof out === "string" ? h(getReact().Fragment, { key: k }, out) : out;
+    });
+  }
+  function walk(node, host) {
+    if (node.nodeType === Node.TEXT_NODE) return walkText(node);
+    if (node.nodeType !== Node.ELEMENT_NODE) return null;
+    const el = node;
+    const tag = el.tagName.toLowerCase();
+    if (tag === "sc-for") return walkFor(el, host);
+    if (tag === "sc-if") return walkIf(el, host);
+    if (tag === "x-import") return walkXImport(el, host);
+    if (tag === "sc-helmet") return host.helmet(el);
+    if (tag === "dc-import") return walkComponent(el, host);
+    return walkElement(el, host);
+  }
+  var warnedHoles = /* @__PURE__ */ new Set();
+  function warnUnresolved(ctx, what) {
+    const key = (ctx?.__name || "?") + "\0" + what;
+    if (warnedHoles.has(key)) return;
+    warnedHoles.add(key);
+    console.warn("[dc-runtime] " + (ctx?.__name || "template") + ": " + what);
+  }
+  function walkText(node) {
+    const txt = node.nodeValue ?? "";
+    if (!txt.includes("{{")) {
+      if (!txt.trim() && !txt.includes(" ")) return null;
+      return () => txt;
+    }
+    const parts = txt.split(/\{\{([\s\S]+?)\}\}/g);
+    return (vals, ctx, key) => h(
+      getReact().Fragment,
+      { key },
+      ...parts.map((p, i) => {
+        if (!(i & 1)) return p;
+        const v = resolve(vals, p);
+        if (v === void 0) {
+          if (!ctx?.__streamingNow) {
+            if (document.body?.hasAttribute("data-dc-editor-on")) {
+              return h(
+                "span",
+                { key: i, className: "sc-interp sc-unresolved" },
+                "{{ " + p.trim() + " }}"
+              );
+            }
+            warnUnresolved(
+              ctx,
+              "{{ " + p.trim() + " }} never resolved \u2014 rendered as empty"
+            );
+            return null;
+          }
+          return h(
+            "span",
+            { key: i, className: "sc-interp sc-missing" },
+            p.trim()
+          );
+        }
+        if (getReact().isValidElement(v) || Array.isArray(v)) {
+          return h(getReact().Fragment, { key: i }, v);
+        }
+        if (v === null || typeof v === "boolean") return null;
+        return h("span", { key: i, className: "sc-interp" }, String(v));
+      })
+    );
+  }
+  function walkFor(el, host) {
+    const listGet = compileAttr(el.getAttribute("list") || "");
+    const asName = el.getAttribute("as") || "item";
+    const hintN = parseInt(el.getAttribute("hint-placeholder-count") || "0", 10);
+    const kids = walkChildren(el, host);
+    const listSrc = el.getAttribute("list") || "";
+    return (vals, ctx, key) => {
+      let list = listGet(vals);
+      if (!Array.isArray(list)) {
+        if (!ctx?.__streamingNow) {
+          if (list !== void 0 && list !== null) {
+            warnUnresolved(
+              ctx,
+              'sc-for list="' + listSrc + '" is not an array (' + typeof list + ")"
+            );
+          }
+          list = [];
+        } else {
+          list = hintN > 0 ? Array(hintN).fill(void 0) : [];
+        }
+      }
+      return h(
+        getReact().Fragment,
+        { key },
+        list.map((item, i) => {
+          const sub = { ...vals, [asName]: item, $index: i };
+          return h(
+            getReact().Fragment,
+            { key: i },
+            kids.map((b, j) => b(sub, ctx, j))
+          );
+        })
+      );
+    };
+  }
+  function walkIf(el, host) {
+    const valGet = compileAttr(el.getAttribute("value") || "");
+    const hintRaw = el.getAttribute("hint-placeholder-val");
+    const hintGet = hintRaw != null ? compileAttr(hintRaw) : null;
+    const kids = walkChildren(el, host);
+    return (vals, ctx, key) => {
+      let v = valGet(vals);
+      if (v === void 0 && hintGet && ctx?.__streamingNow) v = hintGet(vals);
+      return v ? h(
+        getReact().Fragment,
+        { key },
+        kids.map((b, j) => b(vals, ctx, j))
+      ) : null;
+    };
+  }
+  function walkComponent(el, host) {
+    const name = el.getAttribute("name") || el.getAttribute("component") || "";
+    el.removeAttribute("name");
+    el.removeAttribute("component");
+    const tplId = el.getAttribute("data-dc-tpl");
+    const styleRaw = el.getAttribute("style");
+    el.removeAttribute("style");
+    const styleGet = styleRaw != null ? compileAttr(styleRaw) : null;
+    const { propGetters, hintSize } = collectProps(el, "dc-import", host);
+    const kids = walkChildren(el, host);
+    return (vals, ctx, key) => {
+      const props = {
+        key,
+        __hintSize: hintSize,
+        __tplId: tplId,
+        __hostStyle: styleGet ? hostPositionStyle(styleGet(vals)) : void 0
+      };
+      for (const [k, g] of propGetters) {
+        const v = g(vals);
+        if (k === "dcProps") {
+          if (v && typeof v === "object") Object.assign(props, v);
+          continue;
+        }
+        props[k] = v;
+      }
+      if (kids.length) props.children = kids.map((b, j) => b(vals, ctx, j));
+      return h(host.component(name), props);
+    };
+  }
+  function walkXImport(el, host) {
+    const globalNameGet = compileAttr(
+      el.getAttribute("component-from-global-scope") || ""
+    );
+    const exportNameGet = compileAttr(
+      el.getAttribute("component") || el.getAttribute("name") || ""
+    );
+    const fromRaw = el.getAttribute("from") || (el.getAttribute("component-from-global-scope") ? "" : el.getAttribute("src") || el.getAttribute("import") || "");
+    const urls = fromRaw.trim() ? fromRaw.trim().split(/\s+/) : [];
+    const url = urls.length ? urls[urls.length - 1] : "";
+    const kindOf = (u) => /\.(jsx|tsx)(\?|#|$)/i.test(u) ? "jsx" : "js";
+    const tplId = el.getAttribute("data-dc-tpl");
+    const styleRaw = el.getAttribute("style");
+    el.removeAttribute("style");
+    const styleGet = styleRaw != null ? compileAttr(styleRaw) : null;
+    const wrap = tplId != null || styleGet != null;
+    const { propGetters, hintSize } = collectProps(el, "x-import", host);
+    const hasContent = el.children.length > 0 || !!(el.textContent || "").trim();
+    const deckKeyed = hasContent && isDeckMountTag(el) ? walkDeckChildren(el, host) : null;
+    const kids = deckKeyed ? deckKeyed.kids : hasContent ? walkChildren(el, host) : [];
+    const kidKeys = deckKeyed?.keys ?? null;
+    const urlBindable = fromRaw.includes("{{");
+    if (urls.length && !urlBindable) {
+      let prev;
+      for (const u of urls) prev = host.loadExternal(kindOf(u), u, prev);
+    }
+    const evalName = (g, vals) => {
+      const v = g(vals);
+      const s = v == null ? "" : String(v);
+      return s.includes("{{") ? "" : s;
+    };
+    return (vals, ctx, key) => {
+      const globalName = evalName(globalNameGet, vals);
+      const name = globalName || evalName(exportNameGet, vals);
+      const C = !name || urlBindable ? null : globalName ? host.resolveExternalGlobal(url, globalName) : host.resolveExternal(url, name);
+      const hostStyle = styleGet ? hostPositionStyle(styleGet(vals)) : void 0;
+      const wrapper = wrap ? {
+        key,
+        className: "sc-host-x",
+        "data-dc-tpl": tplId,
+        style: hostStyle || { display: "contents" }
+      } : null;
+      if (!C) {
+        const error = urlBindable ? "x-import `from` cannot contain {{ \u2026 }} \u2014 module URLs are resolved at parse time; use a literal URL" : host.resolveExternalError(url, name);
+        const ph = host.placeholder({
+          key: wrapper ? void 0 : key,
+          name,
+          hintSize,
+          error
+        });
+        return wrapper ? h("div", wrapper, ph) : ph;
+      }
+      const props = wrapper ? {} : { key };
+      let unresolvedHole = false;
+      for (const [k, g] of propGetters) {
+        if (k === "component" || k === "componentFromGlobalScope" || k === "from") {
+          continue;
+        }
+        const v = g(vals);
+        if (v === void 0) unresolvedHole = true;
+        if (k === "dcProps") {
+          if (v && typeof v === "object") Object.assign(props, v);
+          continue;
+        }
+        props[k] = v;
+      }
+      if (unresolvedHole && ctx?.__htmlStreamingNow) {
+        const ph = host.placeholder({
+          key: wrapper ? void 0 : key,
+          name,
+          hintSize,
+          error: null
+        });
+        return wrapper ? h("div", wrapper, ph) : ph;
+      }
+      if (kids.length) {
+        props.children = renderDeckKids(kids, kidKeys, vals, ctx);
+      }
+      return wrapper ? h("div", wrapper, h(C, props)) : h(C, props);
+    };
+  }
+  function contentKey(el) {
+    const clone = el.cloneNode(true);
+    for (const d of clone.querySelectorAll("*")) {
+      while (d.attributes.length) d.removeAttribute(d.attributes[0].name);
+    }
+    const s = clone.innerHTML;
+    let h2 = 5381;
+    for (let i = 0; i < s.length; i++) h2 = (h2 << 5) + h2 + s.charCodeAt(i) | 0;
+    return s.length + "." + (h2 >>> 0).toString(36);
+  }
+  var NEVER_CONTENT_KEYED = new Set(
+    "script style textarea option title select canvas iframe video audio".split(
+      " "
+    )
+  );
+  var NOT_INLINE_SELECTOR = ":not(" + [...INLINE_TEXT_TAGS].join(",") + ")";
+  function walkElement(el, host) {
+    const realTag = RAW_UNWRAP[el.localName] || el.localName;
+    const tplId = el.getAttribute("data-dc-tpl");
+    const inlineOnly = el.childNodes.length > 0 && !NEVER_CONTENT_KEYED.has(realTag) && el.querySelector(NOT_INLINE_SELECTOR) === null;
+    const keySuffix = inlineOnly ? "|" + contentKey(el) : "";
+    const { propGetters, pseudoClasses } = collectProps(el, "dom", host);
+    const deckKeyed = isDeckMountTag(el) ? walkDeckChildren(el, host) : null;
+    const kids = deckKeyed ? deckKeyed.kids : walkChildren(el, host);
+    const kidKeys = deckKeyed?.keys ?? null;
+    return (vals, ctx, key) => {
+      const props = {
+        key: key + keySuffix,
+        "data-dc-tpl": tplId
+      };
+      for (const [k, g] of propGetters) {
+        let v = g(vals);
+        if (k === "style" && typeof v === "string") v = cssToObj(v);
+        if ((k === "value" || k === "checked") && v === void 0) {
+          v = k === "checked" ? false : "";
+        }
+        props[k] = v;
+      }
+      if (pseudoClasses.length) {
+        props.className = [props.className, ...pseudoClasses].filter(Boolean).join(" ");
+      }
+      return h(realTag, props, ...renderDeckKids(kids, kidKeys, vals, ctx));
+    };
+  }
+
+  // src/logic.ts
+  var StreamableLogic = class {
+    constructor(props) {
+      __publicField(this, "props");
+      __publicField(this, "state", {});
+      /** Back-pointer to the wrapper component, installed after construction. */
+      __publicField(this, "__host");
+      this.props = props || {};
+    }
+    setState(update, cb) {
+      this.__host && this.__host.__setLogicState(update, cb);
+    }
+    forceUpdate() {
+      this.__host && this.__host.forceUpdate();
+    }
+    componentDidMount() {
+    }
+    componentDidUpdate(_prevProps) {
+    }
+    componentWillUnmount() {
+    }
+    /** The flat object the template renders against (merged over props). */
+    renderVals() {
+      return {};
+    }
+  };
+  function evalDcLogic(src) {
+    //! nosemgrep: eval-and-function-constructor
+    const fn = new Function(
+      "DCLogic",
+      "StreamableLogic",
+      "React",
+      src + '\n;return (typeof Component!=="undefined"&&Component)||undefined;'
+    );
+    return fn(StreamableLogic, StreamableLogic, getReact());
+  }
+
+  // src/component.ts
+  function shallowEqual(a, b) {
+    if (!b) return false;
+    const ak = Object.keys(a).filter((k) => k !== "children");
+    const bk = Object.keys(b).filter((k) => k !== "children");
+    if (ak.length !== bk.length) return false;
+    for (const k of ak) if (a[k] !== b[k]) return false;
+    return true;
+  }
+  function Placeholder({
+    name,
+    hintSize,
+    streaming,
+    error
+  }) {
+    const [w, hgt] = (hintSize || "100%,60px").split(",");
+    return h(
+      "div",
+      {
+        className: "sc-placeholder" + (streaming ? " sc-streaming" : ""),
+        style: { width: w.trim(), height: hgt && hgt.trim() },
+        title: name
+      },
+      error ? h(
+        "div",
+        { className: "sc-placeholder-error" },
+        (name ? name + ": " : "") + error
+      ) : null
+    );
+  }
+  function hintToMin(hint) {
+    if (!hint) return void 0;
+    const [w, hgt] = hint.split(",");
+    return { minWidth: w.trim(), minHeight: hgt && hgt.trim() };
+  }
+  function createComponentFactory(registry, ensureFetched) {
+    const React = getReact();
+    const AncestorContext = React.createContext([]);
+    class StreamableComponent extends React.Component {
+      constructor(props) {
+        super(props);
+        __publicField(this, "__name");
+        __publicField(this, "__sub");
+        __publicField(this, "__needsDidMount", false);
+        /** Snapshot of the registry's streaming flags taken at render time —
+         *  builders read it off the RenderCtx (this) to pick placeholder vs
+         *  render-nothing for unresolved values. */
+        __publicField(this, "__streamingNow", false);
+        __publicField(this, "__htmlStreamingNow", false);
+        /** When a construct throws, remember the (class, registry.ver, props)
+         *  triple so render-time reconcile doesn't re-attempt it on every parent
+         *  re-render. A registry bump (new class, template, external module
+         *  resolving via bumpAll) changes `ver` and breaks the memo so an
+         *  env-dependent constructor can self-heal. */
+        __publicField(this, "__failedLogic", null);
+        __publicField(this, "__failedUserProps", null);
+        __publicField(this, "__failedVer", -1);
+        /** Per-instance constructor error — kept here (not on the registry entry)
+         *  so one instance's successful construct can't hide a sibling's failure,
+         *  and a construct can never wipe an eval error `updateJs` recorded on
+         *  `r.logicError`. */
+        __publicField(this, "__ctorError", null);
+        __publicField(this, "logic");
+        this.__name = props.__name;
+        this.state = { __v: 0, __err: null };
+        this.__sub = () => {
+          if (this.state.__err) this.setState({ __err: null });
+          this.forceUpdate();
+        };
+        this.__makeLogic(registry.get(this.__name).Logic, null);
+        ensureFetched(this.__name);
+      }
+      /** Error-boundary hook: a render crash anywhere in this DC's subtree
+       *  (its own template, an x-import'd component, a child DC without its
+       *  own deeper boundary) lands here instead of unmounting the page. */
+      static getDerivedStateFromError(e) {
+        return { __err: e instanceof Error && e.message ? e.message : String(e) };
+      }
+      componentDidCatch(e, info) {
+        console.error(
+          "[dc-runtime] render error in <" + this.__name + ">:",
+          e,
+          info?.componentStack || ""
+        );
+      }
+      /** Instantiate the logic class (or the no-op base) and adopt `prevState`
+       *  over its initial state — used both at mount and on hot-swap. */
+      __makeLogic(Logic, prevState) {
+        const L = Logic || StreamableLogic;
+        try {
+          this.logic = new L(this.__userProps());
+          this.__failedLogic = null;
+          this.__failedUserProps = null;
+          this.__ctorError = null;
+        } catch (e) {
+          console.error(e);
+          this.__failedLogic = Logic;
+          this.__failedUserProps = this.__userProps();
+          this.__failedVer = registry.get(this.__name).ver;
+          this.__ctorError = this.__name + ": " + (e instanceof Error && e.message ? e.message : String(e));
+          this.logic = new StreamableLogic(
+            this.__userProps()
+          );
+        }
+        this.logic.__host = this;
+        if (prevState)
+          this.logic.state = { ...this.logic.state || {}, ...prevState };
+      }
+      /** The props the author's logic + template see — internal __-prefixed
+       *  wiring stripped. */
+      __userProps() {
+        const { __name, __hintSize, __tplId, __hostStyle, ...rest } = this.props;
+        return rest;
+      }
+      __setLogicState(update, cb) {
+        const prev = this.logic.state;
+        const patch = typeof update === "function" ? update(prev) : update;
+        this.logic.state = { ...prev, ...patch };
+        this.setState((s) => ({ __v: s.__v + 1 }), cb);
+      }
+      /** Swap the logic instance when the registry's Logic class changed
+       *  (streaming completion, hot reload). State carries over; didMount
+       *  re-fires after the swap commits so refs exist. */
+      __reconcileLogic() {
+        const r = registry.get(this.__name);
+        const Next = r.Logic;
+        const Cur = this.logic.constructor;
+        if (Next === Cur || !Next && Cur === StreamableLogic || Next === this.__failedLogic && r.ver === this.__failedVer && shallowEqual(this.__userProps(), this.__failedUserProps)) {
+          return;
+        }
+        if (!this.__needsDidMount) {
+          try {
+            this.logic.componentWillUnmount();
+          } catch (e) {
+            console.error(e);
+          }
+        }
+        this.__makeLogic(Next, this.logic.state);
+        this.__needsDidMount = true;
+      }
+      componentDidMount() {
+        registry.get(this.__name).subs.add(this.__sub);
+        try {
+          this.logic.componentDidMount();
+        } catch (e) {
+          console.error(e);
+        }
+      }
+      componentDidUpdate(prevProps) {
+        this.logic.props = this.__userProps();
+        if (this.__needsDidMount) {
+          if (this.state.__err || !registry.get(this.__name).tpl) return;
+          this.__needsDidMount = false;
+          try {
+            this.logic.componentDidMount();
+          } catch (e) {
+            console.error(e);
+          }
+        } else {
+          try {
+            this.logic.componentDidUpdate(prevProps);
+          } catch (e) {
+            console.error(e);
+          }
+        }
+      }
+      componentWillUnmount() {
+        registry.get(this.__name).subs.delete(this.__sub);
+        if (!this.__needsDidMount) {
+          try {
+            this.logic.componentWillUnmount();
+          } catch (e) {
+            console.error(e);
+          }
+        }
+      }
+      render() {
+        const r = registry.get(this.__name);
+        const cls = "sc-host" + (r.htmlStreaming ? " sc-streaming-html" : "") + (r.jsStreaming ? " sc-streaming-js" : "");
+        const hintStyle = r.htmlStreaming ? hintToMin(this.props.__hintSize) : void 0;
+        const hostStyle = this.props.__hostStyle || hintStyle ? { ...hintStyle || {}, ...this.props.__hostStyle || {} } : void 0;
+        const hostBase = {
+          className: cls,
+          style: hostStyle,
+          "data-sc-name": this.__name,
+          "data-dc-tpl": this.props.__tplId
+        };
+        const chain = Array.isArray(this.context) ? this.context : [];
+        if (chain.includes(this.__name)) {
+          const cycle = [
+            ...chain.slice(chain.indexOf(this.__name)),
+            this.__name
+          ].join(" \u2192 ");
+          return h(
+            "div",
+            { ...hostBase, className: cls + " sc-has-error" },
+            h(Placeholder, {
+              name: this.__name,
+              hintSize: this.props.__hintSize,
+              error: "circular import: " + cycle
+            })
+          );
+        }
+        if (this.state.__err) {
+          return h(
+            "div",
+            { ...hostBase, className: cls + " sc-has-error" },
+            h(
+              "div",
+              { className: "sc-logic-error", "data-omelette-chrome": "" },
+              this.__name + ": " + this.state.__err
+            ),
+            h(Placeholder, {
+              name: this.__name,
+              hintSize: this.props.__hintSize,
+              error: this.state.__err
+            })
+          );
+        }
+        this.__reconcileLogic();
+        if (!r.tpl) {
+          return h(
+            "div",
+            hostBase,
+            h(Placeholder, { name: this.__name, hintSize: this.props.__hintSize })
+          );
+        }
+        const userProps = this.__userProps();
+        this.logic.props = userProps;
+        let vals = userProps;
+        let renderErr = r.logicError || this.__ctorError;
+        try {
+          vals = { ...userProps, ...this.logic.renderVals() || {} };
+        } catch (e) {
+          console.error(e);
+          renderErr = this.__name + ".renderVals(): " + (e instanceof Error && e.message ? e.message : String(e));
+        }
+        this.__streamingNow = !!(r.htmlStreaming || r.jsStreaming);
+        this.__htmlStreamingNow = !!r.htmlStreaming;
+        return h(
+          "div",
+          { ...hostBase, className: cls + (renderErr ? " sc-has-error" : "") },
+          renderErr && h(
+            "div",
+            { className: "sc-logic-error", "data-omelette-chrome": "" },
+            renderErr
+          ),
+          h(
+            AncestorContext.Provider,
+            { value: [...chain, this.__name] },
+            r.tpl(vals, this)
+          )
+        );
+      }
+    }
+    __publicField(StreamableComponent, "contextType", AncestorContext);
+    const named = /* @__PURE__ */ new Map();
+    function getDC(name) {
+      const hit = named.get(name);
+      if (hit) return hit;
+      function Dispatcher(p) {
+        const [, setTick] = React.useState(0);
+        React.useEffect(() => {
+          const sub = () => setTick((n) => n + 1);
+          registry.get(name).subs.add(sub);
+          return () => {
+            registry.get(name).subs.delete(sub);
+          };
+        }, []);
+        ensureFetched(name);
+        return h(StreamableComponent, { ...p, __name: name });
+      }
+      Dispatcher.displayName = name;
+      named.set(name, Dispatcher);
+      return Dispatcher;
+    }
+    return {
+      getDC,
+      StreamableComponent
+    };
+  }
+
+  // src/bundled.ts
+  function bundledBlob(url) {
+    const blobs = window.__resourceBlobs;
+    const b = blobs ? blobs[url.split("#")[0]] : void 0;
+    return b instanceof Blob ? b : null;
+  }
+
+  // src/cdn.ts
+  var REACT_URL = "https://unpkg.com/react@18.3.1/umd/react.production.min.js";
+  var REACT_SRI = "sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z";
+  var REACT_DOM_URL = "https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js";
+  var REACT_DOM_SRI = "sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1";
+  var BABEL_URL = "https://unpkg.com/@babel/standalone@7.29.0/babel.min.js";
+  var BABEL_SRI = "sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y";
+  function cdnScriptFor(url, sri) {
+    const res = window.__resources;
+    const v = res ? res[url] : void 0;
+    return typeof v === "string" && v ? { src: v } : { src: url, integrity: sri };
+  }
+
+  // src/external.ts
+  var isCustomElementName = (n) => !n.includes(".") && n.includes("-");
+  function isRenderableType(g) {
+    if (typeof g === "function") return !isElementClass(g);
+    return typeof g === "object" && g !== null && typeof g.$$typeof === "symbol";
+  }
+  function resolveDottedPath(root, name) {
+    let cur = root;
+    for (const seg of name.split(".")) {
+      if (cur == null) return void 0;
+      cur = cur[seg];
+    }
+    return cur;
+  }
+  var GLOBAL_POLL_INTERVAL_MS = 50;
+  var GLOBAL_POLL_TIMEOUT_MS = 3e4;
+  function createExternalModules(onResolved) {
+    const cache = /* @__PURE__ */ new Map();
+    let babelLoading = null;
+    const reportedMissing = /* @__PURE__ */ new Map();
+    const polling = /* @__PURE__ */ new Set();
+    function ensureBabel() {
+      if (window.Babel) return Promise.resolve();
+      if (babelLoading) return babelLoading;
+      const babel = cdnScriptFor(BABEL_URL, BABEL_SRI);
+      babelLoading = new Promise((res, rej) => {
+        const s = document.createElement("script");
+        s.src = babel.src;
+        if (babel.integrity) {
+          s.integrity = babel.integrity;
+          s.crossOrigin = "anonymous";
+        }
+        s.onload = () => res();
+        s.onerror = rej;
+        document.head.appendChild(s);
+      });
+      return babelLoading;
+    }
+    const pending = /* @__PURE__ */ new Map();
+    function load(kind, url, after) {
+      const existing = pending.get(url);
+      if (existing) return existing;
+      cache.set(url, null);
+      console.info("[dc-runtime] x-import: loading", url, "(" + kind + ")");
+      const ready = Promise.all([
+        kind === "jsx" ? ensureBabel() : Promise.resolve(),
+        after ?? Promise.resolve()
+      ]);
+      const p = ready.then(() => {
+        const pre = bundledBlob(url);
+        if (pre) return pre.text();
+        return fetch(url).then((r) => {
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.text();
+        });
+      }).then((src) => {
+        const code = kind === "jsx" ? window.Babel.transform(src, {
+          filename: url,
+          presets: ["react", "typescript"]
+        }).code : src;
+        const module = { exports: {} };
+        const before = new Set(Object.keys(window));
+        //! nosemgrep: eval-and-function-constructor
+        new Function("React", "module", "exports", "require", code)(
+          getReact(),
+          module,
+          module.exports,
+          () => ({})
+        );
+        const globals = {};
+        for (const k of Object.keys(window)) {
+          if (!before.has(k) && typeof window[k] === "function") {
+            globals[k] = window[k];
+          }
+        }
+        cache.set(url, { mod: module.exports, globals });
+        console.info(
+          "[dc-runtime] x-import: loaded",
+          url,
+          "\u2014 exports:",
+          Object.keys(module.exports),
+          "window globals:",
+          Object.keys(globals)
+        );
+        onResolved();
+      }).catch((e) => {
+        cache.set(url, {
+          mod: {},
+          globals: {},
+          error: "failed to load: " + (e instanceof Error && e.message ? e.message : String(e))
+        });
+        console.error(
+          "[dc-runtime] x-import: FAILED to load",
+          url,
+          "(" + kind + ")",
+          e
+        );
+        onResolved();
+      });
+      pending.set(url, p);
+      return p;
+    }
+    function resolve2(url, name) {
+      const entry = cache.get(url);
+      if (!entry) return null;
+      const { mod, globals } = entry;
+      const C = mod && mod[name] || globals && globals[name] || typeof window !== "undefined" && window[name] || mod && mod.default;
+      if (typeof C === "function") return C;
+      const key = url + "\0" + name;
+      if (!reportedMissing.has(key)) {
+        reportedMissing.set(
+          key,
+          entry.error || 'no export named "' + name + '" (has: ' + Object.keys(mod).join(", ") + ")"
+        );
+        console.error(
+          "[dc-runtime] x-import: module",
+          url,
+          "loaded but has no component named",
+          JSON.stringify(name),
+          "\u2014 available exports:",
+          Object.keys(mod),
+          "window globals:",
+          Object.keys(globals),
+          ". The module must `module.exports = {" + name + "}` or set `window." + name + "`."
+        );
+      }
+      return null;
+    }
+    function waitForGlobal(name) {
+      if (polling.has(name)) return;
+      polling.add(name);
+      const started = Date.now();
+      const isCE = isCustomElementName(name);
+      const tick = () => {
+        const found = isCE ? customElements.get(name) : isRenderableType(resolveDottedPath(window, name));
+        if (found) {
+          polling.delete(name);
+          onResolved();
+          return;
+        }
+        if (Date.now() - started >= GLOBAL_POLL_TIMEOUT_MS) {
+          console.warn(
+            "[dc-runtime] x-import: global",
+            JSON.stringify(name),
+            "never appeared on window after " + GLOBAL_POLL_TIMEOUT_MS + "ms"
+          );
+          return;
+        }
+        setTimeout(tick, GLOBAL_POLL_INTERVAL_MS);
+      };
+      setTimeout(tick, GLOBAL_POLL_INTERVAL_MS);
+    }
+    function resolveGlobal(url, name) {
+      const isCE = isCustomElementName(name);
+      if (!url) {
+        if (isCE) {
+          if (customElements.get(name)) return name;
+          waitForGlobal(name);
+          return null;
+        }
+        const g2 = resolveDottedPath(window, name);
+        if (isRenderableType(g2)) return g2;
+        waitForGlobal(name);
+        return null;
+      }
+      const entry = cache.get(url);
+      if (!entry) return null;
+      if (isCE && customElements.get(name)) return name;
+      const g = entry.globals[name] ?? resolveDottedPath(window, name);
+      if (isRenderableType(g)) return g;
+      if (name.includes(".")) return null;
+      const key = url + "\0global\0" + name;
+      if (!reportedMissing.has(key)) {
+        reportedMissing.set(key, null);
+        if (isCE && !customElements.get(name)) {
+          console.warn(
+            "[dc-runtime] x-import:",
+            url,
+            "loaded but no custom element",
+            JSON.stringify(name),
+            "is registered and window." + name + " is not a function \u2014 rendering <" + name + "> as an unknown element."
+          );
+        }
+      }
+      return name;
+    }
+    function getError(url, name) {
+      const entry = cache.get(url);
+      if (entry?.error) return entry.error;
+      return reportedMissing.get(url + "\0" + name) || null;
+    }
+    return { load, resolve: resolve2, resolveGlobal, getError };
+  }
+  function isElementClass(g) {
+    try {
+      return typeof g === "function" && typeof HTMLElement !== "undefined" && g.prototype instanceof HTMLElement;
+    } catch {
+      return false;
+    }
+  }
+
+  // src/atomics.ts
+  var ATOMIC_CSS = (
+    // layout
+    ".fx{display:flex}.col{display:flex;flex-direction:column}.grid{display:grid}.ac{align-items:center}.jc{justify-content:center}.jb{justify-content:space-between}.f1{flex:1}.noshrink{flex-shrink:0}.wrap{flex-wrap:wrap}.fw5{font-weight:500}.fw6{font-weight:600}.fw7{font-weight:700}.fw8{font-weight:800}.fs11{font-size:11px}.fs12{font-size:12px}.fs13{font-size:13px}.fs14{font-size:14px}.fs15{font-size:15px}.fs16{font-size:16px}.fs20{font-size:20px}.fs22{font-size:22px}.upper{text-transform:uppercase}.tc{text-align:center}.nowrap{white-space:nowrap}.gap8{gap:8px}.gap10{gap:10px}.gap12{gap:12px}.gap16{gap:16px}.gap24{gap:24px}.m0{margin:0}.mt8{margin-top:8px}.mt12{margin-top:12px}.mt16{margin-top:16px}.mb8{margin-bottom:8px}.mb12{margin-bottom:12px}.mb16{margin-bottom:16px}.posrel{position:relative}.posabs{position:absolute}.round{border-radius:50%}.ohide{overflow:hidden}.bbox{box-sizing:border-box}.pointer{cursor:pointer}.w100{width:100%}.b0{border:none}"
+  );
+
+  // src/helmet.ts
+  var DESIGN_DOC_MODE_RE = /<meta\b[^>]*\bname\s*=\s*["']design_doc_mode["'][^>]*\b(?:content|value)\s*=\s*["'](\w+)["']/i;
+  var CANVAS_BG_LIGHT = "#f0eee6";
+  var CANVAS_BG_DARK = "#2e2c26";
+  function createHelmetManager(doc, isStreaming) {
+    const mounted = /* @__PURE__ */ new Set();
+    const live = /* @__PURE__ */ new Map();
+    let designDocMode = null;
+    let canvasStyleEl = null;
+    let appTheme = "light";
+    try {
+      const ds = doc.documentElement.dataset.theme;
+      appTheme = ds === "dark" || ds === "light" ? ds : new URLSearchParams(doc.defaultView?.location.search ?? "").get(
+        "theme"
+      ) === "dark" ? "dark" : "light";
+    } catch {
+    }
+    function applyCanvasBg() {
+      if (!canvasStyleEl) return;
+      const bg = appTheme === "dark" ? CANVAS_BG_DARK : CANVAS_BG_LIGHT;
+      canvasStyleEl.textContent = `html,body{background:${bg}}#dc-root>.sc-host{position:relative}`;
+    }
+    function postDesignMode(mode) {
+      if (window.parent === window) return;
+      try {
+        window.parent.postMessage({ type: "__dc_design_mode", mode }, "*");
+      } catch {
+      }
+    }
+    function setDesignDocMode(mode) {
+      if (mode === designDocMode) return;
+      designDocMode = mode;
+      postDesignMode(mode);
+      if (mode === "canvas") {
+        doc.documentElement.setAttribute("data-dc-canvas", "");
+        canvasStyleEl = doc.createElement("style");
+        canvasStyleEl.setAttribute("data-dc-canvas", "");
+        applyCanvasBg();
+        doc.head.appendChild(canvasStyleEl);
+      } else {
+        doc.documentElement.removeAttribute("data-dc-canvas");
+        canvasStyleEl?.remove();
+        canvasStyleEl = null;
+      }
+    }
+    window.addEventListener("message", (e) => {
+      const type = e.data && e.data.type;
+      if (type === "__dc_theme") {
+        const t = e.data.theme;
+        if (t === "light" || t === "dark") {
+          appTheme = t;
+          applyCanvasBg();
+        }
+        return;
+      }
+      if (!designDocMode || type !== "__dc_probe") return;
+      postDesignMode(designDocMode);
+    });
+    function compile(node) {
+      const raw = [...node.children];
+      const helmetClosed = node.nextSibling != null || node.parentNode?.nextSibling != null;
+      if (node.hasAttribute("data-dc-atomics") && !mounted.has("__dc-atomics")) {
+        mounted.add("__dc-atomics");
+        const el = doc.createElement("style");
+        el.id = "__dc-atomics";
+        el.textContent = ATOMIC_CSS;
+        doc.head.appendChild(el);
+      }
+      return (_vals, ctx) => {
+        const name = ctx && ctx.__name || "";
+        const streaming = !!(name && isStreaming(name));
+        for (let i = 0; i < raw.length; i++) {
+          const child = raw[i];
+          const tag = child.tagName;
+          const mayBePartial = streaming && !helmetClosed && i === raw.length - 1;
+          if (tag === "SCRIPT") {
+            if (mayBePartial) continue;
+            const key = "SCRIPT|" + (child.getAttribute("src") || child.textContent || "");
+            if (mounted.has(key)) continue;
+            mounted.add(key);
+            const el = doc.createElement("script");
+            for (const { name: an, value } of [...child.attributes])
+              el.setAttribute(an, value);
+            if (child.textContent) el.textContent = child.textContent;
+            doc.head.appendChild(el);
+          } else if (tag === "LINK" || tag === "META") {
+            if (mayBePartial) continue;
+            const key = tag + "|" + (child.getAttribute("href") || child.getAttribute("src") || child.outerHTML);
+            if (mounted.has(key)) continue;
+            mounted.add(key);
+            if (tag === "LINK") {
+              const rel = (child.getAttribute("rel") || "").toLowerCase().split(/\s+/);
+              const href = (child.getAttribute("href") || "").trim();
+              const res = window.__resources;
+              const pre = res && rel.includes("stylesheet") && !rel.includes("alternate") ? res[href] : void 0;
+              const blob = typeof pre === "string" && pre ? bundledBlob(pre) : null;
+              if (blob) {
+                const el = doc.createElement("style");
+                if (child.hasAttribute("disabled")) {
+                  el.setAttribute("media", "not all");
+                } else if (child.getAttribute("media")) {
+                  el.setAttribute("media", child.getAttribute("media"));
+                }
+                if (child.getAttribute("title"))
+                  el.setAttribute("title", child.getAttribute("title"));
+                void blob.text().then((css) => {
+                  el.textContent = css;
+                });
+                doc.head.appendChild(el);
+                continue;
+              }
+            }
+            doc.head.appendChild(child.cloneNode(true));
+          } else {
+            const key = name + "|" + i;
+            let el = live.get(key);
+            if (!el || el.tagName !== tag) {
+              if (el) el.remove();
+              el = doc.createElement(tag.toLowerCase());
+              live.set(key, el);
+              doc.head.appendChild(el);
+            }
+            for (const { name: an, value } of [...child.attributes]) {
+              if (el.getAttribute(an) !== value) el.setAttribute(an, value);
+            }
+            if (el.textContent !== child.textContent)
+              el.textContent = child.textContent;
+          }
+        }
+        return null;
+      };
+    }
+    return { compile, setDesignDocMode };
+  }
+
+  // src/pseudo.ts
+  function scanUnquotedUrl(css, i) {
+    if (css[i] !== "u" && css[i] !== "U" || css.slice(i, i + 4).toLowerCase() !== "url(" || /[a-z0-9_-]/i.test(css[i - 1] ?? "")) {
+      return -1;
+    }
+    let j = i + 4;
+    while (j < css.length && /\s/.test(css[j])) j++;
+    if (css[j] === '"' || css[j] === "'") return -1;
+    while (j < css.length && css[j] !== ")") {
+      if (css[j] === "\\") j++;
+      j++;
+    }
+    return j < css.length ? j + 1 : css.length;
+  }
+  function stripComments(css) {
+    let out = "";
+    let quote = "";
+    for (let i = 0; i < css.length; i++) {
+      const c = css[i];
+      if (quote) {
+        if (c === "\\") {
+          out += c + (css[i + 1] ?? "");
+          i++;
+          continue;
+        }
+        if (c === quote) quote = "";
+        out += c;
+      } else if (c === "'" || c === '"') {
+        quote = c;
+        out += c;
+      } else if (c === "/" && css[i + 1] === "*") {
+        const end = css.indexOf("*/", i + 2);
+        i = end === -1 ? css.length : end + 1;
+        out += " ";
+      } else {
+        const end = scanUnquotedUrl(css, i);
+        if (end === -1) out += c;
+        else {
+          out += css.slice(i, end);
+          i = end - 1;
+        }
+      }
+    }
+    return out;
+  }
+  function importantify(css) {
+    css = stripComments(css);
+    const decls = [];
+    let start = 0;
+    let depth = 0;
+    let quote = "";
+    for (let i = 0; i < css.length; i++) {
+      const c = css[i];
+      if (quote) {
+        if (c === "\\") i++;
+        else if (c === quote) quote = "";
+      } else if (c === "'" || c === '"') quote = c;
+      else if (c === "(") depth++;
+      else if (c === ")") depth = Math.max(0, depth - 1);
+      else if (c === ";" && depth === 0) {
+        decls.push(css.slice(start, i));
+        start = i + 1;
+      } else {
+        const end = scanUnquotedUrl(css, i);
+        if (end !== -1) i = end - 1;
+      }
+    }
+    decls.push(css.slice(start));
+    return decls.map((d) => d.trim()).filter(Boolean).map((d) => /!\s*important$/i.test(d) ? d : d + " !important").join(";");
+  }
+  function createPseudoSheet(doc) {
+    let el = null;
+    const cache = /* @__PURE__ */ new Map();
+    let n = 0;
+    return (pseudo, css) => {
+      const k = pseudo + "|" + css;
+      const hit = cache.get(k);
+      if (hit) return hit;
+      if (!el) {
+        el = doc.createElement("style");
+        doc.head.appendChild(el);
+      }
+      const cls = "scp" + (n++).toString(36);
+      const isPseudoElement = pseudo === "before" || pseudo === "after";
+      const sel = isPseudoElement ? "." + cls + "::" + pseudo : "." + cls + ":" + pseudo;
+      el.sheet.insertRule(
+        sel + "{" + (isPseudoElement ? css : importantify(css)) + "}",
+        el.sheet.cssRules.length
+      );
+      cache.set(k, cls);
+      return cls;
+    };
+  }
+
+  // src/registry.ts
+  function createRegistry() {
+    const entries = /* @__PURE__ */ Object.create(null);
+    function get(name) {
+      return entries[name] || (entries[name] = {
+        html: "",
+        tpl: null,
+        Logic: null,
+        jsStreaming: false,
+        htmlStreaming: false,
+        ver: 0,
+        subs: /* @__PURE__ */ new Set(),
+        fetched: false
+      });
+    }
+    function bump(name) {
+      const r = get(name);
+      r.ver++;
+      for (const fn of r.subs) fn();
+    }
+    return {
+      entries,
+      get,
+      bump,
+      bumpAll() {
+        for (const n in entries) bump(n);
+      }
+    };
+  }
+
+  // src/runtime.ts
+  var COMPONENT_DIR = ".";
+  function createRuntime(doc = document) {
+    const registry = createRegistry();
+    const pseudoClass = createPseudoSheet(doc);
+    const helmet = createHelmetManager(
+      doc,
+      (name) => registry.get(name).htmlStreaming
+    );
+    const external = createExternalModules(() => registry.bumpAll());
+    const factory = createComponentFactory(registry, ensureFetched);
+    const host = {
+      component: (name) => factory.getDC(name),
+      placeholder: (props) => h(Placeholder, props),
+      helmet: (node) => helmet.compile(node),
+      loadExternal: (kind, url, after) => external.load(kind, url, after),
+      resolveExternal: (url, name) => external.resolve(url, name),
+      resolveExternalGlobal: (url, name) => external.resolveGlobal(url, name),
+      resolveExternalError: (url, name) => external.getError(url, name),
+      pseudoClass
+    };
+    function ensureFetched(name) {
+      const r = registry.get(name);
+      if (r.fetched) return;
+      r.fetched = true;
+      const url = COMPONENT_DIR + "/" + encodeURIComponent(name) + ".dc.html";
+      const res = window.__resources;
+      const pre = res ? res[url] : void 0;
+      const target = typeof pre === "string" && pre ? pre : url;
+      const blob = bundledBlob(target);
+      (blob ? blob.text() : fetch(target).then((res2) => {
+        if (!res2.ok) {
+          console.error(
+            '[dc-runtime] sibling fetch for "' + name + '" failed:',
+            url,
+            "returned",
+            res2.status,
+            "\u2014 the reference renders as an empty placeholder."
+          );
+          return "";
+        }
+        return res2.text();
+      })).then((t) => {
+        if (!t) return;
+        const parsed = parseDcText(t);
+        if (!parsed) {
+          console.error(
+            '[dc-runtime] sibling fetch for "' + name + '":',
+            url,
+            "has no \x3cx-dc> block \u2014 not a Design Component."
+          );
+          return;
+        }
+        if (parsed.props) r.propsMeta = parsed.props;
+        if (parsed.preview) r.preview = parsed.preview;
+        if (parsed.template && !r.html) updateHtml(name, parsed.template);
+        if (parsed.js && !r.Logic) updateJs(name, parsed.js);
+      }).catch(
+        (e) => console.error(
+          '[dc-runtime] sibling fetch for "' + name + '" threw:',
+          url,
+          e
+        )
+      );
+    }
+    let rootName = null;
+    function updateHtml(name, html) {
+      const r = registry.get(name);
+      r.html = html;
+      if (name === rootName) {
+        const mode = DESIGN_DOC_MODE_RE.exec(html)?.[1] ?? null;
+        if (mode || !r.htmlStreaming) helmet.setDesignDocMode(mode);
+      }
+      try {
+        r.tpl = compileTemplate(html, host);
+      } catch (e) {
+        console.error("[dc-runtime] template compile FAILED for", name, e);
+      }
+      registry.bump(name);
+    }
+    function updateJs(name, src) {
+      const r = registry.get(name);
+      const seq = r.jsSeq = (r.jsSeq || 0) + 1;
+      try {
+        const Cls = evalDcLogic(src);
+        if (r.jsSeq !== seq) return;
+        if (typeof Cls !== "function") {
+          r.logicError = name + ".dc.html: \x3cscript data-dc-script> must define `class Component extends DCLogic`";
+        } else {
+          r.logicError = null;
+          r.Logic = Cls;
+        }
+      } catch (e) {
+        if (r.jsSeq !== seq) return;
+        console.error(
+          "[dc-runtime] logic class eval FAILED for",
+          name,
+          "\u2014 the template renders with props only.",
+          e
+        );
+        r.logicError = name + ": " + (e instanceof Error && e.message ? e.message : String(e));
+      }
+      registry.bump(name);
+    }
+    function setStreaming(name, kind, on) {
+      const r = registry.get(name);
+      if (kind === "html") r.htmlStreaming = !!on;
+      else r.jsStreaming = !!on;
+      let any = false;
+      for (const n in registry.entries) {
+        const e = registry.entries[n];
+        if (e && (e.htmlStreaming || e.jsStreaming)) {
+          any = true;
+          break;
+        }
+      }
+      doc.documentElement.classList.toggle("sc-dc-streaming", any);
+      registry.bump(name);
+    }
+    function dcUpdate(name, kind, content, streaming) {
+      if (streaming) registry.get(name).fetched = true;
+      if (kind === "html") {
+        setStreaming(name, "html", !!streaming);
+        updateHtml(name, content);
+      } else if (kind === "js") {
+        setStreaming(name, "js", !!streaming);
+        if (!streaming) updateJs(name, content);
+      } else if (kind === "props") {
+        const { props, preview } = parseDataProps(content);
+        const r = registry.get(name);
+        r.propsMeta = props ?? void 0;
+        r.preview = preview;
+        registry.bump(name);
+      }
+    }
+    function setProps(name, overrides) {
+      registry.get(name).propOverrides = overrides && typeof overrides === "object" ? { ...overrides } : null;
+      registry.bump(name);
+    }
+    function adoptParsed(name, parsed) {
+      if (!parsed) return;
+      const r = registry.get(name);
+      if (parsed.props) r.propsMeta = parsed.props;
+      if (parsed.preview) r.preview = parsed.preview;
+      if (parsed.template) updateHtml(name, parsed.template);
+      if (parsed.js) updateJs(name, parsed.js);
+    }
+    return {
+      registry,
+      getDC: factory.getDC,
+      updateHtml,
+      updateJs,
+      dcUpdate,
+      setProps,
+      adoptParsed,
+      setRootName: (name) => {
+        rootName = name;
+      },
+      markFetched: (name) => {
+        registry.get(name).fetched = true;
+      },
+      annotatedTemplate: (name) => {
+        const r = registry.get(name);
+        return r.tpl && r.tpl.__annotated || null;
+      },
+      templateSource: (name) => registry.get(name).html || null,
+      StreamableLogic
+    };
+  }
+
+  // src/stream-state.ts
+  function createStreamTracker(staleMs = 6e4, now = Date.now) {
+    const since = /* @__PURE__ */ new Map();
+    const liveOne = (n) => {
+      const t = since.get(n);
+      if (t === void 0) return false;
+      if (now() - t > staleMs) {
+        since.delete(n);
+        return false;
+      }
+      return true;
+    };
+    return {
+      push(name, streaming, viewportKey) {
+        if (viewportKey === "dc-model") return;
+        if (streaming) since.set(name, now());
+        else since.delete(name);
+      },
+      live(name) {
+        if (name !== void 0) return liveOne(name);
+        for (const n of [...since.keys()]) if (liveOne(n)) return true;
+        return false;
+      }
+    };
+  }
+
+  // src/index.ts
+  function hideRawTemplate() {
+    const s = document.createElement("style");
+    s.textContent = "x-dc{display:none!important}";
+    document.head.appendChild(s);
+  }
+  function loadScript(src, integrity) {
+    return new Promise((resolve2, reject) => {
+      //! nosemgrep: create-script-element
+      const s = document.createElement("script");
+      s.src = src;
+      if (integrity) {
+        s.integrity = integrity;
+        s.crossOrigin = "anonymous";
+      }
+      s.async = false;
+      s.onload = () => resolve2();
+      s.onerror = () => reject(new Error(`failed to load ${src}`));
+      document.head.appendChild(s);
+    });
+  }
+  function loadReactUmd() {
+    const w = window;
+    if (w.React && w.ReactDOM) return Promise.resolve();
+    const react = cdnScriptFor(REACT_URL, REACT_SRI);
+    const reactDom = cdnScriptFor(REACT_DOM_URL, REACT_DOM_SRI);
+    return Promise.all([
+      loadScript(react.src, react.integrity),
+      loadScript(reactDom.src, reactDom.integrity)
+    ]).then(() => void 0);
+  }
+  function init() {
+    const runtime = createRuntime(document);
+    let rootName = "Root";
+    const baseCss = document.createElement("style");
+    baseCss.textContent = BASE_CSS;
+    document.head.prepend(baseCss);
+    const notifyHost = () => {
+      if (window.parent === window) return;
+      const r = runtime.registry.entries[rootName];
+      try {
+        window.parent.postMessage(
+          {
+            type: "__dc_booted",
+            rootName,
+            propsMeta: r && r.propsMeta || null,
+            preview: r && r.preview || null
+          },
+          "*"
+        );
+      } catch {
+      }
+    };
+    const streams = createStreamTracker();
+    const api = {
+      __dcUpdate: (name, kind, content, streaming, viewportKey) => {
+        streams.push(name, streaming, viewportKey);
+        runtime.dcUpdate(name, kind, content, streaming);
+        if (name === rootName && !streaming && kind === "props") notifyHost();
+      },
+      __dcStreaming: (name) => streams.live(name),
+      __dcSetProps: (name, overrides) => runtime.setProps(name, overrides),
+      /** Name of the component currently mounted as the page root — DC tools
+       *  push their template-stream here when targeting "the open page". */
+      __dcRootName: () => rootName,
+      /** Editor bridge — the encoded, `data-dc-tpl`-annotated template source.
+       *  The host editor parses this into its own template DOM so it can map a
+       *  rendered node (carrying the same `data-dc-tpl`) back to the source
+       *  node that emitted it. Returns the encoded form (`sc-camel-*` attrs,
+       *  `\x3csc-raw-*>`/`\x3csc-helmet>` tags); the editor decodes on serialize. */
+      __dcAnnotatedTemplate: (name) => runtime.annotatedTemplate(name),
+      /** Editor bridge — the *original* (decoded) template source. */
+      __dcTemplateSource: (name) => runtime.templateSource(name),
+      __dcBoot: () => {
+        rootName = boot(runtime, document) ?? rootName;
+        notifyHost();
+      },
+      __dcRegistry: runtime.registry.entries,
+      getDC: (name) => runtime.getDC(name),
+      // `DCLogic` is the documented base class name; `StreamableLogic` is the
+      // implementation alias kept for any project that already references it.
+      DCLogic: runtime.StreamableLogic,
+      StreamableLogic: runtime.StreamableLogic
+    };
+    Object.assign(window, api);
+    window.__dcContentKeyed = true;
+    if (document.readyState !== "loading") api.__dcBoot();
+    else document.addEventListener("DOMContentLoaded", () => api.__dcBoot());
+  }
+  hideRawTemplate();
+  loadReactUmd().then(init).catch((err) => {
+    console.error("[dc] failed to load React or boot:", err);
+    throw err;
+  });
+})();
+
+</script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+/* Nocturne — design-system tokens and component classes. This file is the source of truth for the system's look; retune it here and see readme.md. */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  --color-bg: #161826;
+  --color-surface: #232532;
+  --color-text: #e9e9ed;
+  --color-accent: #9184d9; /* review round 7 (Barron): the accent moves to
+     the product's blurple — OKLCH hue 289.2, the hue of the app's own Pro
+     accent (#9a8fe0, --om-accent-pro) — at the same lightness the steel
+     accent held (L 0.660, so the documented ratios survive) and chroma
+     in the product blurple's own range (its token sits at C 0.118; the
+     accent takes 0.125, from the old steel's 0.030):
+     the accent now reads as an accent rather than another neutral. */
+  --color-accent-2: #a7a1db; /* the machine-derived stand-in follows: same
+     hue, same L 0.734, chroma at the same 2:3 proportion it held */
+  --color-divider: color-mix(in srgb, #e9e9ed 16%, transparent);
+
+  /* Tonal ramps — generated in OKLCH on one shared lightness scale, so the
+     same step of any role matches the others in visual value. */
+  --color-neutral-100: #f3f5fe;
+  --color-neutral-200: #e4e7f5;
+  --color-neutral-300: #cfd3e5;
+  --color-neutral-400: #b2b6ca;
+  --color-neutral-500: #9397ab;
+  --color-neutral-600: #75798c;
+  --color-neutral-700: #595d6c;
+  --color-neutral-800: #3f424d;
+  --color-neutral-900: #292b31;
+
+  --color-accent-100: #f5f4ff;
+  --color-accent-200: #e7e5fe;
+  --color-accent-300: #d2cefd;
+  --color-accent-400: #b5abfc;
+  --color-accent-500: #968ae0;
+  --color-accent-600: #796cbf;
+  --color-accent-700: #5d5294;
+  --color-accent-800: #423a6a;
+  --color-accent-900: #2b2741;
+
+  --color-accent-2-100: #f5f4ff;
+  --color-accent-2-200: #e7e5fe;
+  --color-accent-2-300: #d2cefd;
+  --color-accent-2-400: #b5afe8;
+  --color-accent-2-500: #9690c9;
+  --color-accent-2-600: #7972a9;
+  --color-accent-2-700: #5c5783;
+  --color-accent-2-800: #423e5d;
+  --color-accent-2-900: #2b293a;
+
+  /* Deck section-divider ground — review round 3: saturation as presence.
+     Dividers take a saturated deep indigo (hue 277, the neutral ramp's own
+     family; C 0.094 — written when the accent held C 0.030, before the
+     round-7 blurple raised it past the ground's) with a lighter bloom and
+     a ghost tint of the same hue, while the slide grounds stay
+     desaturated. Deck-scale fills only — not interface colors. */
+  --color-section: #262a60;
+  --color-section-glow: #353b80;
+  --color-section-ghost: #4c5397;
+
+  --font-heading: "Inter", system-ui, sans-serif;
+  --font-heading-weight: 500;
+  --font-body: "Inter", system-ui, sans-serif;
+
+  --space-1: 2.8px;
+  --space-2: 5.6px;
+  --space-3: 8.4px;
+  --space-4: 11.2px;
+  --space-6: 16.8px;
+  --space-8: 22.4px;
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 14px;
+
+  /* Elevation — derived from the ground: soft ink-tinted shadows on a
+     light theme, a hairline edge + ambient darkness on a dark one. */
+  --shadow-sm: 0 0 0 1px #3f424d;
+  --shadow-md: 0 0 0 1px #595d6c, 0 6px 18px rgba(0,0,0,0.55);
+  --shadow-lg: 0 0 0 1px #9397ab, 0 16px 40px rgba(0,0,0,0.65);
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+}
+h1, h2, h3, h4 { font-family: var(--font-heading); font-weight: var(--font-heading-weight); }
+
+.lighten{mix-blend-mode:lighten;background-color:transparent}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Components — built with the tokens above. Plain CSS
+   on plain HTML: no JavaScript, no build step. Each class is documented in
+   readme.md and demonstrated in foundations/ and components/.
+   ══════════════════════════════════════════════════════════════════════ */
+
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; font-size: 15px; line-height: 1.55; font-weight: 400; }
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading); font-weight: var(--font-heading-weight);
+  line-height: 1.12; letter-spacing: -0.015em; margin: 0 0 var(--space-2);
+}
+h1 { font-size: 42px; }
+h2 { font-size: 32px; }
+h3 { font-size: 25px; }
+h4 { font-size: 20px; }
+h5 { font-size: 16px; }
+h6 { font-size: 13px; }
+h6 { letter-spacing: 0.08em; text-transform: uppercase; }
+p { margin: 0 0 var(--space-3); }
+a { color: var(--color-accent); text-underline-offset: 3px; }
+img { display: block; max-width: 100%; }
+figure { margin: 0; }
+figcaption {
+  font-size: 11px; margin-top: var(--space-1);
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+.text-muted { color: color-mix(in srgb, var(--color-text) 55%, transparent); }
+:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+::selection { background: color-mix(in srgb, var(--color-accent) 30%, transparent); }
+
+/* — rules — */
+/* Rules fade to transparent at both ends instead of stopping cleanly — a
+   Nocturne signature. The ramp is 48px an end (one deck baseline unit),
+   painted from the same divider token. Freestanding rules fade; box
+   outlines, in-control separators, and short accent marks stay solid. */
+.hr {
+  height: 1px; border: 0; margin: var(--space-4) 0;
+  background: linear-gradient(to right,
+    transparent, var(--color-divider) 48px,
+    var(--color-divider) calc(100% - 48px), transparent);
+}
+
+/* — buttons — */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  cursor: pointer; text-decoration: none;
+  font-family: var(--font-heading); font-weight: var(--font-heading-weight);
+  font-size: 14px; line-height: 1.2; color: var(--color-text); /* matches the .input's 14px —
+     the pair sits side by side in sign-up rows */
+  background: transparent; border: 1px solid transparent;
+  padding: var(--space-2) calc(var(--space-3) * 1.2);
+  border-radius: var(--radius-md);
+}
+.btn svg { display: block; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-primary { color: var(--color-accent); border-color: var(--color-accent); }
+.btn-primary:hover { background: color-mix(in srgb, var(--color-accent) 12%, transparent); }
+.btn-primary:active { background: color-mix(in srgb, var(--color-accent) 22%, transparent); }
+.btn-secondary { border-color: var(--color-divider); }
+.btn-secondary:hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
+.btn-secondary:active { background: color-mix(in srgb, var(--color-text) 14%, transparent); }
+.btn-ghost { color: var(--color-accent); padding-inline: var(--space-1); }
+.btn-ghost:hover { background: color-mix(in srgb, var(--color-accent) 10%, transparent); }
+.btn-ghost:active { background: color-mix(in srgb, var(--color-accent) 18%, transparent); }
+.btn-icon { width: 36px; height: 36px; padding: 0; }
+.btn-block { width: 100%; margin-top: var(--space-2); }
+
+/* — forms — */
+.field > label {
+  display: block; font-size: 12px; margin-bottom: 5px;
+  color: color-mix(in srgb, var(--color-text) 70%, transparent);
+}
+.input {
+  width: 100%; min-height: 36px; padding: 6px 10px; font: inherit;
+  font-size: 14px; color: var(--color-text); caret-color: var(--color-accent);
+  background: var(--color-surface);
+  border: 1px solid var(--color-divider); border-radius: var(--radius-md);
+}
+.input:hover { border-color: color-mix(in srgb, var(--color-text) 45%, transparent); }
+.input:focus-visible { border-color: var(--color-accent); outline-offset: 0; }
+textarea.input { min-height: 90px; resize: vertical; }
+.radio { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; }
+.radio input, .seg-opt input {
+  position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none;
+}
+.radio .dot {
+  width: 16px; height: 16px; flex: none; border-radius: 50%;
+  border: 1.5px solid var(--color-divider);
+}
+.radio:hover .dot { border-color: var(--color-accent); }
+.radio input:checked + .dot {
+  border-color: var(--color-accent); background: var(--color-accent);
+  box-shadow: inset 0 0 0 4px var(--color-bg);
+}
+.radio input:focus-visible + .dot { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.seg {
+  display: inline-flex; overflow: hidden;
+  border: 1px solid var(--color-divider); border-radius: var(--radius-md);
+}
+.seg-opt {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 12px; font-size: 13px; cursor: pointer;
+}
+.seg-opt + .seg-opt { border-left: 1px solid var(--color-divider); }
+.seg-opt:has(input:checked) { color: var(--color-accent); box-shadow: inset 0 0 0 1px var(--color-accent); }
+.seg-opt:not(:has(input:checked)):hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
+.seg-opt:has(input:focus-visible) { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+
+/* — cards — */
+.card {
+  display: flex; flex-direction: column; gap: var(--space-2);
+  padding: var(--space-3); border-radius: var(--radius-md); background: var(--color-surface);
+}
+.card-kicker { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-accent); }
+.card-title {
+  font-family: var(--font-heading); font-weight: var(--font-heading-weight);
+  font-size: 17px; line-height: 1.2;
+}
+.card-body { margin: 0; font-size: 13px; opacity: 0.8; flex: 1; }
+.card-meta {
+  display: flex; align-items: center; gap: 6px; font-size: 11px;
+  color: color-mix(in srgb, var(--color-text) 50%, transparent);
+}
+.elev-sm { box-shadow: var(--shadow-sm); }
+.elev-md { box-shadow: var(--shadow-md); }
+.elev-lg { box-shadow: var(--shadow-lg); }
+
+/* — tags — */
+.tag {
+  display: inline-flex; align-items: center; font-size: 11px;
+  letter-spacing: 0.02em; padding: 3px 10px;
+  border-radius: calc(var(--radius-md) * 0.75);
+}
+.tag-accent { background: var(--color-accent-800); color: var(--color-accent-100); }
+.tag-accent-2 { background: var(--color-accent-2-800); color: var(--color-accent-2-100); }
+.tag-neutral { background: var(--color-neutral-800); color: var(--color-neutral-100); }
+.tag-outline { border: 1px solid var(--color-accent); color: var(--color-accent); }
+
+/* — navigation — */
+.nav {
+  display: flex; align-items: center; gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: none;
+}
+.nav-brand {
+  font-family: var(--font-heading); font-weight: var(--font-heading-weight);
+  font-size: 18px; margin-right: auto;
+}
+.nav a { color: inherit; text-decoration: none; font-size: 14px; }
+.nav a:hover, .nav a[aria-current='page'] { color: var(--color-accent); }
+
+/* — tables — */
+.table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.table th {
+  text-align: left; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+  padding: var(--space-2); border-bottom: 1px solid transparent; /* keeps layout; the row paints the fading rule */
+}
+.table td {
+  padding: var(--space-2);
+  border-bottom: 1px solid transparent;
+}
+/* Row rules as row-level strips so the end-fade spans the row, not each cell. */
+.table thead tr {
+  background: linear-gradient(to right,
+    transparent, var(--color-divider) 48px,
+    var(--color-divider) calc(100% - 48px), transparent) no-repeat bottom / 100% 1px;
+}
+.table tbody tr {
+  background: linear-gradient(to right,
+    transparent, color-mix(in srgb, var(--color-text) 8%, transparent) 48px,
+    color-mix(in srgb, var(--color-text) 8%, transparent) calc(100% - 48px), transparent) no-repeat bottom / 100% 1px;
+}
+.table tbody tr:hover {
+  /* the hover tint layers over the row rule, which keeps painting */
+  background:
+    linear-gradient(color-mix(in srgb, var(--color-text) 4%, transparent),
+                    color-mix(in srgb, var(--color-text) 4%, transparent)) no-repeat 0 0 / 100% 100%,
+    linear-gradient(to right,
+      transparent, color-mix(in srgb, var(--color-text) 8%, transparent) 48px,
+      color-mix(in srgb, var(--color-text) 8%, transparent) calc(100% - 48px), transparent) no-repeat bottom / 100% 1px;
+}
+
+/* — dialog — */
+.dialog-backdrop {
+  position: fixed; inset: 0; display: grid; place-items: center;
+  padding: var(--space-4);
+  background: color-mix(in srgb, var(--color-neutral-900) 50%, transparent);
+}
+.dialog {
+  width: min(440px, 100%); display: flex; flex-direction: column; gap: var(--space-3);
+  padding: var(--space-4); border-radius: var(--radius-lg);
+  background: var(--color-surface); box-shadow: var(--shadow-lg);
+}
+.dialog-title {
+  font-family: var(--font-heading); font-weight: var(--font-heading-weight);
+  font-size: 20px;
+}
+.dialog-body { font-size: 14px; opacity: 0.85; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-2); }
+
+
+</style>
+  <script>
+/* @ds-bundle: {"format":4,"namespace":"Nocturne_noctur","components":[],"sourceHashes":{},"inlinedExternals":[],"unexposedExports":[]} */
+
+(() => {
+
+const __ds_ns = (window.Nocturne_noctur = window.Nocturne_noctur || {});
+
+const __ds_scope = {};
+
+(__ds_ns.__errors = __ds_ns.__errors || []);
+
+})();
+
+</script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <style>
+    body { background: var(--color-bg); color: var(--color-text); margin: 0; }
+    a { color: var(--color-accent-300); }
+    a:hover { color: var(--color-accent); }
+  </style>
+</helmet>
+
+<div style="min-height:100vh;padding:0 20px 64px">
+  <div style="max-width:1040px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;padding:18px 0;border-bottom:1px solid var(--color-divider)">
+    <span class="nav-brand" style="font-size:15px">Employer verification requests</span>
+    <div style="display:flex;align-items:center;gap:var(--space-3)">
+      <span class="tag tag-outline">Alpha prototype</span>
+      <button type="button" class="btn btn-ghost" style="font-size:11px;opacity:0.6" sc-camel-on-click="{{ resetAll }}">Demo: reset to default state</button>
+    </div>
+  </div>
+
+  <sc-if value="{{ isLoggedIn }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:1040px;margin:0 auto;display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;padding:10px 0;border-bottom:1px solid var(--color-divider);font-size:12px">
+    <a href="#" sc-camel-on-click="{{ openMyChecks }}">My checks</a>
+    <sc-if value="{{ isOrgAdmin }}" hint-placeholder-val="{{ false }}">
+      <a href="#" sc-camel-on-click="{{ openOrgChecks }}">Organization checks</a>
+    </sc-if>
+    <a href="#" sc-camel-on-click="{{ startOver }}">Start a new lookup</a>
+    <span style="margin-left:auto;color:var(--color-neutral-500)">{{ accountLine }}</span>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isLookup }}" hint-placeholder-val="{{ true }}">
+  <div style="max-width:460px;margin:0 auto;padding-top:56px;display:flex;flex-direction:column;gap:var(--space-4)">
+    <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:26px;margin:0">Check a candidate's verified record</h1>
+    <p style="margin:0;color:var(--color-neutral-400);font-size:14px;line-height:1.5">Look up whether a candidate holds a verified record. You confirm your own email address before any result is shown.</p>
+
+    <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-4)">
+      <div class="card-kicker">Candidate</div>
+      <div class="field">
+        <label for="el-name">Candidate's full name</label>
+        <input class="input" id="el-name" value="{{ candNameInput }}" sc-camel-on-change="{{ setCandNameInput }}" placeholder="First Last">
+      </div>
+      <div class="field">
+        <label for="el-email">Candidate's email address</label>
+        <input class="input" id="el-email" value="{{ candEmailInput }}" sc-camel-on-change="{{ setCandEmailInput }}" placeholder="name@email.com">
+      </div>
+      <div class="field">
+        <label for="el-phone">Candidate's phone number</label>
+        <input class="input" id="el-phone" value="{{ candPhoneInput }}" sc-camel-on-change="{{ setCandPhoneInput }}" placeholder="(555) 000-0000">
+      </div>
+      <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Give at least one of the two. Both is better: either one can produce a match.</div>
+    </div>
+
+    <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-4)">
+      <div class="card-kicker">You</div>
+      <div class="field">
+        <label for="el-req-name">Your name</label>
+        <input class="input" id="el-req-name" value="{{ reqNameInput }}" sc-camel-on-change="{{ setReqNameInput }}">
+      </div>
+      <div class="field">
+        <label for="el-req-company">Your company</label>
+        <input class="input" id="el-req-company" value="{{ reqCompanyInput }}" sc-camel-on-change="{{ setReqCompanyInput }}">
+      </div>
+      <div class="field">
+        <label for="el-req-email">Your work email address</label>
+        <input class="input" id="el-req-email" value="{{ reqEmailInput }}" sc-camel-on-change="{{ setReqEmailInput }}">
+      </div>
+      <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Required. We send a confirmation link to this address, and the lookup only runs after you click it.</div>
+    </div>
+
+    <button type="button" class="btn btn-primary btn-block" disabled="{{ lookupIncomplete }}" sc-camel-on-click="{{ submitLookup }}">Check for verified record</button>
+
+    <sc-if value="{{ showDemoHints }}" hint-placeholder-val="{{ true }}">
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2);font-size:11px;color:var(--color-neutral-500);line-height:1.6">
+        <div class="card-kicker">Prototype only: seeded test records</div>
+        <sc-for list="{{ seedRows }}" as="row" hint-placeholder-count="2">
+          <div style="display:flex;flex-direction:column;gap:2px;padding-top:6px;border-top:1px solid var(--color-divider)">
+            <div style="color:var(--color-neutral-300)">{{ row.name }}</div>
+            <div>{{ row.email }} / {{ row.phone }}</div>
+            <div>Discoverable: {{ row.discoverableLabel }}</div>
+          </div>
+        </sc-for>
+        <div>No live backend is connected. These records are local to this file and stand in for what the candidate app will eventually serve.</div>
+      </div>
+    </sc-if>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isNoMatch }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:460px;margin:0 auto;padding-top:72px;display:flex;flex-direction:column;gap:var(--space-4)">
+    <div class="card elev-md" style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">
+      <div>No record exists for the credentials supplied.</div>
+      <div style="color:var(--color-neutral-500);margin-top:6px">A candidate may also choose not to show proof of an account.</div>
+    </div>
+    <button type="button" class="btn btn-primary" style="align-self:flex-start" sc-camel-on-click="{{ startOver }}">Start another lookup</button>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isLinkUsed }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:460px;margin:0 auto;padding-top:72px;display:flex;flex-direction:column;gap:var(--space-4)">
+    <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3)">
+      <div class="card-kicker">Link already used</div>
+      <div style="font-size:17px;line-height:1.5">That confirmation link has already been used.</div>
+      <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">Each link works once, for the person who requested it. It cannot be reused or forwarded to someone else. No result is shown here.</div>
+      <button type="button" class="btn btn-primary" style="align-self:flex-start;margin-top:var(--space-2)" sc-camel-on-click="{{ startOver }}">Start a new lookup</button>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isLinkExpired }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:460px;margin:0 auto;padding-top:72px;display:flex;flex-direction:column;gap:var(--space-4)">
+    <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3)">
+      <div class="card-kicker">Link expired</div>
+      <div style="font-size:17px;line-height:1.5">That confirmation link has expired.</div>
+      <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">Links are good for {{ linkWindowLabel }} from the moment they are sent. There is no resend: start a new lookup and a new link is sent.</div>
+      <button type="button" class="btn btn-primary" style="align-self:flex-start;margin-top:var(--space-2)" sc-camel-on-click="{{ startOver }}">Start a new lookup</button>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isConfirmEmail }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:460px;margin:0 auto;padding-top:72px;display:flex;flex-direction:column;gap:var(--space-4)">
+    <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3)">
+      <div class="card-kicker">Confirm your email to continue</div>
+      <div style="font-size:17px;line-height:1.5">Check your email to continue.</div>
+      <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">We sent a confirmation link to {{ pendingRequesterEmail }}. Click it and the lookup runs. Until then there is no result to show.</div>
+      <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">The link works once and expires {{ linkWindowLabel }} after it is sent, whichever comes first. If you never confirm, this attempt leaves no trace: no lookup runs, no record is created, and nothing appears in the candidate's activity log.</div>
+      <div style="display:flex;flex-direction:column;gap:var(--space-2);border-top:1px dashed var(--color-divider);padding-top:var(--space-3);margin-top:var(--space-2)">
+        <div style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--color-neutral-500)">Prototype only</div>
+        <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">No message is actually sent. The button below stands in for clicking the link in your inbox.</div>
+        <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;margin-top:4px">
+          <button type="button" class="btn btn-primary" sc-camel-on-click="{{ confirmRequesterEmail }}">Simulate clicking the confirmation link</button>
+          <button type="button" class="btn btn-ghost" sc-camel-on-click="{{ simulateLinkTimeout }}">Simulate the window elapsing</button>
+          <button type="button" class="btn btn-ghost" sc-camel-on-click="{{ abandonConfirmation }}">Abandon without confirming</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isUpload }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:520px;margin:0 auto;padding-top:48px;display:flex;flex-direction:column;gap:var(--space-4)">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-4);flex-wrap:wrap">
+      <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:24px;margin:0">Continue your comparison</h1>
+      <a href="#" style="font-size:12px" sc-camel-on-click="{{ backToAccess }}">Back to request</a>
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;gap:4px var(--space-4);font-size:12px;color:var(--color-neutral-400);border-top:1px solid var(--color-divider);border-bottom:1px solid var(--color-divider);padding:var(--space-3) 0">
+      <div><span style="color:var(--color-neutral-500)">Candidate</span> {{ matchedName }}</div>
+      <div><span style="color:var(--color-neutral-500)">Looked up by</span> {{ contactUsed }}</div>
+      <div><span style="color:var(--color-neutral-500)">Your email</span> {{ requesterEmail }}</div>
+    </div>
+
+    <sc-if value="{{ showSmallScreenWarn }}" hint-placeholder-val="{{ false }}">
+      <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3)">
+        <div class="card-kicker">Small screen</div>
+        <div style="font-size:15px;line-height:1.6">The side-by-side comparison needs more width than this screen has. It will be cramped and hard to read here.</div>
+        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Switching to a tablet or desktop is the better experience. You can carry on here if you prefer.</div>
+        <button type="button" class="btn btn-primary" style="align-self:flex-start" sc-camel-on-click="{{ ackSmallScreen }}">Continue anyway</button>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ showAccessChoice }}" hint-placeholder-val="{{ true }}">
+      <div style="display:flex;flex-direction:column;gap:var(--space-3)">
+        <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">Choose how you want to pay for this check. Nothing is charged until you open the comparison.</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:var(--space-3);align-items:stretch">
+          <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
+            <div style="font-size:14px">Pay once, no account</div>
+            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">{{ priceLabel }} for a single view. Nothing is saved for you afterward.</div>
+            <button type="button" class="btn btn-primary" style="align-self:flex-start;font-size:12px;margin-top:auto" sc-camel-on-click="{{ chooseGuest }}">Pay once</button>
+          </div>
+          <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
+            <div style="font-size:14px">Log in with saved card</div>
+            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">{{ priceLabel }} per check on the card your account holds. Every check is saved to your history.</div>
+            <button type="button" class="btn btn-primary" style="align-self:flex-start;font-size:12px;margin-top:auto" sc-camel-on-click="{{ chooseSaved }}">Log in</button>
+          </div>
+          <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
+            <div style="font-size:14px">Log in with subscription</div>
+            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Uses one lookup from your plan. Every check is saved to your history.</div>
+            <button type="button" class="btn btn-primary" style="align-self:flex-start;font-size:12px;margin-top:auto" sc-camel-on-click="{{ chooseSub }}">Log in</button>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ showLogin }}" hint-placeholder-val="{{ false }}">
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-4)">
+        <div class="card-kicker">{{ loginKicker }}</div>
+        <div class="field">
+          <label for="lg-email">Email</label>
+          <input class="input" id="lg-email" value="{{ loginEmail }}" sc-camel-on-change="{{ setLoginEmail }}" placeholder="you@company.com">
+        </div>
+        <div class="field">
+          <label for="lg-pass">Password</label>
+          <input class="input" id="lg-pass" type="password" value="{{ loginPass }}" sc-camel-on-change="{{ setLoginPass }}">
+        </div>
+        <div style="display:flex;flex-direction:column;gap:var(--space-2);border-top:1px dashed var(--color-divider);padding-top:var(--space-3)">
+          <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Prototype only: no credentials are checked. Pick which kind of account this stands in for.</div>
+          <div class="seg" style="align-self:flex-start">
+            <label class="seg-opt"><input type="radio" name="sim-acct" checked="{{ segExistingAcct }}" sc-camel-on-change="{{ simExistingAcct }}">Existing account</label>
+            <label class="seg-opt"><input type="radio" name="sim-acct" checked="{{ segNewAcct }}" sc-camel-on-change="{{ simNewAcct }}">New account</label>
+          </div>
+          <sc-if value="{{ isSubLogin }}" hint-placeholder-val="{{ false }}">
+            <div class="seg" style="align-self:flex-start">
+              <label class="seg-opt"><input type="radio" name="sim-role" checked="{{ segRoleUser }}" sc-camel-on-change="{{ simRoleUser }}">Individual user</label>
+              <label class="seg-opt"><input type="radio" name="sim-role" checked="{{ segRoleAdmin }}" sc-camel-on-change="{{ simRoleAdmin }}">Organization admin</label>
+            </div>
+          </sc-if>
+        </div>
+        <div style="display:flex;gap:var(--space-4);align-items:center;flex-wrap:wrap">
+          <button type="button" class="btn btn-primary" disabled="{{ loginIncomplete }}" sc-camel-on-click="{{ doLogin }}">Log in</button>
+          <a href="#" style="font-size:12px" sc-camel-on-click="{{ backToAccessChoice }}">Choose another way to pay</a>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ showCardForm }}" hint-placeholder-val="{{ false }}">
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-4)">
+        <div class="card-kicker">{{ cardFormKicker }}</div>
+        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Prototype only: nothing is processed and no card details are kept. The card is not charged until you open the comparison.</div>
+        <div class="field">
+          <label for="cc-name">Name on card</label>
+          <input class="input" id="cc-name" value="{{ cardName }}" sc-camel-on-change="{{ setCardName }}">
+        </div>
+        <div class="field">
+          <label for="cc-num">Card number</label>
+          <input class="input" id="cc-num" value="{{ cardNumber }}" sc-camel-on-change="{{ setCardNumber }}" placeholder="4242 4242 4242 4242">
+        </div>
+        <div style="display:flex;gap:var(--space-3);flex-wrap:wrap">
+          <div class="field" style="flex:1;min-width:120px">
+            <label for="cc-exp">Expiry</label>
+            <input class="input" id="cc-exp" value="{{ cardExp }}" sc-camel-on-change="{{ setCardExp }}" placeholder="MM/YY">
+          </div>
+          <div class="field" style="flex:1;min-width:120px">
+            <label for="cc-cvc">Security code</label>
+            <input class="input" id="cc-cvc" value="{{ cardCvc }}" sc-camel-on-change="{{ setCardCvc }}" placeholder="123">
+          </div>
+        </div>
+        <div style="display:flex;gap:var(--space-4);align-items:center;flex-wrap:wrap">
+          <button type="button" class="btn btn-primary" disabled="{{ cardIncomplete }}" sc-camel-on-click="{{ saveCard }}">{{ cardSubmitLabel }}</button>
+          <a href="#" style="font-size:12px" sc-camel-on-click="{{ backToAccessChoice }}">Choose another way to pay</a>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ showAccountReady }}" hint-placeholder-val="{{ false }}">
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+        <div class="card-kicker">Signed in</div>
+        <div style="font-size:14px;line-height:1.6">{{ accountReadyLine }}</div>
+        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">{{ accountReadyDetail }}</div>
+        <button type="button" class="btn btn-primary" style="align-self:flex-start" sc-camel-on-click="{{ accessReadyContinue }}">Continue to upload</button>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ uploadReachable }}" hint-placeholder-val="{{ false }}">
+    <p style="margin:0;font-size:13px;color:var(--color-neutral-400);line-height:1.6">Upload the document you received for {{ matchedName }}. It is stored with this check as a view-only render, and the candidate sees it as part of the comparison.</p>
+
+    <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-4)">
+      <div class="field">
+        <label for="up-file">Candidate's document (PDF or Word)</label>
+        <input class="input" id="up-file" type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/*" sc-camel-on-change="{{ onPickDoc }}">
+        <sc-if value="{{ hasDoc }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:var(--color-neutral-300);margin-top:6px">Selected: {{ docName }}</div>
+        </sc-if>
+      </div>
+      <div class="field">
+        <label for="up-source">How did you obtain this candidate's information?</label>
+        <textarea class="input" id="up-source" rows="3" style="resize:vertical;font-family:var(--font-body);line-height:1.6" value="{{ attestation }}" sc-camel-on-change="{{ setAttestation }}" placeholder="e.g. LinkedIn, Indeed, recruiter name, direct candidate submission"></textarea>
+        <div style="font-size:11px;color:var(--color-neutral-500);margin-top:6px;line-height:1.6">Required. This text is stored with the check and shown to the candidate.</div>
+      </div>
+    </div>
+
+    <button type="button" class="btn btn-primary btn-block" disabled="{{ uploadIncomplete }}" sc-camel-on-click="{{ goConfirmDoc }}">Continue</button>
+    </sc-if>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isConfirmDoc }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:480px;margin:0 auto;padding-top:72px;display:flex;flex-direction:column;gap:var(--space-4)">
+    <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3)">
+      <div class="card-kicker">Confirm before the check runs</div>
+      <div style="font-size:16px;line-height:1.6">This document will be shown to the candidate as part of the comparison. Confirm this is a clean copy.</div>
+      <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">{{ docName }}</div>
+      <button type="button" class="btn btn-primary" style="align-self:flex-start;margin-top:var(--space-2)" sc-camel-on-click="{{ confirmDoc }}">Confirm and continue</button>
+      <a href="#" style="font-size:12px" sc-camel-on-click="{{ backToUpload }}">Choose a different file</a>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isCompare }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:1040px;margin:0 auto;padding-top:40px;display:flex;flex-direction:column;gap:var(--space-4)">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-4);flex-wrap:wrap">
+      <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:24px;margin:0">{{ matchedName }}</h1>
+      <sc-if value="{{ isGuestView }}" hint-placeholder-val="{{ false }}">
+        <a href="#" style="font-size:12px" sc-camel-on-click="{{ closeGuestView }}">Close this one-time view</a>
+      </sc-if>
+      <sc-if value="{{ isAccountView }}" hint-placeholder-val="{{ true }}">
+        <a href="#" style="font-size:12px" sc-camel-on-click="{{ openMyChecks }}">My checks</a>
+      </sc-if>
+    </div>
+
+    <sc-if value="{{ isGuestView }}" hint-placeholder-val="{{ false }}">
+      <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">One-time view. Closing this ends it permanently, so read what you need while it is open.</div>
+    </sc-if>
+
+    <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+      <div class="card-kicker">Validation results</div>
+      <div style="font-size:15px;line-height:1.6">{{ rolesCountLine }}</div>
+      <div style="font-size:15px;line-height:1.6">{{ credsCountLine }}</div>
+      <div style="font-size:12px">
+        <a href="#" sc-camel-on-click="{{ openDetail }}">View full details</a>
+      </div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:var(--space-2) var(--space-4);font-size:12px;align-items:baseline;border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
+        <div style="color:var(--color-neutral-500)">Check ID</div><div>{{ checkId }}</div>
+        <div style="color:var(--color-neutral-500)">Run</div><div>{{ checkDateLabel }}</div>
+        <div style="color:var(--color-neutral-500)">Requesting employer</div><div>{{ checkRequester }}</div>
+        <div style="color:var(--color-neutral-500)">Disclosed domain</div><div>{{ checkDomainLine }}</div>
+        <div style="color:var(--color-neutral-500)">Stated source</div><div style="line-height:1.6">{{ checkAttestation }}</div>
+      </div>
+    </div>
+
+    <div class="card elev-md" style="border:1px solid var(--color-accent-700);padding:var(--space-6)">
+      <div style="font-size:15px;line-height:1.6;color:var(--color-neutral-100)">This shows the candidate's current data as of right now. Your copy may differ, if so, that's worth a conversation with the candidate before drawing conclusions.</div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:var(--space-4);align-items:start">
+
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+        <div class="card-kicker">Your uploaded document</div>
+        <div style="font-size:12px;color:var(--color-neutral-400)">{{ docLabel }}</div>
+        <div style="width:100%;aspect-ratio:8.5 / 11;background:#ffffff;border-radius:2px;box-shadow:var(--shadow-lg);overflow:auto;pointer-events:none">
+          <sc-if value="{{ docIsImage }}" hint-placeholder-val="{{ false }}">
+            {{ docRender }}
+          </sc-if>
+          <sc-if value="{{ docNotImage }}" hint-placeholder-val="{{ true }}">
+            <div style="height:100%;display:flex;align-items:center;justify-content:center;text-align:center;padding:12%">
+              <div style="font-size:12px;color:#5b5b66;line-height:1.7;max-width:260px">Page image not available. This file type needs the document rasterization pipeline, which is not built yet. The file is stored with this check as a view-only record of what you uploaded.</div>
+            </div>
+          </sc-if>
+        </div>
+        <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">This is a view-only render of the uploaded document, tied to this check. The original file is retained as part of this check's record but is not offered here in its native format.</div>
+      </div>
+
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+        <div class="card-kicker">Candidate's record as of this check</div>
+        <div style="font-size:12px;color:var(--color-neutral-400)">Generated document, built from the candidate's data</div>
+        <div id="resume-doc-container" style="width:100%;aspect-ratio:8.5 / 11;background:#ffffff;border-radius:2px;box-shadow:var(--shadow-lg);overflow:auto;pointer-events:none"></div>
+        <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Generated from the candidate's data as it stood when this check ran. Item-by-item verification status is not shown on the document. See the full details view above.</div>
+      </div>
+    </div>
+
+    <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Both panels above are frozen as of this check and will not change if the candidate later edits their profile.</div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isDetail }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:640px;margin:0 auto;padding-top:40px;display:flex;flex-direction:column;gap:var(--space-4)">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-4);flex-wrap:wrap">
+      <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:22px;margin:0">Verification detail</h1>
+      <a href="#" style="font-size:12px" sc-camel-on-click="{{ backToCompare }}">Back to comparison</a>
+    </div>
+    <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">Read-only. This mirrors what {{ matchedName }} sees on their own verification status for these items, as it stood when check {{ checkId }} was run.</div>
+    <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-6)">
+      <sc-for list="{{ detailRows }}" as="row" hint-placeholder-count="4">
+        <div style="display:flex;flex-direction:column;gap:6px;padding-bottom:var(--space-4);border-bottom:1px solid var(--color-divider)">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap">
+            <div style="font-size:14px">{{ row.label }}</div>
+            <span class="tag tag-outline" style="white-space:nowrap">{{ row.status }}</span>
+          </div>
+          <div style="font-size:12px;color:var(--color-neutral-500)">{{ row.meta }}</div>
+          <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">{{ row.note }}</div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isResult }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:520px;margin:0 auto;padding-top:56px;display:flex;flex-direction:column;gap:var(--space-4)">
+
+    <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3)">
+      <div class="card-kicker">Lookup result</div>
+      <div style="font-size:17px;line-height:1.5">A record exists for {{ matchedName }} in our system.</div>
+      <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">Your free lookup confirms existence only. Documents, verification history, and the side-by-side comparison are part of paid access.</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:var(--space-2);border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
+      <div style="font-size:11px;letter-spacing:0.04em;text-transform:uppercase;color:var(--color-neutral-500)">Your lookup record</div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px var(--space-4);font-size:12px;color:var(--color-neutral-400)">
+        <div><span style="color:var(--color-neutral-500)">Lookup ID</span> {{ lookupId }}</div>
+        <div><span style="color:var(--color-neutral-500)">Run</span> {{ lookupSentLabel }}</div>
+        <div><span style="color:var(--color-neutral-500)">Domain check</span> {{ domainType }}</div>
+      </div>
+      <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">The domain check compares your email domain against a list of common personal email providers. It is a heuristic on the address only, not a business registry check, so it never confirms that a company exists or that you work there.</div>
+    </div>
+
+    <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+      <div class="card-kicker">Full comparison access</div>
+      <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">Comparing your copy against the candidate's record is a separate request. The candidate is asked by text message and decides whether to allow it.</div>
+      <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Your name, company, and confirmed email are shown to the candidate with that request. Requests expire after {{ responseWindowLabel }} without a response.</div>
+      <label style="display:flex;gap:var(--space-2);align-items:flex-start;font-size:12px;color:var(--color-neutral-300);line-height:1.6">
+        <input type="checkbox" checked="{{ smsOptIn }}" sc-camel-on-change="{{ toggleSmsOptIn }}" style="accent-color:var(--color-accent);margin-top:3px">
+        <span>Also text me when the candidate responds. The text is a notification only and carries no link.</span>
+      </label>
+      <sc-if value="{{ smsOptIn }}" hint-placeholder-val="{{ false }}">
+        <div class="field">
+          <label for="el-sms-phone">Mobile number for that text</label>
+          <input class="input" id="el-sms-phone" value="{{ smsPhone }}" sc-camel-on-change="{{ setSmsPhone }}" placeholder="(555) 000-0000">
+          <div style="font-size:11px;color:var(--color-neutral-500);margin-top:6px;line-height:1.6">Required for the text. We use it for this request only and do not keep it, so you will be asked again next time.</div>
+        </div>
+      </sc-if>
+      <button type="button" class="btn btn-primary" style="align-self:flex-start" disabled="{{ accessRequestBlocked }}" sc-camel-on-click="{{ requestAccess }}">Request full comparison access</button>
+    </div>
+
+    <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2);border:1px dashed var(--color-divider)">
+      <div class="card-kicker">Prototype only: reuse the confirmation link</div>
+      <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Stands in for someone opening the same emailed link a second time, or forwarding it on.</div>
+      <button type="button" class="btn btn-ghost" style="align-self:flex-start;font-size:12px" sc-camel-on-click="{{ replayLink }}">Simulate clicking the link again</button>
+    </div>
+
+    <div style="text-align:center;font-size:12px;color:var(--color-neutral-500)">
+      <a href="#" sc-camel-on-click="{{ startOver }}">Start another lookup</a>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isAccess }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:520px;margin:0 auto;padding-top:56px;display:flex;flex-direction:column;gap:var(--space-4)">
+
+    <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3)">
+      <div class="card-kicker">Request sent</div>
+      <div style="font-size:17px">Check your email for next steps.</div>
+      <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">We asked {{ matchedName }} for approval and will email {{ requesterEmail }} as soon as there is an answer, either way. Nothing to wait on here. Requests close after {{ responseWindowLabel }} without a response.</div>
+      <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">If they approve, the email carries a link that brings you back here to continue. If they decline, or the request times out, the email says so plainly and carries no link, because there is nothing further to do.</div>
+      <div style="border-top:1px dashed var(--color-divider);padding-top:var(--space-3);display:flex;flex-direction:column;gap:var(--space-2)">
+        <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Nothing is actually delivered in this prototype. The button below stands in for opening the approval email.</div>
+        <button type="button" class="btn btn-primary" style="align-self:flex-start" sc-camel-on-click="{{ continueAsApproved }}">(prototype only) Continue as if approved</button>
+      </div>
+    </div>
+
+    <sc-if value="{{ isNotAuthorized }}" hint-placeholder-val="{{ false }}">
+      <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3)">
+        <div class="card-kicker">Request closed</div>
+        <div style="font-size:17px">Not authorized</div>
+        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">The email to {{ requesterEmail }} says the same thing and carries no link, because there is nothing to open.</div>
+        <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">This request did not result in access. That outcome reflects the candidate's own choice, which we do not control or influence.</div>
+        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">If you believe this result is in error, <a href="#" sc-camel-on-click="{{ noop }}">contact support</a> and someone can look into it. Support can review how the request was handled. They cannot tell you anything further about the candidate or their reasons.</div>
+      </div>
+    </sc-if>
+
+    <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+      <div class="card-kicker">Your request record</div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:var(--space-2) var(--space-4);font-size:13px;align-items:baseline">
+        <div style="color:var(--color-neutral-500)">Request ID</div><div>{{ requestId }}</div>
+        <div style="color:var(--color-neutral-500)">Domain check</div><div>{{ domainType }}</div>
+        <div style="color:var(--color-neutral-500)">Sent</div><div>{{ sentLabel }}</div>
+        <div style="color:var(--color-neutral-500)">Status</div><div><span class="tag tag-neutral">{{ statusLabel }}</span></div>
+      </div>
+    </div>
+
+    <div style="display:flex;justify-content:center;gap:var(--space-4);font-size:12px;color:var(--color-neutral-500)">
+      <a href="#" sc-camel-on-click="{{ backToResult }}">Back to lookup result</a>
+      <a href="#" sc-camel-on-click="{{ startOver }}">Start another lookup</a>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isCharge }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:480px;margin:0 auto;padding-top:72px;display:flex;flex-direction:column;gap:var(--space-4)">
+    <sc-if value="{{ isGuestCharge }}" hint-placeholder-val="{{ true }}">
+      <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3);border:1px solid var(--color-accent-700)">
+        <div class="card-kicker">Read this before you open it</div>
+        <div style="font-size:16px;line-height:1.6">This is a one-time view, and opening it charges {{ priceLabel }} to your card now.</div>
+        <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">You have no account, so nothing is stored for you. Once you close the comparison it is gone permanently: the emailed link stops working and the view cannot be reopened, by you or by us.</div>
+        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Read it fully while it is open, and take your own notes if you need them.</div>
+        <label style="display:flex;gap:var(--space-2);align-items:flex-start;font-size:12px;color:var(--color-neutral-300);line-height:1.6">
+          <input type="checkbox" checked="{{ guestAck }}" sc-camel-on-change="{{ toggleGuestAck }}" style="accent-color:var(--color-accent);margin-top:3px">
+          <span>I understand this view cannot be reopened after I close it.</span>
+        </label>
+        <div style="display:flex;align-items:baseline;gap:var(--space-3);flex-wrap:wrap;font-size:12px;color:var(--color-neutral-400);border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
+          <span>Charging: {{ guestCardLabel }}</span>
+          <a href="#" sc-camel-on-click="{{ changeCard }}">Change card</a>
+        </div>
+        <button type="button" class="btn btn-primary" style="align-self:flex-start" disabled="{{ guestChargeBlocked }}" sc-camel-on-click="{{ confirmCharge }}">Charge {{ priceLabel }} and open the comparison</button>
+        <a href="#" style="font-size:12px" sc-camel-on-click="{{ backToUpload }}">Not yet, go back</a>
+      </div>
+    </sc-if>
+    <sc-if value="{{ isAccountCharge }}" hint-placeholder-val="{{ false }}">
+      <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3)">
+        <div class="card-kicker">Confirm</div>
+        <div style="font-size:16px;line-height:1.6">{{ accountChargeLine }}</div>
+        <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">This check is saved to your account permanently. You can return to it from My checks whenever you like.</div>
+        <button type="button" class="btn btn-primary" style="align-self:flex-start" sc-camel-on-click="{{ confirmCharge }}">Open the comparison</button>
+        <a href="#" style="font-size:12px" sc-camel-on-click="{{ backToUpload }}">Not yet, go back</a>
+      </div>
+    </sc-if>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isClosed }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:460px;margin:0 auto;padding-top:72px;display:flex;flex-direction:column;gap:var(--space-4)">
+    <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3)">
+      <div class="card-kicker">View closed</div>
+      <div style="font-size:16px;line-height:1.6">This one-time view is closed and cannot be reopened.</div>
+      <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">The check ran and the charge stands, but it was not attached to an account, so there is nothing left to return to. A new comparison would need a new request to the candidate.</div>
+    </div>
+    <button type="button" class="btn btn-primary" style="align-self:flex-start" sc-camel-on-click="{{ startOver }}">Start another lookup</button>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isMyChecks }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:720px;margin:0 auto;padding-top:48px;display:flex;flex-direction:column;gap:var(--space-4)">
+    <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:24px;margin:0">My checks</h1>
+    <p style="margin:0;font-size:13px;color:var(--color-neutral-400);line-height:1.6">Every check run under {{ accountEmail }}. These are saved permanently: open any one of them again at any time.</p>
+    <sc-if value="{{ hasHistory }}" hint-placeholder-val="{{ true }}">
+      <table class="table">
+        <thead>
+          <tr><th>Candidate</th><th>Check ID</th><th>Run</th><th></th></tr>
+        </thead>
+        <tbody>
+          <sc-for list="{{ historyRows }}" as="row" hint-placeholder-count="2">
+            <tr>
+              <td>{{ row.candidateName }}</td>
+              <td style="color:var(--color-neutral-400)">{{ row.id }}</td>
+              <td style="color:var(--color-neutral-400)">{{ row.dateLabel }}</td>
+              <td style="text-align:right"><button type="button" class="btn btn-ghost" style="font-size:12px" sc-camel-on-click="{{ row.open }}">Open</button></td>
+            </tr>
+          </sc-for>
+        </tbody>
+      </table>
+    </sc-if>
+    <sc-if value="{{ noHistory }}" hint-placeholder-val="{{ false }}">
+      <div class="card elev-sm" style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">No checks yet. A check appears here once you open its comparison.</div>
+    </sc-if>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isOrgChecks }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:860px;margin:0 auto;padding-top:48px;display:flex;flex-direction:column;gap:var(--space-4)">
+    <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:24px;margin:0">Organization checks</h1>
+    <p style="margin:0;font-size:13px;color:var(--color-neutral-400);line-height:1.6">Admin view for {{ orgName }}: every check run by anyone on the plan, not only your own. {{ orgSeatLine }}</p>
+    <table class="table">
+      <thead>
+        <tr><th>Run by</th><th>Candidate</th><th>Check ID</th><th>Run</th><th>Status</th></tr>
+      </thead>
+      <tbody>
+        <sc-for list="{{ orgRows }}" as="row" hint-placeholder-count="5">
+          <tr>
+            <td>{{ row.user }}</td>
+            <td>{{ row.candidateName }}</td>
+            <td style="color:var(--color-neutral-400)">{{ row.id }}</td>
+            <td style="color:var(--color-neutral-400)">{{ row.dateLabel }}</td>
+            <td><span class="tag tag-outline">{{ row.status }}</span></td>
+          </tr>
+        </sc-for>
+      </tbody>
+    </table>
+    <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Admins see that a check was run and by whom. Opening another user's comparison is a separate permission and is not part of this view.</div>
+  </div>
+  </sc-if>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;showDemoHints&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Prototype&quot;},&quot;hasPaidAccess&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Prototype&quot;},&quot;confirmLinkMinutes&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:75,&quot;min&quot;:15,&quot;max&quot;:120,&quot;step&quot;:15,&quot;unit&quot;:&quot;min&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Policy&quot;},&quot;pricePerCheck&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:10,&quot;min&quot;:9,&quot;max&quot;:99,&quot;step&quot;:5,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Policy&quot;},&quot;responseWindowHours&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:72,&quot;min&quot;:24,&quot;max&quot;:168,&quot;step&quot;:24,&quot;unit&quot;:&quot;h&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Policy&quot;}}">
+class Component extends DCLogic {
+  ORG_CHECKS = [
+    { user: 'dana.reyes@northwindtalent.com', candidateName: 'Priya Raman', id: 'CHK-448120', dateLabel: 'Aug 21, 3:40 PM', status: 'Opened' },
+    { user: 'dana.reyes@northwindtalent.com', candidateName: 'Alan Whitfield', id: 'CHK-447903', dateLabel: 'Aug 19, 11:05 AM', status: 'Opened' },
+    { user: 'sam.okafor@northwindtalent.com', candidateName: 'Jordan Avery', id: 'CHK-447511', dateLabel: 'Aug 14, 9:22 AM', status: 'Opened' },
+    { user: 'sam.okafor@northwindtalent.com', candidateName: 'Marcus Delgado', id: 'CHK-446980', dateLabel: 'Aug 8, 4:57 PM', status: 'Request closed, no access' },
+  ];
+
+  FREE_EMAIL_DOMAINS = ['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'icloud.com', 'aol.com'];
+
+  SEEDED_CANDIDATES = [
+    {
+      name: 'Jordan Avery', email: 'jordan.avery@fastmail.com', phone: '(555) 208-4417',
+      verifiedEmail: 'j.avery@acme-inc.com', verifiedPhone: '(555) 208-4417',
+      discoverable: true,
+      status: 'Verified, all resume items resolved',
+      headline: 'Operations and Logistics Manager',
+      location: 'Columbus, OH',
+      summary: 'Operations manager with seven years in regional fulfillment and freight coordination. Owns carrier relationships end to end and builds the reporting that keeps throughput commitments honest.',
+      competencies: ['Carrier contract negotiation', 'Regional fulfillment operations', 'Throughput and capacity reporting', 'Lean process improvement', 'Vendor management', 'Exception handling'],
+      roles: [
+        {
+          title: 'Operations Manager', company: 'Acme Inc.', dates: 'Mar 2021 to present',
+          status: 'Verified',
+          responsibilities: 'Runs the regional fulfillment desk, owns carrier contracts, and reports weekly throughput to the COO.',
+          note: 'Settled: an automated employer-lookup database matched this job directly against Acme Inc.\u2019s records.',
+        },
+        {
+          title: 'Logistics Coordinator', company: 'Brightline Freight', dates: 'Jun 2018 to Feb 2021',
+          status: 'Verified',
+          responsibilities: 'Scheduled inbound loads across three docks and maintained the exception log for late arrivals.',
+          note: 'Settled: a human verifier reached the named HR contact at Brightline Freight, who confirmed the title and dates.',
+        },
+      ],
+      credentials: [
+        { label: 'B.S. Supply Chain Management', issuer: 'Ohio State University', dates: 'Conferred 2018', kind: 'education', status: 'Verified', note: 'Settled: the registrar returned a matching degree and conferral date.' },
+        { label: 'Lean Six Sigma Green Belt', issuer: 'ASQ', dates: 'Issued 2022', kind: 'certification', status: 'Verified', note: 'Settled: the issuing body\u2019s public credential registry returned an active certificate under this candidate\u2019s name.' },
+      ],
+    },
+    {
+      name: 'Priya Raghunathan', email: 'p.raghunathan@zohomail.com', phone: '(555) 671-9052',
+      verifiedEmail: 'praghuna@umich.edu', verifiedPhone: '(555) 671-4408',
+      discoverable: true,
+      status: 'Verified identity, 2 resume items unresolved',
+      headline: 'Senior Healthcare Analyst',
+      location: 'Ann Arbor, MI',
+      summary: 'Health economics analyst working across clinic utilization, forecasting and finance reporting. Translates variance in the numbers into decisions a committee can act on.',
+      competencies: ['Utilization forecasting', 'Variance analysis', 'Health economics modeling', 'SQL and Python', 'Client reporting pipelines', 'Survey data preparation'],
+      roles: [
+        {
+          title: 'Senior Analyst', company: 'Meridian Health Partners', dates: 'Jan 2022 to present',
+          status: 'Verified',
+          responsibilities: 'Builds utilization forecasts for four clinics and presents variance findings to the finance committee.',
+          note: 'Settled: an automated employer-lookup database matched this job directly against Meridian Health Partners\u2019 records.',
+        },
+        {
+          title: 'Data Analyst', company: 'Corvus Analytics', dates: 'Aug 2019 to Dec 2021',
+          status: 'Unable to Verify',
+          responsibilities: 'Maintained the client reporting pipeline and wrote the monthly retention summary.',
+          note: 'Unresolved: Corvus Analytics dissolved in 2023 and no successor record-holder could be reached. Two contact attempts were made 14 days apart.',
+        },
+        {
+          title: 'Research Assistant', company: 'Pune Institute of Economics', dates: 'Jul 2017 to Jun 2019',
+          status: 'Candidate-stated',
+          responsibilities: 'Coded survey responses and prepared data tables for two published working papers.',
+          note: 'Unresolved: the candidate asked that this role stand as their own statement rather than be sent for verification.',
+        },
+      ],
+      credentials: [
+        { label: 'M.S. Health Economics', issuer: 'University of Michigan', dates: 'Conferred 2019', kind: 'education', status: 'Verified', note: 'Settled: the registrar returned a matching degree and conferral date.' },
+        { label: 'Certified Analytics Professional', issuer: 'INFORMS', dates: 'Issued 2021', kind: 'certification', status: 'Candidate-stated', note: 'Unresolved: the issuing body has no public lookup, and the candidate declined to upload the certificate.' },
+      ],
+    },
+    {
+      name: 'Marcus Delgado', email: 'm.delgado@fastmail.com', phone: '(555) 340-2286',
+      verifiedEmail: 'm.delgado@fastmail.com', verifiedPhone: '(555) 340-2286',
+      discoverable: false,
+      status: 'Verified, all resume items resolved',
+      headline: 'Facilities Program Manager',
+      location: 'Tacoma, WA',
+      competencies: ['Vendor management', 'Preventive maintenance planning', 'Capital project budgeting', 'Life safety compliance'],
+      roles: [
+        {
+          title: 'Facilities Program Manager', company: 'Harborline Properties', dates: 'Feb 2020 to present',
+          status: 'Verified',
+          responsibilities: 'Runs preventive maintenance across nine buildings and holds the capital plan for envelope and HVAC work.',
+          note: 'Settled: a human verifier reached the named HR contact at Harborline Properties, who confirmed the title and dates.',
+        },
+      ],
+      credentials: [
+        { label: 'B.A. Business Administration', issuer: 'University of Washington', dates: 'Conferred 2014', kind: 'education', status: 'Verified', note: 'Settled: the registrar returned a matching degree and conferral date.' },
+      ],
+    },
+  ];
+
+  NICKNAMES = {
+    jordan: ['jordy', 'jord', 'jo'],
+    priya: ['pri', 'pria'],
+    marcus: ['marc', 'mark', 'marco'],
+  };
+
+  blank() {
+    return {
+      screen: 'lookup',
+      candNameInput: '', candEmailInput: '', candPhoneInput: '',
+      reqNameInput: '', reqCompanyInput: '', reqEmailInput: '',
+      lookupResult: null,
+      pendingEmail: '',
+      linkToken: null,
+      lookup: null,
+      request: null,
+      response: 'pending',
+      smsOptIn: false, smsPhone: '',
+      smallScreenAck: false, vw: 0,
+      accessStep: 'choose', accessMethod: null, accessReady: false,
+      loginEmail: '', loginPass: '', loginNewAccount: false, loginRole: 'user',
+      cardName: '', cardNumber: '', cardExp: '', cardCvc: '',
+      account: null,
+      history: [],
+      accessLinkSpent: false,
+      guestAck: false, cardReturnToCharge: false,
+      hasPaidAccess: false,
+      docName: '', docType: '', docUrl: null,
+      attestation: '',
+      check: null,
+    };
+  }
+
+  onPickDoc(e) {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    if (/^image\//.test(f.type)) {
+      const rd = new FileReader();
+      rd.onload = () => this.setState({ docName: f.name, docType: f.type, docUrl: rd.result });
+      rd.readAsDataURL(f);
+    } else {
+      this.setState({ docName: f.name, docType: f.type || 'document', docUrl: null });
+    }
+  }
+
+  runCheck() {
+    const s = this.state;
+    const r = s.request || {};
+    const cand = r.candidate || {};
+    const clone = (o) => JSON.parse(JSON.stringify(o || []));
+    const acct = s.account;
+    const check = {
+        guest: !acct,
+        id: 'CHK-' + String(Date.now()).slice(-6),
+        timestamp: new Date().toISOString(),
+        attestation: (s.attestation || '').trim(),
+        docName: s.docName,
+        docType: s.docType,
+        docUrl: s.docUrl,
+        requesterCompany: r.requesterCompany || r.requesterName,
+        requesterDomain: (r.requesterEmail || '').split('@')[1] || 'no domain on file',
+        domainType: r.domainType,
+        candidateName: r.candidateName,
+        profile: clone({
+          headline: cand.headline, location: cand.location, email: cand.email, phone: cand.phone,
+          competencies: cand.competencies || [],
+        }),
+        roles: clone(cand.roles),
+        credentials: clone(cand.credentials),
+    };
+    this.setState({
+      screen: 'compare',
+      check: check,
+      accessLinkSpent: true,
+      history: acct ? [{ id: check.id, candidateName: check.candidateName, timestamp: check.timestamp, check: check }].concat(s.history || []) : (s.history || []),
+    });
+  }
+
+  countLine(items, unit) {
+    const n = items.length;
+    if (!n) return '';
+    const v = items.filter(i => i.status === 'Verified').length;
+    const u = items.filter(i => i.status === 'Unable to Verify').length;
+    const c = items.filter(i => i.status === 'Candidate-stated').length;
+    const parts = [v + ' of ' + n + ' ' + unit + ' verified'];
+    if (u) parts.push(u + ' unable to verify');
+    if (c) parts.push(c + ' candidate-stated');
+    return parts.join(', ');
+  }
+
+
+  sanitizeDoc(v) {
+    return String(v == null ? '' : v)
+      .replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"')
+      .replace(/[\u2013\u2014]/g, '-').replace(/\u00b7/g, '-')
+      .replace(/[^\x20-\x7E]/g, '');
+  }
+
+  wrapText(text, max) {
+    const words = this.sanitizeDoc(text).split(/\s+/).filter(Boolean);
+    const out = [];
+    let line = '';
+    words.forEach(w => {
+      if (!line.length) { line = w; return; }
+      if ((line + ' ' + w).length <= max) { line += ' ' + w; return; }
+      out.push(line); line = w;
+    });
+    if (line.length) out.push(line);
+    return out.length ? out : [''];
+  }
+
+  buildResumeLines(chk) {
+    const prof = chk.profile || {};
+    const lines = [];
+    const push = (text, bold) => lines.push({ text: this.sanitizeDoc(text), bold: !!bold });
+    push(chk.candidateName || '', true);
+    if (prof.headline) push(prof.headline);
+    const contact = [prof.location, prof.email, prof.phone].filter(Boolean).join(' - ');
+    if (contact) push(contact);
+    push('');
+    if ((prof.competencies || []).length) {
+      push('CORE COMPETENCIES', true);
+      this.wrapText((prof.competencies || []).join(', '), 88).forEach(w => push(w));
+      push('');
+    }
+    const roles = chk.roles || [];
+    if (roles.length) {
+      push('PROFESSIONAL EXPERIENCE', true);
+      roles.forEach(r => {
+        push(r.title + ', ' + r.company, true);
+        push(r.dates);
+        this.wrapText(r.responsibilities, 88).forEach(w => push(w));
+        push('');
+      });
+    }
+    const creds = chk.credentials || [];
+    const edu = creds.filter(c => c.kind === 'education');
+    const certs = creds.filter(c => c.kind !== 'education');
+    if (edu.length) {
+      push('EDUCATION', true);
+      edu.forEach(c => { push(c.label + ', ' + c.issuer); push(c.dates); push(''); });
+    }
+    if (certs.length) {
+      push('CERTIFICATIONS', true);
+      certs.forEach(c => { push(c.label + ', ' + c.issuer); push(c.dates); push(''); });
+    }
+    return lines;
+  }
+
+  buildResumePdfBytes(lines) {
+    const pageWidth = 612, pageHeight = 792, marginX = 54, marginTop = 54, marginBottom = 54;
+    const fontSize = 11, leading = 15;
+    const linesPerPage = Math.max(1, Math.floor((pageHeight - marginTop - marginBottom) / leading));
+    const pages = [];
+    for (let i = 0; i < lines.length; i += linesPerPage) pages.push(lines.slice(i, i + linesPerPage));
+    if (pages.length === 0) pages.push([]);
+    const esc = (str) => str.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+    const fontRegularNum = 3, fontBoldNum = 4;
+    let nextNum = 5;
+    const pageObjNums = [], contentObjNums = [];
+    pages.forEach(() => { pageObjNums.push(nextNum++); contentObjNums.push(nextNum++); });
+    const pageBodies = pages.map(pageLines => {
+      let y = pageHeight - marginTop;
+      let body = 'BT\n';
+      let curFont = null;
+      pageLines.forEach(line => {
+        const font = line.bold ? '/F2' : '/F1';
+        if (font !== curFont) { body += font + ' ' + fontSize + ' Tf\n'; curFont = font; }
+        body += '1 0 0 1 ' + marginX + ' ' + y.toFixed(2) + ' Tm\n';
+        body += '(' + esc(line.text) + ') Tj\n';
+        y -= leading;
+      });
+      body += 'ET';
+      return body;
+    });
+    let out = '%PDF-1.4\n';
+    const offsets = [];
+    const push = (str) => { offsets.push(out.length); out += str; };
+    push('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n');
+    push('2 0 obj\n<< /Type /Pages /Kids [' + pageObjNums.map(n => n + ' 0 R').join(' ') + '] /Count ' + pages.length + ' >>\nendobj\n');
+    push(fontRegularNum + ' 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n');
+    push(fontBoldNum + ' 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>\nendobj\n');
+    pages.forEach((pageLines, idx) => {
+      const pnum = pageObjNums[idx], cnum = contentObjNums[idx];
+      const streamData = pageBodies[idx] + '\n';
+      push(pnum + ' 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + pageWidth + ' ' + pageHeight + '] /Resources << /Font << /F1 ' + fontRegularNum + ' 0 R /F2 ' + fontBoldNum + ' 0 R >> >> /Contents ' + cnum + ' 0 R >>\nendobj\n');
+      push(cnum + ' 0 obj\n<< /Length ' + streamData.length + ' >>\nstream\n' + streamData + 'endstream\nendobj\n');
+    });
+    const xrefStart = out.length;
+    const totalObjs = 4 + pages.length * 2;
+    out += 'xref\n0 ' + (totalObjs + 1) + '\n0000000000 65535 f \n';
+    offsets.forEach(off => { out += String(off).padStart(10, '0') + ' 00000 n \n'; });
+    out += 'trailer\n<< /Size ' + (totalObjs + 1) + ' /Root 1 0 R >>\nstartxref\n' + xrefStart + '\n%%EOF';
+    return out;
+  }
+
+  renderResumeDoc() {
+    if (this.state.screen !== 'compare' || !this.state.check) return;
+    const container = document.getElementById('resume-doc-container');
+    if (!container) { requestAnimationFrame(() => this.renderResumeDoc()); return; }
+    try {
+      const lines = this.buildResumeLines(this.state.check);
+      const pdfText = this.buildResumePdfBytes(lines);
+      const bytes = new Uint8Array(pdfText.length);
+      for (let i = 0; i < pdfText.length; i++) bytes[i] = pdfText.charCodeAt(i);
+      container.innerHTML = '';
+      if (!window.pdfjsLib) {
+        const msg = document.createElement('div');
+        msg.style.cssText = 'color:#5b5b66;font-size:12px;padding:24px;text-align:center';
+        msg.textContent = 'Building document render';
+        container.appendChild(msg);
+        setTimeout(() => this.renderResumeDoc(), 300);
+        return;
+      }
+      if (window.pdfjsLib.GlobalWorkerOptions && !window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      }
+      window.pdfjsLib.getDocument({ data: bytes }).promise.then(pdf => {
+        const renderPage = (pageNum) => {
+          pdf.getPage(pageNum).then(page => {
+            const viewport = page.getViewport({ scale: 2 });
+            const canvas = document.createElement('canvas');
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            canvas.style.cssText = 'width:100%;display:block;background:#fff';
+            container.appendChild(canvas);
+            page.render({ canvasContext: canvas.getContext('2d'), viewport });
+            if (pageNum < pdf.numPages) renderPage(pageNum + 1);
+          }).catch(e2 => { console.error('resume page render error', String(e2)); });
+        };
+        renderPage(1);
+      }).catch(e => {
+        console.error('resume getDocument error', String(e));
+        container.innerHTML = '';
+        const err = document.createElement('div');
+        err.style.cssText = 'color:#5b5b66;font-size:12px;padding:24px;text-align:center';
+        err.textContent = 'Document render unavailable.';
+        container.appendChild(err);
+      });
+      this._resumeDocKey = this.state.check.id;
+    } catch (e) {
+      console.error('renderResumeDoc sync error', String(e), e && e.stack);
+    }
+  }
+
+  cardLabelFor(num) {
+    const d = String(num || '').replace(/\D/g, '');
+    if (!d) return 'the card you entered';
+    const brand = d[0] === '4' ? 'Visa' : (d[0] === '5' ? 'Mastercard' : (d[0] === '3' ? 'Amex' : (d[0] === '6' ? 'Discover' : 'Card')));
+    return brand + ' ending ' + d.slice(-4);
+  }
+
+  measureWidth() {
+    let outer = 0;
+    try { if (window.top && window.top.innerWidth) outer = window.top.innerWidth; } catch (e) { outer = 0; }
+    const screenW = (window.screen && (window.screen.availWidth || window.screen.width)) || 0;
+    return Math.max(outer, screenW, window.innerWidth || 0, document.documentElement.clientWidth || 0);
+  }
+
+  componentDidMount() {
+    this.renderResumeDoc();
+    this._onResize = () => this.setState({ vw: this.measureWidth() });
+    window.addEventListener('resize', this._onResize);
+    this._onResize();
+  }
+
+  componentWillUnmount() {
+    if (this._onResize) window.removeEventListener('resize', this._onResize);
+  }
+
+  componentDidUpdate() {
+    const chk = this.state.check;
+    if (this.state.screen === 'compare' && chk && this._resumeDocKey !== chk.id) this.renderResumeDoc();
+    if (this.state.screen !== 'compare') this._resumeDocKey = null;
+  }
+
+  state = this.blank();
+
+  norm(v) { return (v || '').trim().toLowerCase(); }
+  digits(v) { return (v || '').replace(/\D/g, ''); }
+
+  nameTokens(v) {
+    return (v || '').toLowerCase().normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '').replace(/[^a-z\s]/g, ' ')
+      .split(/\s+/).filter(Boolean);
+  }
+
+  tokenMatch(a, b) {
+    if (a === b) return true;
+    if (a.length >= 3 && b.length >= 3 && (a.indexOf(b) === 0 || b.indexOf(a) === 0)) return true;
+    if ((this.NICKNAMES[a] || []).indexOf(b) !== -1) return true;
+    if ((this.NICKNAMES[b] || []).indexOf(a) !== -1) return true;
+    return false;
+  }
+
+  nameMatches(input, fullName) {
+    const a = this.nameTokens(input), b = this.nameTokens(fullName);
+    if (!a.length || !b.length) return false;
+    const firstOk = this.tokenMatch(a[0], b[0]);
+    const lastOk = this.tokenMatch(a[a.length - 1], b[b.length - 1]);
+    return firstOk && lastOk;
+  }
+
+  findMatch() {
+    const nameIn = (this.state.candNameInput || '').trim();
+    const emailIn = this.norm(this.state.candEmailInput);
+    const phoneDigits = this.digits(this.state.candPhoneInput);
+    if (!nameIn || (!emailIn && !phoneDigits)) return null;
+    const hit = this.SEEDED_CANDIDATES.find(c => {
+      if (!this.nameMatches(nameIn, c.name)) return false;
+      const emails = [c.email, c.verifiedEmail].filter(Boolean).map(v => this.norm(v));
+      const phones = [c.phone, c.verifiedPhone].filter(Boolean).map(v => this.digits(v));
+      const emailOk = !!emailIn && emails.indexOf(emailIn) !== -1;
+      const phoneOk = phoneDigits.length >= 7 && phones.indexOf(phoneDigits) !== -1;
+      return emailOk || phoneOk;
+    }) || null;
+    // A candidate who has not opted into discoverability is indistinguishable from no record at all.
+    if (hit && hit.discoverable === false) return null;
+    return hit;
+  }
+
+  submitLookup() {
+    const email = (this.state.reqEmailInput || '').trim();
+    if (!email) return;
+    // Nothing is looked up, recorded, or sent to the candidate until this address is confirmed.
+    this.setState({
+      screen: 'confirmEmail', pendingEmail: email, lookupResult: null, lookup: null, request: null,
+      linkToken: { email: email, issuedAt: Date.now(), used: false },
+    });
+  }
+
+  domainTypeFor(email) {
+    const domain = this.norm(email).split('@')[1] || '';
+    return this.FREE_EMAIL_DOMAINS.indexOf(domain) !== -1
+      ? 'personal email domain'
+      : 'appears to be a company domain';
+  }
+
+  linkWindowMs() { return (this.props.confirmLinkMinutes ?? 45) * 60 * 1000; }
+
+  linkState() {
+    const t = this.state.linkToken;
+    if (!t) return 'none';
+    if (t.used) return 'used';
+    if (Date.now() - t.issuedAt > this.linkWindowMs()) return 'expired';
+    return 'valid';
+  }
+
+  confirmRequesterEmail() {
+    const s = this.state;
+    const st = this.linkState();
+    if (st === 'none') { this.setState({ screen: 'lookup' }); return; }
+    if (st === 'used') { this.setState({ screen: 'linkUsed' }); return; }
+    if (st === 'expired') { this.setState({ screen: 'linkExpired', linkToken: null }); return; }
+    const match = this.findMatch();
+    const burnt = Object.assign({}, s.linkToken, { used: true });
+    if (!match) { this.setState({ screen: 'noMatch', lookupResult: 'none', lookup: null, request: null, linkToken: burnt }); return; }
+    this.setState({
+      linkToken: burnt,
+      screen: 'result',
+      lookupResult: 'match',
+      response: 'pending',
+      lookup: {
+        id: 'LKP-' + String(Date.now()).slice(-6),
+        candidateName: match.name,
+        candidateStatus: match.status,
+        candidate: match,
+        contactUsed: (s.candEmailInput || '').trim() || (s.candPhoneInput || '').trim(),
+        requesterName: (s.reqNameInput || '').trim() || 'Unnamed requester',
+        requesterCompany: (s.reqCompanyInput || '').trim(),
+        requesterEmail: s.pendingEmail,
+        domainType: this.domainTypeFor(s.pendingEmail),
+        timestamp: new Date().toISOString(),
+      },
+    });
+  }
+
+  requestAccess() {
+    const lk = this.state.lookup;
+    if (!lk) return;
+    this.setState({
+      screen: 'access',
+      accessLinkSpent: false,
+      smsPhone: '',
+      response: 'pending',
+      request: {
+        id: 'EVR-' + String(Date.now()).slice(-6),
+        candidateName: lk.candidateName,
+        candidateStatus: lk.candidateStatus,
+        candidate: lk.candidate,
+        contactUsed: lk.contactUsed,
+        smsOptIn: !!this.state.smsOptIn,
+        smsSentTo: this.state.smsOptIn ? (this.state.smsPhone || '').trim() : '',
+        requesterName: lk.requesterName,
+        requesterCompany: lk.requesterCompany,
+        requesterEmail: lk.requesterEmail,
+        domainType: lk.domainType,
+        timestamp: new Date().toISOString(),
+      },
+    });
+  }
+
+  segStyle(on) {
+    return on ? 'background:var(--color-accent-800);color:var(--color-accent-100)' : '';
+  }
+
+  renderVals() {
+    const s = this.state;
+    const lk = s.lookup || {};
+    const r = s.request || lk;
+    const hours = this.props.responseWindowHours ?? 72;
+    const sent = r.timestamp ? new Date(r.timestamp) : null;
+    const paid = s.hasPaidAccess || (this.props.hasPaidAccess ?? false);
+    const cand = r.candidate || {};
+    const chk = s.check || {};
+    const prof = chk.profile || {};
+    const vw = this.measureWidth();
+    const warnSmall = s.screen === 'upload' && vw < 768 && !s.smallScreenAck;
+    const statusLabel = s.response === 'approved' ? 'Approved'
+      : (s.response === 'pending' ? 'Awaiting candidate response' : 'Closed, not authorized');
+    return {
+      isLookup: s.screen === 'lookup',
+      isConfirmEmail: s.screen === 'confirmEmail',
+      isNoMatch: s.screen === 'noMatch',
+      isLinkUsed: s.screen === 'linkUsed',
+      isLinkExpired: s.screen === 'linkExpired',
+      linkWindowLabel: (this.props.confirmLinkMinutes ?? 45) + ' minutes',
+      isResult: s.screen === 'result',
+      isAccess: s.screen === 'access',
+      showDemoHints: this.props.showDemoHints ?? true,
+      seedRows: this.SEEDED_CANDIDATES.map(c => ({
+        name: c.name, email: c.email, phone: c.phone,
+        discoverableLabel: c.discoverable === false ? 'no, opted out' : 'yes',
+      })),
+
+      candNameInput: s.candNameInput,
+      candEmailInput: s.candEmailInput,
+      candPhoneInput: s.candPhoneInput,
+      reqNameInput: s.reqNameInput,
+      reqCompanyInput: s.reqCompanyInput,
+      reqEmailInput: s.reqEmailInput,
+      setCandNameInput: (e) => this.setState({ candNameInput: e.target.value, lookupResult: null }),
+      setCandEmailInput: (e) => this.setState({ candEmailInput: e.target.value, lookupResult: null }),
+      setCandPhoneInput: (e) => this.setState({ candPhoneInput: e.target.value, lookupResult: null }),
+      setReqNameInput: (e) => this.setState({ reqNameInput: e.target.value, lookupResult: null }),
+      setReqCompanyInput: (e) => this.setState({ reqCompanyInput: e.target.value, lookupResult: null }),
+      setReqEmailInput: (e) => this.setState({ reqEmailInput: e.target.value, lookupResult: null }),
+      submitLookup: () => this.submitLookup(),
+      lookupIncomplete: !((s.candNameInput || '').trim()
+        && ((s.candEmailInput || '').trim() || (s.candPhoneInput || '').trim())
+        && (s.reqEmailInput || '').trim()),
+      pendingRequesterEmail: s.pendingEmail || '',
+      confirmRequesterEmail: () => this.confirmRequesterEmail(),
+      simulateLinkTimeout: () => this.setState({
+        linkToken: s.linkToken ? Object.assign({}, s.linkToken, { issuedAt: s.linkToken.issuedAt - this.linkWindowMs() - 1000 }) : null,
+        screen: 'linkExpired',
+      }),
+      replayLink: () => this.setState({ screen: 'linkUsed' }),
+      noop: (e) => { if (e && e.preventDefault) e.preventDefault(); },
+      startOver: (e) => {
+        if (e && e.preventDefault) e.preventDefault();
+        this.setState(Object.assign(this.blank(), { account: s.account, history: s.history || [] }));
+      },
+      abandonConfirmation: () => this.setState({ screen: 'lookup', pendingEmail: '', lookupResult: null, lookup: null, request: null, linkToken: null }),
+      requestAccess: () => this.requestAccess(),
+      lookupId: lk.id || '',
+      lookupSentLabel: lk.timestamp ? new Date(lk.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '',
+
+      isPending: s.response === 'pending',
+      isResolved: s.response !== 'pending',
+      isApproved: s.response === 'approved',
+      isNotAuthorized: s.response === 'declined' || s.response === 'expired',
+      isUpload: s.screen === 'upload',
+      isConfirmDoc: s.screen === 'confirmDoc',
+      isCompare: s.screen === 'compare',
+      isDetail: s.screen === 'detail',
+      continueAsApproved: () => {
+        if (s.accessLinkSpent) { this.setState({ screen: s.account ? 'myChecks' : 'closed' }); return; }
+        this.setState({ response: 'approved', screen: 'upload', vw: this.measureWidth() });
+      },
+      openCompare: () => {
+        if (s.accessLinkSpent) { this.setState({ screen: s.account ? 'myChecks' : 'closed' }); return; }
+        this.setState({ screen: 'upload', vw: this.measureWidth() });
+      },
+      linkStillActive: !s.accessLinkSpent,
+      linkSpent: !!s.accessLinkSpent,
+      linkSpentLine: s.account
+        ? 'This link has been used. The check it opened is saved to your account under My checks.'
+        : 'This link has been used. The one-time view it opened is closed and cannot be reopened.',
+      canOpenEmailLink: s.response === 'approved' && !s.accessLinkSpent,
+      notifyEmailLine: s.response === 'approved'
+        ? 'Email to ' + (r.requesterEmail || 'your address') + ', carrying a reusable link into this request.'
+        : 'Email to ' + (r.requesterEmail || 'your address') + ', closing the request out. No link: there is nothing to open.',
+
+      priceLabel: '$' + (this.props.pricePerCheck ?? 39),
+      showAccessChoice: s.screen === 'upload' && !warnSmall && !s.accessReady && s.accessStep === 'choose',
+      showLogin: s.screen === 'upload' && !warnSmall && !s.accessReady && s.accessStep === 'login',
+      showCardForm: s.screen === 'upload' && !warnSmall && !s.accessReady && s.accessStep === 'card',
+      showAccountReady: s.screen === 'upload' && !warnSmall && !s.accessReady && s.accessStep === 'ready',
+      chooseGuest: () => this.setState({ accessMethod: 'guest', accessStep: 'card' }),
+      chooseSaved: () => this.setState({ accessMethod: 'saved', accessStep: 'login' }),
+      chooseSub: () => this.setState({ accessMethod: 'sub', accessStep: 'login' }),
+      backToAccessChoice: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ accessStep: 'choose', accessMethod: null, account: null }); },
+      loginKicker: s.accessMethod === 'sub' ? 'Log in with subscription' : 'Log in with saved card',
+      isSubLogin: s.accessMethod === 'sub',
+      loginEmail: s.loginEmail,
+      loginPass: s.loginPass,
+      setLoginEmail: (e) => this.setState({ loginEmail: e.target.value }),
+      setLoginPass: (e) => this.setState({ loginPass: e.target.value }),
+      loginIncomplete: !((s.loginEmail || '').trim() && (s.loginPass || '').trim()),
+      segExistingAcct: !s.loginNewAccount,
+      segNewAcct: !!s.loginNewAccount,
+      simExistingAcct: () => this.setState({ loginNewAccount: false }),
+      simNewAcct: () => this.setState({ loginNewAccount: true }),
+      segRoleUser: s.loginRole !== 'admin',
+      segRoleAdmin: s.loginRole === 'admin',
+      simRoleUser: () => this.setState({ loginRole: 'user' }),
+      simRoleAdmin: () => this.setState({ loginRole: 'admin' }),
+      doLogin: () => {
+        const kind = s.accessMethod === 'sub' ? 'sub' : 'saved';
+        const isNew = !!s.loginNewAccount;
+        const account = {
+          email: (s.loginEmail || '').trim(),
+          kind: kind,
+          role: kind === 'sub' ? s.loginRole : 'user',
+          isNew: isNew,
+          cardLabel: isNew ? '' : 'Visa ending 4242',
+          org: kind === 'sub' ? 'Northwind Talent Group' : '',
+        };
+        this.setState({ account: account, accessStep: (kind === 'saved' && isNew) ? 'card' : 'ready' });
+      },
+      cardFormKicker: s.accessMethod === 'guest' ? 'Pay once, no account' : 'Add a card to your account',
+      cardName: s.cardName, cardNumber: s.cardNumber, cardExp: s.cardExp, cardCvc: s.cardCvc,
+      setCardName: (e) => this.setState({ cardName: e.target.value }),
+      setCardNumber: (e) => this.setState({ cardNumber: e.target.value }),
+      setCardExp: (e) => this.setState({ cardExp: e.target.value }),
+      setCardCvc: (e) => this.setState({ cardCvc: e.target.value }),
+      cardIncomplete: !((s.cardName || '').trim() && (s.cardNumber || '').trim() && (s.cardExp || '').trim() && (s.cardCvc || '').trim()),
+      cardSubmitLabel: s.accessMethod === 'guest' ? 'Continue' : 'Save card and continue',
+      guestCardLabel: this.cardLabelFor(s.cardNumber),
+      changeCard: (e) => {
+        if (e && e.preventDefault) e.preventDefault();
+        this.setState({ screen: 'upload', accessStep: 'card', accessReady: false, cardReturnToCharge: true });
+      },
+      saveCard: () => {
+        if (s.accessMethod === 'guest') {
+          if (s.cardReturnToCharge) { this.setState({ accessReady: true, screen: 'charge', cardReturnToCharge: false }); return; }
+          this.setState({ accessReady: true });
+          return;
+        }
+        const acct = Object.assign({}, s.account, { cardLabel: 'card ending ' + (s.cardNumber || '').replace(/\D/g, '').slice(-4) });
+        this.setState({ account: acct, accessStep: 'ready' });
+      },
+      accountReadyLine: s.account
+        ? (s.account.kind === 'sub'
+            ? 'Subscription account: ' + (s.account.org || '') + (s.account.role === 'admin' ? ', organization admin' : '')
+            : 'Account: ' + s.account.email)
+        : '',
+      accountReadyDetail: s.account
+        ? (s.account.kind === 'sub'
+            ? 'This check uses one lookup from the plan and is saved to your history.'
+            : (s.account.cardLabel ? 'Saved card on file: ' + s.account.cardLabel + '. Charged when you open the comparison.' : 'No card on file yet.'))
+        : '',
+      accessReadyContinue: () => this.setState({ accessReady: true }),
+      isLoggedIn: !!s.account,
+      isOrgAdmin: !!(s.account && s.account.role === 'admin'),
+      accountEmail: (s.account || {}).email || '',
+      accountLine: s.account ? ((s.account.email || '') + (s.account.kind === 'sub' ? ' (subscription)' : ' (saved card)')) : '',
+      openMyChecks: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'myChecks' }); },
+      openOrgChecks: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'orgChecks' }); },
+      isMyChecks: s.screen === 'myChecks',
+      isOrgChecks: s.screen === 'orgChecks',
+      hasHistory: (s.history || []).length > 0,
+      noHistory: (s.history || []).length === 0,
+      historyRows: (s.history || []).map(h => ({
+        id: h.id,
+        candidateName: h.candidateName,
+        dateLabel: new Date(h.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }),
+        open: () => this.setState({ screen: 'compare', check: h.check }),
+      })),
+      orgName: (s.account || {}).org || 'your organization',
+      orgSeatLine: 'Plan usage this month: ' + (this.ORG_CHECKS.length + (s.history || []).length) + ' of 50 lookups.',
+      orgRows: (s.history || []).map(h => ({
+        user: ((s.account || {}).email || 'you') + ' (you)',
+        candidateName: h.candidateName,
+        id: h.id,
+        dateLabel: new Date(h.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }),
+        status: 'Opened',
+      })).concat(this.ORG_CHECKS),
+
+      isCharge: s.screen === 'charge',
+      isGuestCharge: s.screen === 'charge' && !s.account,
+      isAccountCharge: s.screen === 'charge' && !!s.account,
+      accountChargeLine: s.account
+        ? (s.account.kind === 'sub'
+            ? 'Opening this comparison uses one lookup from your subscription.'
+            : 'Opening this comparison charges ' + '$' + (this.props.pricePerCheck ?? 39) + ' to your ' + (s.account.cardLabel || 'saved card') + '.')
+        : '',
+      guestAck: !!s.guestAck,
+      toggleGuestAck: (e) => this.setState({ guestAck: !!e.target.checked }),
+      guestChargeBlocked: !s.guestAck,
+      confirmCharge: () => this.runCheck(),
+      isClosed: s.screen === 'closed',
+      isGuestView: s.screen === 'compare' && !!chk.guest,
+      isAccountView: s.screen === 'compare' && !chk.guest,
+      closeGuestView: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'closed', check: null }); },
+      contactUsed: r.contactUsed || lk.contactUsed || '',
+      smsOptIn: !!s.smsOptIn,
+      toggleSmsOptIn: (e) => this.setState({ smsOptIn: !!e.target.checked, smsPhone: '' }),
+      smsPhone: s.smsPhone || '',
+      setSmsPhone: (e) => this.setState({ smsPhone: e.target.value }),
+      accessRequestBlocked: !!(s.smsOptIn && this.digits(s.smsPhone).length < 10),
+      smsNotified: !!(r.smsOptIn),
+      smsNotNotified: !r.smsOptIn,
+      showSmallScreenWarn: warnSmall,
+      uploadReachable: s.screen === 'upload' && !warnSmall && s.accessReady,
+      ackSmallScreen: () => this.setState({ smallScreenAck: true }),
+      openDetail: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'detail' }); },
+      backToCompare: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'compare' }); },
+      backToResult: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'result' }); },
+      backToAccess: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'access' }); },
+      backToUpload: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'upload' }); },
+
+      onPickDoc: (e) => this.onPickDoc(e),
+      docName: s.docName,
+      hasDoc: !!s.docName,
+      attestation: s.attestation,
+      setAttestation: (e) => this.setState({ attestation: e.target.value }),
+      uploadIncomplete: !(s.docName && (s.attestation || '').trim()),
+      goConfirmDoc: () => this.setState({ screen: 'confirmDoc' }),
+      confirmDoc: () => this.setState({ screen: 'charge', guestAck: false }),
+
+      checkId: chk.id || '',
+      docLabel: chk.docName || '',
+      docIsImage: !!chk.docUrl,
+      docNotImage: !chk.docUrl,
+      docRender: chk.docUrl ? React.createElement('img', {
+        src: chk.docUrl,
+        alt: 'View-only render of the uploaded document',
+        draggable: false,
+        style: { width: '100%', display: 'block' },
+      }) : null,
+      checkAttestation: chk.attestation || '',
+      checkDateLabel: chk.timestamp ? new Date(chk.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '',
+      checkRequester: chk.requesterCompany || '',
+      checkDomainLine: chk.requesterDomain ? chk.requesterDomain + ' (' + chk.domainType + ')' : '',
+      rolesCountLine: this.countLine(chk.roles || [], 'work history entries'),
+      credsCountLine: this.countLine(chk.credentials || [], 'education and certification entries'),
+      detailRows: [].concat(
+        (chk.roles || cand.roles || []).map(r2 => ({ label: r2.title + ' at ' + r2.company, meta: r2.dates, status: r2.status, note: r2.note })),
+        (chk.credentials || cand.credentials || []).map(c => ({ label: c.label + ', ' + c.issuer, meta: c.dates, status: c.status, note: c.note }))
+      ),
+      isPaidAccess: paid,
+      isFreeAccess: !paid,
+      simulateUpgrade: () => this.setState({ hasPaidAccess: true }),
+      matchedName: r.candidateName || '',
+      requestId: (s.request || {}).id || '',
+      requesterLine: r.requesterCompany ? r.requesterName + ' at ' + r.requesterCompany : (r.requesterName || ''),
+      requesterEmail: r.requesterEmail || '',
+      domainType: r.domainType || '',
+      sentLabel: sent ? sent.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '',
+      statusLabel: statusLabel,
+      responseWindowLabel: hours + ' hours',
+
+      segPendingOn: s.response === 'pending',
+      segApprovedOn: s.response === 'approved',
+      segDeclinedOn: s.response === 'declined',
+      segExpiredOn: s.response === 'expired',
+      simPending: () => this.setState({ response: 'pending' }),
+      simApproved: () => this.setState({ response: 'approved' }),
+      simDeclined: () => this.setState({ response: 'declined' }),
+      simExpired: () => this.setState({ response: 'expired' }),
+
+      backToLookup: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'lookup', lookupResult: null, lookup: null, request: null, pendingEmail: '' }); },
+      resetAll: () => this.setState(this.blank()),
+    };
+  }
+}
+
+</script>
+</body>
+</html>
