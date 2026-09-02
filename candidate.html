@@ -2562,8 +2562,8 @@ a:hover{color:var(--color-accent)}
     <div class="card elev-sm" style="width:100%;text-align:left">
       <div style="font-size:14px;margin-bottom:6px">We saved your in-progress signup ({{ draftFileName }}). Pick up where you left off?</div>
       <div style="display:flex;gap:var(--space-2)">
-        <button type="button" class="btn btn-primary" sc-camel-on-click="{{ resumeDraft }}">Continue</button>
-        <button type="button" class="btn btn-ghost" sc-camel-on-click="{{ discardDraft }}">Start a new upload</button>
+        <button type="button" class="btn btn-primary" disabled="{{ duplicateCheckPending }}" sc-camel-on-click="{{ resumeDraft }}">{{ duplicateCheckLabel }}</button>
+        <button type="button" class="btn btn-ghost" disabled="{{ duplicateCheckPending }}" sc-camel-on-click="{{ discardDraft }}">Start a new upload</button>
       </div>
     </div>
   </sc-if>
@@ -5418,7 +5418,9 @@ class Component extends DCLogic {
     this.saveDraft({ screen: 'checkEmail' });
   }
 
-  async checkDuplicateAccount(email, phone) {
+  // Shared by the signupDetails button and draft-resume paths so there is exactly one
+  // implementation of "is this email/phone already registered" to keep correct.
+  async runDuplicateCheck(email, phone) {
     this.setState({ duplicateCheckPending: true, duplicateCheckError: null });
     let res, data;
     try {
@@ -5430,18 +5432,54 @@ class Component extends DCLogic {
       data = await res.json().catch(() => ({}));
     } catch (e) {
       this.setState({ duplicateCheckPending: false, duplicateCheckError: "Couldn't reach the server. Check your connection and try again." });
-      return;
+      return { ok: false };
     }
     if (!res.ok) {
       this.setState({ duplicateCheckPending: false, duplicateCheckError: (data && data.error) || "Couldn't check that email and phone number. Please try again." });
+      return { ok: false };
+    }
+    this.setState({ duplicateCheckPending: false, duplicateCheckError: null });
+    return { ok: true, exists: !!data.exists };
+  }
+
+  async checkDuplicateAccount(email, phone) {
+    const result = await this.runDuplicateCheck(email, phone);
+    if (!result.ok) return;
+    if (result.exists) {
+      this.setState({ screen: 'duplicateFound' });
       return;
     }
-    if (data.exists) {
-      this.setState({ duplicateCheckPending: false, duplicateCheckError: null, screen: 'duplicateFound' });
-      return;
-    }
-    this.setState({ duplicateCheckPending: false, duplicateCheckError: null, screen: 'entry' });
+    this.setState({ screen: 'entry' });
     this.saveDraft({ screen: 'entry' });
+  }
+
+  // A draft's saved `screen` is only ever a UI convenience for where to resume, never proof
+  // that the phone-required / duplicate-account gate was already passed. Every resume re-runs
+  // the same real check the signupDetails button uses; the draft's screen is only honored if
+  // that check actually passes now. Draft fields are restored into live state up front so nothing
+  // (uploaded file, typed name, etc.) is lost even when validation sends the user back a step.
+  async resumeDraftValidated() {
+    const d = this.state.draft;
+    if (!d) return;
+    const email = d.email || '';
+    const phone = d.phone || '';
+    const fullName = d.fullName || '';
+    this.setState({ fileName: d.fileName, email, fullName, phone, draft: null });
+    if (!email || !phone) {
+      this.setState({ screen: 'signupDetails' });
+      return;
+    }
+    const result = await this.runDuplicateCheck(email, phone);
+    if (!result.ok) {
+      this.setState({ screen: 'signupDetails' });
+      return;
+    }
+    if (result.exists) {
+      this.setState({ screen: 'duplicateFound' });
+      return;
+    }
+    this.setState({ screen: d.screen });
+    this.saveDraft({ screen: d.screen });
   }
 
   async confirmEmailToken(token) {
@@ -6193,7 +6231,7 @@ class Component extends DCLogic {
       devConfirm: () => { this.clearDraft(); this.setState({ screen: 'tiers', draft: null }); },
       showResumeBanner: !!s.draft && s.screen === 'signupDetails',
       draftFileName: s.draft ? s.draft.fileName : null,
-      resumeDraft: () => { const d = s.draft; this.setState({ screen: d.screen, fileName: d.fileName, email: d.email || '', fullName: d.fullName || '', phone: d.phone || '', draft: null }); },
+      resumeDraft: () => { if (!s.duplicateCheckPending) this.resumeDraftValidated(); },
       discardDraft: () => { this.clearDraft(); this.setState({ draft: null }); },
       simulateLeave: () => { this.saveDraft({}); window.location.reload(); },
       freeBorder: s.tier === 'free' ? 'var(--color-accent)' : 'var(--color-divider)',
