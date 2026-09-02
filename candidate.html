@@ -5396,14 +5396,14 @@ class Component extends DCLogic {
     if (this.state.verifyToken) this.confirmEmailToken(this.state.verifyToken);
   }
 
-  async sendVerificationEmail(email, purpose = 'signup') {
+  async sendVerificationEmail(email, phone, fullName, purpose = 'signup') {
     this.setState({ emailSendPending: true, emailSendError: null });
     let res, data;
     try {
       res = await fetch(this.SUPABASE_FN_URL + '/send-verification', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, purpose }),
+        body: JSON.stringify({ email, phone, full_name: fullName, purpose }),
       });
       data = await res.json().catch(() => ({}));
     } catch (e) {
@@ -6153,12 +6153,16 @@ class Component extends DCLogic {
         already_used: 'This link was already used.',
         expired: 'This verification link has expired.',
         network: "Couldn't reach the server.",
+        email_already_registered: 'This email was just registered.',
+        account_creation_failed: "We couldn't finish creating your account.",
       }[s.verifyErrorReason] || 'Something went wrong.',
       verifyErrorMessage: {
         not_found: "This link doesn't match any pending verification. Double-check you copied the full link, or request a new one.",
         already_used: 'This email was already confirmed with this link. If you meant to log in, use the login screen instead.',
         expired: 'Verification links expire after a while for security. Please request a new confirmation email.',
         network: 'Check your connection and try opening the link again.',
+        email_already_registered: 'Another signup for this email was confirmed first. If that was you, log in instead.',
+        account_creation_failed: 'Something went wrong on our end while setting up your account. Please request a new confirmation email and try again.',
       }[s.verifyErrorReason] || 'We were unable to confirm this link. Please request a new confirmation email.',
       returnToEntry: () => {
         const url = new URL(window.location.href);
@@ -6185,7 +6189,7 @@ class Component extends DCLogic {
       emailSendPending: s.emailSendPending,
       emailSendError: s.emailSendError,
       sendConfirmationLabel: s.emailSendPending ? 'Sending…' : 'Send confirmation',
-      sendConfirmation: () => { if (!s.emailSendPending) this.sendVerificationEmail(s.email); },
+      sendConfirmation: () => { if (!s.emailSendPending) this.sendVerificationEmail(s.email, s.phone, s.fullName); },
       devConfirm: () => { this.clearDraft(); this.setState({ screen: 'tiers', draft: null }); },
       showResumeBanner: !!s.draft && s.screen === 'signupDetails',
       draftFileName: s.draft ? s.draft.fileName : null,
