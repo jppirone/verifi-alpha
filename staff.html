@@ -2326,7 +2326,14 @@ th.sortable{cursor:pointer;user-select:none}
               <sc-raw-td style="white-space:nowrap;font-size:12px;color:var(--color-neutral-400)">{{ row.desiredDisp }}</sc-raw-td>
               <sc-raw-td style="white-space:nowrap;font-size:12px;color:var(--color-neutral-400)">{{ row.followUpDisp }}</sc-raw-td>
               <sc-raw-td style="max-width:240px;font-size:12px;color:var(--color-neutral-500)">{{ row.automatedCheck }}</sc-raw-td>
-              <sc-raw-td><span class="{{ row.statusTagClass }}">{{ row.status }}</span></sc-raw-td>
+              <sc-raw-td>
+                <span class="{{ row.statusTagClass }}">{{ row.status }}</span>
+                <sc-if value="{{ row.syncError }}" hint-placeholder-val="{{ false }}">
+                  <div style="margin-top:4px">
+                    <span class="tag tag-outline" style="color:#b00020;border-color:#b00020;white-space:nowrap;cursor:pointer" onClick="{{ row.onRetrySync }}">Not saved · Retry</span>
+                  </div>
+                </sc-if>
+              </sc-raw-td>
               <sc-raw-td>
                 <sc-if value="{{ row.correctionRequested }}" hint-placeholder-val="{{ false }}">
                   <span class="tag tag-outline" style="white-space:nowrap">Correction requested</span>
@@ -2362,6 +2369,13 @@ th.sortable{cursor:pointer;user-select:none}
           </div>
           <span class="{{ detailStatusTagClass }}">{{ detailStatus }}</span>
         </div>
+
+        <sc-if value="{{ detailSyncError }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;align-items:center;gap:var(--space-2);padding:8px 10px;border:1px solid #b00020;border-radius:6px;background:rgba(176,0,32,0.06)">
+            <span style="font-size:12px;color:#b00020">Some changes to this item didn't save.</span>
+            <button type="button" class="btn btn-ghost" style="font-size:12px;padding:2px 8px" onClick="{{ retryDetailSync }}">Retry</button>
+          </div>
+        </sc-if>
 
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:var(--space-4)">
           <div>
@@ -2410,9 +2424,16 @@ th.sortable{cursor:pointer;user-select:none}
         <div class="field">
           <label for="detail-note">Staff note</label>
           <textarea class="input" id="detail-note" rows="2" value="{{ detailNote }}" onChange="{{ setDetailNote }}"></textarea>
-          <div style="display:flex;min-height:16px">
+          <div style="display:flex;align-items:center;gap:6px;min-height:16px">
+            <sc-if value="{{ showNoteSaving }}" hint-placeholder-val="{{ false }}">
+              <span style="font-size:11px;color:var(--color-neutral-500)">Saving…</span>
+            </sc-if>
             <sc-if value="{{ showNoteSaved }}" hint-placeholder-val="{{ false }}">
               <span style="font-size:11px;color:var(--color-accent-300);{{ noteFadeStyle }}">Saved</span>
+            </sc-if>
+            <sc-if value="{{ showNoteError }}" hint-placeholder-val="{{ false }}">
+              <span style="font-size:11px;color:#b00020">Not saved</span>
+              <button type="button" class="btn btn-ghost" style="font-size:11px;padding:1px 6px" onClick="{{ retryNoteSave }}">Retry</button>
             </sc-if>
           </div>
         </div>
@@ -2512,6 +2533,9 @@ th.sortable{cursor:pointer;user-select:none}
 <script type="text/x-dc" data-dc-script="">
 
 class Component extends DCLogic {
+  SUPABASE_FN_URL = 'https://ihmypoduvrzymasgactc.supabase.co/functions/v1';
+  SUPABASE_ANON_KEY = 'sb_publishable_o3S1LP0utVvxTXPRb2aZxg_Fz2FWwBj';
+
   WORKERS = ['Jordan Lee', 'Priya Nair', 'Sam Okafor'];
   STATUS_OPTIONS = ['New', 'In Progress', 'Awaiting Response', 'Confirmed', 'Discrepancy', 'Unable to Verify'];
 
@@ -2532,112 +2556,209 @@ class Component extends DCLogic {
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   }
 
-  seedItems() {
-    return [
-      {
-        id: 'VQ-1031', type: 'Job Experience', claim: 'Software Engineer, Acme Inc., Jun 2019\u2013Aug 2022',
-        received: '2024-04-10', desired: '2024-04-17', followUp: '', note: '',
-        automatedCheck: 'Automated employer-verification database match \u2014 no human outreach needed.',
-        status: 'Confirmed', assignedTo: 'Jordan Lee',
-        timeline: [
-          { date: '2024-04-10T09:02:00', actor: 'System', action: 'Automated employer-verification database check run.', note: 'Match found \u2014 dates and title confirmed.' },
-          { date: '2024-04-10T09:02:30', actor: 'System', action: 'Status set to Confirmed.', note: '' },
-        ],
-      },
-      {
-        id: 'VQ-1032', type: 'Job Experience', claim: 'Marketing Lead, Beta Corp, Mar 2021\u2013Jan 2023',
-        received: '2024-04-11', desired: '2024-04-18', followUp: '2024-04-25', note: 'Payroll-code doc reviewed; upheld per P99, no override.',
-        automatedCheck: 'No automated-database coverage for this employer; human outreach escalated.',
-        status: 'Discrepancy', assignedTo: 'Jordan Lee',
-        correctionRequested: true,
-        correctionNote: 'the end date was mistyped during my original submission',
-        correctionField: 'Employment dates',
-        correctionValue: 'Mar 2021\u2013Jan 2023',
-        timeline: [
-          { date: '2024-04-11T10:00:00', actor: 'System', action: 'Automated check found no coverage for this employer \u2014 escalated to human outreach.', note: '' },
-          { date: '2024-04-13T14:20:00', actor: 'Jordan Lee', action: 'Outreach: called Beta Corp HR.', note: 'HR reports start date of Mar 15, 2021 \u2014 candidate stated Mar 1, 2021.' },
-          { date: '2024-04-15T11:05:00', actor: 'System', action: 'Status set to Discrepancy.', note: '' },
-          { date: '2024-04-18T16:40:00', actor: 'Candidate', action: 'Dispute context submitted.', note: 'Candidate says payroll code shows a 2-week onboarding period before official start; provided payroll excerpt.' },
-          { date: '2024-04-22T09:15:00', actor: 'Jordan Lee', action: 'Bounded re-check performed on submitted context.', note: 'Payroll excerpt does not change employer-of-record start date. Discrepancy upheld, not overridden by candidate assertion alone (P99).' },
-        ],
-      },
-      {
-        id: 'VQ-1033', type: 'Job Experience', claim: 'Operations Manager, Gamma LLC, Apr 2017\u2013Oct 2019',
-        received: '2024-04-09', desired: '2024-04-16', followUp: '', note: '',
-        automatedCheck: 'No automated-database coverage; two outreach attempts made, no response.',
-        status: 'Unable to Verify', assignedTo: 'Priya Nair',
-        timeline: [
-          { date: '2024-04-09T08:30:00', actor: 'System', action: 'Automated check found no coverage \u2014 escalated to human outreach.', note: '' },
-          { date: '2024-04-11T13:00:00', actor: 'Priya Nair', action: 'Outreach attempt 1: emailed Gamma LLC HR contact.', note: 'No response.' },
-          { date: '2024-04-17T13:00:00', actor: 'Priya Nair', action: 'Outreach attempt 2: called Gamma LLC main line.', note: 'Routed to voicemail, no callback received.' },
-          { date: '2024-04-23T09:00:00', actor: 'System', action: 'Verification window (10 business days) elapsed \u2014 resolved to terminal state per P71.', note: '' },
-          { date: '2024-04-23T09:01:00', actor: 'Priya Nair', action: 'Status set to Unable to Verify.', note: 'Institutional non-response.' },
-        ],
-      },
-      {
-        id: 'VQ-1034', type: 'Job Experience', claim: 'Contract Consultant, Delta Ventures, Feb 2023\u2013Present',
-        received: '2024-04-12', desired: '2024-04-19', followUp: '', note: '',
-        automatedCheck: 'No automated-database coverage for independent/contract engagements; candidate-affirmed only.',
-        status: 'Unable to Verify', assignedTo: 'Priya Nair',
-        timeline: [
-          { date: '2024-04-12T10:00:00', actor: 'System', action: 'Automated check found no applicable coverage for a contract engagement.', note: '' },
-          { date: '2024-04-14T15:30:00', actor: 'Candidate', action: 'Attested accuracy of the representation.', note: 'Self-attestation only \u2014 not independently confirmable per P62.' },
-          { date: '2024-04-15T09:00:00', actor: 'Priya Nair', action: 'Status set to Unable to Verify.', note: 'Candidate-affirmed, not independently confirmed.' },
-        ],
-      },
-      {
-        id: 'VQ-1058', type: 'Education', claim: 'B.S. Computer Science, State University, 2015\u20132019',
-        received: '2024-04-20', desired: '2024-04-27', followUp: '2024-04-24', note: '',
-        automatedCheck: 'No automated registry coverage for this institution; outreach to registrar pending.',
-        status: 'Awaiting Response', assignedTo: 'Priya Nair',
-        timeline: [
-          { date: '2024-04-20T08:45:00', actor: 'System', action: 'Automated check found no registry coverage \u2014 escalated to human outreach.', note: '' },
-          { date: '2024-04-21T11:00:00', actor: 'Priya Nair', action: 'Outreach: emailed registrar\u2019s office.', note: 'Awaiting reply.' },
-        ],
-      },
-      {
-        id: 'VQ-1061', type: 'Certification', claim: 'AWS Certified Solutions Architect \u2014 Associate, issued 2022',
-        received: '2024-04-22', desired: '2024-04-29', followUp: '', note: '',
-        automatedCheck: 'Automated issuer-registry lookup in progress.',
-        status: 'New', assignedTo: 'Sam Okafor',
-        timeline: [
-          { date: '2024-04-22T09:00:00', actor: 'System', action: 'Queued for automated issuer-registry lookup.', note: '' },
-        ],
-      },
-      {
-        id: 'VQ-1065', type: 'Job Experience', claim: 'Product Manager, Nimbus Systems, 2022\u20132024',
-        received: '2024-04-23', desired: '2024-04-30', followUp: '2024-04-29', note: '',
-        automatedCheck: 'No automated-database coverage; outreach call placed to former manager.',
-        status: 'In Progress', assignedTo: 'Jordan Lee',
-        timeline: [
-          { date: '2024-04-23T10:15:00', actor: 'System', action: 'Automated check found no coverage \u2014 escalated to human outreach.', note: '' },
-          { date: '2024-04-24T13:40:00', actor: 'Jordan Lee', action: 'Outreach: called former manager, left voicemail requesting callback.', note: '' },
-        ],
-      },
-    ];
-  }
-
   state = {
     screen: 'login',
     loginSelection: 'Jordan Lee',
     loginRole: null, currentUser: null,
     tab: 'queue',
-    items: this.seedItems(),
+    items: [],
     sortKey: 'received', sortDir: 'asc',
     selectedId: null,
-    noteFlash: false, noteFading: false,
+    noteSaveState: 'idle', noteFading: false,
     statusConfirmOpen: false, pendingStatus: null,
     correctionFilter: false, correctionMode: null, correctionDraft: '', declineDraft: '',
+    syncFailures: {},
   };
 
   _noteFlashCounter = 0;
+  _noteSavePending = {};
+  _noteSaveTimers = {};
+  _noteSaveInFlight = {};
+  _noteSaveQueued = {};
+
+  componentDidMount() {
+    this.loadItems();
+  }
+
+  async loadItems() {
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/list-verification-items', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      console.error('list-verification-items failed', e);
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      console.error('list-verification-items failed', data);
+      return;
+    }
+    this.setState({ items: data.items });
+  }
+
+  // Tracks fields/timeline entries that failed to persist, per item id, so the UI can show
+  // a visible "not saved" state and offer a real retry instead of only logging to console.
+  // Shape: { [itemId]: { patchFields: { [field]: value }, entries: [entry, ...] } }
+  _pruneSyncFailure(syncFailures, id, updated) {
+    const next = { ...syncFailures };
+    if (Object.keys(updated.patchFields).length === 0 && updated.entries.length === 0) {
+      delete next[id];
+    } else {
+      next[id] = updated;
+    }
+    return next;
+  }
+
+  recordSyncFailure(id, patch) {
+    this.setState(st => {
+      const existing = st.syncFailures[id] || { patchFields: {}, entries: [] };
+      return { syncFailures: { ...st.syncFailures, [id]: { ...existing, patchFields: { ...existing.patchFields, ...patch } } } };
+    });
+  }
+
+  clearSyncFailureFields(id, fields) {
+    this.setState(st => {
+      const existing = st.syncFailures[id];
+      if (!existing) return {};
+      const patchFields = { ...existing.patchFields };
+      for (const f of fields) delete patchFields[f];
+      return { syncFailures: this._pruneSyncFailure(st.syncFailures, id, { ...existing, patchFields }) };
+    });
+  }
+
+  recordSyncFailureEntry(id, entry) {
+    this.setState(st => {
+      const existing = st.syncFailures[id] || { patchFields: {}, entries: [] };
+      return { syncFailures: { ...st.syncFailures, [id]: { ...existing, entries: [...existing.entries, entry] } } };
+    });
+  }
+
+  clearSyncFailureEntry(id, entry) {
+    this.setState(st => {
+      const existing = st.syncFailures[id];
+      if (!existing) return {};
+      return { syncFailures: this._pruneSyncFailure(st.syncFailures, id, { ...existing, entries: existing.entries.filter(e => e !== entry) }) };
+    });
+  }
+
+  // Single retry entry point used by the queue-row tag, the detail-panel banner, and the
+  // note field's own inline retry — re-attempts whatever is still outstanding for this item.
+  retrySync(id) {
+    const failure = this.state.syncFailures[id];
+    if (!failure) return;
+    const { note, ...otherFields } = failure.patchFields;
+    if (Object.keys(otherFields).length) this.persistItemPatch(id, otherFields);
+    if (note !== undefined) {
+      this._noteSavePending[id] = note;
+      this.flushNoteSave(id);
+    }
+    for (const entry of failure.entries) this.persistTimelineEntry(id, entry);
+  }
 
   updateItem(id, patch) {
     this.setState(st => ({ items: st.items.map(it => it.id === id ? { ...it, ...patch } : it) }));
+    this.persistItemPatch(id, patch);
+  }
+
+  async persistItemPatch(id, patch) {
+    let ok = false;
+    try {
+      const res = await fetch(this.SUPABASE_FN_URL + '/update-verification-item', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, patch }),
+      });
+      const data = await res.json().catch(() => ({}));
+      ok = res.ok && !!data.ok;
+    } catch (e) {
+      ok = false;
+    }
+    if (ok) {
+      this.clearSyncFailureFields(id, Object.keys(patch));
+    } else {
+      console.error('update-verification-item failed', id, patch);
+      this.recordSyncFailure(id, patch);
+    }
   }
 
   addTimelineEntry(id, entry) {
     this.setState(st => ({ items: st.items.map(it => it.id === id ? { ...it, timeline: [...it.timeline, entry] } : it) }));
+    this.persistTimelineEntry(id, entry);
+  }
+
+  async persistTimelineEntry(id, entry) {
+    let ok = false;
+    try {
+      const res = await fetch(this.SUPABASE_FN_URL + '/add-verification-timeline-entry', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_id: id, event_date: entry.date, actor: entry.actor, action: entry.action, note: entry.note }),
+      });
+      const data = await res.json().catch(() => ({}));
+      ok = res.ok && !!data.ok;
+    } catch (e) {
+      ok = false;
+    }
+    if (ok) {
+      this.clearSyncFailureEntry(id, entry);
+    } else {
+      console.error('add-verification-timeline-entry failed', id, entry);
+      this.recordSyncFailureEntry(id, entry);
+    }
+  }
+
+  // Notes persist on every keystroke (onChange fires per-keystroke in this runtime, not on
+  // blur), so saves are debounced 500ms and, per item, strictly serialized: a save in flight
+  // queues the latest pending value instead of firing a second concurrent request, so an
+  // out-of-order response can never leave stale note text in the database.
+  scheduleNoteSave(id, value) {
+    this._noteSavePending[id] = value;
+    clearTimeout(this._noteSaveTimers[id]);
+    this._noteSaveTimers[id] = setTimeout(() => this.flushNoteSave(id), 500);
+  }
+
+  async flushNoteSave(id) {
+    if (this._noteSaveInFlight[id]) {
+      this._noteSaveQueued[id] = true;
+      return;
+    }
+    const value = this._noteSavePending[id];
+    this._noteSaveInFlight[id] = true;
+    if (id === this.state.selectedId) this.setState({ noteSaveState: 'saving' });
+    let ok = false;
+    try {
+      const res = await fetch(this.SUPABASE_FN_URL + '/update-verification-item', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, patch: { note: value } }),
+      });
+      const data = await res.json().catch(() => ({}));
+      ok = res.ok && !!data.ok;
+    } catch (e) {
+      ok = false;
+    }
+    this._noteSaveInFlight[id] = false;
+    if (ok) {
+      this.clearSyncFailureFields(id, ['note']);
+      if (id === this.state.selectedId) {
+        const flashId = ++this._noteFlashCounter;
+        this.setState({ noteSaveState: 'saved', noteFading: false });
+        setTimeout(() => { if (this._noteFlashCounter === flashId) this.setState({ noteFading: true }); }, 900);
+        setTimeout(() => { if (this._noteFlashCounter === flashId) this.setState({ noteSaveState: 'idle', noteFading: false }); }, 1500);
+      }
+    } else {
+      console.error('update-verification-item failed (note)', id);
+      this.recordSyncFailure(id, { note: value });
+      if (id === this.state.selectedId) this.setState({ noteSaveState: 'error' });
+    }
+    if (this._noteSaveQueued[id]) {
+      this._noteSaveQueued[id] = false;
+      this.flushNoteSave(id);
+    }
   }
 
   renderVals() {
@@ -2672,9 +2793,11 @@ class Component extends DCLogic {
       correctionRequested: !!it.correctionRequested,
       isAdminEditable: isAdmin,
       isWorkerRow: !isAdmin,
-      onOpen: () => this.setState({ selectedId: it.id, correctionMode: null, correctionDraft: '', declineDraft: '' }),
+      syncError: !!s.syncFailures[it.id],
+      onOpen: () => this.setState({ selectedId: it.id, correctionMode: null, correctionDraft: '', declineDraft: '', noteSaveState: 'idle' }),
       stopClick: (e) => { if (e && e.stopPropagation) e.stopPropagation(); },
       onReassign: (e) => { if (e.stopPropagation) e.stopPropagation(); this.updateItem(it.id, { assignedTo: e.target.value }); },
+      onRetrySync: (e) => { if (e.stopPropagation) e.stopPropagation(); this.retrySync(it.id); },
     }));
 
     const selected = s.selectedId ? s.items.find(it => it.id === s.selectedId) : null;
@@ -2765,7 +2888,9 @@ class Component extends DCLogic {
         this.setState({ correctionMode: null, correctionDraft: '', declineDraft: '' });
       },
 
-      closeDetail: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ selectedId: null, correctionMode: null, correctionDraft: '', declineDraft: '' }); },
+      closeDetail: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ selectedId: null, correctionMode: null, correctionDraft: '', declineDraft: '', noteSaveState: 'idle' }); },
+      detailSyncError: !!(selected && s.syncFailures[selected.id]),
+      retryDetailSync: () => { if (selected) this.retrySync(selected.id); },
       detailId: selected ? selected.id : '',
       detailType: selected ? selected.type : '',
       detailClaim: selected ? selected.claim : '',
@@ -2786,13 +2911,15 @@ class Component extends DCLogic {
       setDetailAssignedTo: (e) => { if (selected) this.updateItem(selected.id, { assignedTo: e.target.value }); },
       setDetailNote: (e) => {
         if (!selected) return;
-        const id2 = ++this._noteFlashCounter;
-        this.updateItem(selected.id, { note: e.target.value });
-        this.setState({ noteFlash: true, noteFading: false });
-        setTimeout(() => { if (this._noteFlashCounter === id2) this.setState({ noteFading: true }); }, 900);
-        setTimeout(() => { if (this._noteFlashCounter === id2) this.setState({ noteFlash: false, noteFading: false }); }, 1500);
+        const id = selected.id;
+        const value = e.target.value;
+        this.setState(st => ({ items: st.items.map(it => it.id === id ? { ...it, note: value } : it) }));
+        this.scheduleNoteSave(id, value);
       },
-      showNoteSaved: s.noteFlash,
+      retryNoteSave: () => { if (selected) this.retrySync(selected.id); },
+      showNoteSaving: s.noteSaveState === 'saving',
+      showNoteSaved: s.noteSaveState === 'saved',
+      showNoteError: s.noteSaveState === 'error',
       noteFadeStyle: s.noteFading ? 'transition:opacity 0.5s ease;opacity:0' : 'transition:opacity 0.15s ease;opacity:1',
 
       setDetailStatus: (e) => {
