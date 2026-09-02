@@ -2305,6 +2305,7 @@ th.sortable{cursor:pointer;user-select:none}
         <sc-raw-thead>
           <sc-raw-tr>
             <sc-raw-th class="sortable" onClick="{{ sortById }}">ID{{ arrowId }}</sc-raw-th>
+            <sc-raw-th class="sortable" onClick="{{ sortByCandidate }}">Candidate{{ arrowCandidate }}</sc-raw-th>
             <sc-raw-th class="sortable" onClick="{{ sortByType }}">Type{{ arrowType }}</sc-raw-th>
             <sc-raw-th>Claim</sc-raw-th>
             <sc-raw-th class="sortable" onClick="{{ sortByReceived }}">Received{{ arrowReceived }}</sc-raw-th>
@@ -2320,6 +2321,7 @@ th.sortable{cursor:pointer;user-select:none}
           <sc-for list="{{ rows }}" as="row" hint-placeholder-count="6">
             <sc-raw-tr style="cursor:pointer" onClick="{{ row.onOpen }}">
               <sc-raw-td style="font-family:ui-monospace,Menlo,monospace;font-size:12px">{{ row.id }}</sc-raw-td>
+              <sc-raw-td style="white-space:nowrap;font-weight:500">{{ row.candidateName }}</sc-raw-td>
               <sc-raw-td>{{ row.type }}</sc-raw-td>
               <sc-raw-td style="max-width:220px">{{ row.claim }}</sc-raw-td>
               <sc-raw-td style="white-space:nowrap;font-size:12px;color:var(--color-neutral-400)">{{ row.receivedDisp }}</sc-raw-td>
@@ -2362,7 +2364,13 @@ th.sortable{cursor:pointer;user-select:none}
       <a href="#" onClick="{{ closeDetail }}" style="font-size:12px;display:inline-block;margin-bottom:var(--space-4)">← Back to queue</a>
 
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-4);margin-bottom:var(--space-4)">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:var(--space-3)">
+        <div>
+          <div style="font-size:11px;color:var(--color-neutral-500);text-transform:uppercase;letter-spacing:0.04em">Candidate</div>
+          <div style="font-size:17px;font-weight:600;margin-top:2px">{{ detailCandidateName }}</div>
+          <div style="font-size:12px;color:var(--color-neutral-400);margin-top:2px">{{ detailCandidateEmail }} · {{ detailCandidatePhone }}</div>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:var(--space-3);border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
           <div>
             <div class="card-title" style="margin-bottom:2px">{{ detailClaim }}</div>
             <div style="font-size:12px;color:var(--color-neutral-500)">{{ detailId }} · {{ detailType }}</div>
@@ -2787,6 +2795,7 @@ class Component extends DCLogic {
 
     const rows = sorted.map(it => ({
       id: it.id, type: it.type, claim: it.claim,
+      candidateName: it.candidateName || '—',
       receivedDisp: this.fmt(it.received), desiredDisp: this.fmt(it.desired), followUpDisp: this.fmt(it.followUp),
       automatedCheck: it.automatedCheck, status: it.status, statusTagClass: this.statusTagClass(it.status),
       assignedTo: it.assignedTo,
@@ -2835,9 +2844,9 @@ class Component extends DCLogic {
       rows,
       workerOptions: this.WORKERS,
 
-      arrowId: arrow('id'), arrowType: arrow('type'), arrowReceived: arrow('received'), arrowDesired: arrow('desired'),
+      arrowId: arrow('id'), arrowCandidate: arrow('candidateName'), arrowType: arrow('type'), arrowReceived: arrow('received'), arrowDesired: arrow('desired'),
       arrowFollowUp: arrow('followUp'), arrowStatus: arrow('status'), arrowAssigned: arrow('assignedTo'),
-      sortById: setSort('id'), sortByType: setSort('type'), sortByReceived: setSort('received'), sortByDesired: setSort('desired'),
+      sortById: setSort('id'), sortByCandidate: setSort('candidateName'), sortByType: setSort('type'), sortByReceived: setSort('received'), sortByDesired: setSort('desired'),
       sortByFollowUp: setSort('followUp'), sortByStatus: setSort('status'), sortByAssigned: setSort('assignedTo'),
       arrowCorrection: arrow('correctionRequested'), sortByCorrection: setSort('correctionRequested'),
 
@@ -2891,6 +2900,9 @@ class Component extends DCLogic {
       closeDetail: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ selectedId: null, correctionMode: null, correctionDraft: '', declineDraft: '', noteSaveState: 'idle' }); },
       detailSyncError: !!(selected && s.syncFailures[selected.id]),
       retryDetailSync: () => { if (selected) this.retrySync(selected.id); },
+      detailCandidateName: selected ? (selected.candidateName || '—') : '',
+      detailCandidateEmail: selected ? (selected.candidateEmail || '') : '',
+      detailCandidatePhone: selected ? (selected.candidatePhone || '') : '',
       detailId: selected ? selected.id : '',
       detailType: selected ? selected.type : '',
       detailClaim: selected ? selected.claim : '',
