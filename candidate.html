@@ -2739,7 +2739,13 @@ a:hover{color:var(--color-accent)}
     <button type="button" class="btn btn-primary btn-block" disabled="disabled">Continue</button>
   </sc-if>
   <sc-if value="{{ tierChosen }}" hint-placeholder-val="{{ false }}">
-    <button type="button" class="btn btn-primary btn-block" sc-camel-on-click="{{ continueFromTiers }}">Continue</button>
+    <sc-if value="{{ discoverableSaveError }}" hint-placeholder-val="{{ false }}">
+      <div style="font-size:12px;color:#e2735c">{{ discoverableSaveError }}</div>
+    </sc-if>
+    <button type="button" class="btn btn-primary btn-block" disabled="{{ discoverableSavePending }}" sc-camel-on-click="{{ continueFromTiers }}">{{ continueFromTiersLabel }}</button>
+    <sc-if value="{{ discoverableSaveError }}" hint-placeholder-val="{{ false }}">
+      <button type="button" class="btn btn-ghost btn-block" sc-camel-on-click="{{ continueFromTiersSkipSave }}">Continue without saving</button>
+    </sc-if>
   </sc-if>
 </div>
 </sc-if>
@@ -4883,7 +4889,7 @@ class Component extends DCLogic {
     savedLinkedinLinked: true, savedIndeedLinked: false, savedGlassdoorLinked: false,
     savedLinkedinPaused: false, savedIndeedPaused: false, savedGlassdoorPaused: false,
     savedPausedGlobal: false, savedJobStatus: null, savedVisibility: 'hidden',
-    accountTier: 'free', discoverable: false,
+    accountTier: 'free', discoverable: false, discoverableSavePending: false, discoverableSaveError: null,
     optInWorkHistory: false, optInEducation: false, optInCertifications: false,
     contactLeads: { acme: { phone: '', name: '' }, beta: { phone: '', name: '' }, gamma: { phone: '', name: '' }, delta: { phone: '', name: '' }, epsilon: { phone: '', name: '' }, cert: { phone: '', name: '' } },
     deltaEndFormOpen: false, deltaEndDraft: '', deltaEndValue: '',
@@ -5482,6 +5488,38 @@ class Component extends DCLogic {
     this.saveDraft({ screen: d.screen });
   }
 
+  advanceFromTiers() {
+    if (this.state.tier === 'paid') {
+      this.setState({ paymentModalOpen: true, paymentModalMethod: 'card', paymentModalContext: 'signup' });
+    } else {
+      this.setState({ screen: 'interstitial', accountTier: 'free' });
+    }
+  }
+
+  async saveDiscoverableThenAdvance() {
+    if (this.state.discoverableSavePending) return;
+    this.setState({ discoverableSavePending: true, discoverableSaveError: null });
+    let saved = false;
+    try {
+      const res = await fetch(this.SUPABASE_FN_URL + '/set-discoverable', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: this.state.email, phone: this.state.phone, discoverable: this.state.discoverable }),
+      });
+      const data = await res.json().catch(() => ({}));
+      saved = res.ok && !!data.ok;
+    } catch (e) {
+      saved = false;
+    }
+    this.setState({ discoverableSavePending: false });
+    if (!saved) {
+      this.setState({ discoverableSaveError: "We couldn't save your discoverability preference." });
+      return;
+    }
+    this.setState({ discoverableSaveError: null });
+    this.advanceFromTiers();
+  }
+
   async confirmEmailToken(token) {
     let res, data;
     try {
@@ -5498,7 +5536,7 @@ class Component extends DCLogic {
     if (res.ok && data.ok) {
       if (data.purpose === 'signup') {
         this.clearDraft();
-        this.setState({ screen: 'tiers', draft: null, verifyStatus: 'success', email: data.email || this.state.email });
+        this.setState({ screen: 'tiers', draft: null, verifyStatus: 'success', email: data.email || this.state.email, phone: data.phone || this.state.phone });
         return;
       }
       // Placeholder for non-signup purposes (e.g. 'email_change'). Real handling lands
@@ -6240,10 +6278,11 @@ class Component extends DCLogic {
       choosePaid: () => this.setState({ tier: 'paid' }),
       noTierChosen: !s.tier,
       tierChosen: !!s.tier,
-      continueFromTiers: () => {
-        if (s.tier === 'paid') { this.setState({ paymentModalOpen: true, paymentModalMethod: 'card', paymentModalContext: 'signup' }); }
-        else { this.setState({ screen: 'interstitial', accountTier: 'free' }); }
-      },
+      continueFromTiers: () => this.saveDiscoverableThenAdvance(),
+      continueFromTiersSkipSave: () => { this.setState({ discoverableSaveError: null }); this.advanceFromTiers(); },
+      discoverableSavePending: s.discoverableSavePending,
+      discoverableSaveError: s.discoverableSaveError,
+      continueFromTiersLabel: s.discoverableSavePending ? 'Saving preference…' : 'Continue',
       isInterstitial: s.screen === 'interstitial',
       interstitialLearnMoreOpen: s.interstitialLearnMoreOpen,
       interstitialLearnMoreClosed: !s.interstitialLearnMoreOpen,

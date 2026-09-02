@@ -2300,20 +2300,6 @@ const __ds_scope = {};
     </div>
 
     <button type="button" class="btn btn-primary btn-block" disabled="{{ lookupIncomplete }}" sc-camel-on-click="{{ submitLookup }}">Check for verified record</button>
-
-    <sc-if value="{{ showDemoHints }}" hint-placeholder-val="{{ true }}">
-      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2);font-size:11px;color:var(--color-neutral-500);line-height:1.6">
-        <div class="card-kicker">Prototype only: seeded test records</div>
-        <sc-for list="{{ seedRows }}" as="row" hint-placeholder-count="2">
-          <div style="display:flex;flex-direction:column;gap:2px;padding-top:6px;border-top:1px solid var(--color-divider)">
-            <div style="color:var(--color-neutral-300)">{{ row.name }}</div>
-            <div>{{ row.email }} / {{ row.phone }}</div>
-            <div>Discoverable: {{ row.discoverableLabel }}</div>
-          </div>
-        </sc-for>
-        <div>No live backend is connected. These records are local to this file and stand in for what the candidate app will eventually serve.</div>
-      </div>
-    </sc-if>
   </div>
   </sc-if>
 
@@ -2359,8 +2345,11 @@ const __ds_scope = {};
       <div style="display:flex;flex-direction:column;gap:var(--space-2);border-top:1px dashed var(--color-divider);padding-top:var(--space-3);margin-top:var(--space-2)">
         <div style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--color-neutral-500)">Prototype only</div>
         <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">No message is actually sent. The button below stands in for clicking the link in your inbox.</div>
+        <sc-if value="{{ existenceCheckError }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:#e2735c">{{ existenceCheckError }}</div>
+        </sc-if>
         <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;margin-top:4px">
-          <button type="button" class="btn btn-primary" sc-camel-on-click="{{ confirmRequesterEmail }}">Simulate clicking the confirmation link</button>
+          <button type="button" class="btn btn-primary" disabled="{{ existenceCheckPending }}" sc-camel-on-click="{{ confirmRequesterEmail }}">{{ confirmRequesterEmailLabel }}</button>
           <button type="button" class="btn btn-ghost" sc-camel-on-click="{{ simulateLinkTimeout }}">Simulate the window elapsing</button>
           <button type="button" class="btn btn-ghost" sc-camel-on-click="{{ abandonConfirmation }}">Abandon without confirming</button>
         </div>
@@ -2792,8 +2781,11 @@ const __ds_scope = {};
 </div>
 
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props="{&quot;showDemoHints&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Prototype&quot;},&quot;hasPaidAccess&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Prototype&quot;},&quot;confirmLinkMinutes&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:75,&quot;min&quot;:15,&quot;max&quot;:120,&quot;step&quot;:15,&quot;unit&quot;:&quot;min&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Policy&quot;},&quot;pricePerCheck&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:10,&quot;min&quot;:9,&quot;max&quot;:99,&quot;step&quot;:5,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Policy&quot;},&quot;responseWindowHours&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:72,&quot;min&quot;:24,&quot;max&quot;:168,&quot;step&quot;:24,&quot;unit&quot;:&quot;h&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Policy&quot;}}">
+<script type="text/x-dc" data-dc-script data-props="{&quot;hasPaidAccess&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Prototype&quot;},&quot;confirmLinkMinutes&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:75,&quot;min&quot;:15,&quot;max&quot;:120,&quot;step&quot;:15,&quot;unit&quot;:&quot;min&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Policy&quot;},&quot;pricePerCheck&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:10,&quot;min&quot;:9,&quot;max&quot;:99,&quot;step&quot;:5,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Policy&quot;},&quot;responseWindowHours&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:72,&quot;min&quot;:24,&quot;max&quot;:168,&quot;step&quot;:24,&quot;unit&quot;:&quot;h&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Policy&quot;}}">
 class Component extends DCLogic {
+  SUPABASE_FN_URL = 'https://ihmypoduvrzymasgactc.supabase.co/functions/v1';
+  SUPABASE_ANON_KEY = 'sb_publishable_o3S1LP0utVvxTXPRb2aZxg_Fz2FWwBj';
+
   ORG_CHECKS = [
     { user: 'dana.reyes@northwindtalent.com', candidateName: 'Priya Raman', id: 'CHK-448120', dateLabel: 'Aug 21, 3:40 PM', status: 'Opened' },
     { user: 'dana.reyes@northwindtalent.com', candidateName: 'Alan Whitfield', id: 'CHK-447903', dateLabel: 'Aug 19, 11:05 AM', status: 'Opened' },
@@ -2802,97 +2794,6 @@ class Component extends DCLogic {
   ];
 
   FREE_EMAIL_DOMAINS = ['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'icloud.com', 'aol.com'];
-
-  SEEDED_CANDIDATES = [
-    {
-      name: 'Jordan Avery', email: 'jordan.avery@fastmail.com', phone: '(555) 208-4417',
-      verifiedEmail: 'j.avery@acme-inc.com', verifiedPhone: '(555) 208-4417',
-      discoverable: true,
-      status: 'Verified, all resume items resolved',
-      headline: 'Operations and Logistics Manager',
-      location: 'Columbus, OH',
-      summary: 'Operations manager with seven years in regional fulfillment and freight coordination. Owns carrier relationships end to end and builds the reporting that keeps throughput commitments honest.',
-      competencies: ['Carrier contract negotiation', 'Regional fulfillment operations', 'Throughput and capacity reporting', 'Lean process improvement', 'Vendor management', 'Exception handling'],
-      roles: [
-        {
-          title: 'Operations Manager', company: 'Acme Inc.', dates: 'Mar 2021 to present',
-          status: 'Verified',
-          responsibilities: 'Runs the regional fulfillment desk, owns carrier contracts, and reports weekly throughput to the COO.',
-          note: 'Settled: an automated employer-lookup database matched this job directly against Acme Inc.\u2019s records.',
-        },
-        {
-          title: 'Logistics Coordinator', company: 'Brightline Freight', dates: 'Jun 2018 to Feb 2021',
-          status: 'Verified',
-          responsibilities: 'Scheduled inbound loads across three docks and maintained the exception log for late arrivals.',
-          note: 'Settled: a human verifier reached the named HR contact at Brightline Freight, who confirmed the title and dates.',
-        },
-      ],
-      credentials: [
-        { label: 'B.S. Supply Chain Management', issuer: 'Ohio State University', dates: 'Conferred 2018', kind: 'education', status: 'Verified', note: 'Settled: the registrar returned a matching degree and conferral date.' },
-        { label: 'Lean Six Sigma Green Belt', issuer: 'ASQ', dates: 'Issued 2022', kind: 'certification', status: 'Verified', note: 'Settled: the issuing body\u2019s public credential registry returned an active certificate under this candidate\u2019s name.' },
-      ],
-    },
-    {
-      name: 'Priya Raghunathan', email: 'p.raghunathan@zohomail.com', phone: '(555) 671-9052',
-      verifiedEmail: 'praghuna@umich.edu', verifiedPhone: '(555) 671-4408',
-      discoverable: true,
-      status: 'Verified identity, 2 resume items unresolved',
-      headline: 'Senior Healthcare Analyst',
-      location: 'Ann Arbor, MI',
-      summary: 'Health economics analyst working across clinic utilization, forecasting and finance reporting. Translates variance in the numbers into decisions a committee can act on.',
-      competencies: ['Utilization forecasting', 'Variance analysis', 'Health economics modeling', 'SQL and Python', 'Client reporting pipelines', 'Survey data preparation'],
-      roles: [
-        {
-          title: 'Senior Analyst', company: 'Meridian Health Partners', dates: 'Jan 2022 to present',
-          status: 'Verified',
-          responsibilities: 'Builds utilization forecasts for four clinics and presents variance findings to the finance committee.',
-          note: 'Settled: an automated employer-lookup database matched this job directly against Meridian Health Partners\u2019 records.',
-        },
-        {
-          title: 'Data Analyst', company: 'Corvus Analytics', dates: 'Aug 2019 to Dec 2021',
-          status: 'Unable to Verify',
-          responsibilities: 'Maintained the client reporting pipeline and wrote the monthly retention summary.',
-          note: 'Unresolved: Corvus Analytics dissolved in 2023 and no successor record-holder could be reached. Two contact attempts were made 14 days apart.',
-        },
-        {
-          title: 'Research Assistant', company: 'Pune Institute of Economics', dates: 'Jul 2017 to Jun 2019',
-          status: 'Candidate-stated',
-          responsibilities: 'Coded survey responses and prepared data tables for two published working papers.',
-          note: 'Unresolved: the candidate asked that this role stand as their own statement rather than be sent for verification.',
-        },
-      ],
-      credentials: [
-        { label: 'M.S. Health Economics', issuer: 'University of Michigan', dates: 'Conferred 2019', kind: 'education', status: 'Verified', note: 'Settled: the registrar returned a matching degree and conferral date.' },
-        { label: 'Certified Analytics Professional', issuer: 'INFORMS', dates: 'Issued 2021', kind: 'certification', status: 'Candidate-stated', note: 'Unresolved: the issuing body has no public lookup, and the candidate declined to upload the certificate.' },
-      ],
-    },
-    {
-      name: 'Marcus Delgado', email: 'm.delgado@fastmail.com', phone: '(555) 340-2286',
-      verifiedEmail: 'm.delgado@fastmail.com', verifiedPhone: '(555) 340-2286',
-      discoverable: false,
-      status: 'Verified, all resume items resolved',
-      headline: 'Facilities Program Manager',
-      location: 'Tacoma, WA',
-      competencies: ['Vendor management', 'Preventive maintenance planning', 'Capital project budgeting', 'Life safety compliance'],
-      roles: [
-        {
-          title: 'Facilities Program Manager', company: 'Harborline Properties', dates: 'Feb 2020 to present',
-          status: 'Verified',
-          responsibilities: 'Runs preventive maintenance across nine buildings and holds the capital plan for envelope and HVAC work.',
-          note: 'Settled: a human verifier reached the named HR contact at Harborline Properties, who confirmed the title and dates.',
-        },
-      ],
-      credentials: [
-        { label: 'B.A. Business Administration', issuer: 'University of Washington', dates: 'Conferred 2014', kind: 'education', status: 'Verified', note: 'Settled: the registrar returned a matching degree and conferral date.' },
-      ],
-    },
-  ];
-
-  NICKNAMES = {
-    jordan: ['jordy', 'jord', 'jo'],
-    priya: ['pri', 'pria'],
-    marcus: ['marc', 'mark', 'marco'],
-  };
 
   blank() {
     return {
@@ -2918,6 +2819,7 @@ class Component extends DCLogic {
       docName: '', docType: '', docUrl: null,
       attestation: '',
       check: null,
+      existenceCheckPending: false, existenceCheckError: null,
     };
   }
 
@@ -3169,46 +3071,6 @@ class Component extends DCLogic {
   norm(v) { return (v || '').trim().toLowerCase(); }
   digits(v) { return (v || '').replace(/\D/g, ''); }
 
-  nameTokens(v) {
-    return (v || '').toLowerCase().normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '').replace(/[^a-z\s]/g, ' ')
-      .split(/\s+/).filter(Boolean);
-  }
-
-  tokenMatch(a, b) {
-    if (a === b) return true;
-    if (a.length >= 3 && b.length >= 3 && (a.indexOf(b) === 0 || b.indexOf(a) === 0)) return true;
-    if ((this.NICKNAMES[a] || []).indexOf(b) !== -1) return true;
-    if ((this.NICKNAMES[b] || []).indexOf(a) !== -1) return true;
-    return false;
-  }
-
-  nameMatches(input, fullName) {
-    const a = this.nameTokens(input), b = this.nameTokens(fullName);
-    if (!a.length || !b.length) return false;
-    const firstOk = this.tokenMatch(a[0], b[0]);
-    const lastOk = this.tokenMatch(a[a.length - 1], b[b.length - 1]);
-    return firstOk && lastOk;
-  }
-
-  findMatch() {
-    const nameIn = (this.state.candNameInput || '').trim();
-    const emailIn = this.norm(this.state.candEmailInput);
-    const phoneDigits = this.digits(this.state.candPhoneInput);
-    if (!nameIn || (!emailIn && !phoneDigits)) return null;
-    const hit = this.SEEDED_CANDIDATES.find(c => {
-      if (!this.nameMatches(nameIn, c.name)) return false;
-      const emails = [c.email, c.verifiedEmail].filter(Boolean).map(v => this.norm(v));
-      const phones = [c.phone, c.verifiedPhone].filter(Boolean).map(v => this.digits(v));
-      const emailOk = !!emailIn && emails.indexOf(emailIn) !== -1;
-      const phoneOk = phoneDigits.length >= 7 && phones.indexOf(phoneDigits) !== -1;
-      return emailOk || phoneOk;
-    }) || null;
-    // A candidate who has not opted into discoverability is indistinguishable from no record at all.
-    if (hit && hit.discoverable === false) return null;
-    return hit;
-  }
-
   submitLookup() {
     const email = (this.state.reqEmailInput || '').trim();
     if (!email) return;
@@ -3236,15 +3098,37 @@ class Component extends DCLogic {
     return 'valid';
   }
 
-  confirmRequesterEmail() {
+  async confirmRequesterEmail() {
     const s = this.state;
     const st = this.linkState();
     if (st === 'none') { this.setState({ screen: 'lookup' }); return; }
     if (st === 'used') { this.setState({ screen: 'linkUsed' }); return; }
     if (st === 'expired') { this.setState({ screen: 'linkExpired', linkToken: null }); return; }
-    const match = this.findMatch();
+    if (s.existenceCheckPending) return;
+
+    const email = (s.candEmailInput || '').trim();
+    const phone = (s.candPhoneInput || '').trim();
+    this.setState({ existenceCheckPending: true, existenceCheckError: null });
+    let exists;
+    try {
+      const res = await fetch(this.SUPABASE_FN_URL + '/check-existence', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, phone }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((data && data.error) || 'lookup failed');
+      exists = !!data.exists;
+    } catch (e) {
+      // The lookup itself didn't complete (network/server issue) -- this is not the same as
+      // a real "no record" result, so it does not burn the one-time link or show noMatch.
+      this.setState({ existenceCheckPending: false, existenceCheckError: "We couldn't complete this lookup. Please try again." });
+      return;
+    }
+    this.setState({ existenceCheckPending: false });
+
     const burnt = Object.assign({}, s.linkToken, { used: true });
-    if (!match) { this.setState({ screen: 'noMatch', lookupResult: 'none', lookup: null, request: null, linkToken: burnt }); return; }
+    if (!exists) { this.setState({ screen: 'noMatch', lookupResult: 'none', lookup: null, request: null, linkToken: burnt }); return; }
     this.setState({
       linkToken: burnt,
       screen: 'result',
@@ -3252,9 +3136,12 @@ class Component extends DCLogic {
       response: 'pending',
       lookup: {
         id: 'LKP-' + String(Date.now()).slice(-6),
-        candidateName: match.name,
-        candidateStatus: match.status,
-        candidate: match,
+        // check-existence is existence-only by design and never returns candidate details, so
+        // the name shown back here is what the requester themselves typed in, not a confirmed
+        // record from our system.
+        candidateName: (s.candNameInput || '').trim(),
+        candidateStatus: '',
+        candidate: null,
         contactUsed: (s.candEmailInput || '').trim() || (s.candPhoneInput || '').trim(),
         requesterName: (s.reqNameInput || '').trim() || 'Unnamed requester',
         requesterCompany: (s.reqCompanyInput || '').trim(),
@@ -3317,11 +3204,6 @@ class Component extends DCLogic {
       linkWindowLabel: (this.props.confirmLinkMinutes ?? 45) + ' minutes',
       isResult: s.screen === 'result',
       isAccess: s.screen === 'access',
-      showDemoHints: this.props.showDemoHints ?? true,
-      seedRows: this.SEEDED_CANDIDATES.map(c => ({
-        name: c.name, email: c.email, phone: c.phone,
-        discoverableLabel: c.discoverable === false ? 'no, opted out' : 'yes',
-      })),
 
       candNameInput: s.candNameInput,
       candEmailInput: s.candEmailInput,
@@ -3341,6 +3223,9 @@ class Component extends DCLogic {
         && (s.reqEmailInput || '').trim()),
       pendingRequesterEmail: s.pendingEmail || '',
       confirmRequesterEmail: () => this.confirmRequesterEmail(),
+      existenceCheckPending: s.existenceCheckPending,
+      existenceCheckError: s.existenceCheckError,
+      confirmRequesterEmailLabel: s.existenceCheckPending ? 'Checking…' : 'Simulate clicking the confirmation link',
       simulateLinkTimeout: () => this.setState({
         linkToken: s.linkToken ? Object.assign({}, s.linkToken, { issuedAt: s.linkToken.issuedAt - this.linkWindowMs() - 1000 }) : null,
         screen: 'linkExpired',
