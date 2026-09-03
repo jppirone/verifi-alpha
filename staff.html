@@ -2614,11 +2614,20 @@ class Component extends DCLogic {
   SUPABASE_ANON_KEY = 'sb_publishable_o3S1LP0utVvxTXPRb2aZxg_Fz2FWwBj';
 
   WORKERS = ['Jordan Lee', 'Priya Nair', 'Sam Okafor'];
-  STATUS_OPTIONS = ['New', 'In Progress', 'Awaiting Response', 'Confirmed', 'Discrepancy', 'Unable to Verify'];
+  // 'Needs Reconciliation' is a staff-internal working status — it exists so an ambiguous
+  // automated-check result (multiple matches, a name that doesn't match, etc.) is visibly flagged
+  // in the queue instead of sitting silently under 'New'. It is never shown to or implied to the
+  // candidate: nothing in this codebase sends a candidate-facing notification of any kind on a
+  // verification_items status change (confirmed by reading update-verification-item and
+  // add-verification-timeline-entry's deployed source — both are plain PostgREST PATCH/INSERT
+  // calls with no email/SMS/webhook code path — and by checking this project's Supabase Database
+  // Webhooks, which has none configured on any table). Staff still resolve it into a real status
+  // manually, exactly like every other status here.
+  STATUS_OPTIONS = ['New', 'In Progress', 'Awaiting Response', 'Needs Reconciliation', 'Confirmed', 'Discrepancy', 'Unable to Verify'];
 
   statusTagClass(status) {
     if (status === 'Confirmed') return 'tag tag-accent';
-    if (status === 'Discrepancy' || status === 'Unable to Verify') return 'tag tag-outline';
+    if (status === 'Discrepancy' || status === 'Unable to Verify' || status === 'Needs Reconciliation') return 'tag tag-outline';
     return 'tag tag-neutral';
   }
 
@@ -2764,15 +2773,33 @@ class Component extends DCLogic {
     const existingText = (current && current.automatedCheck) || '';
     const nextAutomatedCheck = existingText ? (historyLine + '\n\n---\n\n' + existingText) : historyLine;
 
-    // This only ever writes the automated_check text and a timeline entry. It never touches
-    // status — staff read this and decide, exactly as before, just with real data now.
-    this.updateItem(id, { automatedCheck: nextAutomatedCheck });
+    // The check itself never sets or implies an outcome — staff read the result and decide, same
+    // as always. The one exception, and it's a queue-hygiene move rather than a determination:
+    // an ambiguous result on an item still sitting at 'New' flips it to 'Needs Reconciliation' so
+    // it's visibly flagged in the queue instead of silently waiting under 'New' with no signal
+    // that anything happened. Any other current status is left exactly as it is — a worker who
+    // already moved this item along isn't second-guessed by an automated check running after
+    // the fact; they see the same result in the banner and the timeline either way.
+    const shouldFlagForReconciliation = summary.needsReview && current && current.status === 'New';
+    const patch = shouldFlagForReconciliation
+      ? { automatedCheck: nextAutomatedCheck, status: 'Needs Reconciliation' }
+      : { automatedCheck: nextAutomatedCheck };
+    this.updateItem(id, patch);
     this.addTimelineEntry(id, {
       date: now,
       actor: this.state.currentUser,
       action: 'Ran automated check: ' + checkLabel + '.',
       note: summary.text + (summary.needsReview ? ' Flagged: needs staff review, not a confirmed match.' : ''),
     });
+
+    if (shouldFlagForReconciliation) {
+      this.addTimelineEntry(id, {
+        date: now,
+        actor: 'System',
+        action: 'Automated check returned ambiguous result, flagged for reconciliation',
+        note: '',
+      });
+    }
 
     this.setState({
       automatedCheckRunning: false,
