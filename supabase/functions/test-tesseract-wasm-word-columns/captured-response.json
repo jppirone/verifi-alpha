@@ -1,0 +1,49 @@
+{
+  "baselineText": "TAYLOR MORGAN CHEN\n\nProduct Marketing Manager\n\nCONTACT EXPERIENCE\ntaylor.chen@example.com Senior Product Marketing Manager, Nimbus Cloud Co\n(555) 402-7731 Jan 2020 - Present\n‘Austin, TX - Launched 4 major product releases, exceeding adoption targets\n\n~ Built competitive intelligence program adopted company-wide\nSKILLS ~ Managed $1.2M annual marketing budget across 3 product lines\nProduct Marketing\nGo-to-Market Strategy Product Marketing Manager, Fieldstone Software\nCompetitive Analysis ‘Aug 2016 - Dec 2019\nSel Tableau Fisma Developed positioning and messaging for Nagship SaaS product\nCross unctona Leadership “Partnered with sales fo buld enablement materials and training\n\n~ Grew qualified pipeline 35% through targeted campaign work\n\nEDUCATION Marketing Associate, Fieldstone Software\nBA Marketing Jun 2016 - Aug 2016\nRiverbend College, 2016 - Supported content marketing and social media calendar\n\n",
+  "clusterBoundary": 246.5,
+  "col0Count": 31,
+  "col1Count": 93,
+  "lineBoxCount": 19,
+  "ok": true,
+  "reconstructedText": "TAYLOR MORGAN\nProduct Marketing Manager\n \nCONTACT\ntaylor.chen@example.com\n(555) 402-7731\n‘Austin, TX\nSKILLS\nProduct Marketing\nGo-to-Market Strategy\nCompetitive Analysis\nSel Tableau Fisma\nCross unctona Leadership\nEDUCATION\nBA Marketing\nRiverbend College, 2016\n\nCHEN\n  EXPERIENCE\nSenior Product Marketing Manager, Nimbus Cloud Co\nJan 2020 - Present\n- Launched 4 major product releases, exceeding adoption targets\n~ Built competitive intelligence program adopted company-wide\n~ Managed $1.2M annual marketing budget across 3 product lines\nProduct Marketing Manager, Fieldstone Software\n‘Aug 2016 - Dec 2019\nDeveloped positioning and messaging for Nagship SaaS product\n“Partnered with sales fo buld enablement materials and training\n~ Grew qualified pipeline 35% through targeted campaign work\nMarketing Associate, Fieldstone Software\nJun 2016 - Aug 2016\n- Supported content marketing and social media calendar",
+  "timingMs": {
+    "baselineGetText": 772,
+    "getTextBoxes": 10,
+    "loadImageThroughSetup": 128,
+    "reconstructAndCleanup": 4,
+    "total": 914
+  },
+  "wordBoxCount": 124,
+  "wordBoxSample": [
+    {
+      "confidence": 0.9622216820716858,
+      "flags": 1,
+      "rect": { "bottom": 55, "left": 61, "right": 170, "top": 35 },
+      "text": "TAYLOR"
+    },
+    {
+      "confidence": 0.9513914585113525,
+      "flags": 0,
+      "rect": { "bottom": 55, "left": 180, "right": 304, "top": 35 },
+      "text": "MORGAN"
+    },
+    {
+      "confidence": 0.9631604552268982,
+      "flags": 2,
+      "rect": { "bottom": 55, "left": 315, "right": 391, "top": 35 },
+      "text": "CHEN"
+    },
+    {
+      "confidence": 0.9689971208572388,
+      "flags": 1,
+      "rect": { "bottom": 82, "left": 61, "right": 115, "top": 70 },
+      "text": "Product"
+    },
+    {
+      "confidence": 0.9695724248886108,
+      "flags": 0,
+      "rect": { "bottom": 85, "left": 121, "right": 189, "top": 70 },
+      "text": "Marketing"
+    }
+  ]
+}
