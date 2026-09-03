@@ -2447,6 +2447,75 @@ th.sortable{cursor:pointer;user-select:none}
         </div>
       </div>
 
+      <sc-if value="{{ showAutomatedCheckSection }}" hint-placeholder-val="{{ false }}">
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3);margin-bottom:var(--space-4)">
+        <div class="card-kicker">Run automated check</div>
+        <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.5">Informational only — running a check never changes this item's status or claim. Review the result below and set status manually, same as always.</div>
+
+        <div class="field" style="max-width:280px">
+          <label for="ac-type">Check type</label>
+          <sc-raw-select class="input" id="ac-type" value="{{ automatedCheckType }}" onChange="{{ setAutomatedCheckType }}">
+            <sc-for list="{{ checkTypeOptions }}" as="opt" hint-placeholder-count="3">
+              <option value="{{ opt.value }}">{{ opt.label }}</option>
+            </sc-for>
+          </sc-raw-select>
+        </div>
+
+        <sc-if value="{{ acIsSunbiz }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:#b00020;padding:6px 10px;border:1px solid #b00020;border-radius:6px;background:rgba(176,0,32,0.06)">
+            Currently unreliable, network-blocked — use the manual script instead.
+          </div>
+          <div class="field" style="max-width:420px">
+            <label for="ac-sunbiz-name">Employer / entity name</label>
+            <input class="input" id="ac-sunbiz-name" value="{{ acSunbizEntityName }}" onChange="{{ setAcSunbizEntityName }}">
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ acIsCredly }}" hint-placeholder-val="{{ false }}">
+          <div class="field" style="max-width:420px">
+            <label for="ac-badge-url">Badge URL</label>
+            <input class="input" id="ac-badge-url" placeholder="https://www.credly.com/badges/..." value="{{ acBadgeUrl }}" onChange="{{ setAcBadgeUrl }}">
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ acIsDbpr }}" hint-placeholder-val="{{ false }}">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3);max-width:520px">
+            <div class="field">
+              <label for="ac-dbpr-first">First name</label>
+              <input class="input" id="ac-dbpr-first" value="{{ acDbprFirstName }}" onChange="{{ setAcDbprFirstName }}">
+            </div>
+            <div class="field">
+              <label for="ac-dbpr-last">Last name</label>
+              <input class="input" id="ac-dbpr-last" value="{{ acDbprLastName }}" onChange="{{ setAcDbprLastName }}">
+            </div>
+          </div>
+          <div class="field" style="max-width:260px">
+            <label for="ac-dbpr-lic">License number (optional)</label>
+            <input class="input" id="ac-dbpr-lic" value="{{ acDbprLicenseNumber }}" onChange="{{ setAcDbprLicenseNumber }}">
+          </div>
+        </sc-if>
+
+        <div style="display:flex;align-items:center;gap:var(--space-3)">
+          <button type="button" class="btn btn-primary" onClick="{{ runAutomatedCheck }}">{{ acRunLabel }}</button>
+          <sc-if value="{{ acShowValidationError }}" hint-placeholder-val="{{ false }}">
+            <span style="font-size:12px;color:#b00020">{{ acValidationError }}</span>
+          </sc-if>
+        </div>
+
+        <sc-if value="{{ acShowResult }}" hint-placeholder-val="{{ false }}">
+          <div style="border-top:1px solid var(--color-divider);padding-top:var(--space-3);display:flex;flex-direction:column;gap:6px">
+            <sc-if value="{{ acResultNeedsReview }}" hint-placeholder-val="{{ false }}">
+              <span class="tag tag-outline" style="align-self:flex-start;color:#b00020;border-color:#b00020">Needs staff review — not a confirmed match</span>
+            </sc-if>
+            <sc-if value="{{ acResultFailed }}" hint-placeholder-val="{{ false }}">
+              <span class="tag tag-outline" style="align-self:flex-start;color:#b00020;border-color:#b00020">Check failed</span>
+            </sc-if>
+            <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6;white-space:pre-wrap">{{ acResultText }}</div>
+          </div>
+        </sc-if>
+      </div>
+      </sc-if>
+
       <sc-if value="{{ detailCorrectionRequested }}" hint-placeholder-val="{{ false }}">
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3);margin-bottom:var(--space-4)">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3)">
@@ -2564,6 +2633,8 @@ class Component extends DCLogic {
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   }
 
+  CHECK_LABELS = { credly: 'Credly Badge', dbpr: 'DBPR License', sunbiz: 'Sunbiz (Employer)' };
+
   state = {
     screen: 'login',
     loginSelection: 'Jordan Lee',
@@ -2576,6 +2647,11 @@ class Component extends DCLogic {
     statusConfirmOpen: false, pendingStatus: null,
     correctionFilter: false, correctionMode: null, correctionDraft: '', declineDraft: '',
     syncFailures: {},
+    automatedCheckType: 'credly',
+    automatedCheckInputs: { badgeUrl: '', dbprFirstName: '', dbprLastName: '', dbprLicenseNumber: '', sunbizEntityName: '' },
+    automatedCheckRunning: false,
+    automatedCheckValidationError: '',
+    automatedCheckLastResult: null,
   };
 
   _noteFlashCounter = 0;
@@ -2586,6 +2662,122 @@ class Component extends DCLogic {
 
   componentDidMount() {
     this.loadItems();
+  }
+
+  // Which automated check makes most sense to default to for an item's type — staff can always
+  // switch the selector; this just saves a click for the common case.
+  defaultAutomatedCheckType(itemType) {
+    if (itemType === 'Certification') return 'credly';
+    if (itemType === 'Job Experience') return 'sunbiz';
+    return 'credly';
+  }
+
+  // Same first-token/remainder convention verify-dbpr-license itself uses for its full_name
+  // convenience field, so a prefilled name searches exactly the way it would if typed by hand.
+  splitCandidateName(fullName) {
+    const parts = (fullName || '').trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 0) return { first: '', last: '' };
+    return { first: parts[0], last: parts.slice(1).join(' ') };
+  }
+
+  resetAutomatedCheckState(itemType, candidateName) {
+    const { first, last } = this.splitCandidateName(candidateName);
+    return {
+      automatedCheckType: this.defaultAutomatedCheckType(itemType),
+      automatedCheckInputs: { badgeUrl: '', dbprFirstName: first, dbprLastName: last, dbprLicenseNumber: '', sunbizEntityName: '' },
+      automatedCheckRunning: false,
+      automatedCheckValidationError: '',
+      automatedCheckLastResult: null,
+    };
+  }
+
+  // Turns one edge function's raw response into a plain-English line for the timeline/history
+  // text, plus a needsReview flag. This never picks a winner among multiple matches and never
+  // implies a determination — it only describes what the check itself returned.
+  summarizeAutomatedCheck(checkType, data) {
+    if (!data || !data.ok) {
+      const err = (data && data.error) || 'unknown_error';
+      if (checkType === 'sunbiz' && err === 'blocked_by_challenge') {
+        return { text: 'Blocked by a Cloudflare challenge before reaching results — this is Sunbiz’s known, expected failure mode from cloud infrastructure, not a real "no match". Use the manual local script instead.', needsReview: false };
+      }
+      const detail = data && data.detail ? (' — ' + data.detail) : '';
+      return { text: 'Check failed: ' + err + detail + '.', needsReview: false };
+    }
+
+    if (checkType === 'credly') {
+      if (!data.found) return { text: 'No badge found at that URL.', needsReview: false };
+      return { text: 'Badge found: "' + data.badgeName + '", issued by ' + data.issuer + ' on ' + data.issuedDate + '.', needsReview: false };
+    }
+
+    if (checkType === 'dbpr') {
+      if (!data.found || !data.matches || data.matches.length === 0) return { text: 'No matching license found.', needsReview: false };
+      const lines = data.matches.map((m) => {
+        const matchLabel = m.exactMatch === true ? 'exact name match' : m.exactMatch === false ? 'name does NOT match' : 'name not checked';
+        return '• ' + m.name + ' — ' + m.licenseType + (m.licenseNumber ? (' #' + m.licenseNumber) : '') + ', ' + m.status + (m.expirationDate ? (' (expires ' + m.expirationDate + ')') : '') + ' — ' + matchLabel;
+      });
+      const needsReview = data.matches.length > 1 || data.matches.some((m) => m.exactMatch === false);
+      return { text: data.matches.length + ' match(es) found:\n' + lines.join('\n'), needsReview };
+    }
+
+    // sunbiz
+    if (!data.found) return { text: 'No matching entity found.', needsReview: false };
+    const exact = !!data.exactMatch;
+    return {
+      text: 'Entity found: "' + data.matchedName + '", status ' + data.entityStatus + ', doc #' + data.documentNumber + (data.filingType ? (' (' + data.filingType + ')') : '') + '.' + (exact ? '' : ' Name match is approximate, not exact.'),
+      needsReview: !exact,
+    };
+  }
+
+  async runAutomatedCheckRequest(id, checkType, inputs) {
+    const checkLabel = this.CHECK_LABELS[checkType];
+    let path, body;
+    if (checkType === 'credly') {
+      path = '/verify-credly-badge';
+      body = { badge_url: inputs.badgeUrl.trim() };
+    } else if (checkType === 'dbpr') {
+      path = '/verify-dbpr-license';
+      body = {};
+      if (inputs.dbprFirstName.trim()) body.first_name = inputs.dbprFirstName.trim();
+      if (inputs.dbprLastName.trim()) body.last_name = inputs.dbprLastName.trim();
+      if (inputs.dbprLicenseNumber.trim()) body.license_number = inputs.dbprLicenseNumber.trim();
+    } else {
+      path = '/verify-fl-sos-entity';
+      body = { entity_name: inputs.sunbizEntityName.trim() };
+    }
+
+    let data;
+    try {
+      const res = await fetch(this.SUPABASE_FN_URL + path, {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      data = await res.json().catch(() => ({ ok: false, error: 'invalid_response' }));
+    } catch (e) {
+      data = { ok: false, error: 'network_error', detail: String(e) };
+    }
+
+    const summary = this.summarizeAutomatedCheck(checkType, data);
+    const now = new Date().toISOString();
+    const historyLine = 'Automated check result (not a determination) — ' + checkLabel + ', ' + this.fmtDateTime(now) + ':\n' + summary.text;
+    const current = this.state.items.find((it) => it.id === id);
+    const existingText = (current && current.automatedCheck) || '';
+    const nextAutomatedCheck = existingText ? (historyLine + '\n\n---\n\n' + existingText) : historyLine;
+
+    // This only ever writes the automated_check text and a timeline entry. It never touches
+    // status — staff read this and decide, exactly as before, just with real data now.
+    this.updateItem(id, { automatedCheck: nextAutomatedCheck });
+    this.addTimelineEntry(id, {
+      date: now,
+      actor: this.state.currentUser,
+      action: 'Ran automated check: ' + checkLabel + '.',
+      note: summary.text + (summary.needsReview ? ' Flagged: needs staff review, not a confirmed match.' : ''),
+    });
+
+    this.setState({
+      automatedCheckRunning: false,
+      automatedCheckLastResult: { text: summary.text, needsReview: summary.needsReview, failed: !data.ok, checkLabel },
+    });
   }
 
   async loadItems() {
@@ -2803,7 +2995,7 @@ class Component extends DCLogic {
       isAdminEditable: isAdmin,
       isWorkerRow: !isAdmin,
       syncError: !!s.syncFailures[it.id],
-      onOpen: () => this.setState({ selectedId: it.id, correctionMode: null, correctionDraft: '', declineDraft: '', noteSaveState: 'idle' }),
+      onOpen: () => this.setState({ selectedId: it.id, correctionMode: null, correctionDraft: '', declineDraft: '', noteSaveState: 'idle', ...this.resetAutomatedCheckState(it.type, it.candidateName) }),
       stopClick: (e) => { if (e && e.stopPropagation) e.stopPropagation(); },
       onReassign: (e) => { if (e.stopPropagation) e.stopPropagation(); this.updateItem(it.id, { assignedTo: e.target.value }); },
       onRetrySync: (e) => { if (e.stopPropagation) e.stopPropagation(); this.retrySync(it.id); },
@@ -2897,7 +3089,7 @@ class Component extends DCLogic {
         this.setState({ correctionMode: null, correctionDraft: '', declineDraft: '' });
       },
 
-      closeDetail: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ selectedId: null, correctionMode: null, correctionDraft: '', declineDraft: '', noteSaveState: 'idle' }); },
+      closeDetail: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ selectedId: null, correctionMode: null, correctionDraft: '', declineDraft: '', noteSaveState: 'idle', ...this.resetAutomatedCheckState(null, null) }); },
       detailSyncError: !!(selected && s.syncFailures[selected.id]),
       retryDetailSync: () => { if (selected) this.retrySync(selected.id); },
       detailCandidateName: selected ? (selected.candidateName || '—') : '',
@@ -2912,6 +3104,48 @@ class Component extends DCLogic {
       detailDesiredDisp: selected ? this.fmt(selected.desired) : '',
       detailFollowUp: selected ? selected.followUp : '',
       detailAutomatedCheck: selected ? selected.automatedCheck : '',
+
+      showAutomatedCheckSection: !!(selected && selected.type !== 'Education'),
+      checkTypeOptions: [
+        { value: 'credly', label: 'Credly Badge' },
+        { value: 'dbpr', label: 'DBPR License (FL)' },
+        { value: 'sunbiz', label: 'Sunbiz — Employer (unreliable)' },
+      ],
+      automatedCheckType: s.automatedCheckType,
+      setAutomatedCheckType: (e) => this.setState({ automatedCheckType: e.target.value, automatedCheckValidationError: '', automatedCheckLastResult: null }),
+      acIsCredly: s.automatedCheckType === 'credly',
+      acIsDbpr: s.automatedCheckType === 'dbpr',
+      acIsSunbiz: s.automatedCheckType === 'sunbiz',
+      acBadgeUrl: s.automatedCheckInputs.badgeUrl,
+      acDbprFirstName: s.automatedCheckInputs.dbprFirstName,
+      acDbprLastName: s.automatedCheckInputs.dbprLastName,
+      acDbprLicenseNumber: s.automatedCheckInputs.dbprLicenseNumber,
+      acSunbizEntityName: s.automatedCheckInputs.sunbizEntityName,
+      setAcBadgeUrl: (e) => this.setState(st => ({ automatedCheckInputs: { ...st.automatedCheckInputs, badgeUrl: e.target.value } })),
+      setAcDbprFirstName: (e) => this.setState(st => ({ automatedCheckInputs: { ...st.automatedCheckInputs, dbprFirstName: e.target.value } })),
+      setAcDbprLastName: (e) => this.setState(st => ({ automatedCheckInputs: { ...st.automatedCheckInputs, dbprLastName: e.target.value } })),
+      setAcDbprLicenseNumber: (e) => this.setState(st => ({ automatedCheckInputs: { ...st.automatedCheckInputs, dbprLicenseNumber: e.target.value } })),
+      setAcSunbizEntityName: (e) => this.setState(st => ({ automatedCheckInputs: { ...st.automatedCheckInputs, sunbizEntityName: e.target.value } })),
+      acRunLabel: s.automatedCheckRunning ? 'Running…' : 'Run check',
+      runAutomatedCheck: () => {
+        if (!selected || s.automatedCheckRunning) return;
+        const type = s.automatedCheckType;
+        const inputs = s.automatedCheckInputs;
+        let err = '';
+        if (type === 'credly' && !inputs.badgeUrl.trim()) err = 'Enter a badge URL.';
+        if (type === 'dbpr' && !inputs.dbprLastName.trim() && !inputs.dbprLicenseNumber.trim()) err = 'Enter a last name or a license number.';
+        if (type === 'sunbiz' && !inputs.sunbizEntityName.trim()) err = 'Enter an employer/entity name.';
+        if (err) { this.setState({ automatedCheckValidationError: err }); return; }
+        this.setState({ automatedCheckRunning: true, automatedCheckValidationError: '', automatedCheckLastResult: null });
+        this.runAutomatedCheckRequest(selected.id, type, inputs);
+      },
+      acShowValidationError: !!s.automatedCheckValidationError,
+      acValidationError: s.automatedCheckValidationError,
+      acShowResult: !!s.automatedCheckLastResult,
+      acResultText: s.automatedCheckLastResult ? s.automatedCheckLastResult.text : '',
+      acResultNeedsReview: !!(s.automatedCheckLastResult && s.automatedCheckLastResult.needsReview && !s.automatedCheckLastResult.failed),
+      acResultFailed: !!(s.automatedCheckLastResult && s.automatedCheckLastResult.failed),
+
       detailAssignedTo: selected ? selected.assignedTo : '',
       detailNote: selected ? selected.note : '',
       statusOptions: this.STATUS_OPTIONS,
