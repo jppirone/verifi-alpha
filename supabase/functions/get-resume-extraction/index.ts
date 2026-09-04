@@ -19,10 +19,22 @@ const corsHeaders = {
 // confirm-verification succeeds), returns the most recent resume_documents row for that candidate
 // plus every draft row tied to it.
 //
-// extraction_status is returned as-is so the client can show a "still processing" state rather
-// than an empty form if the candidate reaches this screen before extract-resume-fields has
-// finished (a real race: confirm-verification can complete before the earlier, async
-// upload→OCR→extract chain has).
+// extraction_status is returned as-is EXCEPT for one real, confirmed failure mode: a Supabase
+// Edge Function CPU-time kill (real limit, confirmed live against a real resume photo tonight —
+// 2 seconds CPU time, uniform across every plan tier, verified against Supabase's own current
+// docs rather than assumed) terminates the isolate directly. That bypasses upload-resume's own
+// catch block entirely, so the row is left at 'pending' (or extract-resume-fields' equivalent
+// kill leaves it at 'ocr_done') forever — no exception was ever thrown for anything to catch.
+// There is no reachable path back to the client from a dead isolate, so nothing upstream can mark
+// this row failed at the moment it happens. This function is the one place that DOES get a chance
+// to notice: if a document has sat in 'pending' or 'ocr_done' past STALE_SECONDS, no real run
+// legitimately takes that long (every successful OCR+extraction run tonight finished in single-digit
+// seconds), so it's treated as dead and corrected to 'failed' right here, in the database, not just
+// in this response — an honest self-heal on read, not a client-side illusion of failure while the
+// stored row still claims 'pending'. This is what turns "candidate reaches the confirm screen and
+// sees 'still processing' forever with no way to know it already died" into a real, accurate
+// failed state they can act on.
+const STALE_SECONDS = 60;
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -60,6 +72,17 @@ export default {
         });
       }
 
+      let effectiveStatus = doc.extraction_status;
+      const ageSeconds = (Date.now() - new Date(doc.uploaded_at).getTime()) / 1000;
+      if ((effectiveStatus === "pending" || effectiveStatus === "ocr_done") && ageSeconds > STALE_SECONDS) {
+        const { error: healErr } = await supabase
+          .from("resume_documents")
+          .update({ extraction_status: "failed" })
+          .eq("id", doc.id)
+          .eq("extraction_status", effectiveStatus); // no-op if another request already healed/advanced it
+        if (!healErr) effectiveStatus = "failed";
+      }
+
       const [workHistory, education, certifications, freeform, signed] = await Promise.all([
         supabase.from("work_history_items").select("*").eq("resume_document_id", doc.id).order("start_date", { ascending: false }),
         supabase.from("education_items").select("*").eq("resume_document_id", doc.id).order("start_date", { ascending: false }),
@@ -70,7 +93,7 @@ export default {
 
       return new Response(JSON.stringify({
         ok: true,
-        resume_document: { ...doc, original_signed_url: signed.data?.signedUrl ?? null },
+        resume_document: { ...doc, extraction_status: effectiveStatus, original_signed_url: signed.data?.signedUrl ?? null },
         work_history: workHistory.data ?? [],
         education: education.data ?? [],
         certifications: certifications.data ?? [],

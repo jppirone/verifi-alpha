@@ -5592,11 +5592,31 @@ class Component extends DCLogic {
     }
   }
 
+  // Real, confirmed failure mode (not hypothetical): a Supabase Edge Function CPU-time kill (2s
+  // CPU time, uniform across every plan tier — verified live against a real resume photo tonight,
+  // then re-confirmed against Supabase's own current docs rather than assumed) terminates the
+  // function's isolate directly. No exception is thrown back to this fetch() — the connection
+  // just never resolves — so without a client-side ceiling, this call would hang forever and the
+  // candidate would sit on a spinner with no way to know anything had gone wrong. 45s is generous
+  // relative to every real run tonight (successful OCR+extraction finished in single-digit
+  // seconds) while still bounding how long a candidate can be left with zero feedback. This is one
+  // half of the fix — the other half is get-resume-extraction's own stale-row self-heal, which
+  // makes the failure durable and visible even if this tab isn't open anymore when it happens.
+  async fetchWithTimeout(url, options, timeoutMs) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, { ...options, signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async uploadResumeInBackground(emailVerificationId, staged) {
     this.setState({ resumeUploadStatus: 'uploading', resumeUploadError: null });
     let res, data;
     try {
-      res = await fetch(this.SUPABASE_FN_URL + '/upload-resume', {
+      res = await this.fetchWithTimeout(this.SUPABASE_FN_URL + '/upload-resume', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -5609,10 +5629,16 @@ class Component extends DCLogic {
           width: staged.width,
           height: staged.height,
         }),
-      });
+      }, 45000);
       data = await res.json().catch(() => ({}));
     } catch (e) {
-      this.setState({ resumeUploadStatus: 'failed', resumeUploadError: "Couldn't reach the server." });
+      const timedOut = e && e.name === 'AbortError';
+      this.setState({
+        resumeUploadStatus: 'failed',
+        resumeUploadError: timedOut
+          ? "This is taking longer than expected — the upload may have failed partway through. You can continue; we'll show what we have on the confirm screen."
+          : "Couldn't reach the server.",
+      });
       return;
     }
     if (!res.ok || !data.ok) {
@@ -5627,14 +5653,20 @@ class Component extends DCLogic {
     this.setState({ resumeUploadStatus: 'extracting' });
     let res, data;
     try {
-      res = await fetch(this.SUPABASE_FN_URL + '/extract-resume-fields', {
+      res = await this.fetchWithTimeout(this.SUPABASE_FN_URL + '/extract-resume-fields', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
         body: JSON.stringify({ resume_document_id: resumeDocumentId }),
-      });
+      }, 45000);
       data = await res.json().catch(() => ({}));
     } catch (e) {
-      this.setState({ resumeUploadStatus: 'failed', resumeUploadError: "Couldn't reach the server." });
+      const timedOut = e && e.name === 'AbortError';
+      this.setState({
+        resumeUploadStatus: 'failed',
+        resumeUploadError: timedOut
+          ? "This is taking longer than expected — extraction may have failed partway through. You can continue; we'll show what we have on the confirm screen."
+          : "Couldn't reach the server.",
+      });
       return;
     }
     if (!res.ok || !data.ok) {
