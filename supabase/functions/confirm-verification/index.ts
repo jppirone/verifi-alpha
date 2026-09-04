@@ -29,6 +29,15 @@ const corsHeaders = {
 //      extract-resume-fields calls made earlier in the flow (keyed by email_verification_id, per
 //      the design: resume upload+OCR run at isPreview time against email_verification_id, before
 //      any candidate row exists — see upload-resume's header) can be tied back to that candidate.
+//   3. The response also now echoes back opt_in_work_history / opt_in_education /
+//      opt_in_certifications straight from `record` (already fetched via `select=*`, no new query).
+//      This replaces an earlier, backed-out client-side (localStorage) attempt at the same problem
+//      — the candidate's opt-in choices, staged onto this same email_verifications row by
+//      send-verification at the moment the candidate leaves the preview screen (same pattern as
+//      phone/full_name), are now read back through the token here rather than trusted to survive
+//      in the browser. That closes the real gap the client-side version had: a candidate can
+//      confirm from a different device than the one they signed up on (laptop → phone, opening the
+//      email there), and the token in the confirmation link is all that's needed either way.
 //
 // Capturing the candidate id required one more change: the candidates insert used
 // "Prefer": "return=minimal" (empty response body on success) — changed to
@@ -184,6 +193,9 @@ export default {
         purpose: record.purpose,
         candidate_id: candidateId,
         email_verification_id: record.id,
+        opt_in_work_history: !!record.opt_in_work_history,
+        opt_in_education: !!record.opt_in_education,
+        opt_in_certifications: !!record.opt_in_certifications,
         resume_backfill_error: resumeBackfillError,
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },

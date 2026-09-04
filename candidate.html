@@ -5570,7 +5570,16 @@ class Component extends DCLogic {
       res = await fetch(this.SUPABASE_FN_URL + '/send-verification', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, phone, full_name: fullName, purpose }),
+        // Opt-in choices are staged onto the email_verifications row this same call creates — the
+        // same pattern already used for phone/full_name here, and the reason a client-side (real,
+        // now backed-out) attempt at this problem was replaced: send-verification/confirm-
+        // verification's own headers explain why (real cross-device gap in the client version).
+        body: JSON.stringify({
+          email, phone, full_name: fullName, purpose,
+          opt_in_work_history: this.state.optInWorkHistory,
+          opt_in_education: this.state.optInEducation,
+          opt_in_certifications: this.state.optInCertifications,
+        }),
       });
       data = await res.json().catch(() => ({}));
     } catch (e) {
@@ -5866,6 +5875,13 @@ class Component extends DCLogic {
           screen: 'resumeConfirm', draft: null, verifyStatus: 'success',
           email: data.email || this.state.email, phone: data.phone || this.state.phone,
           resumeCandidateId: data.candidate_id || null,
+          // Server-authoritative, not client-cached: this is the read side of the same
+          // email_verifications row send-verification staged these onto — reached via the token in
+          // this confirmation link itself, so it works even when this link is opened on a different
+          // device than the one that signed up (see confirm-verification's header).
+          optInWorkHistory: !!data.opt_in_work_history,
+          optInEducation: !!data.opt_in_education,
+          optInCertifications: !!data.opt_in_certifications,
         });
         if (data.candidate_id) this.loadResumeExtraction(data.candidate_id);
         return;
