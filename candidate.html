@@ -2614,14 +2614,19 @@ a:hover{color:var(--color-accent)}
   <p style="margin:0;color:var(--color-neutral-400);font-size:15px;line-height:1.4">We render and verify it against what's actually printed on the document.</p>
 
   <div class="card elev-sm" style="width:100%;padding:var(--space-8);text-align:center;border:1.5px dashed var(--color-divider);background:var(--color-surface)">
+    <input type="file" id="resume-file-input" accept="image/jpeg,image/png,image/heic,image/heif,image/webp" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden" sc-camel-on-change="{{ onPickResumeFile }}">
     <sc-if value="{{ hasFile }}" hint-placeholder-val="{{ false }}">
       <div style="font-size:14px;color:var(--color-neutral-200);margin-bottom:var(--space-3)">{{ fileName }} selected</div>
       <button type="button" class="btn btn-primary btn-block" sc-camel-on-click="{{ goPreview }}">Continue</button>
+      <label for="resume-file-input" class="btn btn-ghost btn-block" style="cursor:pointer;margin-top:var(--space-2)">Choose a different photo</label>
     </sc-if>
     <sc-if value="{{ noFile }}" hint-placeholder-val="{{ true }}">
-      <div style="font-size:15px;margin-bottom:6px">Drop your resume here or click to browse</div>
-      <div style="font-size:12px;color:var(--color-neutral-500);margin-bottom:var(--space-4)">Accepts PDF or Word (.docx). Other formats will be asked to convert</div>
-      <button type="button" class="btn btn-primary btn-block" sc-camel-on-click="{{ pickFile }}">Choose file</button>
+      <div style="font-size:15px;margin-bottom:6px">Take or upload a photo of your resume</div>
+      <div style="font-size:12px;color:var(--color-neutral-500);margin-bottom:var(--space-4)">Accepts JPEG, PNG, HEIC, HEIF, or WEBP photos. PDF and Word documents aren't supported yet.</div>
+      <label for="resume-file-input" class="btn btn-primary btn-block" style="cursor:pointer">Choose file</label>
+      <sc-if value="{{ resumeFileError }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:12px;color:#e2735c;margin-top:var(--space-3)">{{ resumeFileError }}</div>
+      </sc-if>
     </sc-if>
   </div>
 
@@ -2707,6 +2712,157 @@ a:hover{color:var(--color-accent)}
   <div style="font-size:12px;color:var(--color-neutral-600)">Unconfirmed uploads and files auto-delete after 14 days.</div>
   <button type="button" class="btn btn-ghost" style="font-size:12px;opacity:0.7;margin-top:var(--space-4)" sc-camel-on-click="{{ devConfirm }}">(prototype only) simulate clicking the email link</button>
   <button type="button" class="btn btn-ghost" style="font-size:12px;opacity:0.7" sc-camel-on-click="{{ simulateLeave }}">(prototype only) simulate leaving &amp; coming back before finishing</button>
+</div>
+</sc-if>
+
+<sc-if value="{{ isResumeConfirm }}" hint-placeholder-val="{{ false }}">
+<div style="max-width:900px;margin:0 auto;padding:88px 20px 60px;display:flex;flex-direction:column;gap:var(--space-4)">
+  <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:22px;margin:0">Confirm your resume data</h1>
+  <p style="margin:0;color:var(--color-neutral-400);font-size:13px;line-height:1.5">We read this off the document you uploaded. Check it against the original on the left and correct anything that's wrong — you're fixing our reading of it, not typing from scratch.</p>
+
+  <sc-if value="{{ resumeExtractionLoading }}" hint-placeholder-val="{{ false }}">
+    <div class="card elev-sm" style="padding:var(--space-8);text-align:center;color:var(--color-neutral-400);font-size:14px">Loading your resume data…</div>
+  </sc-if>
+
+  <sc-if value="{{ resumeStillProcessing }}" hint-placeholder-val="{{ false }}">
+    <div class="card elev-md" style="padding:var(--space-8);text-align:center;display:flex;flex-direction:column;gap:var(--space-3);align-items:center">
+      <div style="font-size:15px">Still reading your resume…</div>
+      <div style="font-size:13px;color:var(--color-neutral-500);line-height:1.5">This usually finishes in well under a minute. If it's been longer than that, click below to check again.</div>
+      <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ checkResumeAgain }}">Check again</button>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ resumeExtractionFailed }}" hint-placeholder-val="{{ false }}">
+    <div class="card elev-md" style="padding:var(--space-8);text-align:center;display:flex;flex-direction:column;gap:var(--space-3);align-items:center">
+      <div style="font-size:15px">We couldn't read that document.</div>
+      <div style="font-size:13px;color:var(--color-neutral-500);line-height:1.5">You can still continue — nothing was extracted, so there's nothing to confirm here yet.</div>
+      <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ skipResumeConfirm }}">Continue without resume data</button>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ resumeNoDocument }}" hint-placeholder-val="{{ false }}">
+    <div class="card elev-sm" style="padding:var(--space-8);text-align:center;color:var(--color-neutral-400);font-size:14px">No resume on file — nothing to confirm here.</div>
+  </sc-if>
+
+  <sc-if value="{{ resumeReadyToConfirm }}" hint-placeholder-val="{{ false }}">
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:var(--space-4);align-items:start">
+    <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3);position:sticky;top:88px">
+      <div class="card-kicker">Your uploaded document</div>
+      <div style="width:100%;aspect-ratio:8.5 / 11;background:#ffffff;border-radius:2px;box-shadow:var(--shadow-lg);overflow:auto">
+        <img src="{{ resumeOriginalUrl }}" style="width:100%;display:block">
+      </div>
+      <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">This is exactly what you uploaded, unmodified.</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:var(--space-4)">
+      <sc-if value="{{ resumeHasSummary }}" hint-placeholder-val="{{ false }}">
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
+        <div class="card-kicker">Summary</div>
+        <textarea class="input" rows="3" value="{{ resumeSummaryContent }}" sc-camel-on-change="{{ onResumeSummaryChange }}"></textarea>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ resumeHasNeedsReview }}" hint-placeholder-val="{{ false }}">
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2);border-color:var(--color-accent)">
+        <div class="card-kicker">Flagged for your review</div>
+        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">These didn't go into Work History automatically (often because they read as unpaid or volunteer roles). Nothing here is submitted for verification.</div>
+        <sc-for list="{{ resumeNeedsReviewRows }}" as="row" hint-placeholder-count="1">
+          <div style="font-size:13px;color:var(--color-neutral-300);padding:var(--space-3);background:var(--color-surface);border-radius:var(--radius-sm)">{{ row.content }}</div>
+        </sc-for>
+      </div>
+      </sc-if>
+
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div class="card-kicker">Work history</div>
+          <label style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--color-neutral-400);cursor:pointer;font-weight:400;text-transform:none;letter-spacing:0">
+            <input type="checkbox" checked="{{ optInWorkHistory }}" sc-camel-on-change="{{ toggleOptInWorkHistory }}">
+            Submit for verification
+          </label>
+        </div>
+        <sc-for list="{{ workHistoryRows }}" as="row" hint-placeholder-count="2">
+          <div style="display:flex;flex-direction:column;gap:var(--space-2);padding-bottom:var(--space-3);border-bottom:1px solid var(--color-divider)">
+            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+              <div class="field" style="flex:1;min-width:160px"><label>Title</label><input class="input" value="{{ row.title }}" sc-camel-on-change="{{ row.onTitle }}"></div>
+              <div class="field" style="flex:1;min-width:160px"><label>Company</label><input class="input" value="{{ row.company }}" sc-camel-on-change="{{ row.onCompany }}"></div>
+            </div>
+            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+              <div class="field" style="flex:1;min-width:140px"><label>Start date</label><input class="input" type="date" value="{{ row.startDate }}" sc-camel-on-change="{{ row.onStartDate }}"></div>
+              <div class="field" style="flex:1;min-width:140px"><label>End date (blank = present)</label><input class="input" type="date" value="{{ row.endDate }}" sc-camel-on-change="{{ row.onEndDate }}"></div>
+            </div>
+            <div class="field"><label>Job responsibilities</label><textarea class="input" rows="3" value="{{ row.jobResponsibilities }}" sc-camel-on-change="{{ row.onResponsibilities }}"></textarea></div>
+          </div>
+        </sc-for>
+        <sc-if value="{{ workHistoryEmpty }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:var(--color-neutral-500)">No work history was found on this document.</div>
+        </sc-if>
+      </div>
+
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div class="card-kicker">Education</div>
+          <label style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--color-neutral-400);cursor:pointer;font-weight:400;text-transform:none;letter-spacing:0">
+            <input type="checkbox" checked="{{ optInEducation }}" sc-camel-on-change="{{ toggleOptInEducation }}">
+            Submit for verification
+          </label>
+        </div>
+        <sc-for list="{{ educationRows }}" as="row" hint-placeholder-count="1">
+          <div style="display:flex;flex-direction:column;gap:var(--space-2);padding-bottom:var(--space-3);border-bottom:1px solid var(--color-divider)">
+            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+              <div class="field" style="flex:1;min-width:160px"><label>Degree</label><input class="input" value="{{ row.degree }}" sc-camel-on-change="{{ row.onDegree }}"></div>
+              <div class="field" style="flex:1;min-width:160px"><label>Field of study</label><input class="input" value="{{ row.fieldOfStudy }}" sc-camel-on-change="{{ row.onFieldOfStudy }}"></div>
+            </div>
+            <div class="field"><label>Institution</label><input class="input" value="{{ row.institution }}" sc-camel-on-change="{{ row.onInstitution }}"></div>
+            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+              <div class="field" style="flex:1;min-width:140px"><label>Start date</label><input class="input" type="date" value="{{ row.startDate }}" sc-camel-on-change="{{ row.onStartDate }}"></div>
+              <div class="field" style="flex:1;min-width:140px"><label>End date</label><input class="input" type="date" value="{{ row.endDate }}" sc-camel-on-change="{{ row.onEndDate }}"></div>
+            </div>
+          </div>
+        </sc-for>
+        <sc-if value="{{ educationEmpty }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:var(--color-neutral-500)">No education was found on this document.</div>
+        </sc-if>
+      </div>
+
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div class="card-kicker">Certifications</div>
+          <label style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--color-neutral-400);cursor:pointer;font-weight:400;text-transform:none;letter-spacing:0">
+            <input type="checkbox" checked="{{ optInCertifications }}" sc-camel-on-change="{{ toggleOptInCertifications }}">
+            Submit for verification
+          </label>
+        </div>
+        <sc-for list="{{ certificationRows }}" as="row" hint-placeholder-count="1">
+          <div style="display:flex;flex-direction:column;gap:var(--space-2);padding-bottom:var(--space-3);border-bottom:1px solid var(--color-divider)">
+            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+              <div class="field" style="flex:1;min-width:160px"><label>Name</label><input class="input" value="{{ row.name }}" sc-camel-on-change="{{ row.onName }}"></div>
+              <div class="field" style="flex:1;min-width:160px"><label>Issuing body</label><input class="input" value="{{ row.issuingBody }}" sc-camel-on-change="{{ row.onIssuingBody }}"></div>
+            </div>
+            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+              <div class="field" style="flex:1;min-width:140px"><label>Issue date</label><input class="input" type="date" value="{{ row.issueDate }}" sc-camel-on-change="{{ row.onIssueDate }}"></div>
+              <div class="field" style="flex:1;min-width:140px"><label>Expiration date</label><input class="input" type="date" value="{{ row.expirationDate }}" sc-camel-on-change="{{ row.onExpirationDate }}"></div>
+            </div>
+          </div>
+        </sc-for>
+        <sc-if value="{{ certificationsEmpty }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:var(--color-neutral-500)">No certifications were found on this document.</div>
+        </sc-if>
+      </div>
+
+      <sc-if value="{{ resumeHasHobbies }}" hint-placeholder-val="{{ false }}">
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
+        <div class="card-kicker">Hobbies / other</div>
+        <textarea class="input" rows="2" value="{{ resumeHobbiesContent }}" sc-camel-on-change="{{ onResumeHobbiesChange }}"></textarea>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ resumeConfirmError }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:12px;color:#e2735c">{{ resumeConfirmError }}</div>
+      </sc-if>
+      <button type="button" class="btn btn-primary btn-block" disabled="{{ resumeConfirmPending }}" sc-camel-on-click="{{ confirmResumeData }}">{{ resumeConfirmLabel }}</button>
+    </div>
+  </div>
+  </sc-if>
 </div>
 </sc-if>
 
@@ -4891,6 +5047,11 @@ class Component extends DCLogic {
     savedPausedGlobal: false, savedJobStatus: null, savedVisibility: 'hidden',
     accountTier: 'free', discoverable: false, discoverableSavePending: false, discoverableSaveError: null,
     optInWorkHistory: false, optInEducation: false, optInCertifications: false,
+    resumeFileStaged: null, resumeFileError: null,
+    resumeEmailVerificationId: null, resumeDocumentId: null,
+    resumeUploadStatus: 'idle', resumeUploadError: null,
+    resumeCandidateId: null, resumeExtraction: null, resumeExtractionLoading: false,
+    resumeConfirmPending: false, resumeConfirmError: null,
     contactLeads: { acme: { phone: '', name: '' }, beta: { phone: '', name: '' }, gamma: { phone: '', name: '' }, delta: { phone: '', name: '' }, epsilon: { phone: '', name: '' }, cert: { phone: '', name: '' } },
     deltaEndFormOpen: false, deltaEndDraft: '', deltaEndValue: '',
     verificationFilter: 'active', upgradeModalOpen: false, upgradeReturnTab: null, upgradeReturnTarget: null,
@@ -5420,8 +5581,141 @@ class Component extends DCLogic {
       this.setState({ emailSendPending: false, emailSendError: "Couldn't send that verification email. Please try again." });
       return;
     }
-    this.setState({ emailSendPending: false, emailSendError: null, screen: 'checkEmail' });
+    this.setState({ emailSendPending: false, emailSendError: null, screen: 'checkEmail', resumeEmailVerificationId: data.email_verification_id || null });
     this.saveDraft({ screen: 'checkEmail' });
+    // Resume upload/OCR run in the background here, not blocking the checkEmail screen — the
+    // client-decoded image data was already staged by onPickResumeFile back at isEntry. This is
+    // the earliest point a real email_verification_id exists (candidates rows don't exist until
+    // confirm-verification; see upload-resume's header for the full reasoning).
+    if (data.email_verification_id && this.state.resumeFileStaged) {
+      this.uploadResumeInBackground(data.email_verification_id, this.state.resumeFileStaged);
+    }
+  }
+
+  async uploadResumeInBackground(emailVerificationId, staged) {
+    this.setState({ resumeUploadStatus: 'uploading', resumeUploadError: null });
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/upload-resume', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email_verification_id: emailVerificationId,
+          original_filename: staged.fileName,
+          mime_type: staged.mimeType,
+          original_base64: staged.originalBase64,
+          sanitized_base64: staged.sanitizedBase64,
+          rgba_base64: staged.rgbaBase64,
+          width: staged.width,
+          height: staged.height,
+        }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ resumeUploadStatus: 'failed', resumeUploadError: "Couldn't reach the server." });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      this.setState({ resumeUploadStatus: 'failed', resumeUploadError: (data && (data.message || data.error)) || 'Upload failed.' });
+      return;
+    }
+    this.setState({ resumeUploadStatus: 'ocr_done', resumeDocumentId: data.resume_document_id });
+    this.extractResumeInBackground(data.resume_document_id);
+  }
+
+  async extractResumeInBackground(resumeDocumentId) {
+    this.setState({ resumeUploadStatus: 'extracting' });
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/extract-resume-fields', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resume_document_id: resumeDocumentId }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ resumeUploadStatus: 'failed', resumeUploadError: "Couldn't reach the server." });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      this.setState({ resumeUploadStatus: 'failed', resumeUploadError: (data && data.error) || 'Extraction failed.' });
+      return;
+    }
+    this.setState({ resumeUploadStatus: 'extracted' });
+  }
+
+  // Real image decode: draws the picked photo to a canvas (which both strips EXIF/metadata for
+  // the sanitized render and, via getImageData, produces the raw RGBA the proven tesseract-wasm +
+  // word-clustering OCR pipeline needs — same client-decode contract used by every OCR test
+  // tonight). Downscales anything larger than 2200px on the long edge first: an un-downscaled
+  // phone photo (e.g. 3024x4032) would produce a ~48MB raw RGBA payload, which is real, not a
+  // hypothetical — this cap keeps the request reasonable without visibly hurting OCR quality.
+  //
+  // HEIC/HEIF stay in the accepted list (config-driven, not a hardcoded restriction — see
+  // upload-resume's ACCEPTED_MIME_TYPES), but canvas-decoding HEIC only works reliably in Safari;
+  // Chrome and Firefox do not decode HEIC via <img>/canvas as of this build. That's a real,
+  // load-bearing browser limitation, not glossed over: the catch block below is what actually
+  // fires for a candidate on Chrome picking a HEIC photo, and says so plainly rather than failing
+  // silently or corrupting the upload.
+  async onPickResumeFile(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const ACCEPTED = ['image/jpeg', 'image/png', 'image/heic', 'image/heif', 'image/webp'];
+    if (file.type && !ACCEPTED.includes(file.type)) {
+      this.setState({ resumeFileError: "That file type isn't supported yet. Please upload a JPEG, PNG, HEIC, HEIF, or WEBP photo.", fileName: null, resumeFileStaged: null });
+      return;
+    }
+    this.setState({ resumeFileError: null });
+    const MAX_DIMENSION = 2200;
+    try {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const rd = new FileReader();
+        rd.onload = () => resolve(rd.result);
+        rd.onerror = () => reject(new Error('read_failed'));
+        rd.readAsDataURL(file);
+      });
+      const img = await new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error('decode_failed'));
+        image.src = dataUrl;
+      });
+      let w = img.naturalWidth, h = img.naturalHeight;
+      if (Math.max(w, h) > MAX_DIMENSION) {
+        const scale = MAX_DIMENSION / Math.max(w, h);
+        w = Math.round(w * scale);
+        h = Math.round(h * scale);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      const imageData = ctx.getImageData(0, 0, w, h);
+      let binary = '';
+      const bytes = imageData.data;
+      const chunk = 65536;
+      for (let i = 0; i < bytes.length; i += chunk) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + chunk, bytes.length)));
+      }
+      const rgbaBase64 = btoa(binary);
+      const sanitizedDataUrl = canvas.toDataURL('image/jpeg', 0.92);
+      const sanitizedBase64 = sanitizedDataUrl.split(',')[1];
+      const originalBase64 = dataUrl.split(',')[1];
+      this.setState({
+        fileName: file.name,
+        resumeFileStaged: {
+          fileName: file.name, mimeType: file.type || 'image/jpeg',
+          originalBase64, sanitizedBase64, rgbaBase64, width: w, height: h,
+        },
+        resumeFileError: null,
+      });
+    } catch (err) {
+      this.setState({
+        resumeFileError: "We couldn't process that photo in this browser (this can happen with HEIC/HEIF photos outside Safari). Please try a JPEG or PNG instead.",
+        fileName: null, resumeFileStaged: null,
+      });
+    }
   }
 
   // Shared by the signupDetails button and draft-resume paths so there is exactly one
@@ -5536,7 +5830,12 @@ class Component extends DCLogic {
     if (res.ok && data.ok) {
       if (data.purpose === 'signup') {
         this.clearDraft();
-        this.setState({ screen: 'tiers', draft: null, verifyStatus: 'success', email: data.email || this.state.email, phone: data.phone || this.state.phone });
+        this.setState({
+          screen: 'resumeConfirm', draft: null, verifyStatus: 'success',
+          email: data.email || this.state.email, phone: data.phone || this.state.phone,
+          resumeCandidateId: data.candidate_id || null,
+        });
+        if (data.candidate_id) this.loadResumeExtraction(data.candidate_id);
         return;
       }
       // Placeholder for non-signup purposes (e.g. 'email_change'). Real handling lands
@@ -5545,6 +5844,91 @@ class Component extends DCLogic {
       return;
     }
     this.setState({ verifyStatus: 'error', verifyErrorReason: (data && data.error) || 'unknown' });
+  }
+
+  // Reads back the draft rows extract-resume-fields wrote (or the still-in-progress status if the
+  // background upload→OCR→extract chain kicked off at sendConfirmation time hasn't finished by the
+  // time the candidate clicks the email link — a real race, not a hypothetical one). If no
+  // resume_documents row exists at all (candidate used "Help me start" instead of uploading),
+  // skips straight past this screen rather than showing an empty form.
+  async loadResumeExtraction(candidateId) {
+    this.setState({ resumeExtractionLoading: true });
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/get-resume-extraction', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate_id: candidateId }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ resumeExtractionLoading: false });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      this.setState({ resumeExtractionLoading: false });
+      return;
+    }
+    if (!data.resume_document) {
+      this.setState({ resumeExtractionLoading: false, resumeExtraction: null, screen: 'tiers' });
+      return;
+    }
+    this.setState({ resumeExtractionLoading: false, resumeExtraction: data });
+  }
+
+  checkResumeAgain() {
+    if (this.state.resumeCandidateId) this.loadResumeExtraction(this.state.resumeCandidateId);
+  }
+
+  skipResumeConfirm() {
+    this.setState({ screen: 'tiers' });
+  }
+
+  updateResumeItem(category, id, field, value) {
+    this.setState(st => {
+      if (!st.resumeExtraction) return {};
+      const list = st.resumeExtraction[category].map(item => item.id === id ? { ...item, [field]: value } : item);
+      return { resumeExtraction: { ...st.resumeExtraction, [category]: list } };
+    });
+  }
+
+  updateResumeFreeform(id, value) {
+    this.setState(st => {
+      if (!st.resumeExtraction) return {};
+      const list = st.resumeExtraction.freeform.map(item => item.id === id ? { ...item, content: value } : item);
+      return { resumeExtraction: { ...st.resumeExtraction, freeform: list } };
+    });
+  }
+
+  async submitResumeConfirmation() {
+    if (!this.state.resumeExtraction || !this.state.resumeCandidateId || this.state.resumeConfirmPending) return;
+    this.setState({ resumeConfirmPending: true, resumeConfirmError: null });
+    const ex = this.state.resumeExtraction;
+    const body = {
+      candidate_id: this.state.resumeCandidateId,
+      work_history: ex.work_history.map(w => ({ id: w.id, company: w.company, title: w.title, start_date: w.start_date, end_date: w.end_date, job_responsibilities: w.job_responsibilities })),
+      education: ex.education.map(x => ({ id: x.id, institution: x.institution, degree: x.degree, field_of_study: x.field_of_study, start_date: x.start_date, end_date: x.end_date })),
+      certifications: ex.certifications.map(c => ({ id: c.id, name: c.name, issuing_body: c.issuing_body, issue_date: c.issue_date, expiration_date: c.expiration_date })),
+      freeform: ex.freeform.map(f => ({ id: f.id, content: f.content })),
+      opt_in: { work_history: this.state.optInWorkHistory, education: this.state.optInEducation, certifications: this.state.optInCertifications },
+    };
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/confirm-resume-data', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ resumeConfirmPending: false, resumeConfirmError: "Couldn't reach the server. Check your connection and try again." });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      this.setState({ resumeConfirmPending: false, resumeConfirmError: "Couldn't save your changes. Please try again." });
+      return;
+    }
+    this.setState({ resumeConfirmPending: false, resumeConfirmError: null, screen: 'tiers' });
   }
 
   resetAll() {
@@ -6220,7 +6604,76 @@ class Component extends DCLogic {
       isReactivate: s.screen === 'reactivate',
       isPreview: s.screen === 'preview',
       isCheckEmail: s.screen === 'checkEmail',
-      isTiers: s.screen === 'tiers',
+      isResumeConfirm: s.screen === 'resumeConfirm',
+      resumeExtractionLoading: s.resumeExtractionLoading,
+      resumeStillProcessing: !s.resumeExtractionLoading && !!s.resumeExtraction && s.resumeExtraction.resume_document &&
+        (s.resumeExtraction.resume_document.extraction_status === 'pending' || s.resumeExtraction.resume_document.extraction_status === 'ocr_done'),
+      resumeExtractionFailed: !s.resumeExtractionLoading && !!s.resumeExtraction && s.resumeExtraction.resume_document &&
+        s.resumeExtraction.resume_document.extraction_status === 'failed',
+      resumeNoDocument: !s.resumeExtractionLoading && !s.resumeExtraction,
+      resumeReadyToConfirm: !s.resumeExtractionLoading && !!s.resumeExtraction && s.resumeExtraction.resume_document &&
+        s.resumeExtraction.resume_document.extraction_status === 'extracted',
+      checkResumeAgain: () => this.checkResumeAgain(),
+      skipResumeConfirm: () => this.skipResumeConfirm(),
+      resumeOriginalUrl: (s.resumeExtraction && s.resumeExtraction.resume_document && s.resumeExtraction.resume_document.original_signed_url) || '',
+      resumeHasSummary: !!(s.resumeExtraction && s.resumeExtraction.freeform.some(f => f.section_type === 'summary')),
+      resumeSummaryContent: (() => {
+        const f = s.resumeExtraction && s.resumeExtraction.freeform.find(f => f.section_type === 'summary');
+        return f ? f.content || '' : '';
+      })(),
+      onResumeSummaryChange: (e) => {
+        const f = s.resumeExtraction && s.resumeExtraction.freeform.find(f => f.section_type === 'summary');
+        if (f) this.updateResumeFreeform(f.id, e.target.value);
+      },
+      resumeHasHobbies: !!(s.resumeExtraction && s.resumeExtraction.freeform.some(f => f.section_type === 'hobbies_other')),
+      resumeHobbiesContent: (() => {
+        const f = s.resumeExtraction && s.resumeExtraction.freeform.find(f => f.section_type === 'hobbies_other');
+        return f ? f.content || '' : '';
+      })(),
+      onResumeHobbiesChange: (e) => {
+        const f = s.resumeExtraction && s.resumeExtraction.freeform.find(f => f.section_type === 'hobbies_other');
+        if (f) this.updateResumeFreeform(f.id, e.target.value);
+      },
+      resumeHasNeedsReview: !!(s.resumeExtraction && s.resumeExtraction.freeform.some(f => f.section_type === 'needs_review')),
+      resumeNeedsReviewRows: (s.resumeExtraction ? s.resumeExtraction.freeform.filter(f => f.section_type === 'needs_review') : [])
+        .map(f => ({ content: f.content })),
+      workHistoryEmpty: !!(s.resumeExtraction) && s.resumeExtraction.work_history.length === 0,
+      workHistoryRows: (s.resumeExtraction ? s.resumeExtraction.work_history : []).map(w => ({
+        id: w.id,
+        title: w.title || '', company: w.company || '',
+        startDate: w.start_date || '', endDate: w.end_date || '',
+        jobResponsibilities: w.job_responsibilities || '',
+        onTitle: (e) => this.updateResumeItem('work_history', w.id, 'title', e.target.value),
+        onCompany: (e) => this.updateResumeItem('work_history', w.id, 'company', e.target.value),
+        onStartDate: (e) => this.updateResumeItem('work_history', w.id, 'start_date', e.target.value),
+        onEndDate: (e) => this.updateResumeItem('work_history', w.id, 'end_date', e.target.value),
+        onResponsibilities: (e) => this.updateResumeItem('work_history', w.id, 'job_responsibilities', e.target.value),
+      })),
+      educationEmpty: !!(s.resumeExtraction) && s.resumeExtraction.education.length === 0,
+      educationRows: (s.resumeExtraction ? s.resumeExtraction.education : []).map(x => ({
+        id: x.id,
+        degree: x.degree || '', fieldOfStudy: x.field_of_study || '', institution: x.institution || '',
+        startDate: x.start_date || '', endDate: x.end_date || '',
+        onDegree: (e) => this.updateResumeItem('education', x.id, 'degree', e.target.value),
+        onFieldOfStudy: (e) => this.updateResumeItem('education', x.id, 'field_of_study', e.target.value),
+        onInstitution: (e) => this.updateResumeItem('education', x.id, 'institution', e.target.value),
+        onStartDate: (e) => this.updateResumeItem('education', x.id, 'start_date', e.target.value),
+        onEndDate: (e) => this.updateResumeItem('education', x.id, 'end_date', e.target.value),
+      })),
+      certificationsEmpty: !!(s.resumeExtraction) && s.resumeExtraction.certifications.length === 0,
+      certificationRows: (s.resumeExtraction ? s.resumeExtraction.certifications : []).map(c => ({
+        id: c.id,
+        name: c.name || '', issuingBody: c.issuing_body || '',
+        issueDate: c.issue_date || '', expirationDate: c.expiration_date || '',
+        onName: (e) => this.updateResumeItem('certifications', c.id, 'name', e.target.value),
+        onIssuingBody: (e) => this.updateResumeItem('certifications', c.id, 'issuing_body', e.target.value),
+        onIssueDate: (e) => this.updateResumeItem('certifications', c.id, 'issue_date', e.target.value),
+        onExpirationDate: (e) => this.updateResumeItem('certifications', c.id, 'expiration_date', e.target.value),
+      })),
+      resumeConfirmPending: s.resumeConfirmPending,
+      resumeConfirmError: s.resumeConfirmError,
+      resumeConfirmLabel: s.resumeConfirmPending ? 'Saving…' : 'Confirm and continue',
+      confirmResumeData: () => this.submitResumeConfirmation(),
       isVerifying: s.screen === 'verifying',
       verifyPending: s.verifyStatus === 'pending',
       verifyFailed: s.verifyStatus === 'error',
@@ -6249,7 +6702,8 @@ class Component extends DCLogic {
       hasFile: !!s.fileName,
       noFile: !s.fileName,
       fileName: s.fileName,
-      pickFile: () => this.setState({ fileName: 'resume_march.pdf' }),
+      resumeFileError: s.resumeFileError,
+      onPickResumeFile: (e) => this.onPickResumeFile(e),
       goPreview: () => { this.setState({ screen: 'preview' }); this.saveDraft({ screen: 'preview' }); },
       email: s.email,
       setEmail: (e) => this.setState({ email: e.target.value }),
