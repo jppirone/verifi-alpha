@@ -25,7 +25,7 @@ const ACCEPTED_MIME_TYPES = [
   "image/webp",
 ];
 
-// WHY THIS TAKES email_verification_id, NOT candidate_id:
+// WHY THIS TAKES email_verification_id, NOT candidate_id — for the FIRST upload:
 // candidates rows are created only at confirm-verification time (zero-trace-for-abandoned-signups
 // hygiene already used elsewhere in this project — an abandoned signup that never clicks the email
 // link leaves no permanent candidates row). Upload happens earlier, at isEntry/isPreview, before
@@ -33,6 +33,15 @@ const ACCEPTED_MIME_TYPES = [
 // email_verifications row, only linked to a real candidate at confirm time —
 // backfill_resume_pipeline_candidate_id() (called from confirm-verification) does that linking.
 // candidate_id on resume_documents (and every child table) stays NULL until then.
+//
+// candidate_id IS accepted directly as an alternative, for a real, later case: "Try a different
+// file" on the resumeConfirm screen, reached only after confirmation, when a real candidate_id
+// already exists. Re-uploading against the ORIGINAL email_verification_id there would be wrong,
+// not just redundant — backfill_resume_pipeline_candidate_id() only ever runs once, at confirm
+// time, so a new row staged under that same id would never get candidate_id backfilled and would
+// silently never appear on get-resume-extraction's candidate_id-keyed lookup. Exactly one of
+// email_verification_id / candidate_id is required; whichever is given determines which existence
+// check runs and which column the new row is linked through — never both, never neither.
 //
 // WHY OCR RUNS HERE, NOT IN extract-resume-fields:
 // The proven OCR pipeline (test-tesseract-wasm-word-columns, tonight) takes client-decoded RGBA —
@@ -139,6 +148,7 @@ export default {
       const body = await req.json();
       const {
         email_verification_id,
+        candidate_id,
         original_filename,
         mime_type,
         original_base64,       // untouched original file bytes, base64
@@ -148,8 +158,10 @@ export default {
         height,
       } = body;
 
-      if (!email_verification_id || typeof email_verification_id !== "string") {
-        return new Response(JSON.stringify({ ok: false, error: "email_verification_id is required" }), {
+      const hasEv = !!email_verification_id && typeof email_verification_id === "string";
+      const hasCand = !!candidate_id && typeof candidate_id === "string";
+      if (!hasEv && !hasCand) {
+        return new Response(JSON.stringify({ ok: false, error: "email_verification_id or candidate_id is required" }), {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
@@ -170,23 +182,41 @@ export default {
 
       const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-      // Confirm this is a real, still-open email_verifications row before accepting an upload
-      // against it — a clear error beats a resume silently orphaned under a bogus id.
-      const { data: evRow, error: evErr } = await supabase
-        .from("email_verifications")
-        .select("id, confirmed_at")
-        .eq("id", email_verification_id)
-        .single();
-      if (evErr || !evRow) {
-        return new Response(JSON.stringify({ ok: false, error: "email_verification_not_found" }), {
-          status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+      // Confirm this is a real row before accepting an upload against it — a clear error beats a
+      // resume silently orphaned under a bogus id. candidate_id takes priority when both happen to
+      // be present (shouldn't normally happen, but candidate_id is the more specific, later-stage
+      // identifier if it does).
+      let linkColumn: "candidate_id" | "email_verification_id";
+      let linkValue: string;
+      if (hasCand) {
+        const { data: candRow, error: candErr } = await supabase
+          .from("candidates").select("id").eq("id", candidate_id).single();
+        if (candErr || !candRow) {
+          return new Response(JSON.stringify({ ok: false, error: "candidate_not_found" }), {
+            status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        linkColumn = "candidate_id";
+        linkValue = candidate_id;
+      } else {
+        const { data: evRow, error: evErr } = await supabase
+          .from("email_verifications")
+          .select("id, confirmed_at")
+          .eq("id", email_verification_id)
+          .single();
+        if (evErr || !evRow) {
+          return new Response(JSON.stringify({ ok: false, error: "email_verification_not_found" }), {
+            status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        linkColumn = "email_verification_id";
+        linkValue = email_verification_id;
       }
 
       const docId = crypto.randomUUID();
       const ext = mime_type.split("/")[1] || "bin";
-      const originalPath = `${email_verification_id}/${docId}/original.${ext}`;
-      const sanitizedPath = `${email_verification_id}/${docId}/sanitized.jpg`;
+      const originalPath = `${linkValue}/${docId}/original.${ext}`;
+      const sanitizedPath = `${linkValue}/${docId}/sanitized.jpg`;
 
       const originalBytes = base64ToBytes(original_base64);
       const sanitizedBytes = base64ToBytes(sanitized_base64);
@@ -206,7 +236,7 @@ export default {
         .from("resume_documents")
         .insert({
           id: docId,
-          email_verification_id,
+          [linkColumn]: linkValue,
           original_storage_path: originalPath,
           original_filename: original_filename ?? null,
           mime_type,

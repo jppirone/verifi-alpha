@@ -2735,8 +2735,13 @@ a:hover{color:var(--color-accent)}
   <sc-if value="{{ resumeExtractionFailed }}" hint-placeholder-val="{{ false }}">
     <div class="card elev-md" style="padding:var(--space-8);text-align:center;display:flex;flex-direction:column;gap:var(--space-3);align-items:center">
       <div style="font-size:15px">We couldn't read that document.</div>
-      <div style="font-size:13px;color:var(--color-neutral-500);line-height:1.5">You can still continue — nothing was extracted, so there's nothing to confirm here yet.</div>
+      <div style="font-size:13px;color:var(--color-neutral-500);line-height:1.5">You can try a different photo, or continue now — nothing was extracted, so there's nothing to confirm here yet either way.</div>
+      <input type="file" id="resume-retry-file-input" accept="image/jpeg,image/png,image/heic,image/heif,image/webp" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden" sc-camel-on-change="{{ onPickRetryResumeFile }}">
+      <label for="resume-retry-file-input" class="btn btn-primary" style="cursor:pointer">Try a different file</label>
       <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ skipResumeConfirm }}">Continue without resume data</button>
+      <sc-if value="{{ resumeFileError }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:12px;color:#e2735c">{{ resumeFileError }}</div>
+      </sc-if>
     </div>
   </sc-if>
 
@@ -5049,7 +5054,6 @@ class Component extends DCLogic {
     optInWorkHistory: false, optInEducation: false, optInCertifications: false,
     resumeFileStaged: null, resumeFileError: null,
     resumeEmailVerificationId: null, resumeDocumentId: null,
-    resumeUploadStatus: 'idle', resumeUploadError: null,
     resumeCandidateId: null, resumeExtraction: null, resumeExtractionLoading: false,
     resumeConfirmPending: false, resumeConfirmError: null,
     contactLeads: { acme: { phone: '', name: '' }, beta: { phone: '', name: '' }, gamma: { phone: '', name: '' }, delta: { phone: '', name: '' }, epsilon: { phone: '', name: '' }, cert: { phone: '', name: '' } },
@@ -5605,12 +5609,15 @@ class Component extends DCLogic {
   // CPU time, uniform across every plan tier — verified live against a real resume photo tonight,
   // then re-confirmed against Supabase's own current docs rather than assumed) terminates the
   // function's isolate directly. No exception is thrown back to this fetch() — the connection
-  // just never resolves — so without a client-side ceiling, this call would hang forever and the
-  // candidate would sit on a spinner with no way to know anything had gone wrong. 45s is generous
-  // relative to every real run tonight (successful OCR+extraction finished in single-digit
-  // seconds) while still bounding how long a candidate can be left with zero feedback. This is one
-  // half of the fix — the other half is get-resume-extraction's own stale-row self-heal, which
-  // makes the failure durable and visible even if this tab isn't open anymore when it happens.
+  // just never resolves — so without a client-side ceiling, this call would hang forever with the
+  // request itself never settling. 45s is generous relative to every real run tonight (successful
+  // OCR+extraction finished in single-digit seconds) while still bounding it. This is one half of
+  // the fix — the other half is get-resume-extraction's own stale-row self-heal, and the piece
+  // that actually surfaces either of those to the candidate is resumeConfirm's own polling (see
+  // startResumePolling) reading that self-heal back, not this call's own success/failure — this
+  // function runs in the background, often before the candidate has even opened the confirm
+  // screen, so nothing it observes about its own outcome is guaranteed to still be relevant by the
+  // time they do.
   async fetchWithTimeout(url, options, timeoutMs) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -5622,7 +5629,6 @@ class Component extends DCLogic {
   }
 
   async uploadResumeInBackground(emailVerificationId, staged) {
-    this.setState({ resumeUploadStatus: 'uploading', resumeUploadError: null });
     let res, data;
     try {
       res = await this.fetchWithTimeout(this.SUPABASE_FN_URL + '/upload-resume', {
@@ -5641,25 +5647,14 @@ class Component extends DCLogic {
       }, 45000);
       data = await res.json().catch(() => ({}));
     } catch (e) {
-      const timedOut = e && e.name === 'AbortError';
-      this.setState({
-        resumeUploadStatus: 'failed',
-        resumeUploadError: timedOut
-          ? "This is taking longer than expected — the upload may have failed partway through. You can continue; we'll show what we have on the confirm screen."
-          : "Couldn't reach the server.",
-      });
       return;
     }
-    if (!res.ok || !data.ok) {
-      this.setState({ resumeUploadStatus: 'failed', resumeUploadError: (data && (data.message || data.error)) || 'Upload failed.' });
-      return;
-    }
-    this.setState({ resumeUploadStatus: 'ocr_done', resumeDocumentId: data.resume_document_id });
+    if (!res.ok || !data.ok) return;
+    this.setState({ resumeDocumentId: data.resume_document_id });
     this.extractResumeInBackground(data.resume_document_id);
   }
 
   async extractResumeInBackground(resumeDocumentId) {
-    this.setState({ resumeUploadStatus: 'extracting' });
     let res, data;
     try {
       res = await this.fetchWithTimeout(this.SUPABASE_FN_URL + '/extract-resume-fields', {
@@ -5669,20 +5664,50 @@ class Component extends DCLogic {
       }, 45000);
       data = await res.json().catch(() => ({}));
     } catch (e) {
-      const timedOut = e && e.name === 'AbortError';
-      this.setState({
-        resumeUploadStatus: 'failed',
-        resumeUploadError: timedOut
-          ? "This is taking longer than expected — extraction may have failed partway through. You can continue; we'll show what we have on the confirm screen."
-          : "Couldn't reach the server.",
-      });
+      return;
+    }
+    if (!res.ok || !data.ok) return;
+  }
+
+  // Powers the "Try a different file" retry on the resumeConfirm screen. Unlike
+  // uploadResumeInBackground (fired before a candidate row exists, keyed to
+  // email_verification_id), this runs after confirmation with a real candidate_id already in
+  // hand, so it uploads directly against that — see upload-resume's header for the branch.
+  // Deliberately not fire-and-forget the way the original background chain is: this sets
+  // resumeExtractionLoading itself so the screen shows "Loading your resume data…" instead of
+  // the stale failed-state card while the retry is in flight, then hands off to
+  // loadResumeExtraction for the actual authoritative status (which starts polling on its own if
+  // the retry is still processing) rather than trusting this call's own success/failure shape.
+  async retryResumeUpload(candidateId, staged) {
+    this.setState({ resumeExtractionLoading: true });
+    let res, data;
+    try {
+      res = await this.fetchWithTimeout(this.SUPABASE_FN_URL + '/upload-resume', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          candidate_id: candidateId,
+          original_filename: staged.fileName,
+          mime_type: staged.mimeType,
+          original_base64: staged.originalBase64,
+          sanitized_base64: staged.sanitizedBase64,
+          rgba_base64: staged.rgbaBase64,
+          width: staged.width,
+          height: staged.height,
+        }),
+      }, 45000);
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ resumeExtractionLoading: false, resumeFileError: "Couldn't reach the server. Please try again." });
       return;
     }
     if (!res.ok || !data.ok) {
-      this.setState({ resumeUploadStatus: 'failed', resumeUploadError: (data && data.error) || 'Extraction failed.' });
+      this.setState({ resumeExtractionLoading: false, resumeFileError: (data && (data.message || data.error)) || 'Upload failed. Please try again.' });
       return;
     }
-    this.setState({ resumeUploadStatus: 'extracted' });
+    this.setState({ resumeDocumentId: data.resume_document_id });
+    this.extractResumeInBackground(data.resume_document_id);
+    this.loadResumeExtraction(candidateId);
   }
 
   // Real image decode: draws the picked photo to a canvas (which both strips EXIF/metadata for
@@ -5698,15 +5723,18 @@ class Component extends DCLogic {
   // load-bearing browser limitation, not glossed over: the catch block below is what actually
   // fires for a candidate on Chrome picking a HEIC photo, and says so plainly rather than failing
   // silently or corrupting the upload.
-  async onPickResumeFile(e) {
-    const file = e.target.files && e.target.files[0];
-    if (!file) return;
+  // Shared by the initial isEntry picker and the resumeConfirm "Try a different file" retry —
+  // same client-decode contract either way (a fresh signup hasn't uploaded yet; a retry has a
+  // real candidate_id already and needs the identical staged payload for upload-resume). Throws
+  // an Error whose .userMessage is the exact candidate-facing copy to show; callers only need to
+  // decide where the resulting message and staged payload go.
+  async decodeResumeImage(file) {
     const ACCEPTED = ['image/jpeg', 'image/png', 'image/heic', 'image/heif', 'image/webp'];
     if (file.type && !ACCEPTED.includes(file.type)) {
-      this.setState({ resumeFileError: "That file type isn't supported yet. Please upload a JPEG, PNG, HEIC, HEIF, or WEBP photo.", fileName: null, resumeFileStaged: null });
-      return;
+      const err = new Error('unsupported_type');
+      err.userMessage = "That file type isn't supported yet. Please upload a JPEG, PNG, HEIC, HEIF, or WEBP photo.";
+      throw err;
     }
-    this.setState({ resumeFileError: null });
     const MAX_DIMENSION = 2200;
     try {
       const dataUrl = await new Promise((resolve, reject) => {
@@ -5743,19 +5771,45 @@ class Component extends DCLogic {
       const sanitizedDataUrl = canvas.toDataURL('image/jpeg', 0.92);
       const sanitizedBase64 = sanitizedDataUrl.split(',')[1];
       const originalBase64 = dataUrl.split(',')[1];
-      this.setState({
-        fileName: file.name,
-        resumeFileStaged: {
-          fileName: file.name, mimeType: file.type || 'image/jpeg',
-          originalBase64, sanitizedBase64, rgbaBase64, width: w, height: h,
-        },
-        resumeFileError: null,
-      });
+      return {
+        fileName: file.name, mimeType: file.type || 'image/jpeg',
+        originalBase64, sanitizedBase64, rgbaBase64, width: w, height: h,
+      };
     } catch (err) {
-      this.setState({
-        resumeFileError: "We couldn't process that photo in this browser (this can happen with HEIC/HEIF photos outside Safari). Please try a JPEG or PNG instead.",
-        fileName: null, resumeFileStaged: null,
-      });
+      const wrapped = new Error('decode_failed');
+      wrapped.userMessage = "We couldn't process that photo in this browser (this can happen with HEIC/HEIF photos outside Safari). Please try a JPEG or PNG instead.";
+      throw wrapped;
+    }
+  }
+
+  async onPickResumeFile(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    try {
+      const staged = await this.decodeResumeImage(file);
+      this.setState({ fileName: staged.fileName, resumeFileStaged: staged, resumeFileError: null });
+    } catch (err) {
+      this.setState({ resumeFileError: err.userMessage, fileName: null, resumeFileStaged: null });
+    }
+  }
+
+  // "Try a different file" from the resumeConfirm screen itself — reached only after a real
+  // candidate_id already exists (this screen is only shown post-confirmation), so this uploads
+  // directly against candidate_id rather than the pre-confirmation email_verification_id staging
+  // key. upload-resume accepts either (see that function's header for the branch). Gives a
+  // candidate whose first attempt failed OCR/extraction a real second attempt instead of only
+  // "continue without a resume".
+  async onPickRetryResumeFile(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const candidateId = this.state.resumeCandidateId;
+    if (!candidateId) return;
+    try {
+      const staged = await this.decodeResumeImage(file);
+      this.setState({ resumeFileError: null });
+      this.retryResumeUpload(candidateId, staged);
+    } catch (err) {
+      this.setState({ resumeFileError: err.userMessage });
     }
   }
 
@@ -5899,6 +5953,17 @@ class Component extends DCLogic {
   // time the candidate clicks the email link — a real race, not a hypothetical one). If no
   // resume_documents row exists at all (candidate used "Help me start" instead of uploading),
   // skips straight past this screen rather than showing an empty form.
+  //
+  // Also the one place that decides whether resumeConfirm's auto-poll should be running: a real,
+  // confirmed gap (found by testing an actual resume tonight, not theorized) was that
+  // get-resume-extraction's stale-row self-heal only ever ran when something called this function,
+  // and the only thing that ever did was this screen's one-time initial load and a manual "Check
+  // again" click — so a real backend failure (a genuine CPU-time kill, confirmed via Edge Function
+  // logs to happen in single-digit seconds) could sit self-healed in the database for however long
+  // it took a candidate to notice their screen hadn't moved and click a button, with zero automatic
+  // feedback in between. startResumePolling/stopResumePolling below close that: every call here
+  // re-evaluates the real status and keeps the poll running exactly as long as it's still needed,
+  // not a fixed duration guessed in advance.
   async loadResumeExtraction(candidateId) {
     this.setState({ resumeExtractionLoading: true });
     let res, data;
@@ -5918,10 +5983,38 @@ class Component extends DCLogic {
       return;
     }
     if (!data.resume_document) {
+      this.stopResumePolling();
       this.setState({ resumeExtractionLoading: false, resumeExtraction: null, screen: 'tiers' });
       return;
     }
     this.setState({ resumeExtractionLoading: false, resumeExtraction: data });
+    const status = data.resume_document.extraction_status;
+    if (status === 'pending' || status === 'ocr_done') {
+      this.startResumePolling(candidateId);
+    } else {
+      this.stopResumePolling();
+    }
+  }
+
+  // 12s: comfortably inside the 10-15s range that makes sense against every real timing seen
+  // tonight — successful runs finish in single-digit seconds, and get-resume-extraction's own
+  // self-heal only ever flips a row past 60s of being stuck, so there's no real cost to checking
+  // this often. Skips a tick rather than overlapping if a call from the previous tick (or a manual
+  // "Check again") is still in flight. Idempotent: calling this while already running is a no-op,
+  // so loadResumeExtraction can call it on every load without needing to track whether it already
+  // did.
+  startResumePolling(candidateId) {
+    if (this._resumePollTimer) return;
+    this._resumePollTimer = setInterval(() => {
+      if (!this.state.resumeExtractionLoading) this.loadResumeExtraction(candidateId);
+    }, 12000);
+  }
+
+  stopResumePolling() {
+    if (this._resumePollTimer) {
+      clearInterval(this._resumePollTimer);
+      this._resumePollTimer = null;
+    }
   }
 
   checkResumeAgain() {
@@ -5929,6 +6022,7 @@ class Component extends DCLogic {
   }
 
   skipResumeConfirm() {
+    this.stopResumePolling();
     this.setState({ screen: 'tiers' });
   }
 
@@ -5976,10 +6070,12 @@ class Component extends DCLogic {
       this.setState({ resumeConfirmPending: false, resumeConfirmError: "Couldn't save your changes. Please try again." });
       return;
     }
+    this.stopResumePolling();
     this.setState({ resumeConfirmPending: false, resumeConfirmError: null, screen: 'tiers' });
   }
 
   resetAll() {
+    this.stopResumePolling();
     this.clearDraft();
     this.setState(this.getInitialState());
   }
@@ -6653,6 +6749,7 @@ class Component extends DCLogic {
       isPreview: s.screen === 'preview',
       isCheckEmail: s.screen === 'checkEmail',
       isResumeConfirm: s.screen === 'resumeConfirm',
+      isTiers: s.screen === 'tiers',
       resumeExtractionLoading: s.resumeExtractionLoading,
       resumeStillProcessing: !s.resumeExtractionLoading && !!s.resumeExtraction && s.resumeExtraction.resume_document &&
         (s.resumeExtraction.resume_document.extraction_status === 'pending' || s.resumeExtraction.resume_document.extraction_status === 'ocr_done'),
@@ -6752,6 +6849,7 @@ class Component extends DCLogic {
       fileName: s.fileName,
       resumeFileError: s.resumeFileError,
       onPickResumeFile: (e) => this.onPickResumeFile(e),
+      onPickRetryResumeFile: (e) => this.onPickRetryResumeFile(e),
       goPreview: () => { this.setState({ screen: 'preview' }); this.saveDraft({ screen: 'preview' }); },
       email: s.email,
       setEmail: (e) => this.setState({ email: e.target.value }),
