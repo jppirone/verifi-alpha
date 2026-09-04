@@ -26,7 +26,14 @@ const corsHeaders = {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
-const CLAUDE_MODEL = "claude-sonnet-5";
+// Haiku 4.5, not Sonnet, deliberately: structured extraction from clear instructions is well
+// within a smaller model's ability, and at real Anthropic pricing (confirmed via the claude-api
+// skill, not recalled from memory) Haiku is $1/$5 per MTok in/out vs Sonnet 5's $2/$10 — half the
+// per-resume cost for a task that doesn't need Sonnet's extra capability. User's own call after
+// seeing the real cost estimate for this specific key (~$0.01-0.02/resume on Sonnet, roughly
+// half that here) — this is the one piece of the pipeline that spends real, metered API money,
+// separate from this coding session's own usage.
+const CLAUDE_MODEL = "claude-haiku-4-5";
 
 // Extraction prompt — states the target schema and field definitions explicitly rather than
 // relying on the model to infer categories, per instructions. Every rule below came from the build
