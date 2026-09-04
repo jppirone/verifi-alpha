@@ -2534,7 +2534,6 @@ a:hover{color:var(--color-accent)}
   <a href="#" sc-camel-on-click="{{ openWhy }}">Why</a>
   <a href="#" sc-camel-on-click="{{ openHow }}">How Much</a>
   <a href="#" sc-camel-on-click="{{ openHelp }}">Help Me Start</a>
-  <button type="button" class="btn btn-ghost" style="margin-left:auto;font-size:11px;opacity:0.6" sc-camel-on-click="{{ toggleCookie }}">{{ cookieToggleLabel }}</button>
 </nav>
 </sc-if>
 
@@ -2552,6 +2551,24 @@ a:hover{color:var(--color-accent)}
     <div style="font-size:13px;color:var(--color-neutral-500);line-height:1.5">{{ verifyErrorMessage }}</div>
   </div>
   <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ returnToEntry }}">Return to start</button>
+  </sc-if>
+</div>
+</sc-if>
+
+<sc-if value="{{ isConfirmingLogin }}" hint-placeholder-val="{{ false }}">
+<div style="max-width:420px;margin:0 auto;padding:120px 20px 40px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:var(--space-3)">
+  <sc-if value="{{ loginConfirmPending }}" hint-placeholder-val="{{ true }}">
+  <div class="card elev-md" style="width:100%;padding:var(--space-8)">
+    <div style="font-size:17px;margin-bottom:8px">Confirming your login&hellip;</div>
+    <div style="font-size:13px;color:var(--color-neutral-500);line-height:1.5">One moment.</div>
+  </div>
+  </sc-if>
+  <sc-if value="{{ loginConfirmFailed }}" hint-placeholder-val="{{ false }}">
+  <div class="card elev-md" style="width:100%;padding:var(--space-8)">
+    <div style="font-size:17px;margin-bottom:8px">{{ loginConfirmErrorTitle }}</div>
+    <div style="font-size:13px;color:var(--color-neutral-500);line-height:1.5">{{ loginConfirmErrorMessage }}</div>
+  </div>
+  <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ returnToLoginFromConfirm }}">Back to login</button>
   </sc-if>
 </div>
 </sc-if>
@@ -2644,20 +2661,37 @@ a:hover{color:var(--color-accent)}
 <sc-if value="{{ isReturning }}" hint-placeholder-val="{{ false }}">
 <div style="max-width:380px;margin:0 auto;padding:88px 20px 40px;display:flex;flex-direction:column;gap:var(--space-4)">
   <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:24px;margin:0">Log in</h1>
+
+  <sc-if value="{{ loginFormVisible }}" hint-placeholder-val="{{ true }}">
+  <p style="margin:0;color:var(--color-neutral-400);font-size:13px;line-height:1.4">No password needed. We'll email you a link that logs you in on whatever device you open it from.</p>
   <div class="field">
     <label for="login-email">Email</label>
-    <input class="input" id="login-email" type="email" placeholder="you@email.com">
+    <input class="input" id="login-email" type="email" placeholder="you@email.com" value="{{ loginEmail }}" sc-camel-on-change="{{ setLoginEmail }}">
   </div>
-  <div class="field">
-    <label for="login-pass">Password</label>
-    <input class="input" id="login-pass" type="password" placeholder="••••••••">
+  <sc-if value="{{ loginRequestError }}" hint-placeholder-val="{{ false }}">
+    <div style="font-size:12px;color:#e2735c">{{ loginRequestError }}</div>
+  </sc-if>
+  <button type="button" class="btn btn-primary btn-block" disabled="{{ loginRequestPending }}" sc-camel-on-click="{{ requestLoginLink }}">{{ loginRequestLabel }}</button>
+  </sc-if>
+
+  <sc-if value="{{ loginLinkSent }}" hint-placeholder-val="{{ false }}">
+  <div class="card elev-sm" style="padding:var(--space-6);text-align:center">
+    <div style="font-size:15px;margin-bottom:6px">Check your email</div>
+    <div style="font-size:13px;color:var(--color-neutral-500);line-height:1.5">We sent a login link to <strong style="color:var(--color-neutral-300)">{{ sentToEmailDisplay }}</strong>. Open it on any device — this page will pick it up automatically.</div>
   </div>
-  <button type="button" class="btn btn-primary btn-block" sc-camel-on-click="{{ goAccount }}">Log in</button>
-  <div style="text-align:center;font-size:12px;color:var(--color-neutral-500)">
-    <a href="#" sc-camel-on-click="{{ noop }}">Forgot password?</a>
+  <button type="button" class="btn btn-ghost btn-block" sc-camel-on-click="{{ useAnotherEmailForLogin }}">Use a different email</button>
+  </sc-if>
+
+  <sc-if value="{{ loginPollExpired }}" hint-placeholder-val="{{ false }}">
+  <div class="card elev-sm" style="padding:var(--space-6);text-align:center">
+    <div style="font-size:15px;margin-bottom:6px">That link expired</div>
+    <div style="font-size:13px;color:var(--color-neutral-500);line-height:1.5">Login links expire after a while for security.</div>
   </div>
+  <button type="button" class="btn btn-primary btn-block" sc-camel-on-click="{{ requestNewLoginLink }}">Send a new link</button>
+  </sc-if>
+
   <div style="border-top:1px solid var(--color-divider);margin-top:var(--space-3);padding-top:var(--space-4);text-align:center;font-size:12px;color:var(--color-neutral-500);line-height:1.6">
-    Not you, or want to upload something new instead? <a href="#" sc-camel-on-click="{{ bypassCookie }}">Click here</a>
+    Not you, or want to upload something new instead? <a href="#" sc-camel-on-click="{{ backToSignupFromLogin }}">Click here</a>
   </div>
 </div>
 </sc-if>
@@ -5032,10 +5066,15 @@ class Component extends DCLogic {
   getInitialState() {
     const seededSkills = this.seedSkillItems();
     const verifyToken = new URLSearchParams(window.location.search).get('verify_token');
-    return { screen: verifyToken ? 'verifying' : 'signupDetails', verifyToken, verifyStatus: verifyToken ? 'pending' : null, verifyErrorReason: null,
+    const loginToken = new URLSearchParams(window.location.search).get('login_token');
+    return { screen: verifyToken ? 'verifying' : (loginToken ? 'confirmingLogin' : 'signupDetails'), verifyToken, verifyStatus: verifyToken ? 'pending' : null, verifyErrorReason: null,
+    loginToken, loginConfirmStatus: loginToken ? 'pending' : null, loginConfirmErrorReason: null,
+    sessionToken: null,
+    loginEmail: '', loginRequestPending: false, loginRequestError: null,
+    loginLinkSent: false, loginTokenId: null, loginPollExpired: false, loginStatusChecking: false,
     emailSendPending: false, emailSendError: null,
     fullName: '', phone: '', duplicateCheckPending: false, duplicateCheckError: null,
-    cookie: false, overlayOpen: false, overlayTab: 0, fileName: null, email: '', tier: null, draft: null, accountTab: 'profile',
+    overlayOpen: false, overlayTab: 0, fileName: null, email: '', tier: null, draft: null, accountTab: 'profile',
     retractOpenBeta: false, retractSubmittedBeta: false,
     epsilonReopenFormOpen: false, epsilonReopened: false,
     profileFirst: 'Alex', profileLast: 'Rivera',
@@ -5565,6 +5604,8 @@ class Component extends DCLogic {
       if (raw) this.setState({ draft: JSON.parse(raw) });
     } catch (e) {}
     if (this.state.verifyToken) this.confirmEmailToken(this.state.verifyToken);
+    else if (this.state.loginToken) this.confirmLoginToken(this.state.loginToken);
+    else this.resolveSession();
   }
 
   async sendVerificationEmail(email, phone, fullName, purpose = 'signup') {
@@ -5948,6 +5989,188 @@ class Component extends DCLogic {
     this.setState({ verifyStatus: 'error', verifyErrorReason: (data && data.error) || 'unknown' });
   }
 
+  // Real, persisted access — the direct fix for the gap confirmed before any of this was built:
+  // confirming on one device used to establish access only for that single moment, with nothing
+  // checked on any later visit or on any other device. Stores only the raw session token
+  // (candidate_sessions itself stores just its SHA-256 hash — see the migration), and is the one
+  // place profile fields + the account screen get applied together, whether the token arrived via
+  // resolve-session (returning visit), confirm-login (the device that clicked the link), or
+  // check-login-status (the device that requested it, once its poll observes confirmation).
+  applySession(sessionToken, profile) {
+    try { localStorage.setItem('verifi_session_token', sessionToken); } catch (e) {}
+    const reactivateNeeded = this.state.deletionScheduled;
+    this.setState({
+      sessionToken,
+      email: (profile && profile.email) || this.state.email,
+      phone: (profile && profile.phone) || this.state.phone,
+      fullName: (profile && profile.full_name) || this.state.fullName,
+      resumeCandidateId: (profile && profile.candidate_id) || this.state.resumeCandidateId,
+    });
+    if (reactivateNeeded) { this.setState({ screen: 'reactivate' }); return; }
+    this.enterAccount();
+  }
+
+  // Called on every mount when there's no verify_token/login_token in the URL — the read side of
+  // applySession's write. A missing, revoked, or expired session all fail the same way (see
+  // resolve-session's own header): silently clear the stale local token and fall through to
+  // signupDetails, same as if no one had ever logged in on this device.
+  async resolveSession() {
+    let token;
+    try { token = localStorage.getItem('verifi_session_token'); } catch (e) { token = null; }
+    if (!token) return;
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/resolve-session', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_token: token }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      try { localStorage.removeItem('verifi_session_token'); } catch (e) {}
+      return;
+    }
+    this.applySession(token, data);
+  }
+
+  // Passwordless login, step 1 (requesting device). Deliberately mirrors sendVerificationEmail's
+  // shape rather than reusing it — request-login looks up an EXISTING candidate by email instead of
+  // staging a new one, and a wrong/unregistered email is a real, honest 404 here (see
+  // request-login's own header for why that's not an email-enumeration regression in this
+  // codebase).
+  async requestLoginLink(email) {
+    this.setState({ loginRequestPending: true, loginRequestError: null });
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/request-login', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ loginRequestPending: false, loginRequestError: "Couldn't reach the server. Check your connection and try again." });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      const msg = data.error === 'no_account_found'
+        ? "We couldn't find an account with that email. Double-check it, or sign up instead."
+        : "Couldn't send that login link. Please try again.";
+      this.setState({ loginRequestPending: false, loginRequestError: msg });
+      return;
+    }
+    this.setState({ loginRequestPending: false, loginRequestError: null, loginLinkSent: true, loginTokenId: data.login_token_id, loginPollExpired: false });
+    this.startLoginPolling(data.login_token_id);
+  }
+
+  // Passwordless login, step 3 (requesting device, polling). Deliberately the exact
+  // startResumePolling/stopResumePolling shape (see that pair's own header for the reasoning this
+  // borrows wholesale): a live interval poll, started when the flow begins and stopped once it
+  // resolves, skipping a tick rather than overlapping if the previous one is still in flight. No
+  // push infrastructure (Realtime or otherwise) — the few-second delay this trades for is not worth
+  // introducing a class of infrastructure this project uses nowhere else.
+  startLoginPolling(loginTokenId) {
+    if (this._loginPollTimer) return;
+    this._loginPollTimer = setInterval(() => {
+      if (!this.state.loginStatusChecking) this.checkLoginStatus(loginTokenId);
+    }, 12000);
+  }
+
+  stopLoginPolling() {
+    if (this._loginPollTimer) {
+      clearInterval(this._loginPollTimer);
+      this._loginPollTimer = null;
+    }
+  }
+
+  async checkLoginStatus(loginTokenId) {
+    this.setState({ loginStatusChecking: true });
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/check-login-status', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ login_token_id: loginTokenId }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ loginStatusChecking: false });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      this.setState({ loginStatusChecking: false });
+      return;
+    }
+    if (!data.confirmed) {
+      this.setState({ loginStatusChecking: false, loginPollExpired: !!data.expired });
+      if (data.expired) this.stopLoginPolling();
+      return;
+    }
+    // Confirmed — check-login-status has already atomically claimed (or, on a retried poll,
+    // re-fetched) this device's own real session server-side; apply it exactly like Device B's
+    // confirm-login response.
+    this.stopLoginPolling();
+    this.setState({ loginStatusChecking: false });
+    this.applySession(data.session_token, data);
+  }
+
+  // Passwordless login, step 2 (the device that actually clicks the link). Strips login_token from
+  // the URL on success — not just tidiness: without this, a refresh on this same device would
+  // resend the now-already-used token to confirm-login and hit a real 409, instead of falling
+  // through componentDidMount to resolveSession and finding the real session this call just
+  // stored. That fallthrough is the actual mechanism behind "refresh and still be logged in."
+  async confirmLoginToken(token) {
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/confirm-login', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ loginConfirmStatus: 'error', loginConfirmErrorReason: 'network' });
+      return;
+    }
+    if (res.ok && data.ok) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('login_token');
+      window.history.replaceState({}, '', url);
+      this.applySession(data.session_token, data);
+      return;
+    }
+    this.setState({ loginConfirmStatus: 'error', loginConfirmErrorReason: (data && data.error) || 'unknown' });
+  }
+
+  // Real revocation, not just a local screen change — mirrors the concern that motivated logout's
+  // own build (see that function's header): a "Log off" that only reset local UI state next to a
+  // newly-real login would leave the exact same kind of dormant, decorative control this whole
+  // feature replaced. Fire-and-forget: the local session is cleared and the screen changes
+  // immediately, matching every other logOff-adjacent nav in this file; the server-side revoke
+  // trails behind but the token is already unusable to this device either way.
+  async realLogOff() {
+    const token = this.state.sessionToken;
+    try { localStorage.removeItem('verifi_session_token'); } catch (e) {}
+    this.stopLoginPolling();
+    this.setState({
+      screen: 'returning', sessionToken: null,
+      loginEmail: '', loginRequestPending: false, loginRequestError: null,
+      loginLinkSent: false, loginTokenId: null, loginPollExpired: false,
+    });
+    if (token) {
+      try {
+        await fetch(this.SUPABASE_FN_URL + '/logout', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_token: token }),
+        });
+      } catch (e) {}
+    }
+  }
+
   // Reads back the draft rows extract-resume-fields wrote (or the still-in-progress status if the
   // background upload→OCR→extract chain kicked off at sendConfirmation time hasn't finished by the
   // time the candidate clicks the email link — a real race, not a hypothetical one). If no
@@ -6158,23 +6381,54 @@ class Component extends DCLogic {
     };
     return {
       noop: openPlaceholder,
-      cookieToggleLabel: s.cookie ? 'Demo: saved-login cookie (on)' : 'Demo: simulate saved-login cookie',
-      toggleCookie: () => this.setState(st => ({ cookie: !st.cookie, screen: !st.cookie ? 'returning' : 'signupDetails' })),
-      bypassCookie: (e) => { pd(e); this.setState({ cookie: false, screen: 'signupDetails' }); },
       goLogin: (e) => { pd(e); this.setState({ screen: 'returning' }); },
-      goAccount: () => {
-        if (this.state.deletionScheduled) { this.setState({ screen: 'reactivate' }); return; }
-        this.enterAccount(); this.addActivityLog('Logged in');
-      },
       reactivateAccount: () => {
         this.setState({ deletionScheduled: false, deletionDate: null });
         this.addActivityLog('Account reactivated');
         this.enterAccount(); this.addActivityLog('Logged in');
       },
       cancelReactivate: (e) => { pd(e); this.setState({ screen: 'signupDetails' }); },
-      logOff: () => this.guardedNav(() => { this.addActivityLog('Logged off'); this.setState({ screen: 'returning' }); }),
+      logOff: () => this.guardedNav(() => { this.addActivityLog('Logged off'); this.realLogOff(); }),
       isAccount: s.screen === 'account',
-      showTopNav: s.screen !== 'account' && s.screen !== 'returning' && s.screen !== 'verifying',
+      showTopNav: s.screen !== 'account' && s.screen !== 'returning' && s.screen !== 'verifying' && s.screen !== 'confirmingLogin',
+      loginEmail: s.loginEmail,
+      setLoginEmail: (e) => this.setState({ loginEmail: e.target.value, loginRequestError: null }),
+      loginRequestPending: s.loginRequestPending,
+      loginRequestError: s.loginRequestError,
+      loginRequestLabel: s.loginRequestPending ? 'Sending…' : 'Send me a login link',
+      requestLoginLink: () => { if (!s.loginRequestPending && s.loginEmail) this.requestLoginLink(s.loginEmail); },
+      loginFormVisible: !s.loginLinkSent,
+      loginLinkSent: s.loginLinkSent && !s.loginPollExpired,
+      loginPollExpired: s.loginLinkSent && s.loginPollExpired,
+      sentToEmailDisplay: s.loginEmail,
+      requestNewLoginLink: () => { this.stopLoginPolling(); this.setState({ loginLinkSent: false, loginTokenId: null, loginPollExpired: false, loginRequestError: null }); },
+      useAnotherEmailForLogin: (e) => { pd(e); this.stopLoginPolling(); this.setState({ loginLinkSent: false, loginTokenId: null, loginPollExpired: false, loginRequestError: null, loginEmail: '' }); },
+      backToSignupFromLogin: (e) => { pd(e); this.stopLoginPolling(); this.setState({ screen: 'signupDetails', loginLinkSent: false, loginTokenId: null, loginPollExpired: false, loginRequestError: null }); },
+      isConfirmingLogin: s.screen === 'confirmingLogin',
+      loginConfirmPending: s.loginConfirmStatus === 'pending',
+      loginConfirmFailed: s.loginConfirmStatus === 'error',
+      loginConfirmErrorTitle: {
+        not_found: "We can't find that login link.",
+        already_used: 'This login link was already used.',
+        expired: 'This login link has expired.',
+        no_candidate_linked: "We can't find that login link.",
+        candidate_not_found: "We can't find an account for that login link.",
+        network: "Couldn't reach the server.",
+      }[s.loginConfirmErrorReason] || 'Something went wrong.',
+      loginConfirmErrorMessage: {
+        not_found: "This link doesn't match any pending login request. Double-check you copied the full link, or request a new one.",
+        already_used: 'This link was already used to log in. If that was you on another device, you should already be signed in there — otherwise request a new link.',
+        expired: 'Login links expire after a while for security. Please request a new one.',
+        no_candidate_linked: "This link doesn't match any pending login request. Request a new one.",
+        candidate_not_found: 'We could not find an account for this link. Please request a new one.',
+        network: 'Check your connection and try opening the link again.',
+      }[s.loginConfirmErrorReason] || 'We were unable to confirm this login link. Please request a new one.',
+      returnToLoginFromConfirm: () => {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('login_token');
+        window.history.replaceState({}, '', url);
+        this.setState({ screen: 'returning', loginConfirmStatus: null, loginConfirmErrorReason: null, loginToken: null });
+      },
       tabIsProfile: s.accountTab === 'profile',
       tabProfileClass: s.accountTab === 'profile' ? 'btn-secondary' : 'btn-ghost',
       selectTabProfile: () => this.guardedNav(() => this.setState({ accountTab: 'profile' })),
@@ -6895,7 +7149,18 @@ class Component extends DCLogic {
       helpMenuOpen: s.helpMenuOpen,
       helpMenuOpenStr: s.helpMenuOpen ? 'true' : 'false',
       openHelpMenu: () => this.setState({ helpMenuOpen: true }),
-      closeHelpMenu: () => this.setState({ helpMenuOpen: false }),
+      // The wrapping div's mouse-enter/leave already opens/closes this menu for pointer users;
+      // this onBlur exists only for keyboard users tabbing away. Without the relatedTarget guard,
+      // clicking any item INSIDE the dropdown (System tour, Log off, the tab shortcuts) blurs the
+      // trigger button first, closing the menu and unmounting those buttons before their own click
+      // ever lands — the item's onClick then never fires. Only close when focus is actually moving
+      // outside the button+dropdown wrapper.
+      closeHelpMenu: (e) => {
+        const btn = e && e.currentTarget;
+        const related = e && e.relatedTarget;
+        if (btn && related && btn.parentElement && btn.parentElement.contains(related)) return;
+        this.setState({ helpMenuOpen: false });
+      },
       helpChatLabel: s.screen === 'account' ? this.getTourSteps().find(t => t.tab === s.accountTab).title : 'your account',
       helpLaunchTour: () => { const steps = this.getTourSteps(); this.setState({ helpMenuOpen: false, screen: 'account', accountTab: steps[s.tourStep] ? steps[s.tourStep].tab : 'profile', tourActive: true }, () => this.measureTourTarget()); },
       helpTabProfile: () => this.setState({ helpMenuOpen: false, helpTabModalTab: 'profile' }),
