@@ -32,14 +32,21 @@
 --
 -- Table order in both sections follows the real foreign-key graph, children before parents:
 --   verification_item_timeline -> verification_items -> {work_history_items, education_items,
---   certification_items, candidate_freeform_sections} -> resume_documents -> candidates
---   -> email_verifications
+--   certification_items, candidate_freeform_sections} -> resume_documents -> candidate_sessions
+--   -> login_tokens -> candidates -> email_verifications
 -- resume_documents is linked to a candidate two ways — candidate_id (once backfilled at
 -- confirm-verification time) and email_verification_id (the staging key used before that, for
 -- an abandoned or still-mid-signup upload) — so both are checked everywhere a "does this row
 -- belong to this candidate" test is needed. verification_items.candidate_id is the only link
 -- into the staff queue; verification_item_timeline hangs off verification_items.id (text,
 -- "VQ-####") via its item_id column, not off candidates directly.
+--
+-- candidate_sessions.candidate_id and login_tokens.candidate_id are real foreign keys with no
+-- ON DELETE CASCADE (see the passwordless-login migration), so both MUST be cleared before
+-- candidates or the delete fails outright with a foreign-key violation, not just leaves stray
+-- rows behind. login_tokens also carries its own email column directly (a login link can predate
+-- any candidate match — see request-login's header), so it's matched by email as well as via any
+-- candidate_id link, unlike candidate_sessions which only ever exists tied to a real candidate.
 
 
 -- ============================================================================
@@ -82,6 +89,11 @@ select
   te.email,
   (select count(*) from cand where cand.email = te.email) as candidates,
   (select count(*) from ev where ev.email = te.email) as email_verifications,
+  (select count(*) from login_tokens lt
+     where lt.email = te.email
+        or lt.candidate_id in (select candidate_id from cand where cand.email = te.email)) as login_tokens,
+  (select count(*) from candidate_sessions cs
+     where cs.candidate_id in (select candidate_id from cand where cand.email = te.email)) as candidate_sessions,
   (select count(*) from rd where rd.email = te.email) as resume_documents,
   (select count(*) from work_history_items w
      where w.candidate_id in (select candidate_id from cand where cand.email = te.email)
@@ -171,6 +183,17 @@ where candidate_id in (
 ) or email_verification_id in (
   select id from email_verifications where email in (select email from _reset_target_emails)
 );
+
+delete from candidate_sessions
+where candidate_id in (
+  select id from candidates where email in (select email from _reset_target_emails)
+);
+
+delete from login_tokens
+where email in (select email from _reset_target_emails)
+   or candidate_id in (
+     select id from candidates where email in (select email from _reset_target_emails)
+   );
 
 delete from candidates
 where email in (select email from _reset_target_emails);
