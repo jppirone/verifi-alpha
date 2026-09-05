@@ -2631,15 +2631,15 @@ a:hover{color:var(--color-accent)}
   <p style="margin:0;color:var(--color-neutral-400);font-size:15px;line-height:1.4">We render and verify it against what's actually printed on the document.</p>
 
   <div class="card elev-sm" style="width:100%;padding:var(--space-8);text-align:center;border:1.5px dashed var(--color-divider);background:var(--color-surface)">
-    <input type="file" id="resume-file-input" accept="image/jpeg,image/png,image/heic,image/heif,image/webp" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden" sc-camel-on-change="{{ onPickResumeFile }}">
+    <input type="file" id="resume-file-input" accept="image/jpeg,image/png,image/heic,image/heif,image/webp,application/pdf" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden" sc-camel-on-change="{{ onPickResumeFile }}">
     <sc-if value="{{ hasFile }}" hint-placeholder-val="{{ false }}">
       <div style="font-size:14px;color:var(--color-neutral-200);margin-bottom:var(--space-3)">{{ fileName }} selected</div>
       <button type="button" class="btn btn-primary btn-block" sc-camel-on-click="{{ goPreview }}">Continue</button>
-      <label for="resume-file-input" class="btn btn-ghost btn-block" style="cursor:pointer;margin-top:var(--space-2)">Choose a different photo</label>
+      <label for="resume-file-input" class="btn btn-ghost btn-block" style="cursor:pointer;margin-top:var(--space-2)">Choose a different file</label>
     </sc-if>
     <sc-if value="{{ noFile }}" hint-placeholder-val="{{ true }}">
-      <div style="font-size:15px;margin-bottom:6px">Take or upload a photo of your resume</div>
-      <div style="font-size:12px;color:var(--color-neutral-500);margin-bottom:var(--space-4)">Accepts JPEG, PNG, HEIC, HEIF, or WEBP photos. PDF and Word documents aren't supported yet.</div>
+      <div style="font-size:15px;margin-bottom:6px">Take a photo or upload a PDF of your resume</div>
+      <div style="font-size:12px;color:var(--color-neutral-500);margin-bottom:var(--space-4)">Accepts PDF, JPEG, PNG, HEIC, HEIF, or WEBP. For a multi-page resume, upload it as a single PDF. Word documents aren't supported yet.</div>
       <label for="resume-file-input" class="btn btn-primary btn-block" style="cursor:pointer">Choose file</label>
       <sc-if value="{{ resumeFileError }}" hint-placeholder-val="{{ false }}">
         <div style="font-size:12px;color:#e2735c;margin-top:var(--space-3)">{{ resumeFileError }}</div>
@@ -2769,8 +2769,8 @@ a:hover{color:var(--color-accent)}
   <sc-if value="{{ resumeExtractionFailed }}" hint-placeholder-val="{{ false }}">
     <div class="card elev-md" style="padding:var(--space-8);text-align:center;display:flex;flex-direction:column;gap:var(--space-3);align-items:center">
       <div style="font-size:15px">We couldn't read that document.</div>
-      <div style="font-size:13px;color:var(--color-neutral-500);line-height:1.5">You can try a different photo, or continue now — nothing was extracted, so there's nothing to confirm here yet either way.</div>
-      <input type="file" id="resume-retry-file-input" accept="image/jpeg,image/png,image/heic,image/heif,image/webp" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden" sc-camel-on-change="{{ onPickRetryResumeFile }}">
+      <div style="font-size:13px;color:var(--color-neutral-500);line-height:1.5">You can try a different file, or continue now — nothing was extracted, so there's nothing to confirm here yet either way.</div>
+      <input type="file" id="resume-retry-file-input" accept="image/jpeg,image/png,image/heic,image/heif,image/webp,application/pdf" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden" sc-camel-on-change="{{ onPickRetryResumeFile }}">
       <label for="resume-retry-file-input" class="btn btn-primary" style="cursor:pointer">Try a different file</label>
       <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ skipResumeConfirm }}">Continue without resume data</button>
       <sc-if value="{{ resumeFileError }}" hint-placeholder-val="{{ false }}">
@@ -2788,7 +2788,12 @@ a:hover{color:var(--color-accent)}
     <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3);position:sticky;top:88px">
       <div class="card-kicker">Your uploaded document</div>
       <div style="width:100%;aspect-ratio:8.5 / 11;background:#ffffff;border-radius:2px;box-shadow:var(--shadow-lg);overflow:auto">
-        <img src="{{ resumeOriginalUrl }}" style="width:100%;display:block">
+        <sc-if value="{{ resumeIsPdf }}" hint-placeholder-val="{{ false }}">
+          <iframe src="{{ resumeOriginalUrl }}" style="width:100%;height:100%;border:0;display:block"></iframe>
+        </sc-if>
+        <sc-if value="{{ resumeIsImage }}" hint-placeholder-val="{{ true }}">
+          <img src="{{ resumeOriginalUrl }}" style="width:100%;display:block">
+        </sc-if>
       </div>
       <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">This is exactly what you uploaded, unmodified.</div>
     </div>
@@ -5825,11 +5830,31 @@ class Component extends DCLogic {
     }
   }
 
+  // PDF path: no canvas decode at all — a PDF isn't an <img>-decodable format, and rasterization
+  // now happens server-side, per page, in rasterize-pdf-page (real, deployed, stress-tested against
+  // 4 real PDF shapes before this was wired in). This just reads the raw file bytes as base64;
+  // upload-resume's isPdf branch handles everything else. sanitizedBase64/rgbaBase64/width/height
+  // are left undefined — upload-resume only requires those for the image path.
+  async decodeResumePdf(file) {
+    const dataUrl = await new Promise((resolve, reject) => {
+      const rd = new FileReader();
+      rd.onload = () => resolve(rd.result);
+      rd.onerror = () => reject(new Error('read_failed'));
+      rd.readAsDataURL(file);
+    }).catch(() => {
+      const err = new Error('read_failed');
+      err.userMessage = "We couldn't read that PDF in this browser. Please try again or use a different file.";
+      throw err;
+    });
+    const originalBase64 = dataUrl.split(',')[1];
+    return { fileName: file.name, mimeType: 'application/pdf', originalBase64 };
+  }
+
   async onPickResumeFile(e) {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
     try {
-      const staged = await this.decodeResumeImage(file);
+      const staged = file.type === 'application/pdf' ? await this.decodeResumePdf(file) : await this.decodeResumeImage(file);
       this.setState({ fileName: staged.fileName, resumeFileStaged: staged, resumeFileError: null });
     } catch (err) {
       this.setState({ resumeFileError: err.userMessage, fileName: null, resumeFileStaged: null });
@@ -5848,7 +5873,7 @@ class Component extends DCLogic {
     const candidateId = this.state.resumeCandidateId;
     if (!candidateId) return;
     try {
-      const staged = await this.decodeResumeImage(file);
+      const staged = file.type === 'application/pdf' ? await this.decodeResumePdf(file) : await this.decodeResumeImage(file);
       this.setState({ resumeFileError: null });
       this.retryResumeUpload(candidateId, staged);
     } catch (err) {
@@ -7068,6 +7093,11 @@ class Component extends DCLogic {
       checkResumeAgain: () => this.checkResumeAgain(),
       skipResumeConfirm: () => this.skipResumeConfirm(),
       resumeOriginalUrl: (s.resumeExtraction && s.resumeExtraction.resume_document && s.resumeExtraction.resume_document.original_signed_url) || '',
+      // A PDF can't render via <img> the way a photo can — the confirm screen below picks an
+      // <iframe> (browser's native PDF viewer) or <img> based on this, rather than always assuming
+      // an image the way it did before PDF uploads existed.
+      resumeIsPdf: !!(s.resumeExtraction && s.resumeExtraction.resume_document && s.resumeExtraction.resume_document.mime_type === 'application/pdf'),
+      resumeIsImage: !!(s.resumeExtraction && s.resumeExtraction.resume_document && s.resumeExtraction.resume_document.mime_type !== 'application/pdf'),
       resumeHasSummary: !!(s.resumeExtraction && s.resumeExtraction.freeform.some(f => f.section_type === 'summary')),
       resumeSummaryContent: (() => {
         const f = s.resumeExtraction && s.resumeExtraction.freeform.find(f => f.section_type === 'summary');

@@ -44,18 +44,29 @@ const corsHeaders = {
 // short-circuit cleanly if it's called anyway on an already-'extracted' row, since candidate.html's
 // upload → extract chain calls it unconditionally regardless of which path ran here.
 //
-// SCOPE DECISION (deliberate, backed out later via config, not a hardcoded restriction): alpha
-// accepts image uploads only. PDF rasterization inside an Edge Function is a real, unsolved
-// problem (same shape as the Tesseract-in-Deno problem this session already fought through) and is
-// explicitly out of scope for this build. Re-enabling PDF later is meant to be a one-line change to
-// this list plus wiring an actual rasterization step into the sanitize stage — nothing else here
-// should need to change, which is why this is one constant and not scattered validation logic.
+// PDF SUPPORT (added after real stress-testing — 7/7 real PDFs across 4 real document shapes,
+// same session as rasterize-pdf-page itself): the earlier "alpha accepts image uploads only" scope
+// decision is retired. PDF rasterization inside an Edge Function was the real unsolved problem
+// blocking it (same shape as the Tesseract-in-Deno problem this session fought through for images);
+// it's solved now, in rasterize-pdf-page, one page per invocation (a real memory-ceiling finding,
+// not a guess — see that function's header). PDFs skip the client-side canvas decode entirely
+// (there's no canvas decode for a PDF) and go through the PDF branch below instead, which calls
+// rasterize-pdf-page once per page and merges the per-page structured extractions.
+//
+// Word/.docx stays out of scope deliberately — a separate infrastructure/vendor decision, not a
+// technical gap like PDF was. Flat pre-stitched multi-page images (a candidate manually combining
+// several page-photos into one file) are also NOT supported: that heuristic was tested for real
+// against the actual motivating file and killed (see STITCHED_ASPECT_RATIO_THRESHOLD below — it
+// still exists to catch and vision-route a stitch that slips through, not to make stitching a
+// supported path). A candidate with a multi-page photographed resume is expected to upload a real
+// PDF or one image per page, not a manual stitch.
 const ACCEPTED_MIME_TYPES = [
   "image/jpeg",
   "image/png",
   "image/heic",
   "image/heif",
   "image/webp",
+  "application/pdf",
 ];
 
 // WHY THIS TAKES email_verification_id, NOT candidate_id — for the FIRST upload:
@@ -317,6 +328,35 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const BUCKET = "resume-documents";
 
+// Server-to-server call to the sibling function — same project, so the internal functions URL
+// works directly. Real gap found live: rasterize-pdf-page's OWN code is auth:"none" (its
+// withSupabase wrapper doesn't require a JWT), but the Supabase platform's own gateway enforces
+// JWT verification in front of every function regardless of what the function's code says —
+// confirmed by a real 502 "Missing authorization header" on the first real end-to-end test of this
+// wiring. The service-role key (already available here) satisfies that gateway check.
+const RASTERIZE_FN_URL = `${SUPABASE_URL}/functions/v1/rasterize-pdf-page`;
+
+// Real safety valve on the page LOOP itself, distinct from rasterize-pdf-page's own
+// PAGE_COUNT_THRESHOLD=15 (which only affects that function's per-page tesseract-vs-vision
+// routing, not how many pages get requested). A resume is practically 1-3 pages; this just stops a
+// pathological upload from making this function issue dozens of sequential per-page calls. Not
+// real-data-calibrated — no test tonight exercised more than 3 pages — flagged as a guess like
+// every other untested boundary in this pipeline.
+const MAX_PDF_PAGES = 30;
+
+// Merges N per-page ExtractionResult objects (one per rasterize-pdf-page call) into one. Plain
+// concatenation, no cross-page dedup — a role or credential that legitimately repeats verbatim
+// across two pages of the same resume is rare, and rasterize-pdf-page's own prompt already dedups
+// WITHIN a single page. Real, known gap for the rare cross-page duplicate; not solved here.
+function mergeExtractions(pages: ExtractionResult[]): ExtractionResult {
+  return {
+    work_history: pages.flatMap((p) => p.work_history),
+    education: pages.flatMap((p) => p.education),
+    certifications: pages.flatMap((p) => p.certifications),
+    freeform: pages.flatMap((p) => p.freeform),
+  };
+}
+
 export default {
   fetch: withSupabase({ auth: "none" }, async (req, _ctx) => {
     if (req.method === "OPTIONS") {
@@ -350,11 +390,14 @@ export default {
           message: `This file type isn't supported yet. Please upload one of: ${ACCEPTED_MIME_TYPES.join(", ")}.`,
         }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
-      if (!original_base64 || !sanitized_base64 || !rgba_base64 || !width || !height) {
+      const isPdf = mime_type === "application/pdf";
+      // PDFs skip the client canvas-decode entirely (there's no canvas decode for a PDF) — only
+      // the raw file bytes are required. Images still need the full client-decoded set.
+      if (!original_base64 || (!isPdf && (!sanitized_base64 || !rgba_base64 || !width || !height))) {
         return new Response(JSON.stringify({
           ok: false,
           error: "missing_upload_data",
-          message: "Upload was incomplete (this browser may not support processing this photo format). Try a JPEG or PNG.",
+          message: "Upload was incomplete (this browser may not support processing this file). Try a JPEG, PNG, or PDF.",
         }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
 
@@ -394,19 +437,23 @@ export default {
       const docId = crypto.randomUUID();
       const ext = mime_type.split("/")[1] || "bin";
       const originalPath = `${linkValue}/${docId}/original.${ext}`;
-      const sanitizedPath = `${linkValue}/${docId}/sanitized.jpg`;
+      // No sanitized render for a PDF — sanitizing means "flattened/EXIF-stripped image", and a
+      // multi-page PDF has no single image to flatten to. rasterize-pdf-page reads originalPath
+      // directly, page by page, instead.
+      const sanitizedPath = isPdf ? null : `${linkValue}/${docId}/sanitized.jpg`;
 
       const originalBytes = base64ToBytes(original_base64);
-      const sanitizedBytes = base64ToBytes(sanitized_base64);
 
-      const [origUpload, sanUpload] = await Promise.all([
-        supabase.storage.from(BUCKET).upload(originalPath, originalBytes, { contentType: mime_type, upsert: false }),
-        supabase.storage.from(BUCKET).upload(sanitizedPath, sanitizedBytes, { contentType: "image/jpeg", upsert: false }),
-      ]);
-      if (origUpload.error || sanUpload.error) {
+      const uploads = [supabase.storage.from(BUCKET).upload(originalPath, originalBytes, { contentType: mime_type, upsert: false })];
+      if (!isPdf) {
+        const sanitizedBytes = base64ToBytes(sanitized_base64);
+        uploads.push(supabase.storage.from(BUCKET).upload(sanitizedPath!, sanitizedBytes, { contentType: "image/jpeg", upsert: false }));
+      }
+      const [origUpload, sanUpload] = await Promise.all(uploads);
+      if (origUpload.error || sanUpload?.error) {
         return new Response(JSON.stringify({
           ok: false, error: "storage_upload_failed",
-          detail: { original: origUpload.error?.message, sanitized: sanUpload.error?.message },
+          detail: { original: origUpload.error?.message, sanitized: sanUpload?.error?.message },
         }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
 
@@ -427,6 +474,91 @@ export default {
         return new Response(JSON.stringify({ ok: false, error: "db_insert_failed", detail: insertErr.message }), {
           status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
+      }
+
+      // PDF branch: one page per rasterize-pdf-page call, per the real memory-ceiling finding that
+      // function's header documents (rendering every page in one invocation genuinely fails with
+      // WORKER_RESOURCE_LIMIT — not a guess, a reproduced failure). Page 1's response carries
+      // page_count, so it's called first and the rest follow in a loop. Each call already returns a
+      // complete, routed (tesseract-vs-vision) structured extraction for that one page — this
+      // function's own OCR/vision logic below is for the image path only and isn't reused here.
+      // Same short-circuit as the image vision-fallback branch: goes straight to 'extracted',
+      // skipping 'ocr_done' and extract-resume-fields' separate Haiku call, since every page already
+      // comes back fully extracted.
+      if (isPdf) {
+        console.log(`upload-resume: ${docId} is a PDF, routing through rasterize-pdf-page`);
+        const pageExtractions: ExtractionResult[] = [];
+        let pageCount = 1;
+        for (let pageNumber = 1; pageNumber <= pageCount && pageNumber <= MAX_PDF_PAGES; pageNumber++) {
+          let pageRes: Response;
+          let pageData: { ok?: boolean; page_count?: number; extraction?: unknown; error?: string; message?: string };
+          try {
+            pageRes = await fetch(RASTERIZE_FN_URL, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "apikey": SUPABASE_SERVICE_ROLE_KEY,
+                "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+              },
+              body: JSON.stringify({ storage_path: originalPath, page_number: pageNumber }),
+            });
+            pageData = await pageRes.json();
+          } catch (fetchErr) {
+            await supabase.from("resume_documents").update({ extraction_status: "failed" }).eq("id", docId);
+            return new Response(JSON.stringify({
+              ok: false, error: "pdf_rasterize_unreachable", detail: String(fetchErr),
+              resume_document_id: docId, page: pageNumber,
+            }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          }
+          if (!pageRes.ok || !pageData.ok || !isValidExtraction(pageData.extraction)) {
+            await supabase.from("resume_documents").update({ extraction_status: "failed" }).eq("id", docId);
+            return new Response(JSON.stringify({
+              ok: false, error: "pdf_page_extraction_failed",
+              detail: pageData.message || pageData.error || "unknown_error",
+              resume_document_id: docId, page: pageNumber,
+            }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          }
+          pageExtractions.push(pageData.extraction);
+          if (pageNumber === 1 && typeof pageData.page_count === "number" && pageData.page_count > 0) {
+            pageCount = pageData.page_count;
+          }
+        }
+
+        const merged = mergeExtractions(pageExtractions);
+        const { error: pdfRpcErr } = await supabase.rpc("insert_resume_extraction", {
+          p_resume_document_id: docId,
+          p_candidate_id: docRow.candidate_id,
+          p_work_history: merged.work_history,
+          p_education: merged.education,
+          p_certifications: merged.certifications,
+          p_freeform: merged.freeform,
+        });
+        if (pdfRpcErr) {
+          await supabase.from("resume_documents").update({ extraction_status: "failed" }).eq("id", docId);
+          return new Response(JSON.stringify({ ok: false, error: "insert_failed", detail: pdfRpcErr.message, resume_document_id: docId }), {
+            status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        const { error: pdfStatusErr } = await supabase
+          .from("resume_documents")
+          .update({ extraction_status: "extracted", extracted_at: new Date().toISOString() })
+          .eq("id", docId);
+        if (pdfStatusErr) {
+          return new Response(JSON.stringify({ ok: false, error: "status_update_failed", detail: pdfStatusErr.message }), {
+            status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        const { data: signedPdf } = await supabase.storage.from(BUCKET).createSignedUrl(originalPath, 3600);
+        return new Response(JSON.stringify({
+          ok: true,
+          resume_document_id: docId,
+          extraction_status: "extracted",
+          extraction_method: "pdf_rasterize",
+          page_count: pageCount,
+          original_signed_url: signedPdf?.signedUrl ?? null,
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
 
       const w = Number(width), h = Number(height);
