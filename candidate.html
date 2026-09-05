@@ -5072,6 +5072,7 @@ class Component extends DCLogic {
     sessionToken: null,
     loginEmail: '', loginRequestPending: false, loginRequestError: null,
     loginLinkSent: false, loginTokenId: null, loginPollExpired: false, loginStatusChecking: false,
+    checkEmailStatusChecking: false,
     emailSendPending: false, emailSendError: null,
     fullName: '', phone: '', duplicateCheckPending: false, duplicateCheckError: null,
     overlayOpen: false, overlayTab: 0, fileName: null, email: '', tier: null, draft: null, accountTab: 'profile',
@@ -5637,6 +5638,7 @@ class Component extends DCLogic {
     }
     this.setState({ emailSendPending: false, emailSendError: null, screen: 'checkEmail', resumeEmailVerificationId: data.email_verification_id || null });
     this.saveDraft({ screen: 'checkEmail' });
+    if (data.email_verification_id) this.startCheckEmailPolling(data.email_verification_id);
     // Resume upload/OCR run in the background here, not blocking the checkEmail screen — the
     // client-decoded image data was already staged by onPickResumeFile back at isEntry. This is
     // the earliest point a real email_verification_id exists (candidates rows don't exist until
@@ -5965,20 +5967,7 @@ class Component extends DCLogic {
     }
     if (res.ok && data.ok) {
       if (data.purpose === 'signup') {
-        this.clearDraft();
-        this.setState({
-          screen: 'resumeConfirm', draft: null, verifyStatus: 'success',
-          email: data.email || this.state.email, phone: data.phone || this.state.phone,
-          resumeCandidateId: data.candidate_id || null,
-          // Server-authoritative, not client-cached: this is the read side of the same
-          // email_verifications row send-verification staged these onto — reached via the token in
-          // this confirmation link itself, so it works even when this link is opened on a different
-          // device than the one that signed up (see confirm-verification's header).
-          optInWorkHistory: !!data.opt_in_work_history,
-          optInEducation: !!data.opt_in_education,
-          optInCertifications: !!data.opt_in_certifications,
-        });
-        if (data.candidate_id) this.loadResumeExtraction(data.candidate_id);
+        this.applySignupConfirmation(data);
         return;
       }
       // Placeholder for non-signup purposes (e.g. 'email_change'). Real handling lands
@@ -5987,6 +5976,70 @@ class Component extends DCLogic {
       return;
     }
     this.setState({ verifyStatus: 'error', verifyErrorReason: (data && data.error) || 'unknown' });
+  }
+
+  // Shared by both routes into a confirmed signup: confirmEmailToken (the device that actually
+  // clicks the link) and checkVerificationStatus (the device that stayed on "Check your email" and
+  // polled its way here — see that function's own header). Server-authoritative, not client-cached:
+  // this is the read side of the same email_verifications row send-verification staged these onto,
+  // so it works regardless of which device reaches it first.
+  applySignupConfirmation(data) {
+    this.clearDraft();
+    this.setState({
+      screen: 'resumeConfirm', draft: null, verifyStatus: 'success',
+      email: data.email || this.state.email, phone: data.phone || this.state.phone,
+      resumeCandidateId: data.candidate_id || null,
+      optInWorkHistory: !!data.opt_in_work_history,
+      optInEducation: !!data.opt_in_education,
+      optInCertifications: !!data.opt_in_certifications,
+    });
+    if (data.candidate_id) this.loadResumeExtraction(data.candidate_id);
+  }
+
+  // The exact startResumePolling/startLoginPolling shape (see either's own header for the full
+  // reasoning this borrows wholesale) — a live interval poll, started the moment checkEmail is
+  // entered and stopped once it resolves, skipping a tick rather than overlapping if the previous
+  // one is still in flight. No push infrastructure, same tradeoff already made twice tonight.
+  startCheckEmailPolling(emailVerificationId) {
+    if (this._checkEmailPollTimer) return;
+    this._checkEmailPollTimer = setInterval(() => {
+      if (!this.state.checkEmailStatusChecking) this.checkVerificationStatus(emailVerificationId);
+    }, 12000);
+  }
+
+  stopCheckEmailPolling() {
+    if (this._checkEmailPollTimer) {
+      clearInterval(this._checkEmailPollTimer);
+      this._checkEmailPollTimer = null;
+    }
+  }
+
+  async checkVerificationStatus(emailVerificationId) {
+    this.setState({ checkEmailStatusChecking: true });
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/check-verification-status', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email_verification_id: emailVerificationId }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ checkEmailStatusChecking: false });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      this.setState({ checkEmailStatusChecking: false });
+      return;
+    }
+    if (!data.confirmed) {
+      this.setState({ checkEmailStatusChecking: false });
+      if (data.expired) this.stopCheckEmailPolling();
+      return;
+    }
+    this.stopCheckEmailPolling();
+    this.setState({ checkEmailStatusChecking: false });
+    this.applySignupConfirmation(data);
   }
 
   // Real, persisted access — the direct fix for the gap confirmed before any of this was built:
