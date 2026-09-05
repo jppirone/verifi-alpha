@@ -112,7 +112,7 @@ export default {
       }
 
       const candRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=id,email,phone,full_name`,
+        `${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=id,email,phone,full_name,first_name,last_name`,
         { headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } },
       );
       const candRows = candRes.ok ? await candRes.json() : [];
@@ -151,6 +151,8 @@ export default {
         email: candidate.email,
         phone: candidate.phone,
         full_name: candidate.full_name,
+        first_name: candidate.first_name,
+        last_name: candidate.last_name,
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: "unhandled", detail: String(e) }), {

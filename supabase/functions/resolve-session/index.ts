@@ -17,6 +17,12 @@ const corsHeaders = {
 // anywhere (see candidate_sessions in the migration). A revoked or expired session, or one that
 // simply doesn't match any hash, all return the same ok:false — the client's only correct response
 // to any of them is "you're not logged in," not a reason to distinguish and act on differently.
+//
+// Returns both full_name AND first_name/last_name (not a replacement) — signup now only ever
+// writes first_name/last_name (see confirm-verification), so full_name is null for every new
+// candidate, but pre-existing candidates only ever have full_name. The client concatenates
+// first_name/last_name when present and falls back to full_name otherwise, rather than this
+// function guessing at a single display string itself.
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
@@ -60,7 +66,7 @@ export default {
       }
 
       const candRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/candidates?id=eq.${session.candidate_id}&select=id,email,phone,full_name`,
+        `${SUPABASE_URL}/rest/v1/candidates?id=eq.${session.candidate_id}&select=id,email,phone,full_name,first_name,last_name`,
         { headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } },
       );
       const candRows = candRes.ok ? await candRes.json() : [];
@@ -90,6 +96,8 @@ export default {
         email: candidate.email,
         phone: candidate.phone,
         full_name: candidate.full_name,
+        first_name: candidate.first_name,
+        last_name: candidate.last_name,
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: "unhandled", detail: String(e) }), {

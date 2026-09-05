@@ -6,7 +6,7 @@
 //
 // MODIFIED AGAIN for the opt-in server-side staging fix: the three "Submit for verification"
 // checkboxes (work history / education / certifications) are now staged onto this same
-// email_verifications row, in the same request that already stages email/phone/full_name here —
+// email_verifications row, in the same request that already stages email/phone/name here —
 // no new round trip, no new table. This replaces an earlier, backed-out client-side (localStorage)
 // attempt at surviving the real page reload the email confirmation link causes; see
 // confirm-verification's header for the read side and the full reasoning (the real gap the
@@ -21,6 +21,12 @@
 // anchor's occurrence count checked as exactly 1 before touching it), not a full-file rewrite — so
 // every line below other than those two anchors is the original, unmodified deployed source,
 // preserved verbatim including its own (mostly flush-left, not reformatted) indentation style.
+//
+// MODIFIED AGAIN to stage first_name/last_name instead of a single full_name: the candidate signup
+// form now collects them separately (see candidate.html). full_name stays on the email_verifications
+// row for pre-existing rows only — this function no longer writes it at all, on purpose; new rows
+// carry first_name/last_name instead. See the migration adding these columns for the full reasoning
+// and confirm-verification's own header for the read side.
 
 // Setup type definitions for built-in Supabase Runtime APIs
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -42,7 +48,7 @@ return new Response(null, { headers: corsHeaders });
 }
 
 try {
-const { email, phone, full_name, purpose, opt_in_work_history, opt_in_education, opt_in_certifications } = await req.json();
+const { email, phone, first_name, last_name, purpose, opt_in_work_history, opt_in_education, opt_in_certifications } = await req.json();
 if (!email || typeof email !== "string") {
 return new Response(JSON.stringify({ ok: false, error: "Email required" }), {
 status: 400,
@@ -62,7 +68,7 @@ headers: {
 "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
 "Prefer": "return=representation",
 },
-body: JSON.stringify({ email, phone, full_name, token, expires_at: expiresAt, purpose: verifyPurpose, opt_in_work_history: !!opt_in_work_history, opt_in_education: !!opt_in_education, opt_in_certifications: !!opt_in_certifications }),
+body: JSON.stringify({ email, phone, first_name, last_name, token, expires_at: expiresAt, purpose: verifyPurpose, opt_in_work_history: !!opt_in_work_history, opt_in_education: !!opt_in_education, opt_in_certifications: !!opt_in_certifications }),
 });
 
 if (!insertRes.ok) {

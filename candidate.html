@@ -2589,8 +2589,12 @@ a:hover{color:var(--color-accent)}
 
   <div class="card elev-sm" style="width:100%;padding:var(--space-6);display:flex;flex-direction:column;gap:var(--space-3);text-align:left">
     <div class="field">
-      <label for="signup-name">Full name</label>
-      <input class="input" id="signup-name" type="text" placeholder="Jordan Lee" value="{{ fullName }}" sc-camel-on-change="{{ setFullName }}">
+      <label for="signup-first-name">First name</label>
+      <input class="input" id="signup-first-name" type="text" placeholder="Jordan" value="{{ firstName }}" sc-camel-on-change="{{ setFirstName }}">
+    </div>
+    <div class="field">
+      <label for="signup-last-name">Last name</label>
+      <input class="input" id="signup-last-name" type="text" placeholder="Lee" value="{{ lastName }}" sc-camel-on-change="{{ setLastName }}">
     </div>
     <div class="field">
       <label for="signup-phone">Phone number</label>
@@ -5079,7 +5083,7 @@ class Component extends DCLogic {
     loginLinkSent: false, loginTokenId: null, loginPollExpired: false, loginStatusChecking: false,
     checkEmailStatusChecking: false,
     emailSendPending: false, emailSendError: null,
-    fullName: '', phone: '', duplicateCheckPending: false, duplicateCheckError: null,
+    firstName: '', lastName: '', phone: '', duplicateCheckPending: false, duplicateCheckError: null,
     overlayOpen: false, overlayTab: 0, fileName: null, email: '', tier: null, draft: null, accountTab: 'profile',
     retractOpenBeta: false, retractSubmittedBeta: false,
     epsilonReopenFormOpen: false, epsilonReopened: false,
@@ -5614,7 +5618,7 @@ class Component extends DCLogic {
     else this.resolveSession();
   }
 
-  async sendVerificationEmail(email, phone, fullName, purpose = 'signup') {
+  async sendVerificationEmail(email, phone, firstName, lastName, purpose = 'signup') {
     this.setState({ emailSendPending: true, emailSendError: null });
     let res, data;
     try {
@@ -5622,11 +5626,11 @@ class Component extends DCLogic {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
         // Opt-in choices are staged onto the email_verifications row this same call creates — the
-        // same pattern already used for phone/full_name here, and the reason a client-side (real,
+        // same pattern already used for phone/name here, and the reason a client-side (real,
         // now backed-out) attempt at this problem was replaced: send-verification/confirm-
         // verification's own headers explain why (real cross-device gap in the client version).
         body: JSON.stringify({
-          email, phone, full_name: fullName, purpose,
+          email, phone, first_name: firstName, last_name: lastName, purpose,
           opt_in_work_history: this.state.optInWorkHistory,
           opt_in_education: this.state.optInEducation,
           opt_in_certifications: this.state.optInCertifications,
@@ -5926,8 +5930,9 @@ class Component extends DCLogic {
     if (!d) return;
     const email = d.email || '';
     const phone = d.phone || '';
-    const fullName = d.fullName || '';
-    this.setState({ fileName: d.fileName, email, fullName, phone, draft: null });
+    const firstName = d.firstName || '';
+    const lastName = d.lastName || '';
+    this.setState({ fileName: d.fileName, email, firstName, lastName, phone, draft: null });
     if (!email || !phone) {
       this.setState({ screen: 'signupDetails' });
       return;
@@ -6081,7 +6086,8 @@ class Component extends DCLogic {
       sessionToken,
       email: (profile && profile.email) || this.state.email,
       phone: (profile && profile.phone) || this.state.phone,
-      fullName: (profile && profile.full_name) || this.state.fullName,
+      firstName: (profile && profile.first_name) || this.state.firstName,
+      lastName: (profile && profile.last_name) || this.state.lastName,
       resumeCandidateId: (profile && profile.candidate_id) || this.state.resumeCandidateId,
     });
     if (reactivateNeeded) { this.setState({ screen: 'reactivate' }); return; }
@@ -6382,7 +6388,7 @@ class Component extends DCLogic {
   }
 
   saveDraft(fields) {
-    const draft = { fileName: this.state.fileName, email: this.state.email, fullName: this.state.fullName, phone: this.state.phone, screen: this.state.screen, ...fields };
+    const draft = { fileName: this.state.fileName, email: this.state.email, firstName: this.state.firstName, lastName: this.state.lastName, phone: this.state.phone, screen: this.state.screen, ...fields };
     try { localStorage.setItem('verifi_draft', JSON.stringify(draft)); } catch (e) {}
   }
 
@@ -7190,8 +7196,10 @@ class Component extends DCLogic {
       goPreview: () => { this.setState({ screen: 'preview' }); this.saveDraft({ screen: 'preview' }); },
       email: s.email,
       setEmail: (e) => this.setState({ email: e.target.value }),
-      fullName: s.fullName,
-      setFullName: (e) => this.setState({ fullName: e.target.value }),
+      firstName: s.firstName,
+      setFirstName: (e) => this.setState({ firstName: e.target.value }),
+      lastName: s.lastName,
+      setLastName: (e) => this.setState({ lastName: e.target.value }),
       phone: s.phone,
       setPhone: (e) => this.setState({ phone: e.target.value }),
       duplicateCheckPending: s.duplicateCheckPending,
@@ -7202,7 +7210,7 @@ class Component extends DCLogic {
       emailSendPending: s.emailSendPending,
       emailSendError: s.emailSendError,
       sendConfirmationLabel: s.emailSendPending ? 'Sending…' : 'Send confirmation',
-      sendConfirmation: () => { if (!s.emailSendPending) this.sendVerificationEmail(s.email, s.phone, s.fullName); },
+      sendConfirmation: () => { if (!s.emailSendPending) this.sendVerificationEmail(s.email, s.phone, s.firstName, s.lastName); },
       devConfirm: () => { this.clearDraft(); this.setState({ screen: 'tiers', draft: null }); },
       showResumeBanner: !!s.draft && s.screen === 'signupDetails',
       draftFileName: s.draft ? s.draft.fileName : null,

@@ -50,6 +50,14 @@ const corsHeaders = {
 // didn't were purely indentation (the original's whole `if (record.purpose === 'signup')` block
 // uses a flatter 2-space indent than the rest of the function, not re-normalized here — cosmetic
 // only, logic unchanged, confirmed by re-checking those two spots directly against the source).
+//
+// MODIFIED AGAIN: the candidates insert now carries first_name/last_name (read straight off
+// `record`, already fetched via select=* — no new query) instead of full_name, matching
+// send-verification's write side. full_name stays on both tables for pre-existing rows only; this
+// insert simply doesn't write it anymore. The duplicate-email race-recovery path below (an insert
+// failing with a real unique-constraint violation because a retry landed after a previous attempt
+// already succeeded) is untouched — first_name/last_name just ride along in the same insert body,
+// same atomicity, same retry-safety.
 
 export default {
   fetch: withSupabase({ auth: "none" }, async (req, _ctx) => {
@@ -116,7 +124,7 @@ export default {
             "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
             "Prefer": "return=representation",
           },
-          body: JSON.stringify({ email: record.email, phone: record.phone, full_name: record.full_name, verification_id: record.id }),
+          body: JSON.stringify({ email: record.email, phone: record.phone, first_name: record.first_name, last_name: record.last_name, verification_id: record.id }),
         });
 
         if (!insertRes.ok) {
