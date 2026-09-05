@@ -2300,6 +2300,30 @@ th.sortable{cursor:pointer;user-select:none}
           <button type="button" class="btn {{ filterCorrectionClass }}" style="font-size:12px" onClick="{{ showCorrectionOnly }}">Correction requested ({{ correctionCount }})</button>
         </div>
       </div>
+      <div style="display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:flex-end;margin-bottom:var(--space-4)">
+        <div class="field" style="flex:1;min-width:160px;margin:0">
+          <label for="filter-name" style="font-size:11px">Candidate name</label>
+          <input class="input" id="filter-name" placeholder="e.g. Jordan Ellis" value="{{ nameFilter }}" onChange="{{ setNameFilter }}">
+        </div>
+        <div class="field" style="flex:1;min-width:140px;margin:0">
+          <label for="filter-item-id" style="font-size:11px">Item ID</label>
+          <input class="input" id="filter-item-id" placeholder="e.g. VQ-1034" value="{{ itemIdFilter }}" onChange="{{ setItemIdFilter }}">
+        </div>
+        <div class="field" style="flex:1;min-width:180px;margin:0">
+          <label for="filter-type" style="font-size:11px">Category</label>
+          <sc-raw-select class="input" id="filter-type" value="{{ typeFilter }}" onChange="{{ setTypeFilter }}">
+            <sc-for list="{{ typeFilterOptions }}" as="opt" hint-placeholder-count="5">
+              <option value="{{ opt.value }}">{{ opt.label }}</option>
+            </sc-for>
+          </sc-raw-select>
+        </div>
+        <sc-if value="{{ hasAnyFilterActive }}" hint-placeholder-val="{{ false }}">
+          <button type="button" class="btn btn-ghost" style="font-size:12px" onClick="{{ clearFilters }}">Clear filters</button>
+        </sc-if>
+      </div>
+      <sc-if value="{{ filteredEmpty }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:12px;color:var(--color-neutral-500);padding:var(--space-4) 0">No items match the current filters.</div>
+      </sc-if>
       <div style="overflow-x:auto">
       <sc-raw-table class="table">
         <sc-raw-thead>
@@ -2655,6 +2679,14 @@ class Component extends DCLogic {
     noteSaveState: 'idle', noteFading: false,
     statusConfirmOpen: false, pendingStatus: null,
     correctionFilter: false, correctionMode: null, correctionDraft: '', declineDraft: '',
+    // Real search/filter, added after confirming none existed: candidate name (reuses the
+    // candidateName field list-verification-items already resolves — first_name+last_name with a
+    // full_name fallback for pre-existing candidates, untouched here), item ID (the real VQ-####
+    // ids already shown in this table's own ID column), and category (the real type values
+    // confirmed live: "Job Experience", "Education", "Certification" — plus "Personal Info",
+    // included per instruction even though no code path inserts that type today; see
+    // typeFilterOptions below for why it's expected to return nothing).
+    nameFilter: '', itemIdFilter: '', typeFilter: '',
     syncFailures: {},
     automatedCheckType: 'credly',
     automatedCheckInputs: { badgeUrl: '', dbprFirstName: '', dbprLastName: '', dbprLicenseNumber: '', sunbizEntityName: '' },
@@ -2993,7 +3025,19 @@ class Component extends DCLogic {
     const isAdmin = s.loginRole === 'admin';
     const isWorker = s.loginRole === 'worker';
     const scopedAll = isAdmin ? s.items : s.items.filter(it => it.assignedTo === s.currentUser);
-    const scoped = s.correctionFilter ? scopedAll.filter(it => it.correctionRequested) : scopedAll;
+    const correctionScoped = s.correctionFilter ? scopedAll.filter(it => it.correctionRequested) : scopedAll;
+
+    // Real search/filter (see state's own comment for why each of these three exists and what it
+    // reads). All three narrow together (AND, not OR) — a name query, an ID query, and a category
+    // pick are each independently optional; whichever ones are non-empty all have to match.
+    const nameQuery = s.nameFilter.trim().toLowerCase();
+    const idQuery = s.itemIdFilter.trim().toLowerCase();
+    const scoped = correctionScoped.filter((it) => {
+      if (nameQuery && !(it.candidateName || '').toLowerCase().includes(nameQuery)) return false;
+      if (idQuery && !(it.id || '').toLowerCase().includes(idQuery)) return false;
+      if (s.typeFilter && it.type !== s.typeFilter) return false;
+      return true;
+    });
 
     const sortVal = (it, key) => {
       if (key === 'received') return it.received;
@@ -3062,6 +3106,28 @@ class Component extends DCLogic {
       showDetail: !!s.selectedId,
       rows,
       workerOptions: this.WORKERS,
+
+      nameFilter: s.nameFilter,
+      setNameFilter: (e) => this.setState({ nameFilter: e.target.value }),
+      itemIdFilter: s.itemIdFilter,
+      setItemIdFilter: (e) => this.setState({ itemIdFilter: e.target.value }),
+      typeFilter: s.typeFilter,
+      setTypeFilter: (e) => this.setState({ typeFilter: e.target.value }),
+      // "Personal Info" is included per instruction even though no code path writes that type
+      // today (confirm-resume-data is the only inserter, and it only ever writes "Job Experience",
+      // "Education", or "Certification" — confirmed by reading it, not assumed) — name/phone/email
+      // reconciliation was never wired into the queue. Selecting it will correctly show zero rows
+      // until that routing exists; the label says so up front rather than looking like a bug.
+      typeFilterOptions: [
+        { value: '', label: 'All categories' },
+        { value: 'Job Experience', label: 'Job Experience' },
+        { value: 'Education', label: 'Education' },
+        { value: 'Certification', label: 'Certification' },
+        { value: 'Personal Info', label: 'Personal Info (not routed to the queue yet — always empty today)' },
+      ],
+      hasAnyFilterActive: !!(s.nameFilter.trim() || s.itemIdFilter.trim() || s.typeFilter),
+      clearFilters: () => this.setState({ nameFilter: '', itemIdFilter: '', typeFilter: '' }),
+      filteredEmpty: scoped.length === 0 && scopedAll.length > 0,
 
       arrowId: arrow('id'), arrowCandidate: arrow('candidateName'), arrowType: arrow('type'), arrowReceived: arrow('received'), arrowDesired: arrow('desired'),
       arrowFollowUp: arrow('followUp'), arrowStatus: arrow('status'), arrowAssigned: arrow('assignedTo'),
