@@ -11,6 +11,39 @@ const corsHeaders = {
 
 // Resume Upload → OCR → Structured Extraction Pipeline (Alpha) — step 1 of 3.
 //
+// VISION FALLBACK FOR STITCHED MULTI-PAGE IMAGES (added after tonight's real investigation — see
+// test-vision-extract, same session): tesseract-wasm's CPU-time kill (2s CPU time, see below) is a
+// hard isolate termination, not a catchable JS exception — confirmed live tonight, no exception was
+// ever thrown for the normal try/catch around runOcr() to catch. That rules out a "try tesseract,
+// catch failure, fall back to vision" structure within one invocation: if tesseract itself is what
+// blows the CPU budget mid-word-recognition, the isolate dies before any catch block runs. The only
+// place a fallback decision CAN be made safely is before calling tesseract at all.
+//
+// The real killed case tonight (a synthetic stitched multi-page resume, confirmed via
+// test-vision-extract re-runs) was a very tall, narrow composite — multiple page-images stacked
+// vertically into one file. The client already caps the long edge at 2200px (see
+// onPickResumeFile's canvas-decode comment in candidate.html), so raw pixel count alone doesn't
+// reliably separate a normal single-page portrait resume (which can ALSO land near 2200x1700,
+// ~3.7MP, after that cap) from a stitched composite — capping the long edge trades width for height
+// on a tall image, so a stitch can end up with LOWER total area than a normal page. Aspect ratio is
+// the signal that actually matches the failure mode: stacking N pages vertically multiplies height
+// by roughly N while width stays fixed, so a 2+ page stitch lands at long:short ratio north of 2.0
+// where no normal single-page photo or scan (portrait ~1.3, landscape ~0.77) would ever sit. This
+// threshold is a reasoned default from tonight's one real data point, not a tuned production
+// constant — revisit with more real examples as they accumulate.
+//
+// When the ratio trips the threshold, this skips tesseract-wasm entirely and sends the already-
+// in-hand sanitized JPEG bytes straight to Claude Sonnet 5 vision for one-call structured
+// extraction (proven tonight: real CPU-kill avoidance, since it's a network-bound API call rather
+// than local CPU-bound work, plus real per-call cost pulled from actual token usage — nothing
+// estimated). Because vision returns the FINAL structured shape directly rather than raw OCR text,
+// this path also performs the insert_resume_extraction RPC itself and sets extraction_status
+// straight to 'extracted' — skipping the 'ocr_done' intermediate state and extract-resume-fields'
+// separate Haiku call entirely for these documents (two LLM calls for one job would be pure waste
+// once vision can do the whole thing in one pass). extract-resume-fields has been updated to
+// short-circuit cleanly if it's called anyway on an already-'extracted' row, since candidate.html's
+// upload → extract chain calls it unconditionally regardless of which path ran here.
+//
 // SCOPE DECISION (deliberate, backed out later via config, not a hardcoded restriction): alpha
 // accepts image uploads only. PDF rasterization inside an Edge Function is a real, unsolved
 // problem (same shape as the Tesseract-in-Deno problem this session already fought through) and is
@@ -66,6 +99,151 @@ const ACCEPTED_MIME_TYPES = [
 // fixable gap; this is that fix, applied because production code has no reason to preserve it.
 const WASM_URL = "https://cdn.jsdelivr.net/npm/tesseract-wasm@0.11.0/dist/tesseract-core.wasm";
 const MODEL_URL = "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/eng.traineddata";
+
+// long:short pixel-dimension ratio above which an image is treated as a stitched multi-page
+// composite and routed to vision instead of tesseract-wasm — see header comment above for why.
+const STITCHED_ASPECT_RATIO_THRESHOLD = 2.0;
+
+const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
+// Sonnet 5, not Haiku (contrast with extract-resume-fields): reading a real, possibly messy photo
+// directly is a harder task than parsing already-clean OCR text, and this path only runs on the
+// rare stitched/oversized case, not every resume — the extra cost isn't paid at normal volume.
+const VISION_MODEL = "claude-sonnet-5";
+
+// Same schema/field definitions as extract-resume-fields's prompt (keep both in sync if the schema
+// changes), plus one addition: this path reads the image directly, so it can also describe
+// non-text graphical content (language-proficiency bars/icons) that OCR structurally cannot see.
+const VISION_EXTRACTION_PROMPT = `You are extracting structured data directly from the attached image of a resume. Read the document as printed — do not invent information that is not actually present in the image in some recognizable form.
+
+Return ONLY a single JSON object, no prose before or after it, matching exactly this shape:
+
+{
+  "work_history": [
+    { "company": string, "title": string, "start_date": string, "end_date": string,
+      "job_responsibilities": string, "extraction_confidence": "high" | "medium" | "low" }
+  ],
+  "education": [
+    { "institution": string, "degree": string, "field_of_study": string,
+      "start_date": string, "end_date": string, "extraction_confidence": "high" | "medium" | "low" }
+  ],
+  "certifications": [
+    { "name": string, "issuing_body": string, "issue_date": string, "expiration_date": string,
+      "extraction_confidence": "high" | "medium" | "low" }
+  ],
+  "freeform": [
+    { "section_type": "summary" | "hobbies_other" | "needs_review", "content": string }
+  ]
+}
+
+FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable buckets:
+
+- work_history = PAID EMPLOYMENT ONLY. If a role reads as unpaid — volunteer work, an unpaid
+  internship explicitly described as unpaid, community service — do NOT put it in work_history.
+  Instead add ONE entry to "freeform" with section_type "needs_review" whose content plainly
+  describes the excluded role (organization, title, dates, and why you excluded it) so a human
+  reviews it rather than it being silently dropped. Do not guess when pay status is ambiguous —
+  only exclude when the text itself signals "unpaid" or "volunteer"; otherwise include it normally.
+
+- Work-history section headers vary by resume — "Experience", "Work History", "Professional
+  Experience", "Employment History", "Job Description", and similar all describe the SAME concept
+  and all belong in work_history. Don't treat different header wording as different categories.
+
+- education = DEGREE-GRANTING PROGRAMS ONLY (e.g. B.A., B.S., M.S., MBA, Ph.D., Associate's).
+
+- certifications = standalone credentials: certifications, licenses, bootcamps, and similar
+  short-form credentials that are NOT part of a degree program. A coding bootcamp goes in
+  certifications UNLESS the resume text itself frames it as part of a degree program (e.g. a
+  university-issued certificate within a degree track) — read the actual framing, don't assume.
+
+- Deduplication: if the same role or credential appears more than once anywhere in the document
+  (e.g. listed once under "Experience" and again under a separate "Leadership" or "Highlights"
+  section), extract it ONCE. Do not create duplicate entries for repeated mentions of the same
+  underlying fact.
+
+- "summary" (freeform) = any professional summary / objective / about-me blurb at the top of the
+  resume. "hobbies_other" (freeform) = interests, hobbies, volunteer/community activities not
+  already handled by the needs_review rule above, and any other content that doesn't fit work
+  history, education, or certifications. Summary and hobbies/other content must NEVER be placed
+  into work_history, education, or certifications, even if it superficially resembles one of them.
+  If the resume shows language proficiency as icons, bars, dots, or other non-text graphics rather
+  than words, describe what you can determine from the graphic (e.g. the language name and an
+  approximate level like "native/fluent/conversational/basic" if the graphic clearly conveys a
+  level) in a "summary" or "hobbies_other" freeform entry — do not silently drop it, and do not
+  invent a precision level the graphic doesn't actually convey.
+
+DATES: use YYYY-MM-DD when the resume gives a specific day (rare), YYYY-MM-01 when it gives a
+month and year, YYYY-01-01 when it gives only a year. If a role/program is current/ongoing
+("Present", "Current", no end given), set end_date to an empty string "" — do not invent a real
+end date. If a date is entirely absent or unrecoverable, use an empty string "" for that field, not
+a guess.
+
+If a category has no entries, return an empty array for it — do not omit the key.`;
+
+type ExtractionResult = {
+  work_history: Array<{ company: string; title: string; start_date: string; end_date: string; job_responsibilities: string; extraction_confidence: string }>;
+  education: Array<{ institution: string; degree: string; field_of_study: string; start_date: string; end_date: string; extraction_confidence: string }>;
+  certifications: Array<{ name: string; issuing_body: string; issue_date: string; expiration_date: string; extraction_confidence: string }>;
+  freeform: Array<{ section_type: string; content: string }>;
+};
+
+function isValidExtraction(x: unknown): x is ExtractionResult {
+  if (!x || typeof x !== "object") return false;
+  const o = x as Record<string, unknown>;
+  return Array.isArray(o.work_history) && Array.isArray(o.education) &&
+    Array.isArray(o.certifications) && Array.isArray(o.freeform);
+}
+
+// Sends the sanitized JPEG bytes already in hand straight to vision — no Storage round-trip
+// needed, unlike test-vision-extract which had to fetch by path. Throws on any failure; caller is
+// responsible for marking the document 'failed'. max_tokens=16000 and no `temperature` param are
+// both load-bearing: Sonnet 5 rejects `temperature` outright (400), and 16000 was the number that
+// stopped real truncation (`stop_reason: "max_tokens"`) seen at 8192 during tonight's testing —
+// thinking-token overhead varies run to run and eats into the same budget as the answer.
+async function runVisionExtraction(sanitizedBase64: string): Promise<ExtractionResult> {
+  if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not configured");
+
+  const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "x-api-key": ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: VISION_MODEL,
+      max_tokens: 16000,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: sanitizedBase64 } },
+          { type: "text", text: VISION_EXTRACTION_PROMPT },
+        ],
+      }],
+    }),
+  });
+  if (!claudeRes.ok) {
+    const detail = await claudeRes.text().catch(() => "");
+    throw new Error(`claude_call_failed (${claudeRes.status}): ${detail.slice(0, 500)}`);
+  }
+
+  const claudeData = await claudeRes.json();
+  // Sonnet 5 uses adaptive thinking by default — content[0] is often a "thinking" block, not the
+  // answer, so find the actual text block rather than assuming index 0.
+  const textBlock = (claudeData?.content ?? []).find((b: { type?: string }) => b.type === "text");
+  const rawText: string = textBlock?.text ?? "";
+  const cleaned = rawText.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "");
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    throw new Error(`malformed_vision_response: ${rawText.slice(0, 500)}`);
+  }
+  if (!isValidExtraction(parsed)) {
+    throw new Error("vision_response_wrong_shape");
+  }
+  return parsed;
+}
 
 type TextItem = { rect: { left: number; top: number; right: number; bottom: number }; confidence: number; text: string };
 
@@ -251,10 +429,61 @@ export default {
         });
       }
 
+      const w = Number(width), h = Number(height);
+      const aspectRatio = Math.max(w, h) / Math.min(w, h);
+      const useVisionFallback = aspectRatio > STITCHED_ASPECT_RATIO_THRESHOLD;
+
+      if (useVisionFallback) {
+        console.log(`upload-resume: ${docId} routed to vision fallback (${w}x${h}, ratio ${aspectRatio.toFixed(2)})`);
+        let extraction: ExtractionResult;
+        try {
+          extraction = await runVisionExtraction(sanitized_base64);
+        } catch (visionErr) {
+          await supabase.from("resume_documents").update({ extraction_status: "failed" }).eq("id", docId);
+          return new Response(JSON.stringify({ ok: false, error: "vision_extraction_failed", detail: String(visionErr), resume_document_id: docId }), {
+            status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        const { error: rpcErr } = await supabase.rpc("insert_resume_extraction", {
+          p_resume_document_id: docId,
+          p_candidate_id: docRow.candidate_id,
+          p_work_history: extraction.work_history,
+          p_education: extraction.education,
+          p_certifications: extraction.certifications,
+          p_freeform: extraction.freeform,
+        });
+        if (rpcErr) {
+          await supabase.from("resume_documents").update({ extraction_status: "failed" }).eq("id", docId);
+          return new Response(JSON.stringify({ ok: false, error: "insert_failed", detail: rpcErr.message, resume_document_id: docId }), {
+            status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        const { error: statusErr } = await supabase
+          .from("resume_documents")
+          .update({ extraction_status: "extracted", extracted_at: new Date().toISOString() })
+          .eq("id", docId);
+        if (statusErr) {
+          return new Response(JSON.stringify({ ok: false, error: "status_update_failed", detail: statusErr.message }), {
+            status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        const { data: signedVision } = await supabase.storage.from(BUCKET).createSignedUrl(originalPath, 3600);
+        return new Response(JSON.stringify({
+          ok: true,
+          resume_document_id: docId,
+          extraction_status: "extracted",
+          extraction_method: "vision",
+          original_signed_url: signedVision?.signedUrl ?? null,
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
       let ocrText = "";
       try {
         const rgbaBytes = base64ToBytes(rgba_base64);
-        ocrText = await runOcr(rgbaBytes, Number(width), Number(height));
+        ocrText = await runOcr(rgbaBytes, w, h);
       } catch (ocrErr) {
         await supabase.from("resume_documents").update({ extraction_status: "failed" }).eq("id", docId);
         return new Response(JSON.stringify({ ok: false, error: "ocr_failed", detail: String(ocrErr), resume_document_id: docId }), {

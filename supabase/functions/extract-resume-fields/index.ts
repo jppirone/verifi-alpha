@@ -153,6 +153,17 @@ export default {
           status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
+      // upload-resume's vision fallback (stitched/oversized images) writes extraction rows and
+      // sets extraction_status to 'extracted' directly, skipping 'ocr_done' entirely — but
+      // candidate.html's upload → extract chain calls this function unconditionally afterward
+      // regardless of which path ran. Short-circuit cleanly here rather than let that call fall
+      // through to the ocr_raw_text check below and error on a document that was never meant to
+      // have OCR text in the first place.
+      if (doc.extraction_status === "extracted") {
+        return new Response(JSON.stringify({ ok: true, resume_document_id, extraction_status: "extracted", already_extracted: true }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
       if (!doc.ocr_raw_text) {
         return new Response(JSON.stringify({ ok: false, error: "ocr_not_done", message: "This document has no OCR text yet." }), {
           status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" },
