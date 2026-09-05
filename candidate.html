@@ -3287,286 +3287,48 @@ a:hover{color:var(--color-accent)}
           <label class="seg-opt"><input type="radio" name="verif-filter" checked="{{ filterIsCompleted }}" sc-camel-on-change="{{ setFilterCompleted }}">Completed</label>
         </div>
 
+        <sc-if value="{{ verificationItemsLoading }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:13px;color:var(--color-neutral-500)">Loading your verification items…</div>
+        </sc-if>
+
+        <sc-if value="{{ verificationItemsError }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:13px;color:var(--color-neutral-500)">We couldn't load your verification items just now. Try refreshing the page.</div>
+        </sc-if>
+
         <sc-if value="{{ showNoActiveItems }}" hint-placeholder-val="{{ false }}">
           <div style="font-size:13px;color:var(--color-neutral-500)">Nothing needs your attention right now.</div>
         </sc-if>
 
-        <sc-if value="{{ showAcme }}" hint-placeholder-val="{{ false }}">
-        <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:var(--space-3)">
-            <div>
-              <div class="card-title" style="margin-bottom:2px">Software Engineer at Acme Inc.</div>
-              <div style="font-size:12px;color:var(--color-neutral-500)">Jun 2019 – Jul 2021</div>
-            </div>
-            <div style="display:flex;gap:var(--space-2)">
-              <span class="tag tag-accent">Confirmed</span>
-              <span class="tag tag-neutral">Automated database match</span>
-            </div>
-          </div>
-          <div style="font-size:12px;color:var(--color-neutral-500)">Settled: an automated employer-lookup database matched this job directly against Acme Inc.'s records. No action needed.</div>
-          <div style="display:flex;flex-direction:column;gap:var(--space-2);border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
-            <div class="field" style="max-width:300px">
-              <label for="lead-phone-acme">Have a phone number for this employer? (optional)</label>
-              <input class="input" id="lead-phone-acme" value="{{ leadPhoneAcme }}" sc-camel-on-change="{{ setLeadPhoneAcme }}" placeholder="(555) 000-0000">
-            </div>
-            <sc-if value="{{ leadSecondShownAcme }}" hint-placeholder-val="{{ false }}">
-              <div class="field" style="max-width:300px">
-                <label for="lead-name-acme">Contact name (optional)</label>
-                <input class="input" id="lead-name-acme" value="{{ leadNameAcme }}" sc-camel-on-change="{{ setLeadNameAcme }}">
+        <sc-if value="{{ hasVerificationItemRows }}" hint-placeholder-val="{{ false }}">
+          <sc-for list="{{ verificationItemRows }}" as="row" hint-placeholder-count="1">
+            <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:var(--space-3)">
+                <div>
+                  <div class="card-title" style="margin-bottom:2px">{{ row.claim }}</div>
+                  <div style="font-size:12px;color:var(--color-neutral-500)">{{ row.categoryLabel }} · {{ row.id }}</div>
+                </div>
+                <span class="tag {{ row.tagClass }}">{{ row.safeLabel }}</span>
               </div>
-            </sc-if>
-            <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">This isn't used to verify your employment on its own. If provided, our verifier checks it against an independent business listing first, and only uses it as a starting point for outreach if that checks out.</div>
-          </div>
-        </div>
-        </sc-if>
-
-        <sc-if value="{{ showEducation }}" hint-placeholder-val="{{ false }}">
-        <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:var(--space-3)">
-            <div>
-              <div class="card-title" style="margin-bottom:2px">B.S. Computer Science, State University</div>
-              <div style="font-size:12px;color:var(--color-neutral-500)">Graduated May 2019</div>
             </div>
-            <div style="display:flex;gap:var(--space-2)">
-              <span class="tag tag-accent">Confirmed</span>
-              <span class="tag tag-neutral">Automated database match</span>
-            </div>
-          </div>
-          <div style="font-size:12px;color:var(--color-neutral-500)">Settled: matched directly against State University's registrar records. No action needed.</div>
-        </div>
-        </sc-if>
-
-        <sc-if value="{{ showCertifications }}" hint-placeholder-val="{{ false }}">
-        <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:var(--space-3)">
-            <div>
-              <div class="card-title" style="margin-bottom:2px">AWS Certified Solutions Architect, Amazon Web Services</div>
-              <div style="font-size:12px;color:var(--color-neutral-500)">Issued Jan 2022</div>
-            </div>
-            <div style="display:flex;gap:var(--space-2)">
-              <span class="tag tag-accent">Confirmed</span>
-              <span class="tag tag-neutral">Automated database match</span>
-            </div>
-          </div>
-          <div style="font-size:12px;color:var(--color-neutral-500)">Settled: matched directly against AWS's certification records. No action needed.</div>
-          <div style="display:flex;flex-direction:column;gap:var(--space-2);border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
-            <div class="field" style="max-width:300px">
-              <label for="lead-name-cert">Contact name at the certifying body (optional)</label>
-              <input class="input" id="lead-name-cert" value="{{ leadNameCert }}" sc-camel-on-change="{{ setLeadNameCert }}">
-            </div>
-            <sc-if value="{{ leadSecondShownCert }}" hint-placeholder-val="{{ false }}">
-              <div class="field" style="max-width:300px">
-                <label for="lead-phone-cert">Phone number or website (optional)</label>
-                <input class="input" id="lead-phone-cert" value="{{ leadPhoneCert }}" sc-camel-on-change="{{ setLeadPhoneCert }}" placeholder="(555) 000-0000 or example.org">
-              </div>
-            </sc-if>
-            <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">This isn't used to verify your certification on its own. If provided, our verifier checks it against an independent listing for the certifying body first, and only uses it as a starting point for outreach if that checks out.</div>
-          </div>
-        </div>
-        </sc-if>
-
-        <sc-if value="{{ showBeta }}" hint-placeholder-val="{{ true }}">
-        <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:var(--space-3)">
-            <div>
-              <div class="card-title" style="margin-bottom:2px">Marketing Lead at Beta Corp</div>
-              <div style="font-size:12px;color:var(--color-neutral-500)">Apr 2022 – Jun 2023</div>
-            </div>
-            <div style="display:flex;gap:var(--space-2)">
-              <span class="tag tag-outline">Discrepancy</span>
-              <span class="tag tag-neutral">Employer-reported dates differ</span>
-              <span class="tag tag-outline">Overlapping Dates - Action Needed</span>
-            </div>
-          </div>
-          <div style="font-size:12px;color:var(--color-neutral-500)">This role's dates overlap with another role on this profile (Client Success Associate, Northwind Retail)</div>
-          <sc-if value="{{ retractSubmittedBeta }}" hint-placeholder-val="{{ false }}">
-            <div style="font-size:12px;color:var(--color-neutral-500)">Settled: you submitted a correction for the reported end date; it's logged to your audit trail. You can add more context at any time.</div>
-          </sc-if>
-          <sc-if value="{{ retractNotSubmittedBeta }}" hint-placeholder-val="{{ true }}">
-            <div style="font-size:12px;color:var(--color-neutral-500)">If this is a genuine entry error rather than a real discrepancy, you can request a correction. It cannot be deleted. The correction is applied as a visible, audit-logged change to this item.</div>
-          </sc-if>
-          <sc-if value="{{ retractOpenBeta }}" hint-placeholder-val="{{ false }}">
-            <div class="field" style="max-width:360px">
-              <label for="retract-note">Describe the entry error</label>
-              <textarea class="input" id="retract-note" rows="2" placeholder="e.g. the end date was mistyped during my original submission"></textarea>
-            </div>
-            <button type="button" class="btn btn-secondary" style="align-self:flex-start" sc-camel-on-click="{{ submitRetractBeta }}">Submit correction request</button>
-          </sc-if>
-          <sc-if value="{{ retractClosedBeta }}" hint-placeholder-val="{{ true }}">
-            <button type="button" class="btn btn-ghost" style="align-self:flex-start;font-size:12px" sc-camel-on-click="{{ openRetractBeta }}">{{ retractButtonLabel }}</button>
-          </sc-if>
-          <div style="display:flex;flex-direction:column;gap:var(--space-2);border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
-            <div class="field" style="max-width:300px">
-              <label for="lead-phone-beta">Have a phone number for this employer? (optional)</label>
-              <input class="input" id="lead-phone-beta" value="{{ leadPhoneBeta }}" sc-camel-on-change="{{ setLeadPhoneBeta }}" placeholder="(555) 000-0000">
-            </div>
-            <sc-if value="{{ leadSecondShownBeta }}" hint-placeholder-val="{{ false }}">
-              <div class="field" style="max-width:300px">
-                <label for="lead-name-beta">Contact name (optional)</label>
-                <input class="input" id="lead-name-beta" value="{{ leadNameBeta }}" sc-camel-on-change="{{ setLeadNameBeta }}">
-              </div>
-            </sc-if>
-            <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">This isn't used to verify your employment on its own. If provided, our verifier checks it against an independent business listing first, and only uses it as a starting point for outreach if that checks out.</div>
-          </div>
-        </div>
-        </sc-if>
-
-        <sc-if value="{{ showGamma }}" hint-placeholder-val="{{ false }}">
-        <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:var(--space-3)">
-            <div>
-              <div class="card-title" style="margin-bottom:2px">Operations Manager at Gamma LLC</div>
-              <div style="font-size:12px;color:var(--color-neutral-500)">Apr 2017 – May 2019</div>
-            </div>
-            <div style="display:flex;gap:var(--space-2)">
-              <span class="tag tag-outline">Unable to verify</span>
-              <span class="tag tag-neutral">Institutional non-response</span>
-            </div>
-          </div>
-          <div style="font-size:12px;color:var(--color-neutral-500)">Settled: our verifier contacted Gamma LLC's HR contact and received no response. This is a permanent outcome; it is not shown as verified.</div>
-          <div style="display:flex;flex-direction:column;gap:var(--space-2);border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
-            <div class="field" style="max-width:300px">
-              <label for="lead-phone-gamma">Have a phone number for this employer? (optional)</label>
-              <input class="input" id="lead-phone-gamma" value="{{ leadPhoneGamma }}" sc-camel-on-change="{{ setLeadPhoneGamma }}" placeholder="(555) 000-0000">
-            </div>
-            <sc-if value="{{ leadSecondShownGamma }}" hint-placeholder-val="{{ false }}">
-              <div class="field" style="max-width:300px">
-                <label for="lead-name-gamma">Contact name (optional)</label>
-                <input class="input" id="lead-name-gamma" value="{{ leadNameGamma }}" sc-camel-on-change="{{ setLeadNameGamma }}">
-              </div>
-            </sc-if>
-            <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">This isn't used to verify your employment on its own. If provided, our verifier checks it against an independent business listing first, and only uses it as a starting point for outreach if that checks out.</div>
-          </div>
-        </div>
-        </sc-if>
-
-        <sc-if value="{{ showDelta }}" hint-placeholder-val="{{ false }}">
-        <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:var(--space-3)">
-            <div>
-              <div class="card-title" style="margin-bottom:2px">Contract Consultant at Delta Ventures</div>
-              <sc-if value="{{ deltaEndOngoing }}" hint-placeholder-val="{{ true }}">
-                <div style="font-size:12px;color:var(--color-neutral-500)">Jul 2023 – Present</div>
-              </sc-if>
-              <sc-if value="{{ deltaEndSaved }}" hint-placeholder-val="{{ false }}">
-                <div style="font-size:12px;color:var(--color-neutral-500)">Jul 2023 – {{ deltaEndDateText }}</div>
-              </sc-if>
-            </div>
-            <div style="display:flex;gap:var(--space-2)">
-              <span class="tag tag-outline">Unable to verify</span>
-              <span class="tag tag-neutral">Candidate-asserted, unconfirmable</span>
-              <sc-if value="{{ deltaEndSaved }}" hint-placeholder-val="{{ false }}">
-                <span class="tag tag-accent">Candidate-stated end date</span>
-              </sc-if>
-            </div>
-          </div>
-          <div style="font-size:12px;color:var(--color-neutral-500)">Settled: the source document's end date was illegible, so your typed correction ("Present") is retained but shown as unconfirmed, not verified, per your earlier acknowledgment.</div>
-          <sc-if value="{{ deltaEndNotStarted }}" hint-placeholder-val="{{ true }}">
-            <button type="button" class="btn btn-ghost" style="align-self:flex-start;font-size:12px" sc-camel-on-click="{{ openDeltaEnd }}">End this role</button>
-          </sc-if>
-          <sc-if value="{{ deltaEndFormOpen }}" hint-placeholder-val="{{ false }}">
-            <div style="display:flex;flex-direction:column;gap:var(--space-2)">
-              <div class="field" style="max-width:260px">
-                <label for="delta-end-date">End date</label>
-                <input class="input" id="delta-end-date" value="{{ deltaEndDraft }}" sc-camel-on-change="{{ setDeltaEndDraft }}" placeholder="e.g. Aug 2026">
-              </div>
-              <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">This won't be verified, no outreach is made and nothing is spent confirming it. It's recorded as your own statement.</div>
-              <button type="button" class="btn btn-secondary" style="align-self:flex-start" sc-camel-on-click="{{ saveDeltaEnd }}">Save</button>
-            </div>
-          </sc-if>
-          <div style="display:flex;flex-direction:column;gap:var(--space-2);border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
-            <div class="field" style="max-width:300px">
-              <label for="lead-phone-delta">Have a phone number for this employer? (optional)</label>
-              <input class="input" id="lead-phone-delta" value="{{ leadPhoneDelta }}" sc-camel-on-change="{{ setLeadPhoneDelta }}" placeholder="(555) 000-0000">
-            </div>
-            <sc-if value="{{ leadSecondShownDelta }}" hint-placeholder-val="{{ false }}">
-              <div class="field" style="max-width:300px">
-                <label for="lead-name-delta">Contact name (optional)</label>
-                <input class="input" id="lead-name-delta" value="{{ leadNameDelta }}" sc-camel-on-change="{{ setLeadNameDelta }}">
-              </div>
-            </sc-if>
-            <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">This isn't used to verify your employment on its own. If provided, our verifier checks it against an independent business listing first, and only uses it as a starting point for outreach if that checks out.</div>
-          </div>
-        </div>
-        </sc-if>
-
-        <sc-if value="{{ showEpsilon }}" hint-placeholder-val="{{ false }}">
-        <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:var(--space-3)">
-            <div>
-              <div class="card-title" style="margin-bottom:2px">Client Success Associate at Northwind Retail</div>
-              <div style="font-size:12px;color:var(--color-neutral-500)">Aug 2021 – Jun 2022</div>
-            </div>
-            <div style="display:flex;gap:var(--space-2)">
-              <sc-if value="{{ epsilonReopened }}" hint-placeholder-val="{{ false }}">
-                <span class="tag tag-outline">Pending re-verification</span>
-              </sc-if>
-              <sc-if value="{{ epsilonNotReopened }}" hint-placeholder-val="{{ true }}">
-                <span class="tag tag-outline">Closed, no response</span>
-              </sc-if>
-              <span class="tag tag-neutral">No response within verification window</span>
-              <span class="tag tag-outline">Overlapping Dates - Action Needed</span>
-            </div>
-          </div>
-          <div style="font-size:12px;color:var(--color-neutral-500)">This role's dates overlap with another role on this profile (Marketing Lead, Beta Corp)</div>
-          <sc-if value="{{ epsilonReopened }}" hint-placeholder-val="{{ false }}">
-            <div style="font-size:12px;color:var(--color-neutral-500)">Reopened: thanks for providing the missing detail. This is back under active review.</div>
-          </sc-if>
-          <sc-if value="{{ epsilonClosedNotOpen }}" hint-placeholder-val="{{ true }}">
-            <div style="font-size:12px;color:var(--color-neutral-500)">Closed, no response: we asked you to confirm whether this was full-time employment or a contract engagement, and didn't hear back within the standard verification window. This isn't permanent: you can provide that detail any time to reopen the item.</div>
-            <button type="button" class="btn btn-ghost" style="align-self:flex-start;font-size:12px" sc-camel-on-click="{{ openEpsilonReopen }}">Provide the missing information</button>
-          </sc-if>
-          <sc-if value="{{ epsilonReopenFormOpen }}" hint-placeholder-val="{{ false }}">
-            <div class="field" style="max-width:360px">
-              <label for="epsilon-note">Was this full-time employment or a contract engagement?</label>
-              <textarea class="input" id="epsilon-note" rows="2" placeholder="e.g. this was a full-time employee role, not a contractor engagement"></textarea>
-            </div>
-            <button type="button" class="btn btn-secondary" style="align-self:flex-start" sc-camel-on-click="{{ submitEpsilonReopen }}">Submit and reopen</button>
-          </sc-if>
-          <div style="display:flex;flex-direction:column;gap:var(--space-2);border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
-            <div class="field" style="max-width:300px">
-              <label for="lead-phone-epsilon">Have a phone number for this employer? (optional)</label>
-              <input class="input" id="lead-phone-epsilon" value="{{ leadPhoneEpsilon }}" sc-camel-on-change="{{ setLeadPhoneEpsilon }}" placeholder="(555) 000-0000">
-            </div>
-            <sc-if value="{{ leadSecondShownEpsilon }}" hint-placeholder-val="{{ false }}">
-              <div class="field" style="max-width:300px">
-                <label for="lead-name-epsilon">Contact name (optional)</label>
-                <input class="input" id="lead-name-epsilon" value="{{ leadNameEpsilon }}" sc-camel-on-change="{{ setLeadNameEpsilon }}">
-              </div>
-            </sc-if>
-            <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">This isn't used to verify your employment on its own. If provided, our verifier checks it against an independent business listing first, and only uses it as a starting point for outreach if that checks out.</div>
-          </div>
-        </div>
+          </sc-for>
         </sc-if>
 
         <div style="font-size:11px;color:var(--color-neutral-600);line-height:1.6">
-          Nothing on this tab can be deleted. Items can be omitted from a specific delivery target's view on the Customization tab, or retracted here through an audit-logged correction for genuine entry errors. The underlying record is append-only.
+          Nothing on this tab can be deleted. The underlying record is append-only.
         </div>
 
-        <div class="card elev-sm" style="display:flex;flex-direction:column;gap:6px">
-          <div class="card-kicker">Your verification summary</div>
-          <sc-for list="{{ verificationSummaryLines }}" as="line" hint-placeholder-count="4">
-            <div style="font-size:13px;color:var(--color-neutral-300)">{{ line }}</div>
-          </sc-for>
-        </div>
-
-        <sc-if value="{{ hasStandingDiscrepancyRows }}" hint-placeholder-val="{{ false }}">
-          <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
-            <div class="card-kicker">What travels downstream</div>
-            <div style="font-size:12px;color:var(--color-neutral-500)">Only genuine standing discrepancies and Unable to Verify items appear here. A resolved clarification of an ambiguous original detail has nothing left to disclose.</div>
-            <sc-for list="{{ standingDiscrepancyRows }}" as="row" hint-placeholder-count="1">
-              <div style="border-top:1px solid var(--color-divider);padding-top:var(--space-3);display:flex;flex-direction:column;gap:2px">
-                <div class="card-title" style="font-size:14px">{{ row.field }}</div>
-                <sc-if value="{{ row.isDiscrepancy }}" hint-placeholder-val="{{ false }}">
-                  <span class="tag tag-outline" style="align-self:flex-start;margin-bottom:2px">Discrepancy, not corrected</span>
-                  <div style="font-size:12px;color:var(--color-neutral-400)">Candidate stated: {{ row.stated }}</div>
-                  <div style="font-size:12px;color:var(--color-neutral-400)">Verified: {{ row.verified }}</div>
+        <sc-if value="{{ hasVerificationCategorySummaries }}" hint-placeholder-val="{{ false }}">
+          <div class="card elev-sm" style="display:flex;flex-direction:column;gap:6px">
+            <div class="card-kicker">Category summary</div>
+            <sc-for list="{{ verificationCategorySummaries }}" as="cat" hint-placeholder-count="1">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-2);border-top:1px solid var(--color-divider);padding-top:6px">
+                <div style="font-size:13px;color:var(--color-neutral-300)">{{ cat.label }}</div>
+                <sc-if value="{{ cat.hasVerified }}" hint-placeholder-val="{{ false }}">
+                  <span class="tag tag-accent">Verified</span>
                 </sc-if>
-                <sc-if value="{{ row.isUnableToVerify }}" hint-placeholder-val="{{ false }}">
-                  <span class="tag tag-outline" style="align-self:flex-start;margin-bottom:2px">Unable to verify</span>
-                  <div style="font-size:12px;color:var(--color-neutral-400)">Candidate stated: {{ row.stated }} (never independently confirmed)</div>
+                <sc-if value="{{ cat.hasVerifiedNot }}" hint-placeholder-val="{{ true }}">
+                  <span class="tag tag-neutral">Not yet verified</span>
                 </sc-if>
-                <div style="font-size:12px;color:var(--color-neutral-300)">{{ row.note }}</div>
               </div>
             </sc-for>
           </div>
@@ -4758,81 +4520,120 @@ class Component extends DCLogic {
     return lines;
   }
 
-  getStandingDiscrepancyRow(key) {
-    const s = this.state;
-    if (key === 'beta' && !s.retractSubmittedBeta) {
-      return {
-        kind: 'discrepancy',
-        field: 'Employment dates: Marketing Lead at Beta Corp',
-        stated: 'Apr 2022 – Jun 2023 (as submitted)',
-        verified: 'Apr 2022 – Apr 2023 (employer record)',
-        note: "Independent verification succeeded and found a different end date than the one you submitted. You chose not to correct it, so it's disclosed here as a standing discrepancy.",
-      };
-    }
-    if (key === 'gamma') {
-      return {
-        kind: 'unable_to_verify',
-        field: 'Employment dates: Operations Manager at Gamma LLC',
-        stated: 'Apr 2017 – May 2019 (as submitted)',
-        reason: "Gamma LLC's HR contact never responded, so independent confirmation was never obtained. This is not a discrepancy. There is no verified value to compare against.",
-      };
-    }
-    if (key === 'delta') {
-      return {
-        kind: 'unable_to_verify',
-        field: 'Employment end date: Contract Consultant at Delta Ventures',
-        stated: 'Jul 2023 – Present (candidate correction; source document end date illegible)',
-        reason: "The source document's end date was illegible and no other independent source exists to check it against, so your stated value was never independently confirmed.",
-      };
-    }
-    return null;
+  // Real candidate-facing verification status, replacing the prototype block that used to live
+  // here (fake Acme/Beta/Gamma/Delta/Epsilon cards, fixed fake summary counts, a "standing
+  // discrepancy" section with no backing data). Investigated before building (see the session
+  // this was built in): verification_items.status is the only real, populated status axis today —
+  // work_history_items/education_items/certification_items.status (the Item-18-model vocabulary)
+  // is never written by anything after insert and every row in those three tables is empty right
+  // now, so there is nothing real to join against there. That axis has 7 legal internal values,
+  // including 'Needs Reconciliation', which staff.html's status dropdown can set on any item today
+  // (confirmed live, not hypothetical) — so this mapping is a strict allowlist, never a pass-
+  // through of the raw column, specifically so an internal value never reaches this screen by
+  // accident.
+  VERIFICATION_STATUS_LABELS = {
+    'Confirmed': 'Verified',
+    'Unable to Verify': 'Unable to Verify',
+    'Discrepancy': 'Under review, staff has a question about this item',
+  };
+  VERIFICATION_FALLBACK_LABEL = 'Submitted, pending review';
+
+  // Everything not explicitly listed above — New, In Progress, Awaiting Response, Needs
+  // Reconciliation, or anything unrecognized/null — falls through to the same neutral fallback as
+  // a plain 'New' row. There is no code path here that can render an internal status string
+  // directly.
+  verificationSafeLabel(status) {
+    return this.VERIFICATION_STATUS_LABELS[status] || this.VERIFICATION_FALLBACK_LABEL;
   }
 
-  getDownstreamPreviewRows() {
-    const s = this.state;
-    const expCat = this.CZ_CATEGORIES.find(c => c.key === 'experience');
-    return expCat.items.map(it => this.getStandingDiscrepancyRow(it.key)).filter(Boolean).map(row => ({
-      ...row,
-      isDiscrepancy: row.kind === 'discrepancy',
-      isUnableToVerify: row.kind === 'unable_to_verify',
-      note: row.kind === 'discrepancy' ? row.note : row.reason,
-    }));
+  verificationIsVerified(status) {
+    return status === 'Confirmed';
   }
 
-  contactLeadVals() {
-    const out = {};
-    const keys = { acme: 'Acme', beta: 'Beta', gamma: 'Gamma', delta: 'Delta', epsilon: 'Epsilon', cert: 'Cert' };
-    Object.keys(keys).forEach(k => {
-      const Cap = keys[k];
-      const lead = (this.state.contactLeads || {})[k] || { phone: '', name: '' };
-      out['leadPhone' + Cap] = lead.phone;
-      out['leadName' + Cap] = lead.name;
-      out['leadSecondShown' + Cap] = k === 'cert' ? !!(lead.name || '').trim() : !!(lead.phone || '').trim();
-      out['setLeadPhone' + Cap] = (e) => this.setContactLead(k, 'phone', e.target.value);
-      out['setLeadName' + Cap] = (e) => this.setContactLead(k, 'name', e.target.value);
+  // "Completed" for the Active/All/Completed filter: a real outcome has been reached on our side.
+  // Discrepancy and Needs Reconciliation are still open questions from the candidate's point of
+  // view even though staff has them flagged internally, so they stay in "Active".
+  verificationIsTerminal(status) {
+    return status === 'Confirmed' || status === 'Unable to Verify';
+  }
+
+  verificationTagClass(status) {
+    if (status === 'Confirmed') return 'tag-accent';
+    if (status === 'Unable to Verify' || status === 'Discrepancy') return 'tag-outline';
+    return 'tag-neutral';
+  }
+
+  VERIFICATION_CATEGORY_LABELS = { 'Job Experience': 'Job Experience', 'Education': 'Education', 'Certification': 'Certifications' };
+  VERIFICATION_CATEGORY_ORDER = ['Job Experience', 'Education', 'Certification'];
+
+  // The P133 verification floor: a category only ever shows as having a confirmed status if at
+  // least one real item in it is genuinely Verified (Confirmed) — never merely submitted or
+  // attempted.
+  getVerificationCategorySummaries() {
+    const items = this.state.verificationItems || [];
+    return this.VERIFICATION_CATEGORY_ORDER.map(type => {
+      const catItems = items.filter(it => it.type === type);
+      if (!catItems.length) return null;
+      const hasVerified = catItems.some(it => this.verificationIsVerified(it.status));
+      return {
+        key: type,
+        label: this.VERIFICATION_CATEGORY_LABELS[type] || type,
+        hasVerified,
+        hasVerifiedNot: !hasVerified,
+      };
+    }).filter(Boolean);
+  }
+
+  getVerificationItemRows() {
+    const s = this.state;
+    const filter = s.verificationFilter;
+    return (s.verificationItems || [])
+      .filter(it => {
+        const terminal = this.verificationIsTerminal(it.status);
+        if (filter === 'active') return !terminal;
+        if (filter === 'completed') return terminal;
+        return true;
+      })
+      .map(it => ({
+        id: it.id,
+        categoryLabel: this.VERIFICATION_CATEGORY_LABELS[it.type] || it.type,
+        claim: it.claim || '(no description on file)',
+        safeLabel: this.verificationSafeLabel(it.status),
+        tagClass: this.verificationTagClass(it.status),
+      }));
+  }
+
+  ensureVerificationItemsLoaded() {
+    const s = this.state;
+    const candidateId = s.resumeCandidateId;
+    if (!candidateId || s.verificationItemsLoadedFor === candidateId || s.verificationItemsLoading) return;
+    this.loadVerificationItems(candidateId);
+  }
+
+  async loadVerificationItems(candidateId) {
+    this.setState({ verificationItemsLoading: true, verificationItemsError: null });
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/list-candidate-verification-items', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate_id: candidateId }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ verificationItemsLoading: false, verificationItemsError: 'network' });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      this.setState({ verificationItemsLoading: false, verificationItemsError: 'load_failed' });
+      return;
+    }
+    this.setState({
+      verificationItemsLoading: false,
+      verificationItemsError: null,
+      verificationItems: data.items || [],
+      verificationItemsLoadedFor: candidateId,
     });
-    return out;
-  }
-
-  setContactLead(key, field, value) {
-    this.setState(st => ({
-      contactLeads: Object.assign({}, st.contactLeads, {
-        [key]: Object.assign({}, (st.contactLeads || {})[key] || { phone: '', name: '' }, { [field]: value }),
-      }),
-    }));
-  }
-
-  getVerificationSummaryLines() {
-    const s = this.state;
-    const correctedCount = s.retractSubmittedBeta ? 1 : 0;
-    const discrepancyCount = s.retractSubmittedBeta ? 0 : 1;
-    const plural = (n) => n === 1 ? 'item' : 'items';
-    return [
-      '3 ' + plural(3) + ' matched exactly what verification found.',
-      '2 ' + plural(2) + ' needed you to clarify an ambiguous original detail.',
-      correctedCount + ' ' + plural(correctedCount) + ' corrected with your agreement.',
-      discrepancyCount + ' ' + plural(discrepancyCount) + ' flagged as a discrepancy you chose not to correct.',
-    ];
   }
 
   buildResumeLines(target) {
@@ -5085,8 +4886,7 @@ class Component extends DCLogic {
     emailSendPending: false, emailSendError: null,
     firstName: '', lastName: '', phone: '', duplicateCheckPending: false, duplicateCheckError: null,
     overlayOpen: false, overlayTab: 0, fileName: null, email: '', tier: null, draft: null, accountTab: 'profile',
-    retractOpenBeta: false, retractSubmittedBeta: false,
-    epsilonReopenFormOpen: false, epsilonReopened: false,
+    epsilonReopened: false,
     profileFirst: 'Alex', profileLast: 'Rivera',
     savedFirst: 'Alex', savedLast: 'Rivera',
     notifyEmail: false, notifySms: false, savedNotifyEmail: false, savedNotifySms: false,
@@ -5105,9 +4905,8 @@ class Component extends DCLogic {
     resumeEmailVerificationId: null, resumeDocumentId: null,
     resumeCandidateId: null, resumeExtraction: null, resumeExtractionLoading: false,
     resumeConfirmPending: false, resumeConfirmError: null,
-    contactLeads: { acme: { phone: '', name: '' }, beta: { phone: '', name: '' }, gamma: { phone: '', name: '' }, delta: { phone: '', name: '' }, epsilon: { phone: '', name: '' }, cert: { phone: '', name: '' } },
-    deltaEndFormOpen: false, deltaEndDraft: '', deltaEndValue: '',
     verificationFilter: 'active', upgradeModalOpen: false, upgradeReturnTab: null, upgradeReturnTarget: null,
+    verificationItems: [], verificationItemsLoading: false, verificationItemsError: null, verificationItemsLoadedFor: null,
     mobileNavOpen: false,
     kycModalOpen: false, kycModalPendingSave: false,
     connectModalOpen: false, connectModalPartner: null,
@@ -6965,20 +6764,13 @@ class Component extends DCLogic {
       setFilterActive: () => this.setState({ verificationFilter: 'active' }),
       setFilterAll: () => this.setState({ verificationFilter: 'all' }),
       setFilterCompleted: () => this.setState({ verificationFilter: 'completed' }),
-      showAcme: s.verificationFilter !== 'active',
-      showEducation: s.verificationFilter !== 'active',
-      showCertifications: s.verificationFilter !== 'active',
-      showGamma: s.verificationFilter !== 'active',
-      showDelta: s.verificationFilter !== 'active',
-      showBeta: s.verificationFilter === 'all' || (s.verificationFilter === 'active' && !s.retractSubmittedBeta) || (s.verificationFilter === 'completed' && s.retractSubmittedBeta),
-      showEpsilon: s.verificationFilter === 'all' || (s.verificationFilter === 'active' && s.epsilonReopened) || (s.verificationFilter === 'completed' && !s.epsilonReopened),
-      showNoActiveItems: s.verificationFilter === 'active' && s.retractSubmittedBeta && !s.epsilonReopened,
-      epsilonReopened: s.epsilonReopened,
-      epsilonNotReopened: !s.epsilonReopened,
-      epsilonClosedNotOpen: !s.epsilonReopened && !s.epsilonReopenFormOpen,
-      epsilonReopenFormOpen: s.epsilonReopenFormOpen,
-      openEpsilonReopen: () => this.setState({ epsilonReopenFormOpen: true }),
-      submitEpsilonReopen: () => { this.setState({ epsilonReopenFormOpen: false, epsilonReopened: true }); this.addActivityLog('Provided missing information: item reopened'); },
+      verificationItemsLoading: s.verificationItemsLoading,
+      verificationItemsError: !!s.verificationItemsError,
+      verificationItemRows: this.getVerificationItemRows(),
+      hasVerificationItemRows: this.getVerificationItemRows().length > 0,
+      showNoActiveItems: !s.verificationItemsLoading && !s.verificationItemsError && this.getVerificationItemRows().length === 0,
+      verificationCategorySummaries: this.getVerificationCategorySummaries(),
+      hasVerificationCategorySummaries: this.getVerificationCategorySummaries().length > 0,
       employerSummaryLines: this.getEmployerSummaryLines(),
       employerRows: this.getEmployerRows(),
       empPageLabel: 'Page ' + (s.empPage + 1) + ' of ' + this.empPageCount() + ', ' + s.employerActivity.length + ' entries.',
@@ -7003,22 +6795,6 @@ class Component extends DCLogic {
       empNoticeText: s.empNotice || '',
       dismissEmpNotice: (e) => { pd(e); this.setState({ empNotice: null }); },
       tier1UnconfirmedLine: s.tier1UnconfirmedCount + ' unconfirmed lookup attempts this period. Nothing is kept about these, so there are no individual entries to show.',
-      deltaEndFormOpen: s.deltaEndFormOpen,
-      deltaEndNotStarted: !s.deltaEndFormOpen && !s.deltaEndValue,
-      deltaEndSaved: !!s.deltaEndValue,
-      deltaEndOngoing: !s.deltaEndValue,
-      deltaEndDateText: s.deltaEndValue,
-      deltaEndDraft: s.deltaEndDraft,
-      openDeltaEnd: () => this.setState({ deltaEndFormOpen: true }),
-      setDeltaEndDraft: (e) => this.setState({ deltaEndDraft: e.target.value }),
-      saveDeltaEnd: () => this.setState(st => (st.deltaEndDraft || '').trim() ? { deltaEndValue: st.deltaEndDraft.trim(), deltaEndFormOpen: false } : {}),
-      ...this.contactLeadVals(),
-      verificationSummaryLines: this.getVerificationSummaryLines(),
-      standingDiscrepancyRows: this.getDownstreamPreviewRows(),
-      hasStandingDiscrepancyRows: this.getDownstreamPreviewRows().length > 0,
-      retractNotSubmittedBeta: !s.retractSubmittedBeta && !s.retractOpenBeta,
-      retractClosedBeta: !s.retractOpenBeta,
-      retractButtonLabel: s.retractSubmittedBeta ? 'Add more context (audit-logged)' : 'Request correction (audit-logged)',
       exportVerifiedData: () => this.exportVerifiedData(),
       exportVerifiedDataLink: (e) => { pd(e); this.exportVerifiedData(); },
       tabIsSharing: s.accountTab === 'sharing',
@@ -7060,7 +6836,7 @@ class Component extends DCLogic {
       tabSubscriptionClass: s.accountTab === 'subscription' ? 'btn-secondary' : 'btn-ghost',
       tabActivityClass: s.accountTab === 'activity' ? 'btn-secondary' : 'btn-ghost',
       tabDeactivationClass: s.accountTab === 'deactivation' ? 'btn-secondary' : 'btn-ghost',
-      selectTabVerification: () => this.guardedNav(() => this.setState({ accountTab: 'verification' })),
+      selectTabVerification: () => this.guardedNav(() => { this.setState({ accountTab: 'verification' }); this.ensureVerificationItemsLoaded(); }),
       selectTabSharing: () => this.guardedNav(() => this.setState({ accountTab: 'sharing' })),
       selectTabSubscription: () => this.guardedNav(() => this.setState({ accountTab: 'subscription' })),
       selectTabActivity: () => this.guardedNav(() => this.setState({ accountTab: 'activity' })),
@@ -7073,12 +6849,12 @@ class Component extends DCLogic {
       mobileTabRows: this.ACCOUNT_TABS.map(t => ({
         label: t.label,
         activeStyle: s.accountTab === t.key ? 'color:var(--color-accent)' : '',
-        onSelect: () => { this.setState({ mobileNavOpen: false }); this.guardedNav(() => this.setState({ accountTab: t.key })); },
+        onSelect: () => {
+          this.setState({ mobileNavOpen: false });
+          this.guardedNav(() => this.setState({ accountTab: t.key }));
+          if (t.key === 'verification') this.ensureVerificationItemsLoaded();
+        },
       })),
-      retractOpenBeta: s.retractOpenBeta,
-      retractSubmittedBeta: s.retractSubmittedBeta,
-      openRetractBeta: () => this.setState({ retractOpenBeta: true }),
-      submitRetractBeta: () => this.setState({ retractOpenBeta: false, retractSubmittedBeta: true }),
       isSignupDetails: s.screen === 'signupDetails',
       isDuplicateFound: s.screen === 'duplicateFound',
       isEntry: s.screen === 'entry',
@@ -7282,7 +7058,7 @@ class Component extends DCLogic {
       tourRectHeight: s.tourRect.height,
       tourNext: () => this.setState(st => { const steps = this.getTourSteps(); const step = Math.min(st.tourStep + 1, steps.length - 1); return { tourStep: step, accountTab: steps[step].tab }; }, () => this.measureTourTarget()),
       tourBack: () => this.setState(st => { const steps = this.getTourSteps(); const step = Math.max(st.tourStep - 1, 0); return { tourStep: step, accountTab: steps[step].tab }; }, () => this.measureTourTarget()),
-      tourExit: () => this.setState({ tourActive: false, tourEverShown: true, accountTab: 'verification' }),
+      tourExit: () => { this.setState({ tourActive: false, tourEverShown: true, accountTab: 'verification' }); this.ensureVerificationItemsLoaded(); },
       overlayOpen: s.overlayOpen,
       tabWhat: s.overlayTab === 0,
       tabWhy: s.overlayTab === 1,
