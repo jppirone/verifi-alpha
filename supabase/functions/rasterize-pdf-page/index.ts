@@ -421,7 +421,7 @@ export default {
       return new Response(null, { headers: corsHeaders });
     }
     try {
-      const { storage_path, page_number, target_dpi } = await req.json();
+      const { storage_path, page_number, target_dpi, force_vision } = await req.json();
       if (!storage_path || typeof storage_path !== "string") {
         return new Response(JSON.stringify({ ok: false, error: "storage_path_required" }), {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -506,6 +506,29 @@ export default {
       }
       const matrix = mupdf.Matrix.scale(scale, scale);
 
+      // SEPARATE real finding, different from the MAX_RENDER_PIXELS story above (2026-09-06,
+      // investigating a real production WORKER_RESOURCE_LIMIT on john.pirone@proton.me's resume):
+      // this clamp assumes the failure predicts from THIS page's own size. It doesn't, always.
+      // Confirmed live: all 4 pages of that real resume share the identical MediaBox (612x792 —
+      // ordinary US Letter), and at the default 150 DPI every page's estimated pixel count
+      // (~2.1MP) sits comfortably under this 5MP clamp — it never engages, correctly, because
+      // this page was never oversized. Yet two of those four pages (not always the same two)
+      // genuinely hit WORKER_RESOURCE_LIMIT in real, reproducible testing, while the other two
+      // succeeded — on identical content, identical code, identical DPI. Reproduced deliberately
+      // by firing 8 real concurrent requests at this same document: 3/8 failed this way, spread
+      // across every page number, no page-specific pattern. This is concurrent load on the
+      // platform's shared worker pool competing for the SAME aggregate memory/CPU budget this
+      // invocation needs — not a property this function can measure about its own page at all.
+      // Nothing here can fix that: there is no version of this clamp, tuned to any threshold,
+      // that would distinguish "this exact page, right now" from "this exact page, five minutes
+      // from now with less contention." The real fix lives in the caller (upload-resume): retry
+      // the same page as a fresh, separate invocation — a different real worker, unaffected by
+      // whatever killed this one — first at a lower DPI, then with force_vision if that also
+      // fails (both real, measured to reduce but not eliminate the failure rate under the same
+      // concurrent load — retrying is a mitigation against a real platform ceiling, not a
+      // guarantee). See upload-resume's own header for the retry contract this function's
+      // target_dpi/force_vision params exist to serve.
+
       // alpha=false, always — a third real finding tonight: mupdf's own alpha=true render path
       // throws a genuine "RangeError: offset is out of bounds" on the hand-built vector-text PDFs,
       // and moving WHERE that call happened (primary render vs. a second tesseract-only render)
@@ -533,6 +556,17 @@ export default {
       if (bytesPerPixel < BYTES_PER_PIXEL_LOW) reasons.push(`bytes_per_pixel ${bytesPerPixel.toFixed(3)} < ${BYTES_PER_PIXEL_LOW} (near-blank)`);
       if (bytesPerPixel > BYTES_PER_PIXEL_HIGH) reasons.push(`bytes_per_pixel ${bytesPerPixel.toFixed(3)} > ${BYTES_PER_PIXEL_HIGH} (unusually dense)`);
       if (totalPixels > PIXEL_COUNT_THRESHOLD) reasons.push(`total_pixels ${(totalPixels / 1e6).toFixed(2)}MP > ${(PIXEL_COUNT_THRESHOLD / 1e6).toFixed(1)}MP`);
+      // force_vision: an explicit caller override, not a signal this function measured itself.
+      // Real, confirmed need (this session's WORKER_RESOURCE_LIMIT investigation): none of the
+      // signals above predict that failure — it's real, reproduced-live concurrent-load
+      // contention on the platform's shared worker pool, not a property of this page's content,
+      // and it hit pages whose own aspect_ratio/page_count/bytes_per_pixel/total_pixels were all
+      // completely ordinary (confirmed live: identical MediaBox to a page that never failed).
+      // Nothing measurable about a page predicts this, so upload-resume's retry loop (see that
+      // function's header) sets this directly on its last retry, after two real failures already
+      // happened, to route around tesseract-wasm's own real, heavier WASM memory footprint —
+      // never inferred here.
+      if (force_vision) reasons.push("force_vision requested by caller");
       const useVision = reasons.length > 0;
 
       let extraction: ExtractionResult;

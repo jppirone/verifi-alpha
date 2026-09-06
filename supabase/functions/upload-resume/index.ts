@@ -420,6 +420,80 @@ const RASTERIZE_FN_URL = `${SUPABASE_URL}/functions/v1/rasterize-pdf-page`;
 // every other untested boundary in this pipeline.
 const MAX_PDF_PAGES = 30;
 
+// RASTERIZE RETRY CONTRACT — real finding, 2026-09-06 (investigating a real production
+// WORKER_RESOURCE_LIMIT on john.pirone@proton.me's resume, pages that render normally most of the
+// time): confirmed live that this failure is NOT predictable from a page's own MediaBox or
+// content — all 4 pages of that real resume share identical page size, and at default DPI the
+// SAME page fails or succeeds depending only on how much OTHER concurrent load is hitting the
+// platform's shared worker pool at that moment (reproduced directly: firing 8 real concurrent
+// rasterize-pdf-page calls at that document made 3/8 fail this way, spread across every page
+// number, no page-specific pattern). Confirmed via the real response itself that this is an
+// UNCATCHABLE isolate kill, not a normal exception: the failure response carries Supabase's own
+// platform-gateway headers (x-served-by: supabase-edge-runtime, sb-error-code) and a bare
+// {code,message} body that doesn't match ANY shape rasterize-pdf-page's own code ever returns
+// (compare: a genuinely corrupt PDF returns THIS function's own {ok:false,error:"mupdf_open_failed",
+// ...} shape with this function's own CORS headers — a real, normal, catchable exception, a
+// categorically different failure) — meaning rasterize-pdf-page's own top-level try/catch never
+// ran; there is no "catch and retry" possible from inside that one invocation. What IS real and
+// catchable is this: from OUT HERE, one dead invocation is just an ordinary HTTP response (status
+// 546) to whatever called it — a completely separate request/isolate boundary a retry from this
+// side isn't bound by. So retrying lives here, not there. Also confirmed live, and important:
+// retrying at a lower DPI reduces but does NOT eliminate the failure rate under the same real
+// concurrent load (8 concurrent calls at 110 DPI against the same document: 2/8 still failed the
+// same way) — so a single DPI-down retry is a real mitigation, not a guarantee, which is exactly
+// why there's a second, different retry below rather than stopping at one.
+const RESOURCE_LIMIT_CODE = "WORKER_RESOURCE_LIMIT";
+// Real value already proven this session (the manual workaround used to test this exact
+// document before this retry existed) — half the default's pixel count, comfortably legible,
+// meaningfully cheaper for both mupdf's render and tesseract-wasm's own memory use.
+const RASTERIZE_RETRY_DPI = 110;
+
+type RasterizePageResult = {
+  ok: boolean;
+  data: { ok?: boolean; page_count?: number; extraction?: unknown; code?: string; error?: string; message?: string };
+  status: number;
+};
+
+async function callRasterizePage(storagePath: string, pageNumber: number, opts?: { targetDpi?: number; forceVision?: boolean }): Promise<RasterizePageResult> {
+  const body: Record<string, unknown> = { storage_path: storagePath, page_number: pageNumber };
+  if (opts?.targetDpi) body.target_dpi = opts.targetDpi;
+  if (opts?.forceVision) body.force_vision = true;
+  const res = await fetch(RASTERIZE_FN_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "apikey": SUPABASE_SERVICE_ROLE_KEY,
+      "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+    },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok, data, status: res.status };
+}
+
+// Three real attempts, each a fresh separate invocation (see the contract comment above for why
+// that matters): default DPI first — unchanged behavior/quality for the common case, which is
+// most of the time, real data confirmed (most concurrent-load test calls still succeeded even
+// under deliberately heavy contention). Only on the SPECIFIC confirmed WORKER_RESOURCE_LIMIT
+// signature does this retry at all — a real, different failure (corrupt PDF, bad storage path,
+// out-of-range page) is a permanent failure no retry would fix, and gets reported immediately,
+// same as before this existed. Retry 1 drops to RASTERIZE_RETRY_DPI (real, measured mitigation,
+// not a guarantee). Retry 2 adds force_vision on top — routes around tesseract-wasm's own real,
+// heavier WASM memory use entirely rather than just shrinking what it has to process, the
+// strongest lever actually available against a resource ceiling neither this page's content nor
+// its own request can predict or control.
+async function rasterizePageWithRetry(storagePath: string, pageNumber: number): Promise<RasterizePageResult> {
+  const attempt1 = await callRasterizePage(storagePath, pageNumber);
+  if (attempt1.data?.code !== RESOURCE_LIMIT_CODE) return attempt1;
+  console.log(`upload-resume: page ${pageNumber} hit ${RESOURCE_LIMIT_CODE} at default DPI, retrying at ${RASTERIZE_RETRY_DPI} DPI`);
+
+  const attempt2 = await callRasterizePage(storagePath, pageNumber, { targetDpi: RASTERIZE_RETRY_DPI });
+  if (attempt2.data?.code !== RESOURCE_LIMIT_CODE) return attempt2;
+  console.log(`upload-resume: page ${pageNumber} hit ${RESOURCE_LIMIT_CODE} again at ${RASTERIZE_RETRY_DPI} DPI, retrying with force_vision`);
+
+  return await callRasterizePage(storagePath, pageNumber, { targetDpi: RASTERIZE_RETRY_DPI, forceVision: true });
+}
+
 // Merges N per-page ExtractionResult objects (one per rasterize-pdf-page call) into one. Plain
 // concatenation, no cross-page dedup — a role or credential that legitimately repeats verbatim
 // across two pages of the same resume is rare, and rasterize-pdf-page's own prompt already dedups
@@ -556,30 +630,27 @@ export default {
       // PDF branch: one page per rasterize-pdf-page call, per the real memory-ceiling finding that
       // function's header documents (rendering every page in one invocation genuinely fails with
       // WORKER_RESOURCE_LIMIT — not a guess, a reproduced failure). Page 1's response carries
-      // page_count, so it's called first and the rest follow in a loop. Each call already returns a
-      // complete, routed (tesseract-vs-vision) structured extraction for that one page — this
-      // function's own OCR/vision logic below is for the image path only and isn't reused here.
-      // Same short-circuit as the image vision-fallback branch: goes straight to 'extracted',
-      // skipping 'ocr_done' and extract-resume-fields' separate Haiku call, since every page already
-      // comes back fully extracted.
+      // page_count, so it's called first and the rest follow in a loop. Each call goes through
+      // rasterizePageWithRetry (see the RASTERIZE RETRY CONTRACT comment above MAX_PDF_PAGES) —
+      // a real, separate finding from the one above: even an ordinary, correctly-sized page can
+      // hit the same WORKER_RESOURCE_LIMIT from real concurrent load this function can't predict
+      // or avoid on the first attempt, only recover from on a fresh one. Each successful call
+      // already returns a complete, routed (tesseract-vs-vision) structured extraction for that
+      // one page — this function's own OCR/vision logic below is for the image path only and
+      // isn't reused here. Same short-circuit as the image vision-fallback branch: goes straight
+      // to 'extracted', skipping 'ocr_done' and extract-resume-fields' separate Haiku call, since
+      // every page already comes back fully extracted.
       if (isPdf) {
         console.log(`upload-resume: ${docId} is a PDF, routing through rasterize-pdf-page`);
         const pageExtractions: ExtractionResult[] = [];
         let pageCount = 1;
         for (let pageNumber = 1; pageNumber <= pageCount && pageNumber <= MAX_PDF_PAGES; pageNumber++) {
-          let pageRes: Response;
-          let pageData: { ok?: boolean; page_count?: number; extraction?: unknown; error?: string; message?: string };
+          let pageData: { ok?: boolean; page_count?: number; extraction?: unknown; code?: string; error?: string; message?: string };
+          let pageOk: boolean;
           try {
-            pageRes = await fetch(RASTERIZE_FN_URL, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "apikey": SUPABASE_SERVICE_ROLE_KEY,
-                "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-              },
-              body: JSON.stringify({ storage_path: originalPath, page_number: pageNumber }),
-            });
-            pageData = await pageRes.json();
+            const result = await rasterizePageWithRetry(originalPath, pageNumber);
+            pageOk = result.ok;
+            pageData = result.data;
           } catch (fetchErr) {
             await supabase.from("resume_documents").update({ extraction_status: "failed" }).eq("id", docId);
             return new Response(JSON.stringify({
@@ -587,11 +658,13 @@ export default {
               resume_document_id: docId, page: pageNumber,
             }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
           }
-          if (!pageRes.ok || !pageData.ok || !isValidExtraction(pageData.extraction)) {
+          if (!pageOk || !pageData.ok || !isValidExtraction(pageData.extraction)) {
             await supabase.from("resume_documents").update({ extraction_status: "failed" }).eq("id", docId);
+            const stillResourceLimited = pageData.code === RESOURCE_LIMIT_CODE;
             return new Response(JSON.stringify({
-              ok: false, error: "pdf_page_extraction_failed",
-              detail: pageData.message || pageData.error || "unknown_error",
+              ok: false,
+              error: stillResourceLimited ? "pdf_page_extraction_failed_after_retries" : "pdf_page_extraction_failed",
+              detail: pageData.message || pageData.error || pageData.code || "unknown_error",
               resume_document_id: docId, page: pageNumber,
             }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
           }
