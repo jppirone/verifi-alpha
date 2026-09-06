@@ -33,6 +33,7 @@ type WorkHistoryEdit = { id: string; company?: string; title?: string; start_dat
 type EducationEdit = { id: string; institution?: string; degree?: string; field_of_study?: string; start_date?: string; end_date?: string };
 type CertificationEdit = { id: string; name?: string; issuing_body?: string; issue_date?: string; expiration_date?: string };
 type FreeformEdit = { id: string; content?: string };
+type SkillEdit = { id: string; skill_text?: string };
 
 function dateOrNull(v: unknown): string | null {
   return typeof v === "string" && v.trim() !== "" ? v : null;
@@ -61,13 +62,14 @@ export default {
       const body = await req.json();
       const {
         candidate_id,
-        work_history = [], education = [], certifications = [], freeform = [],
+        work_history = [], education = [], certifications = [], skills = [], freeform = [],
         opt_in = { work_history: false, education: false, certifications: false },
       }: {
         candidate_id: string;
         work_history: WorkHistoryEdit[];
         education: EducationEdit[];
         certifications: CertificationEdit[];
+        skills: SkillEdit[];
         freeform: FreeformEdit[];
         opt_in: { work_history: boolean; education: boolean; certifications: boolean };
       } = body;
@@ -113,6 +115,20 @@ export default {
         }).eq("id", c.id).eq("candidate_id", candidate_id);
         if (error) {
           return new Response(JSON.stringify({ ok: false, error: "certification_update_failed", detail: error.message, item_id: c.id }), {
+            status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
+      // Skills: candidate-self-reported, same trust level as freeform (summary/hobbies_other) —
+      // never enters the verification_items staff queue below, matching freeform's own lifecycle.
+      // No opt-in flag for skills exists (it was never one of the three categories collected at
+      // signup, and this build doesn't add a fourth) — deliberately out of scope, not an oversight.
+      for (const sk of skills) {
+        const { error } = await supabase.from("skill_items").update({
+          skill_text: sk.skill_text ?? "", candidate_confirmed: true, updated_at: new Date().toISOString(),
+        }).eq("id", sk.id).eq("candidate_id", candidate_id);
+        if (error) {
+          return new Response(JSON.stringify({ ok: false, error: "skill_update_failed", detail: error.message, item_id: sk.id }), {
             status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
@@ -169,7 +185,7 @@ export default {
 
       return new Response(JSON.stringify({
         ok: true,
-        confirmed_counts: { work_history: work_history.length, education: education.length, certifications: certifications.length, freeform: freeform.length },
+        confirmed_counts: { work_history: work_history.length, education: education.length, certifications: certifications.length, skills: skills.length, freeform: freeform.length },
         queued_for_verification: queueInserts.length,
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     } catch (e) {

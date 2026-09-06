@@ -27,13 +27,24 @@
 --      Supabase will show its own "Potential issue detected" destructive-operation prompt —
 --      confirm it only if you mean to proceed.
 --   4. Re-run the REPORT section again (same email list). Every count for every listed email
---      must read 0 across all nine tables. Don't take "Success" on the DELETE statements as
+--      must read 0 across all ten tables. Don't take "Success" on the DELETE statements as
 --      proof by itself — confirm with a real SELECT, the same way this section always has.
 --
 -- Table order in both sections follows the real foreign-key graph, children before parents:
 --   verification_item_timeline -> verification_items -> {work_history_items, education_items,
---   certification_items, candidate_freeform_sections} -> resume_documents -> candidate_sessions
---   -> login_tokens -> candidates -> email_verifications
+--   certification_items, skill_items, candidate_freeform_sections} -> resume_documents ->
+--   candidate_sessions -> login_tokens -> candidates -> email_verifications
+--
+-- skill_items added 2026-09-06 after a real, live completeness audit against
+-- information_schema (every table with a real FK to candidates(id), cross-checked against what
+-- this script already covered) — it's the newest of the resume-pipeline item tables (Core
+-- Competencies / flat skills-list support), same dual candidate_id/resume_document_id linkage as
+-- work_history_items/education_items/certification_items, same lifecycle. The same audit also
+-- found staff_users/staff_login_tokens/staff_sessions keyed by email — deliberately NOT added
+-- here: that's a separate identity space (staff/reviewers, zero FK to candidates) with no
+-- connection to the resume-pipeline signup flow this script exists for, and one of your three
+-- real target emails below (john.pirone@gmail.com) is your real permanent staff_users Admin row —
+-- adding those tables here would risk deleting that real account, not test data.
 -- resume_documents is linked to a candidate two ways — candidate_id (once backfilled at
 -- confirm-verification time) and email_verification_id (the staging key used before that, for
 -- an abandoned or still-mid-signup upload) — so both are checked everywhere a "does this row
@@ -104,6 +115,9 @@ select
   (select count(*) from certification_items c
      where c.candidate_id in (select candidate_id from cand where cand.email = te.email)
         or c.resume_document_id in (select resume_document_id from rd where rd.email = te.email)) as certification_items,
+  (select count(*) from skill_items s
+     where s.candidate_id in (select candidate_id from cand where cand.email = te.email)
+        or s.resume_document_id in (select resume_document_id from rd where rd.email = te.email)) as skill_items,
   (select count(*) from candidate_freeform_sections f
      where f.candidate_id in (select candidate_id from cand where cand.email = te.email)
         or f.resume_document_id in (select resume_document_id from rd where rd.email = te.email)) as candidate_freeform_sections,
@@ -160,6 +174,15 @@ where candidate_id in (
 );
 
 delete from certification_items
+where candidate_id in (
+  select id from candidates where email in (select email from _reset_target_emails)
+) or resume_document_id in (
+  select id from resume_documents
+  where candidate_id in (select id from candidates where email in (select email from _reset_target_emails))
+     or email_verification_id in (select id from email_verifications where email in (select email from _reset_target_emails))
+);
+
+delete from skill_items
 where candidate_id in (
   select id from candidates where email in (select email from _reset_target_emails)
 ) or resume_document_id in (

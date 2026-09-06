@@ -59,10 +59,20 @@ Return ONLY a single JSON object, no prose before or after it, matching exactly 
     { "name": string, "issuing_body": string, "issue_date": string, "expiration_date": string,
       "extraction_confidence": "high" | "medium" | "low" }
   ],
+  "skills": [ string ],
   "freeform": [
-    { "section_type": "summary" | "hobbies_other" | "needs_review", "content": string }
+    { "section_type": "summary" | "hobbies_other" | "needs_review", "heading": string, "content": string }
   ]
 }
+
+ZERO-LOSS RULE (hard requirement — read this before classifying anything): every visible heading,
+paragraph, table, or list on the page must be accounted for somewhere in your output. Never omit
+visible content for any reason. Classify it into a real category (work_history, education,
+certifications, skills) when it genuinely belongs there; otherwise it goes into "freeform" as
+"summary" or "hobbies_other" only when it actually matches one of those two definitions below, and
+as "needs_review" for everything else that doesn't fit anywhere — needs_review is the universal
+fallback, always available, always correct when nothing else fits. Never force content into a
+category it doesn't genuinely belong in just to give it a home.
 
 FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable buckets:
 
@@ -84,16 +94,46 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   certifications UNLESS the resume text itself frames it as part of a degree program (e.g. a
   university-issued certificate within a degree track) — read the actual framing, don't assume.
 
-- Deduplication: if the same role or credential appears more than once anywhere in the document
-  (e.g. listed once under "Experience" and again under a separate "Leadership" or "Highlights"
-  section), extract it ONCE. Do not create duplicate entries for repeated mentions of the same
-  underlying fact.
+- skills = a FLAT LIST of individual skill, competency, or keyword terms presented as a list rather
+  than prose — commonly under a heading like "Skills," "Core Competencies," "Technical Skills,"
+  "Areas of Expertise," "Key Skills," or similar, but judge this by SHAPE, not by header name: if a
+  section reads as a list of short terms/phrases rather than sentences, it belongs in skills
+  regardless of what its heading is called (or even with no heading at all). Each distinct term or
+  short phrase becomes its own string in the "skills" array, copied verbatim — don't rename, merge,
+  split, or normalize wording, and don't alphabetize or reorder; keep the resume's own order. The
+  reverse also holds: if content under a "Skills"-like heading is actually written as prose/full
+  sentences rather than a list of terms, it does NOT belong in skills — classify it by what it
+  actually is instead (summary, or needs_review). Don't duplicate the same term into skills and any
+  other category.
+
+- Deduplication: if the same role, credential, or skill term appears more than once anywhere in the
+  document (e.g. listed once under "Experience" and again under a separate "Leadership" or
+  "Highlights" section), extract it ONCE. Do not create duplicate entries for repeated mentions of
+  the same underlying fact.
 
 - "summary" (freeform) = any professional summary / objective / about-me blurb at the top of the
-  resume. "hobbies_other" (freeform) = interests, hobbies, volunteer/community activities not
-  already handled by the needs_review rule above, and any other content that doesn't fit work
-  history, education, or certifications. Summary and hobbies/other content must NEVER be placed
-  into work_history, education, or certifications, even if it superficially resembles one of them.
+  resume. "hobbies_other" (freeform) = interests, hobbies, and volunteer/community activities ONLY
+  — this is NOT a general catch-all. Content that isn't actually a hobby, interest, or volunteer
+  activity, and doesn't genuinely fit work_history, education, certifications, or skills, belongs in
+  "needs_review" instead, never here. Summary and hobbies/other content must NEVER be placed into
+  work_history, education, certifications, or skills, even if it superficially resembles one of
+  them.
+
+- "needs_review" (freeform) = the universal catch-all for anything real and visible on the page that
+  doesn't genuinely belong in work_history, education, certifications, skills, summary, or
+  hobbies_other. This includes — but is not limited to — a role that reads as unpaid employment (see
+  the work_history rule above), a clearly-titled section whose content doesn't match any other
+  category's definition (e.g. "Career Highlights," "Workplace Strengths," "Achievements," and
+  similar), and any content you can't confidently attribute to another category. When genuinely
+  unsure which category fits, use needs_review rather than guessing or omitting the content —
+  content flagged here is reviewed by a human, not lost.
+
+- Every "freeform" entry must include "heading": the section's own literal heading/label text
+  exactly as printed on the page (e.g. "SELECTED CAREER HIGHLIGHTS", "Workplace Strengths"), copied
+  verbatim — not reworded, not invented, not guessed. Use an empty string "" only when the content
+  genuinely has no visible heading of its own (e.g. an unlabeled continuation of a previous
+  section). This is captured for future analysis of what headers actually appear across resumes; it
+  does not change how content gets classified.
 
 DATES: use YYYY-MM-DD when the resume gives a specific day (rare), YYYY-MM-01 when it gives a
 month and year, YYYY-01-01 when it gives only a year. If a role/program is current/ongoing
@@ -112,14 +152,15 @@ type ExtractionResult = {
   work_history: Array<{ company: string; title: string; start_date: string; end_date: string; job_responsibilities: string; extraction_confidence: string }>;
   education: Array<{ institution: string; degree: string; field_of_study: string; start_date: string; end_date: string; extraction_confidence: string }>;
   certifications: Array<{ name: string; issuing_body: string; issue_date: string; expiration_date: string; extraction_confidence: string }>;
-  freeform: Array<{ section_type: string; content: string }>;
+  skills: Array<string>;
+  freeform: Array<{ section_type: string; heading: string; content: string }>;
 };
 
 function isValidExtraction(x: unknown): x is ExtractionResult {
   if (!x || typeof x !== "object") return false;
   const o = x as Record<string, unknown>;
   return Array.isArray(o.work_history) && Array.isArray(o.education) &&
-    Array.isArray(o.certifications) && Array.isArray(o.freeform);
+    Array.isArray(o.certifications) && Array.isArray(o.skills) && Array.isArray(o.freeform);
 }
 
 export default {
@@ -225,6 +266,7 @@ export default {
         p_work_history: parsed.work_history,
         p_education: parsed.education,
         p_certifications: parsed.certifications,
+        p_skills: parsed.skills,
         p_freeform: parsed.freeform,
       });
       if (rpcErr) {
@@ -252,6 +294,7 @@ export default {
           work_history: parsed.work_history.length,
           education: parsed.education.length,
           certifications: parsed.certifications.length,
+          skills: parsed.skills.length,
           freeform: parsed.freeform.length,
         },
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });

@@ -2813,9 +2813,14 @@ a:hover{color:var(--color-accent)}
       <sc-if value="{{ resumeHasNeedsReview }}" hint-placeholder-val="{{ false }}">
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2);border-color:var(--color-accent)">
         <div class="card-kicker">Flagged for your review</div>
-        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">These didn't go into Work History automatically (often because they read as unpaid or volunteer roles). Nothing here is submitted for verification.</div>
+        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Content we found on your resume but couldn't confidently place anywhere else (an unpaid/volunteer role, or a section that didn't match any category). Nothing here is submitted for verification.</div>
         <sc-for list="{{ resumeNeedsReviewRows }}" as="row" hint-placeholder-count="1">
-          <div style="font-size:13px;color:var(--color-neutral-300);padding:var(--space-3);background:var(--color-surface);border-radius:var(--radius-sm)">{{ row.content }}</div>
+          <div style="font-size:13px;color:var(--color-neutral-300);padding:var(--space-3);background:var(--color-surface);border-radius:var(--radius-sm)">
+            <sc-if value="{{ row.hasHeading }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:11px;letter-spacing:0.04em;text-transform:uppercase;color:var(--color-neutral-500);margin-bottom:4px">{{ row.heading }}</div>
+            </sc-if>
+            {{ row.content }}
+          </div>
         </sc-for>
       </div>
       </sc-if>
@@ -2896,6 +2901,18 @@ a:hover{color:var(--color-accent)}
           <div style="font-size:12px;color:var(--color-neutral-500)">No certifications were found on this document.</div>
         </sc-if>
       </div>
+
+      <sc-if value="{{ resumeHasSkills }}" hint-placeholder-val="{{ false }}">
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+        <div class="card-kicker">Skills</div>
+        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Read straight from your resume, one field per skill — not capped at any count, and each is delivered exactly as written.</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,200px),1fr));gap:var(--space-2)">
+          <sc-for list="{{ resumeSkillRows }}" as="row" hint-placeholder-count="6">
+            <input class="input" value="{{ row.skillText }}" sc-camel-on-change="{{ row.onChange }}">
+          </sc-for>
+        </div>
+      </div>
+      </sc-if>
 
       <sc-if value="{{ resumeHasHobbies }}" hint-placeholder-val="{{ false }}">
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
@@ -3547,16 +3564,6 @@ a:hover{color:var(--color-accent)}
               <div style="font-size:11px;color:var(--color-neutral-600)">{{ skillCountLabel }}</div>
             </div>
             <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
-              <!-- DEV-ONLY TEST FIXTURE PANEL — delete this block and the skillFixture entry in renderVals() before handoff -->
-              <div style="display:flex;flex-direction:column;gap:var(--space-2);padding:var(--space-3);border:1px dashed var(--color-accent-700);border-radius:var(--radius-md);background:var(--color-neutral-900)">
-                <div style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--color-accent-300)">Test Fixture (dev only)</div>
-                <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Not part of the candidate experience, and not real candidate data. Each button is a full reset of the skills state.</div>
-                <div style="display:flex;flex-wrap:wrap;gap:var(--space-2)">
-                  <button type="button" class="btn btn-ghost" sc-camel-on-click="{{ skillFixture.short }}">Short parse (5 skills)</button>
-                  <button type="button" class="btn btn-ghost" sc-camel-on-click="{{ skillFixture.long }}">Long parse (19 skills, forces overflow)</button>
-                </div>
-                <div style="font-size:12px;color:var(--color-neutral-500)">Active: {{ skillFixture.active }}</div>
-              </div>
               <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Up to 15 skills, each its own field. Every term is delivered exactly as you type it: nothing is renamed, merged, or mapped to a standard label.</div>
               <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,200px),1fr));gap:var(--space-2);max-width:760px" sc-camel-on-blur="{{ onSkillsBlur }}">
                 <sc-for list="{{ skillFields }}" as="sk" hint-placeholder-count="5">
@@ -4969,7 +4976,6 @@ class Component extends DCLogic {
   }
 
   getInitialState() {
-    const seededSkills = this.seedSkillItems();
     const verifyToken = new URLSearchParams(window.location.search).get('verify_token');
     const loginToken = new URLSearchParams(window.location.search).get('login_token');
     return { screen: verifyToken ? 'verifying' : (loginToken ? 'confirmingLogin' : 'signupDetails'), verifyToken, verifyStatus: verifyToken ? 'pending' : null, verifyErrorReason: null,
@@ -5030,8 +5036,14 @@ class Component extends DCLogic {
     savedSummaries: this.seedSummaries(),
     summaryModalOpen: false, summaryModalId: null, summaryModalName: '', summaryModalPartner: '', summaryModalText: '',
     cmFlashField: null, cmFlashFading: false,
-    skillItems: seededSkills, skillOverflow: this.seedSkillOverflow(),
-    skillDeleteIndex: null, skillDupQueue: this.findSkillDuplicatePairsIn(seededSkills, []), skillDupKept: [], skillFixtureName: 'long parse (19 skills)',
+    // No longer seeded from a fixture (see removed applySkillFixture/seedSkillItems) — this grid's
+    // real data source is now the resumeConfirm screen's confirmed skill_items (see resumeExtraction.
+    // skills / updateResumeSkill), not this tab. Starts empty rather than reproducing the old
+    // fixture's fake defaults; loading a returning candidate's own confirmed skills into this tab is
+    // a real, separate, not-yet-built next step (Content Manager has no live data source for any
+    // field today — same known gap as the rest of that tab).
+    skillItems: [''], skillOverflow: '',
+    skillDeleteIndex: null, skillDupQueue: [], skillDupKept: [],
     upgradeModalContext: 'customization',
     czFlashField: null, czFlashFading: false, czResetFlash: false, czResetFading: false,
     activityStart: this.defaultActivityStart(), activityEnd: this.defaultActivityEnd(),
@@ -5060,36 +5072,6 @@ class Component extends DCLogic {
       { activity: 'Profile Info preferences saved', timestamp: ts(6) },
       { activity: 'Logged off', timestamp: ts(6) },
     ];
-  }
-
-  // DEV-ONLY: the long fixture exists only to exercise the 16+ overflow path, it is not candidate data
-  LONG_SKILL_FIXTURE = ['JavaScript', 'TypeScript', 'Python', 'React', 'React Native', 'Node.js', 'NodeJS', 'SQL', 'PostgreSQL', 'Product Analytics', 'A/B Testing', 'Figma', 'Design Systems', 'Accessibility (WCAG)', 'GraphQL', 'Docker', 'CI/CD Pipelines', 'Technical Writing', 'Stakeholder Communication'];
-
-  parsedResumeSkills(fixture) {
-    const kind = fixture || (this.state && this.state.skillFixtureName === 'short parse (5 skills)' ? 'short' : 'long');
-    if (kind === 'short') return this.CATEGORY_CONTENT.skills[0].split(',').map(x => x.trim()).filter(Boolean);
-    return this.LONG_SKILL_FIXTURE.slice();
-  }
-
-  // DEV-ONLY: skills fixture switcher, delete this method with the panel in the template
-  applySkillFixture(kind) {
-    const parsed = this.parsedResumeSkills(kind);
-    const grid = parsed.slice(0, 15);
-    this.setState({
-      skillFixtureName: kind === 'long' ? 'long parse (19 skills)' : 'short parse (5 skills)',
-      skillItems: grid.length ? grid : [''],
-      skillOverflow: parsed.slice(15).join(', '),
-      skillDeleteIndex: null, skillDupQueue: this.findSkillDuplicatePairsIn(grid, []), skillDupKept: [],
-    });
-  }
-
-  seedSkillItems() {
-    const grid = this.parsedResumeSkills().slice(0, 15);
-    return grid.length ? grid : [''];
-  }
-
-  seedSkillOverflow() {
-    return this.parsedResumeSkills().slice(15).join(', ');
   }
 
   deliveredSkills() {
@@ -6261,6 +6243,19 @@ class Component extends DCLogic {
     });
   }
 
+  // Same edit-in-place pattern as updateResumeFreeform — no add/delete here, matching every other
+  // category on this screen (resumeConfirm never lets a candidate add or remove a whole row for
+  // work_history/education/certifications/freeform either; skills stays consistent with that rather
+  // than introducing a one-off exception). The add/delete grid interaction stays exactly where it
+  // already lived, in Content Manager's own (still separate, still prototype) skillFields.
+  updateResumeSkill(id, value) {
+    this.setState(st => {
+      if (!st.resumeExtraction) return {};
+      const list = st.resumeExtraction.skills.map(item => item.id === id ? { ...item, skill_text: value } : item);
+      return { resumeExtraction: { ...st.resumeExtraction, skills: list } };
+    });
+  }
+
   async submitResumeConfirmation() {
     if (!this.state.resumeExtraction || !this.state.resumeCandidateId || this.state.resumeConfirmPending) return;
     this.setState({ resumeConfirmPending: true, resumeConfirmError: null });
@@ -6270,6 +6265,7 @@ class Component extends DCLogic {
       work_history: ex.work_history.map(w => ({ id: w.id, company: w.company, title: w.title, start_date: w.start_date, end_date: w.end_date, job_responsibilities: w.job_responsibilities })),
       education: ex.education.map(x => ({ id: x.id, institution: x.institution, degree: x.degree, field_of_study: x.field_of_study, start_date: x.start_date, end_date: x.end_date })),
       certifications: ex.certifications.map(c => ({ id: c.id, name: c.name, issuing_body: c.issuing_body, issue_date: c.issue_date, expiration_date: c.expiration_date })),
+      skills: ex.skills.map(s => ({ id: s.id, skill_text: s.skill_text })),
       freeform: ex.freeform.map(f => ({ id: f.id, content: f.content })),
       opt_in: { work_history: this.state.optInWorkHistory, education: this.state.optInEducation, certifications: this.state.optInCertifications },
     };
@@ -6767,12 +6763,6 @@ class Component extends DCLogic {
       cmUpgradePrompt: () => this.setState({ upgradeModalOpen: true, upgradeModalContext: 'contentManager' }),
       freeSummaryPreview: this.getSummaryText(''),
       freeSkillsPreview: this.deliveredSkills(),
-      // DEV-ONLY: skills fixture switcher, delete this entry with the panel in the template
-      skillFixture: {
-        active: s.skillFixtureName || 'long parse (19 skills)',
-        short: () => this.applySkillFixture('short'),
-        long: () => this.applySkillFixture('long'),
-      },
       skillFields: s.skillItems.map((val, i) => ({
         id: 'skill-field-' + i,
         value: val,
@@ -7019,7 +7009,12 @@ class Component extends DCLogic {
       },
       resumeHasNeedsReview: !!(s.resumeExtraction && s.resumeExtraction.freeform.some(f => f.section_type === 'needs_review')),
       resumeNeedsReviewRows: (s.resumeExtraction ? s.resumeExtraction.freeform.filter(f => f.section_type === 'needs_review') : [])
-        .map(f => ({ content: f.content })),
+        .map(f => ({ content: f.content, heading: f.heading || '', hasHeading: !!(f.heading || '').trim() })),
+      resumeHasSkills: !!(s.resumeExtraction && s.resumeExtraction.skills && s.resumeExtraction.skills.length > 0),
+      resumeSkillRows: (s.resumeExtraction && s.resumeExtraction.skills ? s.resumeExtraction.skills : []).map(sk => ({
+        skillText: sk.skill_text || '',
+        onChange: (e) => this.updateResumeSkill(sk.id, e.target.value),
+      })),
       workHistoryEmpty: !!(s.resumeExtraction) && s.resumeExtraction.work_history.length === 0,
       workHistoryRows: (s.resumeExtraction ? s.resumeExtraction.work_history : []).map(w => ({
         id: w.id,

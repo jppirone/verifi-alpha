@@ -83,10 +83,14 @@ export default {
         if (!healErr) effectiveStatus = "failed";
       }
 
-      const [workHistory, education, certifications, freeform, signed] = await Promise.all([
+      const [workHistory, education, certifications, skills, freeform, signed] = await Promise.all([
         supabase.from("work_history_items").select("*").eq("resume_document_id", doc.id).order("start_date", { ascending: false }),
         supabase.from("education_items").select("*").eq("resume_document_id", doc.id).order("start_date", { ascending: false }),
         supabase.from("certification_items").select("*").eq("resume_document_id", doc.id).order("issue_date", { ascending: false }),
+        // Ordered by position, not created_at — position is the resume's own original order
+        // (see insert_resume_extraction), which matters here since skills are never a "ranking"
+        // but candidates and any downstream view should still see them in the order the resume did.
+        supabase.from("skill_items").select("*").eq("resume_document_id", doc.id).order("position", { ascending: true }),
         supabase.from("candidate_freeform_sections").select("*").eq("resume_document_id", doc.id),
         supabase.storage.from(BUCKET).createSignedUrl(doc.original_storage_path, 3600),
       ]);
@@ -97,6 +101,7 @@ export default {
         work_history: workHistory.data ?? [],
         education: education.data ?? [],
         certifications: certifications.data ?? [],
+        skills: skills.data ?? [],
         freeform: freeform.data ?? [],
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     } catch (e) {
