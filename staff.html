@@ -2628,8 +2628,46 @@ th.sortable{cursor:pointer;user-select:none}
 
   <sc-if value="{{ tabIsReporting }}" hint-placeholder-val="{{ false }}">
     <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
-      <div class="card-title">Reporting</div>
-      <div style="font-size:13px;color:var(--color-neutral-400)">Reporting and saved-report functionality is coming soon.</div>
+      <div class="card-title">Resume extraction failures needing outreach</div>
+      <div style="font-size:13px;color:var(--color-neutral-400)">Candidates whose resume upload failed to extract and who have never reached the verification queue any other way. Alpha's resolution path is the candidate emailing the document directly — this list exists so a real person can reach out proactively instead of relying on that alone.</div>
+      <sc-if value="{{ resumeFailuresLoading }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:12px;color:var(--color-neutral-500);padding:var(--space-3) 0">Loading…</div>
+      </sc-if>
+      <sc-if value="{{ resumeFailuresError }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:12px;color:var(--color-neutral-500);padding:var(--space-3) 0;display:flex;align-items:center;gap:var(--space-2)">
+          Couldn't load this list.
+          <button type="button" class="btn btn-ghost" style="font-size:12px" onClick="{{ loadResumeFailuresAction }}">Retry</button>
+        </div>
+      </sc-if>
+      <sc-if value="{{ resumeFailuresEmpty }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:12px;color:var(--color-neutral-500);padding:var(--space-3) 0">No candidates currently in this state.</div>
+      </sc-if>
+      <sc-if value="{{ showResumeFailuresTable }}" hint-placeholder-val="{{ false }}">
+        <div style="overflow-x:auto">
+        <sc-raw-table class="table">
+          <sc-raw-thead>
+            <sc-raw-tr>
+              <sc-raw-th>Candidate</sc-raw-th>
+              <sc-raw-th>Email</sc-raw-th>
+              <sc-raw-th>Phone</sc-raw-th>
+              <sc-raw-th>Upload failed</sc-raw-th>
+              <sc-raw-th>Candidate acknowledgment</sc-raw-th>
+            </sc-raw-tr>
+          </sc-raw-thead>
+          <sc-raw-tbody>
+            <sc-for list="{{ resumeFailureRows }}" as="row" hint-placeholder-count="2">
+              <sc-raw-tr>
+                <sc-raw-td style="white-space:nowrap;font-weight:500">{{ row.candidateName }}</sc-raw-td>
+                <sc-raw-td style="white-space:nowrap">{{ row.candidateEmail }}</sc-raw-td>
+                <sc-raw-td style="white-space:nowrap">{{ row.candidatePhone }}</sc-raw-td>
+                <sc-raw-td style="white-space:nowrap;font-size:12px;color:var(--color-neutral-400)">{{ row.uploadedDisp }}</sc-raw-td>
+                <sc-raw-td><span class="{{ row.ackClass }}">{{ row.ackLabel }}</span></sc-raw-td>
+              </sc-raw-tr>
+            </sc-for>
+          </sc-raw-tbody>
+        </sc-raw-table>
+        </div>
+      </sc-if>
     </div>
   </sc-if>
 
@@ -2723,6 +2761,12 @@ class Component extends DCLogic {
     automatedCheckRunning: false,
     automatedCheckValidationError: '',
     automatedCheckLastResult: null,
+    // Reporting tab: candidates whose resume extraction failed and who never reached the
+    // verification queue any other way (see list-resume-extraction-failures) — confirmed to be a
+    // real, current, silent dead end (two real candidates found in exactly this state) with zero
+    // prior staff visibility. Loaded lazily, once, the first time the Reporting tab is opened —
+    // see selectTabReporting.
+    resumeFailures: [], resumeFailuresLoading: false, resumeFailuresLoaded: false, resumeFailuresError: false,
   };
 
   _noteFlashCounter = 0;
@@ -2967,6 +3011,34 @@ class Component extends DCLogic {
       return;
     }
     this.setState({ items: data.items });
+  }
+
+  // Backs the Reporting tab's resume-extraction-failure list (see list-resume-extraction-failures
+  // for what "relevant" means: most recent resume_documents row failed AND zero verification_items
+  // rows at all). Deliberately not folded into loadItems/componentDidMount — this is a secondary,
+  // occasional-use view, so it loads once, lazily, the first time a staff member actually opens the
+  // Reporting tab (see selectTabReporting) rather than on every session.
+  async loadResumeFailures() {
+    this.setState({ resumeFailuresLoading: true, resumeFailuresError: false });
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/list-resume-extraction-failures', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      console.error('list-resume-extraction-failures failed', e);
+      this.setState({ resumeFailuresLoading: false, resumeFailuresLoaded: true, resumeFailuresError: true });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      console.error('list-resume-extraction-failures failed', data);
+      this.setState({ resumeFailuresLoading: false, resumeFailuresLoaded: true, resumeFailuresError: true });
+      return;
+    }
+    this.setState({ resumeFailuresLoading: false, resumeFailuresLoaded: true, resumeFailuresError: false, resumeFailures: data.items });
   }
 
   // Tracks fields/timeline entries that failed to persist, per item id, so the UI can show
@@ -3306,7 +3378,27 @@ class Component extends DCLogic {
       tabQueueClass: s.tab === 'queue' ? 'btn-secondary' : 'btn-ghost',
       tabReportingClass: s.tab === 'reporting' ? 'btn-secondary' : 'btn-ghost',
       selectTabQueue: () => this.setState({ tab: 'queue' }),
-      selectTabReporting: () => this.setState({ tab: 'reporting', selectedId: null }),
+      selectTabReporting: () => {
+        this.setState({ tab: 'reporting', selectedId: null });
+        if (!s.resumeFailuresLoaded && !s.resumeFailuresLoading) this.loadResumeFailures();
+      },
+
+      resumeFailuresLoading: s.resumeFailuresLoading,
+      resumeFailuresError: s.resumeFailuresError,
+      resumeFailuresEmpty: s.resumeFailuresLoaded && !s.resumeFailuresError && s.resumeFailures.length === 0,
+      showResumeFailuresTable: s.resumeFailuresLoaded && !s.resumeFailuresError && s.resumeFailures.length > 0,
+      loadResumeFailuresAction: () => this.loadResumeFailures(),
+      resumeFailureRows: s.resumeFailures.map(f => ({
+        candidateName: f.candidateName || '—',
+        candidateEmail: f.candidateEmail || '—',
+        candidatePhone: f.candidatePhone || '—',
+        uploadedDisp: this.fmtDateTime(f.uploadedAt),
+        // Distinguishes "explicitly continued past the failure" from "never acknowledged it at
+        // all" (still mid-flow, or abandoned) — both need outreach, but per this task's explicit
+        // ask they're no longer indistinguishable in the data or here.
+        ackLabel: f.continuedWithoutDataAt ? ('Continued without data — ' + this.fmtDateTime(f.continuedWithoutDataAt)) : 'Never acknowledged the failure',
+        ackClass: f.continuedWithoutDataAt ? 'tag tag-neutral' : 'tag tag-outline',
+      })),
 
       queueScopeNote: isAdmin ? 'Showing every item across every worker.' : 'Showing items assigned to you.',
       showTable: !s.selectedId,

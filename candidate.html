@@ -6224,9 +6224,25 @@ class Component extends DCLogic {
     if (this.state.resumeCandidateId) this.loadResumeExtraction(this.state.resumeCandidateId);
   }
 
+  // Before skip-resume-extraction existed, this was a pure client-side screen transition — no
+  // network call, no record of any kind that the candidate saw a failure and chose to move on.
+  // Confirmed directly against production: two real candidates (john.pirone@gmail.com,
+  // jpirone@yahoo.com) sat with extraction_status='failed' and nothing distinguishing "explicitly
+  // continued anyway" from "never came back." The write below closes that. Fire-and-forget, same
+  // convention as resolve-session's last_seen_at update: the screen already transitioned by the
+  // time this fires, so a slow or failed request here costs staff a slightly stale signal, never
+  // a broken candidate experience.
   skipResumeConfirm() {
+    const candidateId = this.state.resumeCandidateId;
     this.stopResumePolling();
     this.setState({ screen: 'tiers' });
+    if (candidateId) {
+      fetch(this.SUPABASE_FN_URL + '/skip-resume-extraction', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate_id: candidateId }),
+      }).catch(() => {});
+    }
   }
 
   updateResumeItem(category, id, field, value) {

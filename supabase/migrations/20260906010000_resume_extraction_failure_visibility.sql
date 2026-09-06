@@ -1,0 +1,19 @@
+-- Real fix for a confirmed-live gap: skipResumeConfirm() (candidate.html's "Continue without
+-- resume data" button, shown after an extraction failure) was previously a pure client-side screen
+-- transition -- no network call, no persisted record of any kind. Confirmed directly against
+-- production before writing this: two real candidates (john.pirone@gmail.com,
+-- jpirone@yahoo.com) sit today with resume_documents.extraction_status = 'failed' and zero
+-- downstream verification_items, with nothing in the database able to say whether they explicitly
+-- chose to continue or simply never came back -- and staff.html never reads resume_documents at
+-- all (confirmed by grep), so staff had zero visibility into either case.
+--
+-- continued_without_data_at is the queryable signal skip-resume-extraction now writes the moment a
+-- candidate clicks through: set means "explicitly continued anyway," null means "never
+-- acknowledged" (still mid-flow, or abandoned) -- both need staff outreach, but this is what makes
+-- them distinguishable in the data rather than identical, per this task's explicit ask.
+--
+-- This does not attempt to fix the extraction failure itself or build a manual-entry/side-by-side
+-- editing path -- deferred, unchanged: alpha's real resolution mechanism today is the candidate
+-- emailing the document directly. This closes only the silent-dead-end half of the gap: staff
+-- knowing a failure happened, not the resolution mechanism itself.
+alter table resume_documents add column if not exists continued_without_data_at timestamptz;
