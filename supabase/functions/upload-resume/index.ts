@@ -258,6 +258,37 @@ async function runVisionExtraction(sanitizedBase64: string): Promise<ExtractionR
 
 type TextItem = { rect: { left: number; top: number; right: number; bottom: number }; confidence: number; text: string };
 
+// Real, confirmed bug (not theoretical): this column-boundary heuristic used to treat the single
+// largest horizontal gap on a page as a column split UNCONDITIONALLY, with no check for whether the
+// page is actually two-column at all. On a real production PDF (john.pirone@proton.me's resume,
+// page 2 — single-column, flush-left job-title/subheader lines above indented bullets), the gap
+// between the base margin and the bullet-indent level became the page's single largest gap and got
+// treated as a column boundary, silently splitting "AI Solutions Consultant..." into an isolated
+// "AI Solutions" fragment (reordered to the top of the reconstructed text) and "Consultant..." left
+// behind — the same mechanism also split "Independent" from "/ Freelance...", "Technical" from
+// "Training & Digital Skills...", and "School" from "District of Indian River County...". A second
+// real resume (an Enhancv-template PDF with icon-graphic "Strengths"/"Most Proud Of" pairs) showed
+// the same mechanism in miniature: a single stray word ("key") isolated by a 17px gap. The old
+// comment on this function claimed col1 would reliably come back empty for a "genuinely single-
+// column" resume — that was never actually true; col1 ends up empty only when the biggest gap on
+// the page happens to fall at the very end of the sorted left-x list, not whenever the page is
+// single-column, which is exactly how these fragments slipped through unnoticed.
+//
+// MIN_COLUMN_GAP_PX below is set from real, measured word-box gaps, not a guess:
+//   - 36px: the actual erroneous gap on the real corrupted page above (measured live via a
+//     temporary gap-measurement tool against the real stored document).
+//   - 17px: the actual erroneous gap on the second real resume above.
+//   - 120px: the actual gap on a real, confirmed genuine two-column resume (the deterministic
+//     Taylor-Chen test image proven across test-tesseract-wasm-columns, test-tesseract-wasm-
+//     word-columns, and test-real-tesseract-columns) — the real column boundary between its narrow
+//     left column and wide right column.
+// 60px sits with real headroom on both sides (24px above the largest known-erroneous gap, 60px
+// below the one confirmed-genuine gap) — same evidence-based approach as rasterize-pdf-page's
+// PIXEL_COUNT_THRESHOLD. Below this threshold, the page is treated as single-column: every word
+// stays in one reading-order block instead of being split at a gap that's really just margin or
+// bullet-indent whitespace.
+const MIN_COLUMN_GAP_PX = 60;
+
 function reconstructByWordClustering(words: TextItem[]): string {
   const real = words.filter((w) => w.text.trim().length > 0);
   if (real.length === 0) return "";
@@ -271,7 +302,10 @@ function reconstructByWordClustering(words: TextItem[]): string {
       gapIdx = i;
     }
   }
-  const boundary = gapIdx > 0 ? (sortedLefts[gapIdx - 1].left + sortedLefts[gapIdx].left) / 2 : -Infinity;
+  // No real column boundary at all if the biggest gap on the page doesn't clear the real-data
+  // threshold above — treat the whole page as a single column rather than splitting on what's
+  // really just margin or bullet-indent whitespace.
+  const boundary = (gapIdx > 0 && maxGap > MIN_COLUMN_GAP_PX) ? (sortedLefts[gapIdx - 1].left + sortedLefts[gapIdx].left) / 2 : Infinity;
 
   const col0 = withLeft.filter((w) => w.left <= boundary);
   const col1 = withLeft.filter((w) => w.left > boundary);
@@ -297,8 +331,9 @@ function reconstructByWordClustering(words: TextItem[]): string {
 
   const col0Lines = reconstructColumn(col0);
   const col1Lines = reconstructColumn(col1);
-  // If clustering found effectively one column (no real gap), col1 will be empty — don't glue a
-  // spurious blank second block onto genuinely single-column resumes.
+  // col1 is now reliably empty whenever no gap on the page cleared MIN_COLUMN_GAP_PX above (boundary
+  // is Infinity in that case, so every word lands in col0) — don't glue a spurious blank second
+  // block onto genuinely single-column resumes.
   return col1Lines.length ? col0Lines.join("\n") + "\n\n" + col1Lines.join("\n") : col0Lines.join("\n");
 }
 

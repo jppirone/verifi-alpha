@@ -256,6 +256,32 @@ async function runHaikuExtraction(ocrText: string): Promise<ExtractionResult> {
 // tesseract-routed image uploads, not a second, divergent implementation.
 type TextItem = { rect: { left: number; top: number; right: number; bottom: number }; confidence: number; text: string };
 
+// Real, confirmed bug (not theoretical): this column-boundary heuristic used to treat the single
+// largest horizontal gap on a page as a column split UNCONDITIONALLY, with no check for whether the
+// page is actually two-column at all. On a real production PDF (john.pirone@proton.me's resume,
+// page 2 — single-column, flush-left job-title/subheader lines above indented bullets), the gap
+// between the base margin and the bullet-indent level became the page's single largest gap and got
+// treated as a column boundary, silently splitting "AI Solutions Consultant..." into an isolated
+// "AI Solutions" fragment (reordered to the top of the reconstructed text) and "Consultant..." left
+// behind — the same mechanism also split "Independent" from "/ Freelance...", "Technical" from
+// "Training & Digital Skills...", and "School" from "District of Indian River County...". A second
+// real resume (an Enhancv-template PDF with icon-graphic "Strengths"/"Most Proud Of" pairs) showed
+// the same mechanism in miniature: a single stray word ("key") isolated by a 17px gap.
+//
+// MIN_COLUMN_GAP_PX below is set from real, measured word-box gaps, not a guess:
+//   - 36px: the actual erroneous gap on the real corrupted page above (measured live via a
+//     temporary gap-measurement tool against the real stored document).
+//   - 17px: the actual erroneous gap on the second real resume above.
+//   - 120px: the actual gap on a real, confirmed genuine two-column resume (the deterministic
+//     Taylor-Chen test image proven across test-tesseract-wasm-columns, test-tesseract-wasm-
+//     word-columns, and test-real-tesseract-columns) — the real column boundary between its narrow
+//     left column and wide right column.
+// 60px sits with real headroom on both sides (24px above the largest known-erroneous gap, 60px
+// below the one confirmed-genuine gap) — same evidence-based approach as PIXEL_COUNT_THRESHOLD
+// above. Below this threshold, the page is treated as single-column: every word stays in one
+// reading-order block instead of being split at a gap that's really just margin/indentation.
+const MIN_COLUMN_GAP_PX = 60;
+
 function reconstructByWordClustering(words: TextItem[]): string {
   const real = words.filter((w) => w.text.trim().length > 0);
   if (real.length === 0) return "";
@@ -266,7 +292,10 @@ function reconstructByWordClustering(words: TextItem[]): string {
     const gap = sortedLefts[i].left - sortedLefts[i - 1].left;
     if (gap > maxGap) { maxGap = gap; gapIdx = i; }
   }
-  const boundary = gapIdx > 0 ? (sortedLefts[gapIdx - 1].left + sortedLefts[gapIdx].left) / 2 : -Infinity;
+  // No real column boundary at all if the biggest gap on the page doesn't clear the real-data
+  // threshold above — treat the whole page as a single column rather than splitting on what's
+  // really just margin or bullet-indent whitespace.
+  const boundary = (gapIdx > 0 && maxGap > MIN_COLUMN_GAP_PX) ? (sortedLefts[gapIdx - 1].left + sortedLefts[gapIdx].left) / 2 : Infinity;
   const col0 = withLeft.filter((w) => w.left <= boundary);
   const col1 = withLeft.filter((w) => w.left > boundary);
   function reconstructColumn(colWords: typeof withLeft): string[] {
