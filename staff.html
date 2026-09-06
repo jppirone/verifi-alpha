@@ -2454,7 +2454,8 @@ th.sortable{cursor:pointer;user-select:none}
         </div>
 
         <div class="field">
-          <label for="detail-note">Staff note</label>
+          <label for="detail-note">Note to candidate</label>
+          <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.5;margin-bottom:2px">Visible to the candidate on their Verification Status tab whenever this item's status is Discrepancy. Write it assuming they will read it.</div>
           <textarea class="input" id="detail-note" rows="2" value="{{ detailNote }}" onChange="{{ setDetailNote }}"></textarea>
           <div style="display:flex;align-items:center;gap:6px;min-height:16px">
             <sc-if value="{{ showNoteSaving }}" hint-placeholder-val="{{ false }}">
@@ -2466,6 +2467,24 @@ th.sortable{cursor:pointer;user-select:none}
             <sc-if value="{{ showNoteError }}" hint-placeholder-val="{{ false }}">
               <span style="font-size:11px;color:#b00020">Not saved</span>
               <button type="button" class="btn btn-ghost" style="font-size:11px;padding:1px 6px" onClick="{{ retryNoteSave }}">Retry</button>
+            </sc-if>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="detail-internal-note">Internal note (staff only)</label>
+          <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.5;margin-bottom:2px">Never shown to the candidate, under any status. For back-office communication only.</div>
+          <textarea class="input" id="detail-internal-note" rows="2" value="{{ detailInternalNote }}" onChange="{{ setDetailInternalNote }}" style="border-color:var(--color-neutral-600)"></textarea>
+          <div style="display:flex;align-items:center;gap:6px;min-height:16px">
+            <sc-if value="{{ showInternalNoteSaving }}" hint-placeholder-val="{{ false }}">
+              <span style="font-size:11px;color:var(--color-neutral-500)">Saving…</span>
+            </sc-if>
+            <sc-if value="{{ showInternalNoteSaved }}" hint-placeholder-val="{{ false }}">
+              <span style="font-size:11px;color:var(--color-accent-300);{{ internalNoteFadeStyle }}">Saved</span>
+            </sc-if>
+            <sc-if value="{{ showInternalNoteError }}" hint-placeholder-val="{{ false }}">
+              <span style="font-size:11px;color:#b00020">Not saved</span>
+              <button type="button" class="btn btn-ghost" style="font-size:11px;padding:1px 6px" onClick="{{ retryInternalNoteSave }}">Retry</button>
             </sc-if>
           </div>
         </div>
@@ -2677,6 +2696,7 @@ class Component extends DCLogic {
     sortKey: 'received', sortDir: 'asc',
     selectedId: null,
     noteSaveState: 'idle', noteFading: false,
+    internalNoteSaveState: 'idle', internalNoteFading: false,
     statusConfirmOpen: false, pendingStatus: null,
     correctionFilter: false, correctionMode: null, correctionDraft: '', declineDraft: '',
     // Real search/filter, added after confirming none existed: candidate name (reuses the
@@ -2700,6 +2720,12 @@ class Component extends DCLogic {
   _noteSaveTimers = {};
   _noteSaveInFlight = {};
   _noteSaveQueued = {};
+
+  _internalNoteFlashCounter = 0;
+  _internalNoteSavePending = {};
+  _internalNoteSaveTimers = {};
+  _internalNoteSaveInFlight = {};
+  _internalNoteSaveQueued = {};
 
   componentDidMount() {
     this.loadItems();
@@ -2904,16 +2930,23 @@ class Component extends DCLogic {
     });
   }
 
-  // Single retry entry point used by the queue-row tag, the detail-panel banner, and the
-  // note field's own inline retry — re-attempts whatever is still outstanding for this item.
+  // Single retry entry point used by the queue-row tag, the detail-panel banner, and both note
+  // fields' own inline retry — re-attempts whatever is still outstanding for this item. note and
+  // internal_note each get their own debounced save path (see scheduleNoteSave/
+  // scheduleInternalNoteSave), so each is special-cased here the same way; every other field goes
+  // through the generic bulk patch.
   retrySync(id) {
     const failure = this.state.syncFailures[id];
     if (!failure) return;
-    const { note, ...otherFields } = failure.patchFields;
+    const { note, internalNote, ...otherFields } = failure.patchFields;
     if (Object.keys(otherFields).length) this.persistItemPatch(id, otherFields);
     if (note !== undefined) {
       this._noteSavePending[id] = note;
       this.flushNoteSave(id);
+    }
+    if (internalNote !== undefined) {
+      this._internalNoteSavePending[id] = internalNote;
+      this.flushInternalNoteSave(id);
     }
     for (const entry of failure.entries) this.persistTimelineEntry(id, entry);
   }
@@ -3017,6 +3050,57 @@ class Component extends DCLogic {
     if (this._noteSaveQueued[id]) {
       this._noteSaveQueued[id] = false;
       this.flushNoteSave(id);
+    }
+  }
+
+  // Internal note: same debounced, per-item-serialized save discipline as the candidate-facing
+  // note above, kept as a fully separate field/state/save-path pair rather than a parameterized
+  // shared implementation — these two notes have different visibility (one candidate-facing, one
+  // never leaves the building) and staff should never see them share plumbing that could blur that
+  // line later.
+  scheduleInternalNoteSave(id, value) {
+    this._internalNoteSavePending[id] = value;
+    clearTimeout(this._internalNoteSaveTimers[id]);
+    this._internalNoteSaveTimers[id] = setTimeout(() => this.flushInternalNoteSave(id), 500);
+  }
+
+  async flushInternalNoteSave(id) {
+    if (this._internalNoteSaveInFlight[id]) {
+      this._internalNoteSaveQueued[id] = true;
+      return;
+    }
+    const value = this._internalNoteSavePending[id];
+    this._internalNoteSaveInFlight[id] = true;
+    if (id === this.state.selectedId) this.setState({ internalNoteSaveState: 'saving' });
+    let ok = false;
+    try {
+      const res = await fetch(this.SUPABASE_FN_URL + '/update-verification-item', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, patch: { internalNote: value } }),
+      });
+      const data = await res.json().catch(() => ({}));
+      ok = res.ok && !!data.ok;
+    } catch (e) {
+      ok = false;
+    }
+    this._internalNoteSaveInFlight[id] = false;
+    if (ok) {
+      this.clearSyncFailureFields(id, ['internalNote']);
+      if (id === this.state.selectedId) {
+        const flashId = ++this._internalNoteFlashCounter;
+        this.setState({ internalNoteSaveState: 'saved', internalNoteFading: false });
+        setTimeout(() => { if (this._internalNoteFlashCounter === flashId) this.setState({ internalNoteFading: true }); }, 900);
+        setTimeout(() => { if (this._internalNoteFlashCounter === flashId) this.setState({ internalNoteSaveState: 'idle', internalNoteFading: false }); }, 1500);
+      }
+    } else {
+      console.error('update-verification-item failed (internal_note)', id);
+      this.recordSyncFailure(id, { internalNote: value });
+      if (id === this.state.selectedId) this.setState({ internalNoteSaveState: 'error' });
+    }
+    if (this._internalNoteSaveQueued[id]) {
+      this._internalNoteSaveQueued[id] = false;
+      this.flushInternalNoteSave(id);
     }
   }
 
@@ -3260,6 +3344,20 @@ class Component extends DCLogic {
       showNoteSaved: s.noteSaveState === 'saved',
       showNoteError: s.noteSaveState === 'error',
       noteFadeStyle: s.noteFading ? 'transition:opacity 0.5s ease;opacity:0' : 'transition:opacity 0.15s ease;opacity:1',
+
+      detailInternalNote: selected ? (selected.internalNote || '') : '',
+      setDetailInternalNote: (e) => {
+        if (!selected) return;
+        const id = selected.id;
+        const value = e.target.value;
+        this.setState(st => ({ items: st.items.map(it => it.id === id ? { ...it, internalNote: value } : it) }));
+        this.scheduleInternalNoteSave(id, value);
+      },
+      retryInternalNoteSave: () => { if (selected) this.retrySync(selected.id); },
+      showInternalNoteSaving: s.internalNoteSaveState === 'saving',
+      showInternalNoteSaved: s.internalNoteSaveState === 'saved',
+      showInternalNoteError: s.internalNoteSaveState === 'error',
+      internalNoteFadeStyle: s.internalNoteFading ? 'transition:opacity 0.5s ease;opacity:0' : 'transition:opacity 0.15s ease;opacity:1',
 
       setDetailStatus: (e) => {
         if (!selected || e.target.value === selected.status) return;

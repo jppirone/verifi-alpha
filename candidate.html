@@ -3309,6 +3309,38 @@ a:hover{color:var(--color-accent)}
                 </div>
                 <span class="tag {{ row.tagClass }}">{{ row.safeLabel }}</span>
               </div>
+
+              <sc-if value="{{ row.isDiscrepancy }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:12px;color:var(--color-neutral-400);border-top:1px solid var(--color-divider);padding-top:8px">{{ row.discrepancyNote }}</div>
+
+                <sc-if value="{{ row.hasResponded }}" hint-placeholder-val="{{ false }}">
+                  <div style="font-size:12px;color:var(--color-neutral-500)">Response submitted, awaiting staff review.</div>
+                </sc-if>
+
+                <sc-if value="{{ row.showRespondButton }}" hint-placeholder-val="{{ false }}">
+                  <button type="button" class="btn btn-ghost" style="align-self:flex-start;font-size:12px" sc-camel-on-click="{{ row.openRespond }}">Respond</button>
+                </sc-if>
+
+                <sc-if value="{{ row.responseFormOpen }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex;flex-direction:column;gap:var(--space-2);border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
+                    <div class="field" style="max-width:320px">
+                      <label>Corrected value (optional)</label>
+                      <input class="input" value="{{ correctionValueDraft }}" sc-camel-on-change="{{ setCorrectionValueDraft }}" placeholder="Leave blank if you're standing by the original">
+                    </div>
+                    <div class="field" style="max-width:360px">
+                      <label>Your explanation</label>
+                      <textarea class="input" rows="2" value="{{ correctionNoteDraft }}" sc-camel-on-change="{{ setCorrectionNoteDraft }}" placeholder="Explain the correction, or explain why the original is correct"></textarea>
+                    </div>
+                    <sc-if value="{{ correctionSubmitError }}" hint-placeholder-val="{{ false }}">
+                      <div style="font-size:11px;color:#b00020">Couldn't submit your response. Try again.</div>
+                    </sc-if>
+                    <div style="display:flex;gap:8px">
+                      <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ row.submitRespond }}">{{ correctionSubmitLabel }}</button>
+                      <button type="button" class="btn btn-ghost" sc-camel-on-click="{{ row.cancelRespond }}">Cancel</button>
+                    </div>
+                  </div>
+                </sc-if>
+              </sc-if>
             </div>
           </sc-for>
         </sc-if>
@@ -4594,13 +4626,76 @@ class Component extends DCLogic {
         if (filter === 'completed') return terminal;
         return true;
       })
-      .map(it => ({
-        id: it.id,
-        categoryLabel: this.VERIFICATION_CATEGORY_LABELS[it.type] || it.type,
-        claim: it.claim || '(no description on file)',
-        safeLabel: this.verificationSafeLabel(it.status),
-        tagClass: this.verificationTagClass(it.status),
-      }));
+      .map(it => {
+        const isDiscrepancy = it.status === 'Discrepancy';
+        const formOpen = s.correctionResponseOpenId === it.id;
+        return {
+          id: it.id,
+          categoryLabel: this.VERIFICATION_CATEGORY_LABELS[it.type] || it.type,
+          claim: it.claim || '(no description on file)',
+          safeLabel: this.verificationSafeLabel(it.status),
+          tagClass: this.verificationTagClass(it.status),
+          isDiscrepancy,
+          discrepancyNote: it.note || "Staff hasn't added an explanation yet.",
+          hasResponded: isDiscrepancy && !!it.correctionRequested,
+          canRespond: isDiscrepancy && !it.correctionRequested,
+          showRespondButton: isDiscrepancy && !it.correctionRequested && !formOpen,
+          responseFormOpen: isDiscrepancy && !it.correctionRequested && formOpen,
+          openRespond: () => this.openCorrectionResponse(it.id),
+          cancelRespond: () => this.cancelCorrectionResponse(),
+          submitRespond: () => this.submitCorrectionResponse(it.id),
+        };
+      });
+  }
+
+  openCorrectionResponse(itemId) {
+    this.setState({
+      correctionResponseOpenId: itemId,
+      correctionValueDraft: '',
+      correctionNoteDraft: '',
+      correctionSubmitError: null,
+    });
+  }
+
+  cancelCorrectionResponse() {
+    this.setState({ correctionResponseOpenId: null, correctionSubmitError: null });
+  }
+
+  async submitCorrectionResponse(itemId) {
+    const s = this.state;
+    const value = (s.correctionValueDraft || '').trim();
+    const note = (s.correctionNoteDraft || '').trim();
+    if (!value && !note) {
+      this.setState({ correctionSubmitError: 'response_required' });
+      return;
+    }
+    this.setState({ correctionSubmitPending: true, correctionSubmitError: null });
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/submit-candidate-correction-response', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate_id: s.resumeCandidateId, item_id: itemId, corrected_value: value, note }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ correctionSubmitPending: false, correctionSubmitError: 'network' });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      this.setState({ correctionSubmitPending: false, correctionSubmitError: (data && data.error) || 'failed' });
+      return;
+    }
+    this.setState({
+      correctionSubmitPending: false,
+      correctionResponseOpenId: null,
+      correctionValueDraft: '',
+      correctionNoteDraft: '',
+    });
+    // Real refresh from the server rather than an optimistic local patch, so the candidate sees
+    // exactly what staff will see (correction_requested now true) — matches this codebase's
+    // existing convention of re-fetching after a real write rather than guessing the new state.
+    this.loadVerificationItems(s.resumeCandidateId);
   }
 
   ensureVerificationItemsLoaded() {
@@ -4907,6 +5002,8 @@ class Component extends DCLogic {
     resumeConfirmPending: false, resumeConfirmError: null,
     verificationFilter: 'active', upgradeModalOpen: false, upgradeReturnTab: null, upgradeReturnTarget: null,
     verificationItems: [], verificationItemsLoading: false, verificationItemsError: null, verificationItemsLoadedFor: null,
+    correctionResponseOpenId: null, correctionValueDraft: '', correctionNoteDraft: '',
+    correctionSubmitPending: false, correctionSubmitError: null,
     mobileNavOpen: false,
     kycModalOpen: false, kycModalPendingSave: false,
     connectModalOpen: false, connectModalPartner: null,
@@ -6771,6 +6868,12 @@ class Component extends DCLogic {
       showNoActiveItems: !s.verificationItemsLoading && !s.verificationItemsError && this.getVerificationItemRows().length === 0,
       verificationCategorySummaries: this.getVerificationCategorySummaries(),
       hasVerificationCategorySummaries: this.getVerificationCategorySummaries().length > 0,
+      correctionValueDraft: s.correctionValueDraft,
+      correctionNoteDraft: s.correctionNoteDraft,
+      setCorrectionValueDraft: (e) => this.setState({ correctionValueDraft: e.target.value }),
+      setCorrectionNoteDraft: (e) => this.setState({ correctionNoteDraft: e.target.value }),
+      correctionSubmitLabel: s.correctionSubmitPending ? 'Submitting…' : 'Submit response',
+      correctionSubmitError: !!s.correctionSubmitError,
       employerSummaryLines: this.getEmployerSummaryLines(),
       employerRows: this.getEmployerRows(),
       empPageLabel: 'Page ' + (s.empPage + 1) + ' of ' + this.empPageCount() + ', ' + s.employerActivity.length + ' entries.',

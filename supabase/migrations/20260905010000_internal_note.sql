@@ -1,0 +1,25 @@
+-- Splits verification_items' single "Staff note" field into two, ahead of making the candidate-
+-- facing discrepancy-response flow real (candidate.html Verification Status tab). Run through the
+-- same dashboard SQL editor as every other schema change in this project (no CLI/migrations
+-- linkage), committed here as the durable record, matching the discipline established in
+-- 20260903000000_resume_pipeline.sql's own header.
+--
+-- `note` is being repurposed, not newly introduced: it already existed and was already staff-
+-- writable via update-verification-item and staff.html's "Staff note" textarea, but every existing
+-- use of it assumed staff-only visibility. As of this migration it becomes the candidate-facing
+-- note — shown to the candidate on the Verification Status tab whenever an item's status is
+-- 'Discrepancy' — so staff.html's label changes from "Staff note" to "Note to candidate" in the
+-- same change that ships this. No existing real production item has status = 'Discrepancy' with a
+-- note on it today (confirmed live before this migration), so this relabeling closes the gap
+-- before it can leak anything written under the old assumption.
+--
+-- `internal_note` is new: staff-only, never selected by any candidate-facing Edge Function
+-- (list-candidate-verification-items does not and must not include it), never surfaced anywhere in
+-- candidate.html. For back-office communication that should never leave the building.
+--
+-- automated_check is untouched by this migration and by the build it supports — not part of this
+-- change's scope, and no connection from note/internal_note/automated_check to any downstream
+-- employer-facing export or data feed exists today or is implied by this change. employer.html was
+-- checked directly: it never queries verification_items and has no reference to any of these three
+-- columns. That connection, if it's ever wanted, is a separate, later decision.
+alter table verification_items add column if not exists internal_note text;

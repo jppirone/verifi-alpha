@@ -16,7 +16,7 @@ export default {
       return new Response(null, { headers: corsHeaders });
     }
     try {
-      const url = SUPABASE_URL + "/rest/v1/verification_items?select=id,type,claim,received,desired,follow_up,note,automated_check,status,assigned_to,correction_requested,correction_note,correction_field,correction_value,verification_item_timeline(event_date,actor,action,note),candidates(full_name,first_name,last_name,email,phone)&order=id.asc&verification_item_timeline.order=event_date.asc";
+      const url = SUPABASE_URL + "/rest/v1/verification_items?select=id,type,claim,received,desired,follow_up,note,internal_note,automated_check,status,assigned_to,correction_requested,correction_note,correction_field,correction_value,verification_item_timeline(event_date,actor,action,note),candidates(full_name,first_name,last_name,email,phone)&order=id.asc&verification_item_timeline.order=event_date.asc";
       const res = await fetch(url, {
         headers: {
           "apikey": SUPABASE_SERVICE_ROLE_KEY,
@@ -39,6 +39,7 @@ export default {
         desired: r.desired,
         followUp: r.follow_up,
         note: r.note,
+        internalNote: r.internal_note,
         automatedCheck: r.automated_check,
         status: r.status,
         assignedTo: r.assigned_to,
