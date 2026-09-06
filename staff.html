@@ -2252,23 +2252,26 @@ th.sortable{cursor:pointer;user-select:none}
           <span class="nav-brand">Verifi</span>
           <div style="font-size:13px;color:var(--color-neutral-400);margin-top:2px">Staff verification queue</div>
         </div>
-        <div class="field">
-          <label for="staff-email">Email</label>
-          <input class="input" id="staff-email" placeholder="you@verifi-staff.com">
-        </div>
-        <div class="field">
-          <label for="staff-pw">Password</label>
-          <input class="input" id="staff-pw" type="password">
-        </div>
-        <div class="field">
-          <label for="staff-signin-as">Sign in as</label>
-          <sc-raw-select class="input" id="staff-signin-as" value="{{ loginSelection }}" onChange="{{ setLoginSelection }}">
-            <sc-for list="{{ signInOptions }}" as="opt" hint-placeholder-count="4">
-              <option value="{{ opt.value }}">{{ opt.label }}</option>
-            </sc-for>
-          </sc-raw-select>
-        </div>
-        <button type="button" class="btn btn-primary" onClick="{{ logIn }}">Log in</button>
+
+        <sc-if value="{{ loginResolving }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:13px;color:var(--color-neutral-400)">Checking your link…</div>
+        </sc-if>
+
+        <sc-if value="{{ loginLinkSent }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">We sent a login link to {{ loginEmail }}. Click it on this device to continue — it expires in 15 minutes and works once.</div>
+          <button type="button" class="btn btn-ghost" style="align-self:flex-start;font-size:12px" onClick="{{ resetLoginForm }}">Use a different email</button>
+        </sc-if>
+
+        <sc-if value="{{ loginFormOpen }}" hint-placeholder-val="{{ true }}">
+          <div class="field">
+            <label for="staff-email">Email</label>
+            <input class="input" id="staff-email" placeholder="you@verifi-staff.com" value="{{ loginEmail }}" onChange="{{ setLoginEmail }}">
+          </div>
+          <sc-if value="{{ loginRequestError }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:#b00020">{{ loginRequestErrorText }}</div>
+          </sc-if>
+          <button type="button" class="btn btn-primary" onClick="{{ requestLoginLink }}">{{ requestLoginLabel }}</button>
+        </sc-if>
       </div>
     </div>
   </div>
@@ -2689,8 +2692,15 @@ class Component extends DCLogic {
 
   state = {
     screen: 'login',
-    loginSelection: 'Jordan Lee',
-    loginRole: null, currentUser: null,
+    // Real identity, only ever populated from a server-resolved session (staff-confirm-login /
+    // staff-resolve-session) — never self-selected. loginRole/currentUser keep their existing
+    // names deliberately: every downstream consumer (isAdmin, the per-worker queue filter, every
+    // timeline actor attribution) already reads these two fields, so populating them from a real
+    // session — instead of the old self-select dropdown — makes every one of those checks real
+    // with no other code path needing to change.
+    loginRole: null, currentUser: null, staffEmail: null, sessionToken: null,
+    loginEmail: '', loginLinkSent: false, loginRequestPending: false, loginRequestError: null,
+    loginResolving: false,
     tab: 'queue',
     items: [],
     sortKey: 'received', sortDir: 'asc',
@@ -2727,8 +2737,82 @@ class Component extends DCLogic {
   _internalNoteSaveInFlight = {};
   _internalNoteSaveQueued = {};
 
+  // Real gate: loadItems() (the function that actually fetches every candidate's queue data) now
+  // only ever runs after a session has been server-confirmed, not unconditionally on mount. Before
+  // this, the queue's real data left the server into this page's own JS state regardless of the
+  // (fake) login screen sitting in front of it — a real, current version of the exact "no access
+  // control" problem this task exists to fix, just one level lower than the UI. An unauthenticated
+  // visitor's browser now fetches nothing.
   componentDidMount() {
+    const url = new URL(window.location.href);
+    const loginToken = url.searchParams.get('login_token');
+    if (loginToken) {
+      url.searchParams.delete('login_token');
+      window.history.replaceState({}, '', url.toString());
+      this.confirmStaffLogin(loginToken);
+      return;
+    }
+    this.resolveStaffSession();
+  }
+
+  applyStaffSession(sessionToken, profile) {
+    try { localStorage.setItem('verifi_staff_session_token', sessionToken); } catch (e) {}
+    this.setState({
+      sessionToken,
+      staffEmail: profile.email,
+      currentUser: profile.name,
+      loginRole: profile.role === 'admin' ? 'admin' : 'worker',
+      screen: 'portal',
+      loginResolving: false,
+    });
     this.loadItems();
+  }
+
+  async confirmStaffLogin(token) {
+    this.setState({ loginResolving: true });
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/staff-confirm-login', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ loginResolving: false, loginRequestError: true, loginRequestErrorText: 'Something went wrong confirming that link. Try requesting a new one.' });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      this.setState({
+        loginResolving: false,
+        loginRequestError: true,
+        loginRequestErrorText: data.error === 'already_used' ? 'That link was already used.' : data.error === 'expired' ? 'That link expired. Request a new one.' : "That link didn't work. Request a new one.",
+      });
+      return;
+    }
+    this.applyStaffSession(data.session_token, data);
+  }
+
+  async resolveStaffSession() {
+    let token;
+    try { token = localStorage.getItem('verifi_staff_session_token'); } catch (e) { token = null; }
+    if (!token) return;
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/staff-resolve-session', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_token: token }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      try { localStorage.removeItem('verifi_staff_session_token'); } catch (e) {}
+      return;
+    }
+    this.applyStaffSession(token, data);
   }
 
   // Which automated check makes most sense to default to for an item's type — staff can always
@@ -3163,17 +3247,56 @@ class Component extends DCLogic {
     return {
       isLogin: s.screen === 'login',
       isPortal: s.screen === 'portal',
-      signInOptions: [
-        ...this.WORKERS.map(w => ({ value: w, label: w + ' (Worker)' })),
-        { value: 'admin', label: 'Admin' },
-      ],
-      loginSelection: s.loginSelection,
-      setLoginSelection: (e) => this.setState({ loginSelection: e.target.value }),
-      logIn: () => {
-        const isAdminLogin = s.loginSelection === 'admin';
-        this.setState({ screen: 'portal', loginRole: isAdminLogin ? 'admin' : 'worker', currentUser: isAdminLogin ? 'Admin' : s.loginSelection });
+      loginResolving: s.loginResolving,
+      loginLinkSent: s.loginLinkSent,
+      loginFormOpen: !s.loginLinkSent && !s.loginResolving,
+      loginEmail: s.loginEmail,
+      setLoginEmail: (e) => this.setState({ loginEmail: e.target.value, loginRequestError: false }),
+      loginRequestError: s.loginRequestError,
+      loginRequestErrorText: s.loginRequestErrorText || '',
+      requestLoginLabel: s.loginRequestPending ? 'Sending…' : 'Send login link',
+      requestLoginLink: () => {
+        const email = (s.loginEmail || '').trim();
+        if (!email || s.loginRequestPending) return;
+        this.setState({ loginRequestPending: true, loginRequestError: false });
+        fetch(this.SUPABASE_FN_URL + '/staff-request-login', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email }),
+        })
+          .then(res => res.json().catch(() => ({})).then(data => ({ ok: res.ok, data })))
+          .then(({ ok, data }) => {
+            if (ok && data.ok) {
+              this.setState({ loginRequestPending: false, loginLinkSent: true });
+            } else {
+              this.setState({
+                loginRequestPending: false,
+                loginRequestError: true,
+                loginRequestErrorText: data.error === 'no_account_found' ? "We couldn't find a staff account for that email." : "Something went wrong. Try again.",
+              });
+            }
+          })
+          .catch(() => {
+            this.setState({ loginRequestPending: false, loginRequestError: true, loginRequestErrorText: "Something went wrong. Try again." });
+          });
       },
-      logOff: () => this.setState({ screen: 'login', selectedId: null, tab: 'queue' }),
+      resetLoginForm: () => this.setState({ loginLinkSent: false, loginEmail: '', loginRequestError: false }),
+      logOff: () => {
+        const token = s.sessionToken;
+        try { localStorage.removeItem('verifi_staff_session_token'); } catch (e) {}
+        this.setState({
+          screen: 'login', selectedId: null, tab: 'queue',
+          sessionToken: null, staffEmail: null, currentUser: null, loginRole: null,
+          loginEmail: '', loginLinkSent: false,
+        });
+        if (token) {
+          fetch(this.SUPABASE_FN_URL + '/staff-logout', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_token: token }),
+          }).catch(() => {});
+        }
+      },
       currentUserLabel: s.currentUser || '',
       roleLabel: isAdmin ? 'Admin' : 'Worker',
       isAdmin, isWorker,
