@@ -4425,31 +4425,72 @@ class Component extends DCLogic {
     { key: 'deactivation', label: 'Account Deactivation' },
   ];
 
-  CZ_CATEGORIES = [
-    { key: 'experience', label: 'Job Experience', items: [
-      { key: 'acme', label: 'Software Engineer at Acme Inc. (Jun 2019-Jul 2021)', description: 'Built and shipped consumer-facing web features used by over 2 million monthly active users. Partnered with design and product to scope, estimate, and deliver releases on a two-week cadence.' },
-      { key: 'beta', label: 'Marketing Lead at Beta Corp (Apr 2022-Jun 2023)', description: 'Led lead-generation campaigns across email and paid search, growing qualified pipeline by 35 percent year over year. Managed a team of three marketing coordinators.', caveatKey: 'beta' },
-      { key: 'gamma', label: 'Operations Manager at Gamma LLC (Apr 2017-May 2019)', description: 'Oversaw daily operations for a 40-person distribution site, including scheduling, vendor relations, and inventory accuracy reporting.', caveatKey: 'gamma' },
-      { key: 'delta', label: 'Contract Consultant at Delta Ventures (Jul 2023-Present)', description: 'Advised early-stage clients on go-to-market strategy and technical architecture decisions on a project basis.', caveatKey: 'delta' },
-      { key: 'epsilon', label: 'Client Success Associate at Northwind Retail (Aug 2021-Jun 2022)', description: 'Managed onboarding and renewals for a portfolio of retail accounts.', caveatKey: 'epsilon' },
-    ] },
-    { key: 'education', label: 'Education', items: [
-      { key: 'stateU', label: 'B.S. Computer Science, State University (Graduated May 2019)' },
-    ] },
-    { key: 'skills', label: 'Skills' },
-    { key: 'certifications', label: 'Certifications', items: [
-      { key: 'aws', label: 'AWS Certified Solutions Architect, Amazon Web Services (Issued Jan 2022)' },
-    ] },
-    { key: 'misc', label: 'Hobbies & other activities' },
-  ];
+  // Real dead end found live (2026-09-07 wiring audit): Content Manager, Customization, and Views
+  // all read from this exact fixture (CZ_CATEGORIES was a hardcoded constant — "Acme Inc.", "Beta
+  // Corp", "State University", a fake AWS cert) instead of the candidate's own real, confirmed
+  // work_history_items/education_items/certification_items — confirmed live, not theorized: a
+  // candidate opening Views to preview "what employers see" saw fake sample jobs and fell back to
+  // the literal placeholder name "Alex Rivera" if their real name wasn't separately re-entered here
+  // (profileFirst/savedFirst had the exact same "Alex"/"Rivera" literal default and were never
+  // seeded from the real session — see applySession's own fix). getCzCategories() below replaces
+  // the fixture: same shape (so every existing per-item checkbox/customization/PDF-build call site
+  // keeps working unchanged — every reference to the old CZ_CATEGORIES constant below was updated
+  // to call this method instead), but built fresh each time from this.state.resumeExtraction, the
+  // exact same data resumeConfirm already loads and confirms. Item keys are now the real row ids
+  // (uuids) instead of fake fixture keys ('acme','beta',...) — defaultCzCategorySet below was
+  // rewritten to match, building its per-item true/false defaults dynamically instead of off a
+  // fixed literal keyed to fixture ids that no longer exist.
+  getCzCategories() {
+    // this.state may not exist yet — defaultCzCategorySet (below) calls this from getInitialState()
+    // itself, before `this.state` is assigned.
+    const ex = this.state && this.state.resumeExtraction;
+    const workHistory = (ex && ex.work_history) || [];
+    const education = (ex && ex.education) || [];
+    const certifications = (ex && ex.certifications) || [];
+    return [
+      { key: 'experience', label: 'Job Experience', items: workHistory.map(w => ({
+        key: w.id,
+        label: [w.title, w.company].filter(Boolean).join(' at ') + this.parenDateRange(w.start_date, w.end_date),
+        description: w.job_responsibilities || '',
+      })) },
+      { key: 'education', label: 'Education', items: education.map(e => ({
+        key: e.id,
+        label: [e.degree, e.institution].filter(Boolean).join(', ') + (e.end_date ? ` (Graduated ${this.monthYearLabel(e.end_date)})` : ''),
+      })) },
+      { key: 'skills', label: 'Skills' },
+      { key: 'certifications', label: 'Certifications', items: certifications.map(c => ({
+        key: c.id,
+        label: [c.name, c.issuing_body].filter(Boolean).join(', ') + (c.issue_date ? ` (Issued ${this.monthYearLabel(c.issue_date)})` : ''),
+      })) },
+      { key: 'misc', label: 'Hobbies & other activities' },
+    ];
+  }
 
-  CATEGORY_CONTENT = {
-    experience: ['Software Engineer at Acme Inc. (Jun 2019-Jul 2021)', 'Marketing Lead at Beta Corp (Apr 2022-Jun 2023)', 'Operations Manager at Gamma LLC (Apr 2017-May 2019)', 'Contract Consultant at Delta Ventures (Jul 2023-Present)', 'Client Success Associate at Northwind Retail (Aug 2021-Jun 2022)'],
-    education: ['B.S. Computer Science, State University (Graduated May 2019)'],
-    skills: ['JavaScript, Python, React, SQL, Product Analytics'],
-    certifications: ['AWS Certified Solutions Architect, Amazon Web Services (Issued Jan 2022)'],
-    misc: ['Hobbies & interests: rock climbing, amateur woodworking, community coding workshops'],
-  };
+  monthYearLabel(dateStr) {
+    if (!dateStr) return '';
+    const d = new Date(dateStr + 'T00:00:00');
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+  }
+
+  parenDateRange(start, end) {
+    const startLabel = this.monthYearLabel(start);
+    const endLabel = end ? this.monthYearLabel(end) : (start ? 'Present' : '');
+    if (!startLabel && !endLabel) return '';
+    return ` (${[startLabel, endLabel].filter(Boolean).join('-')})`;
+  }
+
+  // Real hobbies/other content for the "Additional Information" section of the Views PDF and
+  // Customization's "misc" category — pulled from the same candidate_freeform_sections rows
+  // resumeConfirm itself reads, filtered to section_type 'hobbies_other' (see get-resume-
+  // extraction/insert_resume_extraction for why that's the real, distinct category — 'needs_review'
+  // freeform is deliberately excluded here, that content was flagged as unresolved, not confirmed
+  // shareable). Replaces the hardcoded CATEGORY_CONTENT.misc fixture string.
+  realHobbiesText() {
+    const ex = this.state.resumeExtraction;
+    const rows = ((ex && ex.freeform) || []).filter(f => f.section_type === 'hobbies_other');
+    return rows.map(f => f.content).filter(Boolean).join(' ');
+  }
 
   _czFlashCounter = 0;
   _cmFlashCounter = 0;
@@ -4460,20 +4501,61 @@ class Component extends DCLogic {
     glassdoor: {},
   };
 
+  // Built dynamically from getCzCategories() now — real dead end this replaces: the old version was
+  // a fixed literal keyed to the fixture's fake ids ({acme:true, beta:true,...}), so a real
+  // candidate's actual work-history/education/certification ids never appeared in a fresh
+  // customization set at all (every real item would have rendered unchecked, having no matching
+  // key). allTrue(catKey) below defaults every REAL item currently known for that category to
+  // included — same "everything on by default, opt out per item" behavior as before, just sourced
+  // from real ids instead of fixture ones. Deliberately state-safe (this.state may not exist yet —
+  // this runs from getInitialState() itself, before `this.state` is assigned) via getCzCategories()'s
+  // own `this.state &&` guard.
   defaultCzCategorySet(partnerKey) {
+    const cats = this.getCzCategories();
+    const allTrue = (catKey) => {
+      const cat = cats.find(c => c.key === catKey);
+      const out = {};
+      ((cat && cat.items) || []).forEach(it => { out[it.key] = true; });
+      return out;
+    };
     const base = {
-      experience: { acme: true, beta: true, gamma: true, delta: true, epsilon: true },
-      education: { stateU: true },
+      experience: allTrue('experience'),
+      education: allTrue('education'),
       skills: true,
-      certifications: { aws: true },
+      certifications: allTrue('certifications'),
       misc: true,
       summaryId: 'sum-generic',
     };
     return { ...base, ...(this.PARTNER_DEFAULT_RULES[partnerKey] || {}) };
   }
 
+  // Real dead end this closes (2026-09-07 wiring audit): customization's per-item checkbox sets are
+  // built once, at getInitialState() time, before resumeExtraction has ever loaded — so they start
+  // as {} for every category (no known items yet). Without this, a candidate's real work-history/
+  // education/certification items would never get a default checkbox state at all once they DID
+  // load, since nothing recomputed customization afterward. Called from loadResumeExtraction's own
+  // success path. Merges rather than overwrites: only fills in items customization doesn't already
+  // have an entry for (defaulting new ones to included), so anything the candidate already toggled
+  // — including on a page they've had open across a resumeExtraction poll/reload — is left alone.
+  refreshCzCategoryDefaults() {
+    const cats = this.getCzCategories().filter(c => c.items);
+    this.setState(st => {
+      const next = {};
+      for (const partner of Object.keys(st.customization)) {
+        const set = { ...st.customization[partner] };
+        for (const cat of cats) {
+          const merged = { ...(set[cat.key] || {}) };
+          cat.items.forEach(it => { if (!(it.key in merged)) merged[it.key] = true; });
+          set[cat.key] = merged;
+        }
+        next[partner] = set;
+      }
+      return { customization: next };
+    });
+  }
+
   seedRoleDescriptions() {
-    const exp = this.CZ_CATEGORIES.find(c => c.key === 'experience');
+    const exp = this.getCzCategories().find(c => c.key === 'experience');
     const out = {};
     exp.items.forEach(it => { out[it.key] = it.description || ''; });
     return out;
@@ -4489,7 +4571,7 @@ class Component extends DCLogic {
   roleDescription(key) {
     const s = this.state;
     if (s && s.roleDescriptions && s.roleDescriptions[key] !== undefined) return s.roleDescriptions[key];
-    const exp = this.CZ_CATEGORIES.find(c => c.key === 'experience');
+    const exp = this.getCzCategories().find(c => c.key === 'experience');
     const it = exp.items.find(i => i.key === key);
     return it ? (it.description || '') : '';
   }
@@ -4748,16 +4830,24 @@ class Component extends DCLogic {
 
   buildResumeLines(target) {
     const s = this.state;
+    const cats = this.getCzCategories();
     const catVal = (key) => (target ? s.customization[target][key] : true);
     const lines = [];
     const push = (text, bold) => lines.push({ text: this.sanitizeAts(text), bold: !!bold });
     const deliveredContact = this.resolveDeliveredContact();
-    push([s.savedFirst, s.savedLast].filter(Boolean).join(' ') || 'Alex Rivera');
+    // Real dead end this replaces (2026-09-07 wiring audit): fell back to the literal placeholder
+    // "Alex Rivera" whenever savedFirst/savedLast were unset \u2014 confirmed live, a candidate previewing
+    // "what employers see" could see a fake person's name. Now omitted entirely rather than faked if
+    // genuinely unset (matches contactLine's own pattern immediately below) \u2014 profileFirst/savedFirst
+    // are also now seeded from the real session name in applySession, so this should be the real name
+    // in practice, not a gap that needed a fallback string at all.
+    const nameLine = [s.savedFirst, s.savedLast].filter(Boolean).join(' ');
+    if (nameLine) push(nameLine);
     const contactLine = [deliveredContact.phone.value, deliveredContact.email.value].filter(Boolean).join(' \u00b7 ');
     if (contactLine) push(contactLine);
     push(this.getSummaryText(target));
     push('');
-    const expCat = this.CZ_CATEGORIES.find(c => c.key === 'experience');
+    const expCat = cats.find(c => c.key === 'experience');
     const expVal = catVal('experience');
     const expItems = expCat.items.filter(it => (target ? expVal[it.key] : true));
     if (expItems.length) {
@@ -4768,7 +4858,7 @@ class Component extends DCLogic {
         push('');
       });
     }
-    const eduCat = this.CZ_CATEGORIES.find(c => c.key === 'education');
+    const eduCat = cats.find(c => c.key === 'education');
     const eduVal = catVal('education');
     const eduItems = eduCat.items.filter(it => (target ? eduVal[it.key] : true));
     if (eduItems.length) {
@@ -4783,16 +4873,17 @@ class Component extends DCLogic {
         push('');
       }
     }
-    const certCat = this.CZ_CATEGORIES.find(c => c.key === 'certifications');
+    const certCat = cats.find(c => c.key === 'certifications');
     const certVal = catVal('certifications');
     const certItems = certCat.items.filter(it => (target ? certVal[it.key] : true));
     if (certItems.length) {
       push('CERTIFICATIONS', true);
       certItems.forEach(it => { push(it.label); push(''); });
     }
-    if (catVal('misc')) {
+    const hobbiesText = this.realHobbiesText();
+    if (catVal('misc') && hobbiesText) {
       push('ADDITIONAL INFORMATION', true);
-      push(this.CATEGORY_CONTENT.misc[0]);
+      push(hobbiesText);
       push('');
     }
     return lines;
@@ -4996,8 +5087,13 @@ class Component extends DCLogic {
     firstName: '', lastName: '', phone: '', duplicateCheckPending: false, duplicateCheckError: null,
     overlayOpen: false, overlayTab: 0, fileName: null, email: '', tier: null, draft: null, accountTab: 'profile',
     epsilonReopened: false,
-    profileFirst: 'Alex', profileLast: 'Rivera',
-    savedFirst: 'Alex', savedLast: 'Rivera',
+    // Real dead end this closes (2026-09-07 wiring audit): these used to default to the literal
+    // fake identity "Alex Rivera" and were never seeded from the real session (see applySession's
+    // own fix) — a candidate could see a fake person's name in their own account/resume preview.
+    // Empty is the honest default for the brief window before a session resolves; the account
+    // screen is only reachable after that anyway.
+    profileFirst: '', profileLast: '',
+    savedFirst: '', savedLast: '',
     notifyEmail: false, notifySms: false, savedNotifyEmail: false, savedNotifySms: false,
     showPasswordForm: false, kycVerified: false,
     linkedinEnabled: false, linkedinLinked: true, linkedinPaused: false,
@@ -5084,6 +5180,20 @@ class Component extends DCLogic {
 
   deliveredSkills() {
     return (this.state.skillItems || []).map(x => (x || '').trim()).filter(Boolean);
+  }
+
+  // Real dead end this closes (2026-09-07 wiring audit): skillItems (Content Manager's editable
+  // grid, and the only source deliveredSkills/Views reads from) started as [''] — one blank field —
+  // regardless of what the candidate's real, confirmed skill_items actually were. Seeds it from
+  // resumeExtraction.skills once, the first time real data is available; only when skillItems is
+  // still in its untouched-blank state, so this never clobbers edits the candidate has already made
+  // in this tab (including across a resumeExtraction poll/reload while Content Manager is open).
+  seedSkillItemsIfBlank() {
+    const s = this.state;
+    const blank = !s.skillItems || s.skillItems.length === 0 || (s.skillItems.length === 1 && !s.skillItems[0]);
+    if (!blank) return;
+    const real = ((s.resumeExtraction && s.resumeExtraction.skills) || []).map(x => x.skill_text || '').filter(Boolean);
+    if (real.length) this.setState({ skillItems: real });
   }
 
   normalizeSkill(v) {
@@ -5263,6 +5373,18 @@ class Component extends DCLogic {
     const patch = { screen: 'account', accountTab: first ? steps[0].tab : 'profile' };
     if (first) { patch.tourActive = true; patch.tourStep = 0; }
     this.setState(patch, () => { if (first) this.measureTourTarget(); });
+    // Real dead end this closes (2026-09-07 wiring audit): resumeExtraction only ever loaded on the
+    // resumeConfirm screen — a candidate who was already complete and landed straight here (the
+    // normal, common case for a returning login) never had it loaded at all, so Content Manager/
+    // Customization/Views had nothing real to read regardless of the fixture-vs-real-data fix
+    // itself. Loaded once per session here, covering all three tabs no matter which is opened first.
+    this.ensureResumeExtractionLoaded();
+  }
+
+  ensureResumeExtractionLoaded() {
+    const s = this.state;
+    if (!s.resumeCandidateId || s.resumeExtraction || s.resumeExtractionLoading) return;
+    this.loadResumeExtraction(s.resumeCandidateId);
   }
 
   measureTourTarget() {
@@ -5365,7 +5487,7 @@ class Component extends DCLogic {
 
   buildVerifiedCoreResume(target) {
     const s = this.state;
-    const expCat = this.CZ_CATEGORIES.find(c => c.key === 'experience');
+    const expCat = this.getCzCategories().find(c => c.key === 'experience');
     const contact = this.resolveDeliveredContact();
     const descFor = (key) => this.roleDescription(key);
     const workItem = (name, position, location, startDate, endDate, verification, key) => ({
@@ -6016,12 +6138,27 @@ class Component extends DCLogic {
     try { localStorage.setItem('verifi_session_token', sessionToken); } catch (e) {}
     const reactivateNeeded = this.state.deletionScheduled;
     const candidateId = (profile && profile.candidate_id) || this.state.resumeCandidateId;
+    // Real dead end this closes (2026-09-07 wiring audit): profileFirst/profileLast (Profile Info's
+    // actual editable name fields) and savedFirst/savedLast (the committed values Views' PDF header
+    // and "alwaysIncludedLine" both read) had their own separate literal "Alex"/"Rivera" default in
+    // getInitialState() and were NEVER seeded from firstName/lastName here, even though those two
+    // ARE the real session name — confirmed live, this is the actual root cause of "Alex Rivera"
+    // showing up in a resume preview, not just a missing fallback string in buildResumeLines (fixed
+    // separately). Only overwrites when the real profile actually has a name to give — falls through
+    // to whatever's already in state otherwise, same guard shape as email/phone/firstName/lastName
+    // above.
+    const first = (profile && profile.first_name) || this.state.firstName;
+    const last = (profile && profile.last_name) || this.state.lastName;
     this.setState({
       sessionToken,
       email: (profile && profile.email) || this.state.email,
       phone: (profile && profile.phone) || this.state.phone,
-      firstName: (profile && profile.first_name) || this.state.firstName,
-      lastName: (profile && profile.last_name) || this.state.lastName,
+      firstName: first,
+      lastName: last,
+      profileFirst: first || this.state.profileFirst,
+      profileLast: last || this.state.profileLast,
+      savedFirst: first || this.state.savedFirst,
+      savedLast: last || this.state.savedLast,
       resumeCandidateId: candidateId,
     });
     if (reactivateNeeded) { this.setState({ screen: 'reactivate' }); return; }
@@ -6326,7 +6463,16 @@ class Component extends DCLogic {
       this.setState({ resumeExtractionLoading: false, resumeExtraction: null });
       return;
     }
-    this.setState({ resumeExtractionLoading: false, resumeExtraction: data });
+    // Real dead end this closes (2026-09-07 wiring audit): Content Manager/Customization/Views used
+    // to have literally nothing to seed from — refreshCzCategoryDefaults and seedSkillItemsIfBlank
+    // are what turn a fresh resumeExtraction load into real, usable defaults for those three tabs
+    // (see each function's own header). Fired after the state update lands (this.state won't reflect
+    // resumeExtraction yet at the moment setState is called — see the callback, not a synchronous
+    // read), not before.
+    this.setState({ resumeExtractionLoading: false, resumeExtraction: data }, () => {
+      this.refreshCzCategoryDefaults();
+      this.seedSkillItemsIfBlank();
+    });
     const status = data.resume_document.extraction_status;
     if (status === 'pending' || status === 'ocr_done') {
       this.startResumePolling(candidateId);
@@ -6870,7 +7016,7 @@ class Component extends DCLogic {
         if (val && s.accountTier === 'free') { e.target.value = ''; this.setState({ upgradeModalOpen: true, upgradeModalContext: 'customization', upgradeReturnTab: 'customization', upgradeReturnTarget: val }); return; }
         this.setState({ customizeTarget: val, czFlashField: null, czResetFlash: false });
       },
-      freeCategoryRows: this.CZ_CATEGORIES.map(c => ({
+      freeCategoryRows: this.getCzCategories().map(c => ({
         label: c.label,
         items: c.items ? c.items.map(it => ({ label: it.label })) : [],
       })),
@@ -6879,7 +7025,7 @@ class Component extends DCLogic {
       goUpgradeFromModal: () => this.setState({ upgradeModalOpen: false, accountTab: 'subscription' }),
       hasCustomizeTarget: !!s.customizeTarget,
       customizeTargetLabel: (this.PARTNERS.find(p => p.key === s.customizeTarget) || {}).label || '',
-      categoryRows: s.customizeTarget ? this.CZ_CATEGORIES.map(c => {
+      categoryRows: s.customizeTarget ? this.getCzCategories().map(c => {
         const val = s.customization[s.customizeTarget][c.key];
         const isItemized = !!c.items;
         return {
@@ -6913,7 +7059,7 @@ class Component extends DCLogic {
       tabIsContentManager: s.accountTab === 'contentManager',
       tabContentManagerClass: s.accountTab === 'contentManager' ? 'btn-secondary' : 'btn-ghost',
       selectTabContentManager: () => this.guardedNav(() => this.setState({ accountTab: 'contentManager' })),
-      cmRoles: this.CZ_CATEGORIES.find(c => c.key === 'experience').items.map(it => ({
+      cmRoles: this.getCzCategories().find(c => c.key === 'experience').items.map(it => ({
         label: it.label,
         description: this.roleDescription(it.key),
         onChange: (e) => this.setRoleDescription(it.key, e.target.value),
