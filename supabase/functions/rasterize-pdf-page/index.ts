@@ -140,6 +140,23 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   "Highlights" section), extract it ONCE. Do not create duplicate entries for repeated mentions of
   the same underlying fact.
 
+- NEVER FABRICATE A STRUCTURED ENTRY FROM A HEADER OR A SUMMARY SENTENCE (hard rule — a real,
+  confirmed failure mode, not a hypothetical): a structured entry's identifying field (a
+  certification's "name", a job's "title", a degree's "institution", etc.) must be a specific line
+  that names that exact real-world thing, copied from the text, never synthesized, paraphrased, or
+  mutated from a section header or from prose that only DESCRIBES having done something in general
+  terms. Example of what NOT to do: a "Continuing Education" note reading "55+ hours of AI &
+  emerging technology certification coursework, Coursiv, 2024-2025" is a narrative summary, not a
+  named credential — it must NOT become a certifications entry with an invented name like "AI &
+  emerging technology certification coursework." That kind of content goes to "needs_review" only,
+  verbatim, untouched. The same applies to every other category: a section header alone (e.g. "AI &
+  Emerging Technology") is not itself an item — if the header has real, specific items listed under
+  it on this page, extract those (each is its own real entry); if it doesn't (no items follow it on
+  this page, or it's only ever described in summary form), the header and its content go to
+  needs_review together, untouched, and no entry is invented to fill the gap. When in doubt whether
+  something is a genuine standalone named item or just a description of one, treat it as
+  needs_review — inventing an entry is never the safe choice, omitting nothing is.
+
 - "summary" (freeform) = any professional summary / objective / about-me blurb at the top of the
   resume. "hobbies_other" (freeform) = interests, hobbies, and volunteer/community activities ONLY
   — this is NOT a general catch-all. Content that isn't actually a hobby, interest, or volunteer
@@ -162,24 +179,38 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   verbatim — not reworded, not invented, not guessed. Use an empty string "" only when the content
   genuinely has no visible heading of its own (e.g. an unlabeled continuation of a previous
   section). This is captured for future analysis of what headers actually appear across resumes; it
-  does not change how content gets classified.`;
+  does not change how content gets classified.
+
+- Every entry in every category (work_history, education, certifications, freeform) must include
+  "position": an integer giving that entry's own reading-order position on THIS page, counted across
+  ALL categories together (not separately per category) — 0 for whatever comes first reading top to
+  bottom on the page, 1 for whatever comes next, and so on, regardless of which category it belongs
+  to. This is real document layout, not a ranking: splitting content into separate JSON arrays by
+  category already throws away the true order things appeared in on the page (e.g. Skills sitting
+  between a Summary and Work History), and "position" is the only thing that lets that real order be
+  reconstructed afterward. Also include a top-level "skills_position": an integer with that same
+  meaning for where the Skills block itself sits among everything else on the page (or null if this
+  page has no skills section) — skills are one visual block, not individually positioned entries, so
+  they get exactly one position value for the whole block, not one per skill. If this page has
+  nothing else at all (a single section filling the whole page), position values still start at 0.`;
 
 const SCHEMA_SHAPE = `{
   "work_history": [
     { "company": string, "title": string, "start_date": string, "end_date": string,
-      "job_responsibilities": string, "extraction_confidence": "high" | "medium" | "low" }
+      "job_responsibilities": string, "extraction_confidence": "high" | "medium" | "low", "position": number }
   ],
   "education": [
     { "institution": string, "degree": string, "field_of_study": string,
-      "start_date": string, "end_date": string, "extraction_confidence": "high" | "medium" | "low" }
+      "start_date": string, "end_date": string, "extraction_confidence": "high" | "medium" | "low", "position": number }
   ],
   "certifications": [
     { "name": string, "issuing_body": string, "issue_date": string, "expiration_date": string,
-      "extraction_confidence": "high" | "medium" | "low" }
+      "extraction_confidence": "high" | "medium" | "low", "position": number }
   ],
   "skills": [ string ],
+  "skills_position": number | null,
   "freeform": [
-    { "section_type": "summary" | "hobbies_other" | "needs_review", "heading": string, "content": string }
+    { "section_type": "summary" | "hobbies_other" | "needs_review", "heading": string, "content": string, "position": number }
   ]
 }`;
 
@@ -227,11 +258,12 @@ ${ocrText}
 }
 
 type ExtractionResult = {
-  work_history: Array<{ company: string; title: string; start_date: string; end_date: string; job_responsibilities: string; extraction_confidence: string }>;
-  education: Array<{ institution: string; degree: string; field_of_study: string; start_date: string; end_date: string; extraction_confidence: string }>;
-  certifications: Array<{ name: string; issuing_body: string; issue_date: string; expiration_date: string; extraction_confidence: string }>;
+  work_history: Array<{ company: string; title: string; start_date: string; end_date: string; job_responsibilities: string; extraction_confidence: string; position?: number }>;
+  education: Array<{ institution: string; degree: string; field_of_study: string; start_date: string; end_date: string; extraction_confidence: string; position?: number }>;
+  certifications: Array<{ name: string; issuing_body: string; issue_date: string; expiration_date: string; extraction_confidence: string; position?: number }>;
   skills: Array<string>;
-  freeform: Array<{ section_type: string; heading: string; content: string }>;
+  skills_position?: number | null;
+  freeform: Array<{ section_type: string; heading: string; content: string; position?: number }>;
 };
 
 function isValidExtraction(x: unknown): x is ExtractionResult {

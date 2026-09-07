@@ -131,19 +131,20 @@ Return ONLY a single JSON object, no prose before or after it, matching exactly 
 {
   "work_history": [
     { "company": string, "title": string, "start_date": string, "end_date": string,
-      "job_responsibilities": string, "extraction_confidence": "high" | "medium" | "low" }
+      "job_responsibilities": string, "extraction_confidence": "high" | "medium" | "low", "position": number }
   ],
   "education": [
     { "institution": string, "degree": string, "field_of_study": string,
-      "start_date": string, "end_date": string, "extraction_confidence": "high" | "medium" | "low" }
+      "start_date": string, "end_date": string, "extraction_confidence": "high" | "medium" | "low", "position": number }
   ],
   "certifications": [
     { "name": string, "issuing_body": string, "issue_date": string, "expiration_date": string,
-      "extraction_confidence": "high" | "medium" | "low" }
+      "extraction_confidence": "high" | "medium" | "low", "position": number }
   ],
   "skills": [ string ],
+  "skills_position": number | null,
   "freeform": [
-    { "section_type": "summary" | "hobbies_other" | "needs_review", "heading": string, "content": string }
+    { "section_type": "summary" | "hobbies_other" | "needs_review", "heading": string, "content": string, "position": number }
   ]
 }
 
@@ -193,6 +194,23 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   "Highlights" section), extract it ONCE. Do not create duplicate entries for repeated mentions of
   the same underlying fact.
 
+- NEVER FABRICATE A STRUCTURED ENTRY FROM A HEADER OR A SUMMARY SENTENCE (hard rule — a real,
+  confirmed failure mode, not a hypothetical): a structured entry's identifying field (a
+  certification's "name", a job's "title", a degree's "institution", etc.) must be a specific line
+  that names that exact real-world thing, copied from the text, never synthesized, paraphrased, or
+  mutated from a section header or from prose that only DESCRIBES having done something in general
+  terms. Example of what NOT to do: a "Continuing Education" note reading "55+ hours of AI &
+  emerging technology certification coursework, Coursiv, 2024-2025" is a narrative summary, not a
+  named credential — it must NOT become a certifications entry with an invented name like "AI &
+  emerging technology certification coursework." That kind of content goes to "needs_review" only,
+  verbatim, untouched. The same applies to every other category: a section header alone (e.g. "AI &
+  Emerging Technology") is not itself an item — if the header has real, specific items listed under
+  it, extract those (each is its own real entry); if it doesn't (no items follow it, or it's only
+  ever described in summary form), the header and its content go to needs_review together,
+  untouched, and no entry is invented to fill the gap. When in doubt whether something is a genuine
+  standalone named item or just a description of one, treat it as needs_review — inventing an entry
+  is never the safe choice, omitting nothing is.
+
 - "summary" (freeform) = any professional summary / objective / about-me blurb at the top of the
   resume. "hobbies_other" (freeform) = interests, hobbies, and volunteer/community activities ONLY
   — this is NOT a general catch-all. Content that isn't actually a hobby, interest, or volunteer
@@ -216,6 +234,18 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   genuinely has no visible heading of its own (e.g. an unlabeled continuation of a previous
   section). This is captured for future analysis of what headers actually appear across resumes; it
   does not change how content gets classified.
+
+- Every entry in every category (work_history, education, certifications, freeform) must include
+  "position": an integer giving that entry's own reading-order position on the resume, counted
+  across ALL categories together (not separately per category) — 0 for whatever comes first reading
+  top to bottom, 1 for whatever comes next, and so on, regardless of which category it belongs to.
+  This is real document layout, not a ranking: splitting content into separate JSON arrays by
+  category already throws away the true order things appeared in (e.g. Skills sitting between a
+  Summary and Work History), and "position" is the only thing that lets that real order be
+  reconstructed afterward. Also include a top-level "skills_position": an integer with that same
+  meaning for where the Skills block itself sits among everything else (or null if there is no
+  skills section) — skills are one visual block, not individually positioned entries, so they get
+  exactly one position value for the whole block, not one per skill.
   If the resume shows language proficiency as icons, bars, dots, or other non-text graphics rather
   than words, describe what you can determine from the graphic (e.g. the language name and an
   approximate level like "native/fluent/conversational/basic" if the graphic clearly conveys a
@@ -231,11 +261,12 @@ a guess.
 If a category has no entries, return an empty array for it — do not omit the key.`;
 
 type ExtractionResult = {
-  work_history: Array<{ company: string; title: string; start_date: string; end_date: string; job_responsibilities: string; extraction_confidence: string }>;
-  education: Array<{ institution: string; degree: string; field_of_study: string; start_date: string; end_date: string; extraction_confidence: string }>;
-  certifications: Array<{ name: string; issuing_body: string; issue_date: string; expiration_date: string; extraction_confidence: string }>;
+  work_history: Array<{ company: string; title: string; start_date: string; end_date: string; job_responsibilities: string; extraction_confidence: string; position?: number }>;
+  education: Array<{ institution: string; degree: string; field_of_study: string; start_date: string; end_date: string; extraction_confidence: string; position?: number }>;
+  certifications: Array<{ name: string; issuing_body: string; issue_date: string; expiration_date: string; extraction_confidence: string; position?: number }>;
   skills: Array<string>;
-  freeform: Array<{ section_type: string; heading: string; content: string }>;
+  skills_position?: number | null;
+  freeform: Array<{ section_type: string; heading: string; content: string; position?: number }>;
 };
 
 function isValidExtraction(x: unknown): x is ExtractionResult {
@@ -498,13 +529,42 @@ async function rasterizePageWithRetry(storagePath: string, pageNumber: number): 
 // concatenation, no cross-page dedup — a role or credential that legitimately repeats verbatim
 // across two pages of the same resume is rare, and rasterize-pdf-page's own prompt already dedups
 // WITHIN a single page. Real, known gap for the rare cross-page duplicate; not solved here.
-function mergeExtractions(pages: ExtractionResult[]): ExtractionResult {
+//
+// POSITION GLOBALIZATION: the model only ever sees one page at a time (see the migration's own
+// header for why — rendering multiple pages in one call is a real, reproduced memory-ceiling
+// failure, not a stylistic choice), so every "position" value it returns is local to that one page
+// (0, 1, 2... in that page's own reading order). This is the one place with enough context to turn
+// those into real, globally-ordered positions: pages are requested and pushed in strict page-number
+// order already (the caller's own for-loop), so multiplying each page's own number into its
+// positions before concatenating preserves both cross-page order (page 1's items always sort before
+// page 2's) and within-page order (untouched, just offset). PAGE_POSITION_SPAN (1000) is a generous
+// per-page headroom — no real resume page has come anywhere close to 1000 distinct extracted units
+// — chosen the same way MAX_PDF_PAGES was: a safety margin, not a tuned constant.
+const PAGE_POSITION_SPAN = 1000;
+
+function globalizePosition(pageNumber: number, localPosition: number | undefined | null): number | null {
+  if (typeof localPosition !== "number" || !Number.isFinite(localPosition)) return null;
+  return pageNumber * PAGE_POSITION_SPAN + localPosition;
+}
+
+function mergeExtractions(pages: Array<{ pageNumber: number; extraction: ExtractionResult }>): ExtractionResult {
   return {
-    work_history: pages.flatMap((p) => p.work_history),
-    education: pages.flatMap((p) => p.education),
-    certifications: pages.flatMap((p) => p.certifications),
-    skills: pages.flatMap((p) => p.skills),
-    freeform: pages.flatMap((p) => p.freeform),
+    work_history: pages.flatMap(({ pageNumber, extraction }) =>
+      extraction.work_history.map((w) => ({ ...w, position: globalizePosition(pageNumber, w.position) ?? undefined }))),
+    education: pages.flatMap(({ pageNumber, extraction }) =>
+      extraction.education.map((e) => ({ ...e, position: globalizePosition(pageNumber, e.position) ?? undefined }))),
+    certifications: pages.flatMap(({ pageNumber, extraction }) =>
+      extraction.certifications.map((c) => ({ ...c, position: globalizePosition(pageNumber, c.position) ?? undefined }))),
+    skills: pages.flatMap(({ extraction }) => extraction.skills),
+    // Only one page can sensibly claim "the" skills block position — the first page that actually
+    // reported one. A resume with skills split oddly across pages is a real edge case this doesn't
+    // try to solve; it just doesn't crash or silently pick an arbitrary later page instead.
+    skills_position: (() => {
+      const withSkills = pages.find(({ extraction }) => typeof extraction.skills_position === "number");
+      return withSkills ? globalizePosition(withSkills.pageNumber, withSkills.extraction.skills_position) : null;
+    })(),
+    freeform: pages.flatMap(({ pageNumber, extraction }) =>
+      extraction.freeform.map((f) => ({ ...f, position: globalizePosition(pageNumber, f.position) ?? undefined }))),
   };
 }
 
@@ -642,7 +702,7 @@ export default {
       // every page already comes back fully extracted.
       if (isPdf) {
         console.log(`upload-resume: ${docId} is a PDF, routing through rasterize-pdf-page`);
-        const pageExtractions: ExtractionResult[] = [];
+        const pageExtractions: Array<{ pageNumber: number; extraction: ExtractionResult }> = [];
         let pageCount = 1;
         for (let pageNumber = 1; pageNumber <= pageCount && pageNumber <= MAX_PDF_PAGES; pageNumber++) {
           let pageData: { ok?: boolean; page_count?: number; extraction?: unknown; code?: string; error?: string; message?: string };
@@ -668,7 +728,7 @@ export default {
               resume_document_id: docId, page: pageNumber,
             }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
           }
-          pageExtractions.push(pageData.extraction);
+          pageExtractions.push({ pageNumber, extraction: pageData.extraction });
           if (pageNumber === 1 && typeof pageData.page_count === "number" && pageData.page_count > 0) {
             pageCount = pageData.page_count;
           }
@@ -682,6 +742,7 @@ export default {
           p_education: merged.education,
           p_certifications: merged.certifications,
           p_skills: merged.skills,
+          p_skills_position: merged.skills_position ?? null,
           p_freeform: merged.freeform,
         });
         if (pdfRpcErr) {
@@ -735,6 +796,7 @@ export default {
           p_education: extraction.education,
           p_certifications: extraction.certifications,
           p_skills: extraction.skills,
+          p_skills_position: extraction.skills_position ?? null,
           p_freeform: extraction.freeform,
         });
         if (rpcErr) {

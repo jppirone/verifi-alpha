@@ -2751,9 +2751,9 @@ class Component extends DCLogic {
     // candidateName field list-verification-items already resolves — first_name+last_name with a
     // full_name fallback for pre-existing candidates, untouched here), item ID (the real VQ-####
     // ids already shown in this table's own ID column), and category (the real type values
-    // confirmed live: "Job Experience", "Education", "Certification" — plus "Personal Info",
-    // included per instruction even though no code path inserts that type today; see
-    // typeFilterOptions below for why it's expected to return nothing).
+    // confirmed live: "Job Experience", "Education", "Certification", "Needs Review" — plus
+    // "Personal Info", included per instruction even though no code path inserts that type today;
+    // see typeFilterOptions below for why it's expected to return nothing).
     nameFilter: '', itemIdFilter: '', typeFilter: '',
     syncFailures: {},
     automatedCheckType: 'credly',
@@ -3422,6 +3422,11 @@ class Component extends DCLogic {
         { value: 'Job Experience', label: 'Job Experience' },
         { value: 'Education', label: 'Education' },
         { value: 'Certification', label: 'Certification' },
+        // Confirm-resume-data's own internal flag for needs_review resume content (see that
+        // function's header) — always created at status 'Needs Reconciliation', never candidate-
+        // submitted, never shown on the candidate's own status tab. Real, live-inserted rows, not a
+        // placeholder like 'Personal Info' below.
+        { value: 'Needs Review', label: 'Needs Review (flagged resume content)' },
         { value: 'Personal Info', label: 'Personal Info (not routed to the queue yet — always empty today)' },
       ],
       hasAnyFilterActive: !!(s.nameFilter.trim() || s.itemIdFilter.trim() || s.typeFilter),
@@ -3497,7 +3502,9 @@ class Component extends DCLogic {
       detailFollowUp: selected ? selected.followUp : '',
       detailAutomatedCheck: selected ? selected.automatedCheck : '',
 
-      showAutomatedCheckSection: !!(selected && selected.type !== 'Education'),
+      // No automated check applies to unstructured needs_review content (no credly/dbpr/sunbiz
+      // lookup makes sense against free text) — same reasoning as excluding Education.
+      showAutomatedCheckSection: !!(selected && selected.type !== 'Education' && selected.type !== 'Needs Review'),
       checkTypeOptions: [
         { value: 'credly', label: 'Credly Badge' },
         { value: 'dbpr', label: 'DBPR License (FL)' },

@@ -2810,109 +2810,108 @@ a:hover{color:var(--color-accent)}
       </div>
       </sc-if>
 
-      <sc-if value="{{ resumeHasNeedsReview }}" hint-placeholder-val="{{ false }}">
-      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2);border-color:var(--color-accent)">
-        <div class="card-kicker">Flagged for your review</div>
-        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Content we found on your resume but couldn't confidently place anywhere else (an unpaid/volunteer role, or a section that didn't match any category). Nothing here is submitted for verification.</div>
-        <sc-for list="{{ resumeNeedsReviewRows }}" as="row" hint-placeholder-count="1">
-          <div style="font-size:13px;color:var(--color-neutral-300);padding:var(--space-3);background:var(--color-surface);border-radius:var(--radius-sm)">
-            <sc-if value="{{ row.hasHeading }}" hint-placeholder-val="{{ false }}">
-              <div style="font-size:11px;letter-spacing:0.04em;text-transform:uppercase;color:var(--color-neutral-500);margin-bottom:4px">{{ row.heading }}</div>
-            </sc-if>
-            {{ row.content }}
-          </div>
-        </sc-for>
-      </div>
-      </sc-if>
-
-      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <div class="card-kicker">Work history</div>
-          <label style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--color-neutral-400);cursor:pointer;font-weight:400;text-transform:none;letter-spacing:0">
+      <!-- Positional fidelity (Item 15's own requirement, built generically — see the position
+           migration's header): work history, education, certifications, the skills block, and each
+           needs_review entry all render from ONE list ordered by where they actually sit in the
+           source document, not a fixed category order. Summary and Hobbies/Other stay in their own
+           fixed slots above/below this list — the position requirement was scoped to "every
+           extracted unit," and those two were never individually-positioned units to begin with (one
+           summary blurb, one hobbies blurb, each already anchored to a fixed spot on this screen).
+           Submit-for-verification is a category-level decision, not a per-entry one, so those three
+           checkboxes live in their own panel below rather than attached to individual entries. -->
+      <sc-if value="{{ resumeHasAnyVerifiableCategory }}" hint-placeholder-val="{{ false }}">
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
+        <div class="card-kicker">Submit for verification</div>
+        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Choose which categories you'd like verified. Nothing is submitted until you confirm below.</div>
+        <sc-if value="{{ resumeHasWorkHistory }}" hint-placeholder-val="{{ false }}">
+          <label style="display:flex;gap:8px;align-items:center;font-size:13px;color:var(--color-neutral-300);cursor:pointer">
             <input type="checkbox" checked="{{ optInWorkHistory }}" sc-camel-on-change="{{ toggleOptInWorkHistory }}">
-            Submit for verification
+            <span>Work history</span>
           </label>
-        </div>
-        <sc-for list="{{ workHistoryRows }}" as="row" hint-placeholder-count="2">
-          <div style="display:flex;flex-direction:column;gap:var(--space-2);padding-bottom:var(--space-3);border-bottom:1px solid var(--color-divider)">
-            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
-              <div class="field" style="flex:1;min-width:160px"><label>Title</label><input class="input" value="{{ row.title }}" sc-camel-on-change="{{ row.onTitle }}"></div>
-              <div class="field" style="flex:1;min-width:160px"><label>Company</label><input class="input" value="{{ row.company }}" sc-camel-on-change="{{ row.onCompany }}"></div>
-            </div>
-            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
-              <div class="field" style="flex:1;min-width:140px"><label>Start date</label><input class="input" type="date" value="{{ row.startDate }}" sc-camel-on-change="{{ row.onStartDate }}"></div>
-              <div class="field" style="flex:1;min-width:140px"><label>End date (blank = present)</label><input class="input" type="date" value="{{ row.endDate }}" sc-camel-on-change="{{ row.onEndDate }}"></div>
-            </div>
-            <div class="field"><label>Job responsibilities</label><textarea class="input" rows="3" value="{{ row.jobResponsibilities }}" sc-camel-on-change="{{ row.onResponsibilities }}"></textarea></div>
-          </div>
-        </sc-for>
-        <sc-if value="{{ workHistoryEmpty }}" hint-placeholder-val="{{ false }}">
-          <div style="font-size:12px;color:var(--color-neutral-500)">No work history was found on this document.</div>
         </sc-if>
-      </div>
-
-      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <div class="card-kicker">Education</div>
-          <label style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--color-neutral-400);cursor:pointer;font-weight:400;text-transform:none;letter-spacing:0">
+        <sc-if value="{{ resumeHasEducation }}" hint-placeholder-val="{{ false }}">
+          <label style="display:flex;gap:8px;align-items:center;font-size:13px;color:var(--color-neutral-300);cursor:pointer">
             <input type="checkbox" checked="{{ optInEducation }}" sc-camel-on-change="{{ toggleOptInEducation }}">
-            Submit for verification
+            <span>Education</span>
           </label>
-        </div>
-        <sc-for list="{{ educationRows }}" as="row" hint-placeholder-count="1">
-          <div style="display:flex;flex-direction:column;gap:var(--space-2);padding-bottom:var(--space-3);border-bottom:1px solid var(--color-divider)">
-            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
-              <div class="field" style="flex:1;min-width:160px"><label>Degree</label><input class="input" value="{{ row.degree }}" sc-camel-on-change="{{ row.onDegree }}"></div>
-              <div class="field" style="flex:1;min-width:160px"><label>Field of study</label><input class="input" value="{{ row.fieldOfStudy }}" sc-camel-on-change="{{ row.onFieldOfStudy }}"></div>
-            </div>
-            <div class="field"><label>Institution</label><input class="input" value="{{ row.institution }}" sc-camel-on-change="{{ row.onInstitution }}"></div>
-            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
-              <div class="field" style="flex:1;min-width:140px"><label>Start date</label><input class="input" type="date" value="{{ row.startDate }}" sc-camel-on-change="{{ row.onStartDate }}"></div>
-              <div class="field" style="flex:1;min-width:140px"><label>End date</label><input class="input" type="date" value="{{ row.endDate }}" sc-camel-on-change="{{ row.onEndDate }}"></div>
-            </div>
-          </div>
-        </sc-for>
-        <sc-if value="{{ educationEmpty }}" hint-placeholder-val="{{ false }}">
-          <div style="font-size:12px;color:var(--color-neutral-500)">No education was found on this document.</div>
         </sc-if>
-      </div>
-
-      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <div class="card-kicker">Certifications</div>
-          <label style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--color-neutral-400);cursor:pointer;font-weight:400;text-transform:none;letter-spacing:0">
+        <sc-if value="{{ resumeHasCertifications }}" hint-placeholder-val="{{ false }}">
+          <label style="display:flex;gap:8px;align-items:center;font-size:13px;color:var(--color-neutral-300);cursor:pointer">
             <input type="checkbox" checked="{{ optInCertifications }}" sc-camel-on-change="{{ toggleOptInCertifications }}">
-            Submit for verification
+            <span>Certifications</span>
           </label>
-        </div>
-        <sc-for list="{{ certificationRows }}" as="row" hint-placeholder-count="1">
-          <div style="display:flex;flex-direction:column;gap:var(--space-2);padding-bottom:var(--space-3);border-bottom:1px solid var(--color-divider)">
-            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
-              <div class="field" style="flex:1;min-width:160px"><label>Name</label><input class="input" value="{{ row.name }}" sc-camel-on-change="{{ row.onName }}"></div>
-              <div class="field" style="flex:1;min-width:160px"><label>Issuing body</label><input class="input" value="{{ row.issuingBody }}" sc-camel-on-change="{{ row.onIssuingBody }}"></div>
-            </div>
-            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
-              <div class="field" style="flex:1;min-width:140px"><label>Issue date</label><input class="input" type="date" value="{{ row.issueDate }}" sc-camel-on-change="{{ row.onIssueDate }}"></div>
-              <div class="field" style="flex:1;min-width:140px"><label>Expiration date</label><input class="input" type="date" value="{{ row.expirationDate }}" sc-camel-on-change="{{ row.onExpirationDate }}"></div>
-            </div>
-          </div>
-        </sc-for>
-        <sc-if value="{{ certificationsEmpty }}" hint-placeholder-val="{{ false }}">
-          <div style="font-size:12px;color:var(--color-neutral-500)">No certifications were found on this document.</div>
         </sc-if>
-      </div>
-
-      <sc-if value="{{ resumeHasSkills }}" hint-placeholder-val="{{ false }}">
-      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
-        <div class="card-kicker">Skills</div>
-        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Read straight from your resume, one field per skill — not capped at any count, and each is delivered exactly as written.</div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,200px),1fr));gap:var(--space-2)">
-          <sc-for list="{{ resumeSkillRows }}" as="row" hint-placeholder-count="6">
-            <input class="input" value="{{ row.skillText }}" sc-camel-on-change="{{ row.onChange }}">
-          </sc-for>
-        </div>
       </div>
       </sc-if>
+
+      <sc-for list="{{ resumeSectionsOrdered }}" as="section" hint-placeholder-count="3">
+        <sc-if value="{{ section.isWorkHistory }}" hint-placeholder-val="{{ false }}">
+        <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
+          <div class="card-kicker">Work history</div>
+          <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+            <div class="field" style="flex:1;min-width:160px"><label>Title</label><input class="input" value="{{ section.title }}" sc-camel-on-change="{{ section.onTitle }}"></div>
+            <div class="field" style="flex:1;min-width:160px"><label>Company</label><input class="input" value="{{ section.company }}" sc-camel-on-change="{{ section.onCompany }}"></div>
+          </div>
+          <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+            <div class="field" style="flex:1;min-width:140px"><label>Start date</label><input class="input" type="date" value="{{ section.startDate }}" sc-camel-on-change="{{ section.onStartDate }}"></div>
+            <div class="field" style="flex:1;min-width:140px"><label>End date (blank = present)</label><input class="input" type="date" value="{{ section.endDate }}" sc-camel-on-change="{{ section.onEndDate }}"></div>
+          </div>
+          <div class="field"><label>Job responsibilities</label><textarea class="input" rows="3" value="{{ section.jobResponsibilities }}" sc-camel-on-change="{{ section.onResponsibilities }}"></textarea></div>
+        </div>
+        </sc-if>
+
+        <sc-if value="{{ section.isEducation }}" hint-placeholder-val="{{ false }}">
+        <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
+          <div class="card-kicker">Education</div>
+          <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+            <div class="field" style="flex:1;min-width:160px"><label>Degree</label><input class="input" value="{{ section.degree }}" sc-camel-on-change="{{ section.onDegree }}"></div>
+            <div class="field" style="flex:1;min-width:160px"><label>Field of study</label><input class="input" value="{{ section.fieldOfStudy }}" sc-camel-on-change="{{ section.onFieldOfStudy }}"></div>
+          </div>
+          <div class="field"><label>Institution</label><input class="input" value="{{ section.institution }}" sc-camel-on-change="{{ section.onInstitution }}"></div>
+          <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+            <div class="field" style="flex:1;min-width:140px"><label>Start date</label><input class="input" type="date" value="{{ section.startDate }}" sc-camel-on-change="{{ section.onStartDate }}"></div>
+            <div class="field" style="flex:1;min-width:140px"><label>End date</label><input class="input" type="date" value="{{ section.endDate }}" sc-camel-on-change="{{ section.onEndDate }}"></div>
+          </div>
+        </div>
+        </sc-if>
+
+        <sc-if value="{{ section.isCertification }}" hint-placeholder-val="{{ false }}">
+        <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
+          <div class="card-kicker">Certification</div>
+          <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+            <div class="field" style="flex:1;min-width:160px"><label>Name</label><input class="input" value="{{ section.name }}" sc-camel-on-change="{{ section.onName }}"></div>
+            <div class="field" style="flex:1;min-width:160px"><label>Issuing body</label><input class="input" value="{{ section.issuingBody }}" sc-camel-on-change="{{ section.onIssuingBody }}"></div>
+          </div>
+          <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+            <div class="field" style="flex:1;min-width:140px"><label>Issue date</label><input class="input" type="date" value="{{ section.issueDate }}" sc-camel-on-change="{{ section.onIssueDate }}"></div>
+            <div class="field" style="flex:1;min-width:140px"><label>Expiration date</label><input class="input" type="date" value="{{ section.expirationDate }}" sc-camel-on-change="{{ section.onExpirationDate }}"></div>
+          </div>
+        </div>
+        </sc-if>
+
+        <sc-if value="{{ section.isSkills }}" hint-placeholder-val="{{ false }}">
+        <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+          <div class="card-kicker">Skills</div>
+          <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Read straight from your resume, one field per skill — not capped at any count, and each is delivered exactly as written.</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,200px),1fr));gap:var(--space-2)">
+            <sc-for list="{{ section.skillRows }}" as="skillRow" hint-placeholder-count="6">
+              <input class="input" value="{{ skillRow.skillText }}" sc-camel-on-change="{{ skillRow.onChange }}">
+            </sc-for>
+          </div>
+        </div>
+        </sc-if>
+
+        <sc-if value="{{ section.isNeedsReview }}" hint-placeholder-val="{{ false }}">
+        <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2);border-color:var(--color-accent)">
+          <div class="card-kicker">Flagged for your review</div>
+          <sc-if value="{{ section.hasHeading }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:11px;letter-spacing:0.04em;text-transform:uppercase;color:var(--color-neutral-500)">{{ section.heading }}</div>
+          </sc-if>
+          <textarea class="input" rows="3" value="{{ section.content }}" sc-camel-on-change="{{ section.onChange }}"></textarea>
+          <div style="font-size:11px;color:var(--color-neutral-500)">Unresolved content from your resume. You can edit it above. Nothing here is submitted for verification.</div>
+        </div>
+        </sc-if>
+      </sc-for>
 
       <sc-if value="{{ resumeHasHobbies }}" hint-placeholder-val="{{ false }}">
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
@@ -6266,7 +6265,10 @@ class Component extends DCLogic {
       education: ex.education.map(x => ({ id: x.id, institution: x.institution, degree: x.degree, field_of_study: x.field_of_study, start_date: x.start_date, end_date: x.end_date })),
       certifications: ex.certifications.map(c => ({ id: c.id, name: c.name, issuing_body: c.issuing_body, issue_date: c.issue_date, expiration_date: c.expiration_date })),
       skills: ex.skills.map(s => ({ id: s.id, skill_text: s.skill_text })),
-      freeform: ex.freeform.map(f => ({ id: f.id, content: f.content })),
+      // section_type/heading are echoed back (not edited here) so confirm-resume-data can flag
+      // needs_review rows for staff without a second round-trip to look up what kind of freeform
+      // row each id is — see that function's own header.
+      freeform: ex.freeform.map(f => ({ id: f.id, content: f.content, section_type: f.section_type, heading: f.heading })),
       opt_in: { work_history: this.state.optInWorkHistory, education: this.state.optInEducation, certifications: this.state.optInCertifications },
     };
     let res, data;
@@ -7007,47 +7009,81 @@ class Component extends DCLogic {
         const f = s.resumeExtraction && s.resumeExtraction.freeform.find(f => f.section_type === 'hobbies_other');
         if (f) this.updateResumeFreeform(f.id, e.target.value);
       },
-      resumeHasNeedsReview: !!(s.resumeExtraction && s.resumeExtraction.freeform.some(f => f.section_type === 'needs_review')),
-      resumeNeedsReviewRows: (s.resumeExtraction ? s.resumeExtraction.freeform.filter(f => f.section_type === 'needs_review') : [])
-        .map(f => ({ content: f.content, heading: f.heading || '', hasHeading: !!(f.heading || '').trim() })),
-      resumeHasSkills: !!(s.resumeExtraction && s.resumeExtraction.skills && s.resumeExtraction.skills.length > 0),
-      resumeSkillRows: (s.resumeExtraction && s.resumeExtraction.skills ? s.resumeExtraction.skills : []).map(sk => ({
-        skillText: sk.skill_text || '',
-        onChange: (e) => this.updateResumeSkill(sk.id, e.target.value),
-      })),
-      workHistoryEmpty: !!(s.resumeExtraction) && s.resumeExtraction.work_history.length === 0,
-      workHistoryRows: (s.resumeExtraction ? s.resumeExtraction.work_history : []).map(w => ({
-        id: w.id,
-        title: w.title || '', company: w.company || '',
-        startDate: w.start_date || '', endDate: w.end_date || '',
-        jobResponsibilities: w.job_responsibilities || '',
-        onTitle: (e) => this.updateResumeItem('work_history', w.id, 'title', e.target.value),
-        onCompany: (e) => this.updateResumeItem('work_history', w.id, 'company', e.target.value),
-        onStartDate: (e) => this.updateResumeItem('work_history', w.id, 'start_date', e.target.value),
-        onEndDate: (e) => this.updateResumeItem('work_history', w.id, 'end_date', e.target.value),
-        onResponsibilities: (e) => this.updateResumeItem('work_history', w.id, 'job_responsibilities', e.target.value),
-      })),
-      educationEmpty: !!(s.resumeExtraction) && s.resumeExtraction.education.length === 0,
-      educationRows: (s.resumeExtraction ? s.resumeExtraction.education : []).map(x => ({
-        id: x.id,
-        degree: x.degree || '', fieldOfStudy: x.field_of_study || '', institution: x.institution || '',
-        startDate: x.start_date || '', endDate: x.end_date || '',
-        onDegree: (e) => this.updateResumeItem('education', x.id, 'degree', e.target.value),
-        onFieldOfStudy: (e) => this.updateResumeItem('education', x.id, 'field_of_study', e.target.value),
-        onInstitution: (e) => this.updateResumeItem('education', x.id, 'institution', e.target.value),
-        onStartDate: (e) => this.updateResumeItem('education', x.id, 'start_date', e.target.value),
-        onEndDate: (e) => this.updateResumeItem('education', x.id, 'end_date', e.target.value),
-      })),
-      certificationsEmpty: !!(s.resumeExtraction) && s.resumeExtraction.certifications.length === 0,
-      certificationRows: (s.resumeExtraction ? s.resumeExtraction.certifications : []).map(c => ({
-        id: c.id,
-        name: c.name || '', issuingBody: c.issuing_body || '',
-        issueDate: c.issue_date || '', expirationDate: c.expiration_date || '',
-        onName: (e) => this.updateResumeItem('certifications', c.id, 'name', e.target.value),
-        onIssuingBody: (e) => this.updateResumeItem('certifications', c.id, 'issuing_body', e.target.value),
-        onIssueDate: (e) => this.updateResumeItem('certifications', c.id, 'issue_date', e.target.value),
-        onExpirationDate: (e) => this.updateResumeItem('certifications', c.id, 'expiration_date', e.target.value),
-      })),
+      resumeHasWorkHistory: !!(s.resumeExtraction) && s.resumeExtraction.work_history.length > 0,
+      resumeHasEducation: !!(s.resumeExtraction) && s.resumeExtraction.education.length > 0,
+      resumeHasCertifications: !!(s.resumeExtraction) && s.resumeExtraction.certifications.length > 0,
+      resumeHasAnyVerifiableCategory: !!(s.resumeExtraction) &&
+        (s.resumeExtraction.work_history.length > 0 || s.resumeExtraction.education.length > 0 || s.resumeExtraction.certifications.length > 0),
+      // Positional fidelity (see the position migration's own header): one merged, position-sorted
+      // list standing in for what used to be four separate fixed-order cards (work history,
+      // education, certifications, skills) plus a single needs_review card. A null/missing position
+      // (pre-migration rows, or a page whose model call predates this change) sorts last via
+      // Infinity rather than crashing or silently defaulting to 0 — honest about not knowing where
+      // old data really belongs, same convention already used for candidate_freeform_sections.heading.
+      resumeSectionsOrdered: (() => {
+        if (!s.resumeExtraction) return [];
+        const blocks = [];
+        s.resumeExtraction.work_history.forEach(w => blocks.push({
+          kind: 'work_history', position: typeof w.position === 'number' ? w.position : Infinity,
+          title: w.title || '', company: w.company || '',
+          startDate: w.start_date || '', endDate: w.end_date || '',
+          jobResponsibilities: w.job_responsibilities || '',
+          onTitle: (e) => this.updateResumeItem('work_history', w.id, 'title', e.target.value),
+          onCompany: (e) => this.updateResumeItem('work_history', w.id, 'company', e.target.value),
+          onStartDate: (e) => this.updateResumeItem('work_history', w.id, 'start_date', e.target.value),
+          onEndDate: (e) => this.updateResumeItem('work_history', w.id, 'end_date', e.target.value),
+          onResponsibilities: (e) => this.updateResumeItem('work_history', w.id, 'job_responsibilities', e.target.value),
+        }));
+        s.resumeExtraction.education.forEach(x => blocks.push({
+          kind: 'education', position: typeof x.position === 'number' ? x.position : Infinity,
+          degree: x.degree || '', fieldOfStudy: x.field_of_study || '', institution: x.institution || '',
+          startDate: x.start_date || '', endDate: x.end_date || '',
+          onDegree: (e) => this.updateResumeItem('education', x.id, 'degree', e.target.value),
+          onFieldOfStudy: (e) => this.updateResumeItem('education', x.id, 'field_of_study', e.target.value),
+          onInstitution: (e) => this.updateResumeItem('education', x.id, 'institution', e.target.value),
+          onStartDate: (e) => this.updateResumeItem('education', x.id, 'start_date', e.target.value),
+          onEndDate: (e) => this.updateResumeItem('education', x.id, 'end_date', e.target.value),
+        }));
+        s.resumeExtraction.certifications.forEach(c => blocks.push({
+          kind: 'certification', position: typeof c.position === 'number' ? c.position : Infinity,
+          name: c.name || '', issuingBody: c.issuing_body || '',
+          issueDate: c.issue_date || '', expirationDate: c.expiration_date || '',
+          onName: (e) => this.updateResumeItem('certifications', c.id, 'name', e.target.value),
+          onIssuingBody: (e) => this.updateResumeItem('certifications', c.id, 'issuing_body', e.target.value),
+          onIssueDate: (e) => this.updateResumeItem('certifications', c.id, 'issue_date', e.target.value),
+          onExpirationDate: (e) => this.updateResumeItem('certifications', c.id, 'expiration_date', e.target.value),
+        }));
+        // One block for ALL skills together (see the migration header on why section_position is a
+        // separate column from each skill's own intra-block `position`) — takes the lowest real
+        // section_position among the candidate's skill rows, since every row from one extraction
+        // call carries the same value; `find` rather than `min` would also work here but this is
+        // defensive against any future extraction that (incorrectly) varies it row to row.
+        if (s.resumeExtraction.skills && s.resumeExtraction.skills.length > 0) {
+          const positions = s.resumeExtraction.skills.map(sk => sk.section_position).filter(p => typeof p === 'number');
+          blocks.push({
+            kind: 'skills', position: positions.length ? Math.min(...positions) : Infinity,
+            skillRows: s.resumeExtraction.skills.map(sk => ({
+              skillText: sk.skill_text || '',
+              onChange: (e) => this.updateResumeSkill(sk.id, e.target.value),
+            })),
+          });
+        }
+        s.resumeExtraction.freeform.filter(f => f.section_type === 'needs_review').forEach(f => blocks.push({
+          kind: 'needs_review', position: typeof f.position === 'number' ? f.position : Infinity,
+          heading: f.heading || '', hasHeading: !!(f.heading || '').trim(),
+          content: f.content || '',
+          onChange: (e) => this.updateResumeFreeform(f.id, e.target.value),
+        }));
+        blocks.sort((a, b) => a.position - b.position);
+        return blocks.map(b => ({
+          ...b,
+          isWorkHistory: b.kind === 'work_history',
+          isEducation: b.kind === 'education',
+          isCertification: b.kind === 'certification',
+          isSkills: b.kind === 'skills',
+          isNeedsReview: b.kind === 'needs_review',
+        }));
+      })(),
       resumeConfirmPending: s.resumeConfirmPending,
       resumeConfirmError: s.resumeConfirmError,
       resumeConfirmLabel: s.resumeConfirmPending ? 'Saving…' : 'Confirm and continue',

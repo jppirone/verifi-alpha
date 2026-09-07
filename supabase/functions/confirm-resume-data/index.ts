@@ -32,7 +32,10 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 type WorkHistoryEdit = { id: string; company?: string; title?: string; start_date?: string; end_date?: string; job_responsibilities?: string };
 type EducationEdit = { id: string; institution?: string; degree?: string; field_of_study?: string; start_date?: string; end_date?: string };
 type CertificationEdit = { id: string; name?: string; issuing_body?: string; issue_date?: string; expiration_date?: string };
-type FreeformEdit = { id: string; content?: string };
+// section_type/heading are echoed back by the client (candidate.html already has them, straight
+// from get-resume-extraction) rather than re-fetched here — this function only needs them to decide
+// which freeform rows are needs_review for the staff-queue flag below, not to validate anything.
+type FreeformEdit = { id: string; content?: string; section_type?: string; heading?: string };
 type SkillEdit = { id: string; skill_text?: string };
 
 function dateOrNull(v: unknown): string | null {
@@ -49,6 +52,14 @@ function claimForEducation(e: EducationEdit): string {
 }
 function claimForCertification(c: CertificationEdit): string {
   return [c.name, c.issuing_body, c.issue_date].filter(Boolean).join(", ");
+}
+// Truncated, not the full content — this is a queue-list preview (claim), not the review surface
+// itself; internal_note below carries the full, untruncated content plus the reason it's flagged.
+function claimForNeedsReview(f: FreeformEdit): string {
+  const heading = (f.heading || "").trim();
+  const content = (f.content || "").trim();
+  const preview = content.length > 140 ? content.slice(0, 140) + "…" : content;
+  return heading ? `${heading}: ${preview}` : preview || "(no heading, no content)";
 }
 
 export default {
@@ -172,6 +183,36 @@ export default {
             id: idRow, candidate_id, type: "Certification", claim: claimForCertification(c), received: today,
           });
         }
+      }
+
+      // needs_review → staff visibility, unconditional (NOT gated by any opt_in flag above).
+      // needs_review was never one of the three verification categories a candidate opts into —
+      // this isn't a verification submission, it's an internal review flag. The reason: needs_review
+      // is the one place on this screen that is NOT validated against the uploaded document by a
+      // defined schema (company/title/dates etc. all trace back to a real structured field the way
+      // Job Responsibilities is the only free-typed field elsewhere in this build) — which makes it
+      // also the one place a candidate COULD try to slip in additional job-description-style claims
+      // under cover of "content my resume already had." This does not block the candidate (their
+      // update above already went through, same as every other category) and does not touch or
+      // weaken the document-provenance rule for the validated fields — it only adds staff
+      // visibility into this specific catch-all content, using the exact non-blocking-but-flagged
+      // pattern already live for automated-check ambiguity: status 'Needs Reconciliation' (see
+      // staff.html's own header on that status — never shown to or implied to the candidate).
+      // list-candidate-verification-items excludes type 'Needs Review' from what the candidate's own
+      // status tab reads back, so this never surfaces to them as a "verification item pending
+      // review," which it genuinely isn't.
+      for (const f of freeform) {
+        if (f.section_type !== "needs_review") continue;
+        const { data: idRow } = await supabase.rpc("nextval_verification_item_id");
+        queueInserts.push({
+          id: idRow,
+          candidate_id,
+          type: "Needs Review",
+          claim: claimForNeedsReview(f),
+          received: today,
+          status: "Needs Reconciliation",
+          internal_note: `Auto-flagged: unstructured content from the candidate's resume that didn't map to a defined category (heading: ${JSON.stringify(f.heading || "(none)")}). Not independently validated against the uploaded document the way the structured fields above it are — review for anything that reads like an inserted job-description-style claim rather than content genuinely present on the original resume. Full content:\n\n${f.content || ""}`,
+        });
       }
 
       if (queueInserts.length) {

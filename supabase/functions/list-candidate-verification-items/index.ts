@@ -53,8 +53,13 @@ export default {
         });
       }
 
+      // type=neq."Needs Review": that type is confirm-resume-data's own internal, staff-only flag
+      // for needs_review content (see its header) — never a claim the candidate actually submitted
+      // for verification, so it never belongs on the candidate's own status tab. Same staff-only
+      // trust boundary already used for internal_note and automated_check, just applied as a row
+      // filter instead of a column omission since this one is a whole extra kind of row, not a field.
       const url = SUPABASE_URL + "/rest/v1/verification_items?select=id,type,claim,status,created_at,note,correction_requested,correction_note,correction_value&candidate_id=eq."
-        + encodeURIComponent(candidate_id) + "&order=created_at.asc";
+        + encodeURIComponent(candidate_id) + "&type=neq." + encodeURIComponent("Needs Review") + "&order=created_at.asc";
       const res = await fetch(url, {
         headers: {
           "apikey": SUPABASE_SERVICE_ROLE_KEY,
