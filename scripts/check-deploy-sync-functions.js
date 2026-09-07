@@ -63,17 +63,40 @@ async function mgmtFetch(urlPath) {
   const res = await fetch(`${MGMT_API}${urlPath}`, {
     headers: { Authorization: `Bearer ${ACCESS_TOKEN}` },
   });
+  const contentType = res.headers.get("content-type") || "";
   const bodyText = await res.text();
-  return { ok: res.ok, status: res.status, bodyText };
+  return { ok: res.ok, status: res.status, bodyText, contentType };
+}
+
+// REAL FINDING, confirmed live (2026-09-07): this endpoint does NOT return the deployed function's
+// raw source text. It returns an "ESZIP2"-framed binary bundle (Deno's compiled-module-graph
+// archive format) — confirmed by fetching it for real against upload-resume: content-type
+// application/octet-stream, ~13MB (vs. the ~55KB local source file), and the body's first bytes are
+// literally the ASCII magic "ESZIP2" followed by binary length-prefixed sections, one per resolved
+// module (the entry file AND every jsr:/https: import it pulls in, source maps included). A plain
+// sha256-of-bytes comparison against a single local source file can never match this, structurally —
+// it isn't comparing "deployed code" against "local code" the same way check-deploy-sync.js does for
+// static files, it's comparing a whole compiled bundle against one uncompiled input file. Extracting
+// just the entry module's original source back out would mean writing and trusting a real eszip
+// parser against Deno's (not fully published in the Management API docs) framing — not something to
+// improvise silently while holding a live, about-to-be-revoked credential. Detected and short-circuited
+// here rather than hashed, so this script reports an honest "can't verify content" instead of a false
+// "out of sync". See the header comment above for what a real fix would need.
+function looksLikeEszipBundle(bodyText, contentType) {
+  return contentType.includes("octet-stream") || bodyText.slice(0, 6) === "ESZIP2";
 }
 
 async function fetchDeployedSource(slug) {
-  const { ok, status, bodyText } = await mgmtFetch(`/projects/${PROJECT_REF}/functions/${slug}/body`);
+  const { ok, status, bodyText, contentType } = await mgmtFetch(`/projects/${PROJECT_REF}/functions/${slug}/body`);
   if (!ok) return { ok: false, status, bodyText };
 
-  // Defensive: the Management API reference for this endpoint doesn't clearly document whether the
-  // response is raw source text or JSON-wrapped — handle both rather than assuming. If this branch
-  // ever fires for real, print what actually came back so it's obvious, not silently wrong.
+  if (looksLikeEszipBundle(bodyText, contentType)) {
+    return { ok: true, isEszipBundle: true, text: bodyText };
+  }
+
+  // Defensive: in case a future API version changes this to JSON-wrapped source instead — handle
+  // both rather than assuming. If this branch ever fires for real, print what actually came back so
+  // it's obvious, not silently wrong.
   const trimmed = bodyText.trim();
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
     try {
@@ -116,7 +139,7 @@ function findMatchingCommit(localPath, liveHash) {
   return { noMatch: true, checked: shas.length };
 }
 
-async function checkFunction(slug) {
+async function checkFunction(slug, meta) {
   console.log(`\n=== ${slug} ===`);
 
   const localRelPath = `supabase/functions/${slug}/index.ts`;
@@ -135,6 +158,29 @@ async function checkFunction(slug) {
     console.log(`  LIVE FETCH FAILED (status ${deployed.status}) — ${deployed.bodyText.slice(0, 200)}`);
     return;
   }
+
+  if (deployed.isEszipBundle) {
+    // Can't hash-compare content (see fetchDeployedSource) — fall back to a real but weaker signal:
+    // when was this function actually deployed, versus when was this local file actually committed.
+    // Not proof the bytes match, but a deploy timestamp older than the local file's last commit IS
+    // proof of drift, same direction of evidence check-deploy-sync.js gives for static files, just
+    // via metadata instead of content.
+    const localCommitDate = git(`log -1 --format=%ci -- ${localRelPath}`);
+    if (!meta) {
+      console.log(`  ⚠️  content check unavailable (see NOTE above), and no deploy metadata was passed in for this function either.`);
+      return;
+    }
+    const deployedAt = new Date(meta.updated_at);
+    const localAt = localCommitDate ? new Date(localCommitDate) : null;
+    console.log(`  ⚠️  content check unavailable (see NOTE above). Metadata only: deployed at ${deployedAt.toISOString()} (v${meta.version}), local HEAD for this file committed at ${localAt ? localAt.toISOString() : "(no commits)"} (${localHeadSha}).`);
+    if (localAt && deployedAt < localAt) {
+      console.log(`     ❌ deploy timestamp is OLDER than the local file's last commit — this function is very likely out of date. Redeploy and re-check.`);
+    } else if (localAt) {
+      console.log(`     deploy timestamp is at or after the local file's last commit — consistent with (but not proof of) being in sync.`);
+    }
+    return;
+  }
+
   const liveHash = sha256(deployed.text);
 
   if (liveHash === localHash) {
@@ -158,11 +204,11 @@ async function checkFunction(slug) {
   }
 }
 
-async function listDeployedSlugs() {
+async function listDeployedFunctions() {
   const { ok, status, bodyText } = await mgmtFetch(`/projects/${PROJECT_REF}/functions`);
   if (!ok) throw new Error(`could not list deployed functions (status ${status}): ${bodyText.slice(0, 200)}`);
   const parsed = JSON.parse(bodyText);
-  return new Set(parsed.map((f) => f.slug));
+  return new Map(parsed.map((f) => [f.slug, f]));
 }
 
 async function main() {
@@ -174,33 +220,34 @@ async function main() {
   const args = process.argv.slice(2);
   const localSlugs = args.length ? args : localFunctionSlugs();
 
-  let deployedSlugs;
+  let deployedFns;
   try {
-    deployedSlugs = await listDeployedSlugs();
+    deployedFns = await listDeployedFunctions();
   } catch (e) {
     console.error(`FATAL: ${e.message}`);
     process.exitCode = 1;
     return;
   }
 
-  console.log(`Checking Supabase project ${PROJECT_REF} (${deployedSlugs.size} functions live) against local git history for: ${localSlugs.join(", ")}`);
+  console.log(`Checking Supabase project ${PROJECT_REF} (${deployedFns.size} functions live) against local git history for: ${localSlugs.join(", ")}`);
+  console.log(`NOTE: the Management API's /body endpoint returns a compiled eszip bundle, not raw source (see fetchDeployedSource's header comment) — content can't be hash-compared today. Falls back to the deploy timestamp (updated_at) as a weaker, but real, signal.`);
 
-  const localOnly = localSlugs.filter((s) => !deployedSlugs.has(s));
+  const localOnly = localSlugs.filter((s) => !deployedFns.has(s));
   if (localOnly.length) {
-    console.log(`\n(local file exists but NOT deployed to this project — skipping content check, nothing live to compare against): ${localOnly.join(", ")}`);
+    console.log(`\n(local file exists but NOT deployed to this project — skipping check, nothing live to compare against): ${localOnly.join(", ")}`);
   }
 
   // Only report live-only functions when this run covers the full local set — a targeted run
   // (explicit slug args) isn't trying to be exhaustive, so silence here isn't a missing finding.
   if (!args.length) {
-    const liveOnly = [...deployedSlugs].filter((s) => !localSlugs.includes(s));
+    const liveOnly = [...deployedFns.keys()].filter((s) => !localSlugs.includes(s));
     if (liveOnly.length) {
       console.log(`\n⚠️  deployed on Supabase but no local supabase/functions/<slug>/index.ts found (orphan, or deleted locally without un-deploying): ${liveOnly.join(", ")}`);
     }
   }
 
-  for (const slug of localSlugs.filter((s) => deployedSlugs.has(s))) {
-    await checkFunction(slug);
+  for (const slug of localSlugs.filter((s) => deployedFns.has(s))) {
+    await checkFunction(slug, deployedFns.get(slug));
   }
 }
 
