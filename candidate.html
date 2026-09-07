@@ -2786,7 +2786,7 @@ a:hover{color:var(--color-accent)}
   <sc-if value="{{ resumeNoDocument }}" hint-placeholder-val="{{ false }}">
     <div class="card elev-md" style="padding:var(--space-8);text-align:center;display:flex;flex-direction:column;gap:var(--space-3);align-items:center">
       <div style="font-size:15px">No resume on file yet.</div>
-      <div style="font-size:13px;color:var(--color-neutral-500);line-height:1.5">Your account is confirmed, but we don't have a resume to read yet — a real, reachable state (see checkResumeFlowIncomplete's own header: the background upload started at signup can fail or never finish independently of email confirmation succeeding, including across two different devices). Upload one to continue.</div>
+      <div style="font-size:13px;color:var(--color-neutral-500);line-height:1.5">Your account is confirmed, but we don't have a resume on file yet. Upload one to continue.</div>
       <input type="file" id="resume-nodoc-file-input" accept="image/jpeg,image/png,image/heic,image/heif,image/webp,application/pdf" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden" sc-camel-on-change="{{ onPickRetryResumeFile }}">
       <label for="resume-nodoc-file-input" class="btn btn-primary" style="cursor:pointer">Upload your resume</label>
       <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ skipResumeConfirm }}">Continue without resume data</button>
