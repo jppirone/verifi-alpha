@@ -3060,7 +3060,12 @@ a:hover{color:var(--color-accent)}
       <sc-if value="{{ showPauseIndicator }}" hint-placeholder-val="{{ false }}">
         <span class="tag tag-outline">{{ pauseIndicatorLabel }}</span>
       </sc-if>
-      <button type="button" class="btn btn-ghost" style="font-size:11px;opacity:0.6" sc-camel-on-click="{{ toggleAccountTier }}">Demo: tier = {{ accountTierLabel }}</button>
+      <!-- Item B (2026-09-08 regression session): the "Demo: tier =" button that used to sit here
+           is gone — removed entirely, not left dormant. It let a tester silently flip local
+           accountTier out of sync with the real candidates.tier backend value now driving it (see
+           set-candidate-tier/test-stripe-webhook's own headers). "Demo: reset to default state"
+           (resetAll) is a separate, broader dev tool untouched by this item — flagged, not fixed,
+           worth its own look later. -->
       <button type="button" class="btn btn-ghost" style="font-size:11px;opacity:0.6" sc-camel-on-click="{{ resetAll }}">Demo: reset to default state</button>
     </div>
   </div>
@@ -3822,12 +3827,31 @@ a:hover{color:var(--color-accent)}
               <label class="seg-opt" style="white-space:nowrap"><input type="radio" name="billing" checked="{{ billingMonthly }}" sc-camel-on-change="{{ setBillingMonthly }}">$4.99/mo</label>
               <label class="seg-opt" style="white-space:nowrap"><input type="radio" name="billing" checked="{{ billingAnnual }}" sc-camel-on-change="{{ setBillingAnnual }}">$50/yr</label>
             </div>
-            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Payment is attempted 7 days before renewal. If it fails, your account reverts to Free as of the renewal date, not a separate deactivated state, and basic sharing keeps working either way.</div>
+            <!-- Item B: renewal recurs for real through Stripe test-mode billing at your selected
+                 interval. Renewal-failure handling (auto-revert to Free) is a separate webhook event
+                 this alpha doesn't yet handle — flagged, not silently overclaimed. -->
+            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Billing recurs for real through Stripe test mode at your selected interval. Renewal-failure handling isn't built in this alpha yet.</div>
             <div class="card-kicker" style="margin-top:var(--space-2)">Payment method</div>
             <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
-              <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ openPaymentCard }}">Card</button>
-              <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ openPaymentBank }}">Bank link</button>
-              <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ openPaymentPaypal }}">PayPal / Venmo</button>
+              <button type="button" class="btn btn-secondary" disabled="{{ checkoutPending }}" sc-camel-on-click="{{ openPaymentCard }}">{{ checkoutButtonLabelCard }}</button>
+              <button type="button" class="btn btn-secondary" disabled="{{ checkoutPending }}" sc-camel-on-click="{{ openPaymentBank }}">{{ checkoutButtonLabelBank }}</button>
+              <button type="button" class="btn btn-secondary" disabled="{{ checkoutPending }}" sc-camel-on-click="{{ openPaymentPaypal }}">{{ checkoutButtonLabelPaypal }}</button>
+            </div>
+            <div style="font-size:11px;color:var(--color-neutral-500)">Test-mode Stripe Checkout. Use a published test card, e.g. 4242 4242 4242 4242, any future expiry, any CVC.</div>
+            <sc-if value="{{ checkoutError }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:12px;color:#e2735c">{{ checkoutError }}</div>
+            </sc-if>
+          </sc-if>
+          <sc-if value="{{ checkoutCancelledNotice }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border:1px solid var(--color-divider);border-radius:6px">
+              <span style="font-size:12px;color:var(--color-neutral-400)">Checkout was cancelled. Your plan wasn't changed.</span>
+              <button type="button" class="btn btn-ghost" style="font-size:11px;padding:2px 8px" sc-camel-on-click="{{ dismissCheckoutNotice }}">Dismiss</button>
+            </div>
+          </sc-if>
+          <sc-if value="{{ checkoutSuccessNotice }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border:1px solid var(--color-divider);border-radius:6px">
+              <span style="font-size:12px;color:var(--color-accent-300)">Payment confirmed — you're on the Paid plan.</span>
+              <button type="button" class="btn btn-ghost" style="font-size:11px;padding:2px 8px" sc-camel-on-click="{{ dismissCheckoutNotice }}">Dismiss</button>
             </div>
           </sc-if>
         </div>
@@ -4098,11 +4122,18 @@ a:hover{color:var(--color-accent)}
       <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="downgrade-modal-title">
         <div class="dialog-title" id="downgrade-modal-title">Switch to Free</div>
         <div class="dialog-body">
-          You'll keep full Paid access through the end of your current billing period ({{ periodEndDate }}); after that, your account moves to Free. Basic sharing keeps working on Free either way.
+          <!-- Item B: was "keep Paid access through the end of your current billing period" — a
+               real deferred-downgrade (scheduled for the renewal date) isn't built; this alpha's
+               downgrade is immediate, so the copy says that honestly instead of promising a grace
+               period this doesn't actually give. Basic sharing keeps working on Free either way. -->
+          Switching takes effect immediately. Basic sharing keeps working on Free either way.
+          <sc-if value="{{ checkoutError }}" hint-placeholder-val="{{ false }}">
+            <div style="margin-top:var(--space-3);font-size:12px;color:#e2735c">{{ checkoutError }}</div>
+          </sc-if>
         </div>
         <div class="dialog-actions">
-          <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ closeDowngradeModal }}">Cancel</button>
-          <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ confirmDowngradeModal }}">Confirm switch to Free</button>
+          <button type="button" class="btn btn-secondary" disabled="{{ checkoutPending }}" sc-camel-on-click="{{ closeDowngradeModal }}">Cancel</button>
+          <button type="button" class="btn btn-secondary" disabled="{{ checkoutPending }}" sc-camel-on-click="{{ confirmDowngradeModal }}">{{ confirmDowngradeModalLabel }}</button>
         </div>
       </div>
     </div>
@@ -4332,17 +4363,27 @@ a:hover{color:var(--color-accent)}
 </div>
 </sc-if>
 
+<!-- Item B (2026-09-08 regression session): this modal now only ever renders during signup (see
+     advanceFromTiers/confirmSignupPaidSelection's own header) — the Subscription tab's real upgrade
+     path (openPaymentCard etc.) skips straight to a genuine Stripe test-mode redirect instead.
+     Copy rewritten to stop claiming a "PCI-compliant hosted form" handoff that never happened: no
+     real payment is collected at signup, on purpose (a full-page Stripe redirect this early would
+     strand the candidate — see confirmSignupPaidSelection's own header) — this sets the real
+     candidates.tier backend field directly via set-candidate-tier, honestly, with real billing
+     deferred to the Subscription tab after the account exists. -->
 <sc-if value="{{ paymentModalOpen }}" hint-placeholder-val="{{ false }}">
   <div class="dialog-backdrop">
     <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="payment-modal-title">
-      <div class="dialog-title" id="payment-modal-title">Payment details</div>
+      <div class="dialog-title" id="payment-modal-title">Start on Paid</div>
       <div class="dialog-body">
-        You're being securely handed off to our PCI-compliant payment processor's hosted form ({{ paymentModalMethodLabel }}). This app never collects or stores your raw payment details, only the processor's success/failure result comes back here.
-        <div style="margin-top:var(--space-4);border:1px dashed var(--color-divider);border-radius:var(--radius-md);padding:var(--space-6);text-align:center;font-size:12px;color:var(--color-neutral-500)">generic payment-processor hosted form placeholder</div>
+        No payment is collected during signup. This sets your account to the Paid plan now; manage billing for real, any time, from the Subscription tab once your account exists.
+        <sc-if value="{{ checkoutError }}" hint-placeholder-val="{{ false }}">
+          <div style="margin-top:var(--space-3);font-size:12px;color:#e2735c">{{ checkoutError }}</div>
+        </sc-if>
       </div>
       <div class="dialog-actions">
-        <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ closePaymentModal }}">Cancel</button>
-        <button type="button" class="btn btn-primary" sc-camel-on-click="{{ confirmPaymentModal }}">Confirm payment</button>
+        <button type="button" class="btn btn-secondary" disabled="{{ checkoutPending }}" sc-camel-on-click="{{ closePaymentModal }}">Cancel</button>
+        <button type="button" class="btn btn-primary" disabled="{{ checkoutPending }}" sc-camel-on-click="{{ confirmPaymentModal }}">{{ confirmPaymentModalLabel }}</button>
       </div>
     </div>
   </div>
@@ -5213,6 +5254,9 @@ class Component extends DCLogic {
     cvEmailCodeInput: '', cvSmsCodeInput: '', cvEmailConfirmed: false, cvSmsConfirmed: false,
     cvPhoneEntry: '', cvPhoneCodeInput: '', cvPhoneCodeSentFlag: false,
     tierSelection: 'free', billingCycle: 'monthly', changePlanOpen: false,
+    // Item B (2026-09-08 regression session): real Stripe test-mode checkout state — see
+    // startRealCheckout/handleCheckoutReturn's own headers.
+    checkoutPending: false, checkoutError: null, checkoutCancelledNotice: false, checkoutSuccessNotice: false,
     deactStep: 'default', deactReason: '', deactNote: '', deactChoice: null, arrivedFromDeactivationPause: false,
     deletionScheduled: false, deletionDate: null,
     deactivatePending: false, deactivateError: null, reactivatePending: false, reactivateError: null,
@@ -5734,7 +5778,10 @@ class Component extends DCLogic {
       const raw = localStorage.getItem('verifi_draft');
       if (raw) this.setState({ draft: JSON.parse(raw) });
     } catch (e) {}
-    this.mountResolveOrToken();
+    // Item B: handleCheckoutReturn (see its own header) has to run AFTER a real session is
+    // resolved, not in parallel with it — it needs resumeCandidateId/a real session token in place
+    // before it can meaningfully re-check tier state.
+    this.mountResolveOrToken().then(() => this.handleCheckoutReturn());
   }
 
   // Real bug, reproduced directly (2026-09-07): a candidate mid-session, on a validation/confirm
@@ -6301,6 +6348,14 @@ class Component extends DCLogic {
       // Same guard as profileFirst/savedFirst above — covers a returning session exactly like a
       // fresh signup, since this is the only other place email/phone are ever really learned.
       ...this.seedContactFromAccount(resolvedEmail, resolvedPhone),
+      // Item B (2026-09-08 regression session): accountTier now reflects the real
+      // candidates.tier backend value (see set-candidate-tier/test-stripe-webhook's own headers)
+      // every time a session is resolved — not just once at some earlier local flip that could
+      // silently drift from the truth. Falls through to whatever's already in state only when the
+      // profile response genuinely has nothing to say (never expected in practice — resolve-session/
+      // confirm-login/check-login-status all always select tier — but matches the same defensive
+      // shape as first/last/email/phone above rather than assuming the field is always present).
+      accountTier: (profile && profile.tier) || this.state.accountTier,
     });
     if (reactivateNeeded) { this.setState({ screen: 'reactivate', deletionScheduled: true, deletionDate }); return; }
 
@@ -6410,8 +6465,169 @@ class Component extends DCLogic {
       try { localStorage.removeItem('verifi_session_token'); } catch (e) {}
       return false;
     }
-    this.applySession(token, data);
+    // Item B: awaited now (previously fire-and-forget) — handleCheckoutReturn (see its own header)
+    // needs applySession's own setState to have actually landed before it reads this.state.accountTier
+    // back off a fresh resolveSession() call; nothing else in this file relied on the old
+    // not-awaited timing.
+    await this.applySession(token, data);
     return true;
+  }
+
+  // Item B (2026-09-08 regression session): real Stripe test-mode checkout, replacing the
+  // Subscription tab's fully-simulated "Confirm payment" click. Calls test-stripe-checkout (see its
+  // own header — mode=subscription, client_reference_id=candidate_id) and does a genuine full-page
+  // redirect to Stripe's own hosted Checkout page — alpha testers complete it with one of Stripe's
+  // published test-mode card numbers (e.g. 4242 4242 4242 4242), no real charge ever occurs.
+  //
+  // A full-page redirect destroys this component instance entirely — nothing in this.state survives
+  // it. upgradeReturnTab/upgradeReturnTarget/billingCycle are the one thing that needs to: a
+  // candidate who hit a paid-gated feature (Customization, say) and clicked "Upgrade" from there
+  // expects to land back on THAT feature after paying, not just the Subscription tab. Stashed in
+  // localStorage (survives the redirect the way React state can't) and read back by
+  // handleCheckoutReturn on the next real page load.
+  async startRealCheckout() {
+    const s = this.state;
+    if (!s.resumeCandidateId || s.checkoutPending) return;
+    this.setState({ checkoutPending: true, checkoutError: null, checkoutCancelledNotice: false });
+    try {
+      localStorage.setItem('verifi_checkout_return', JSON.stringify({
+        upgradeReturnTab: s.upgradeReturnTab || null,
+        upgradeReturnTarget: s.upgradeReturnTarget || null,
+        billingCycle: s.billingCycle,
+      }));
+    } catch (e) {}
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/test-stripe-checkout', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate_id: s.resumeCandidateId, billing_cycle: s.billingCycle }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ checkoutPending: false, checkoutError: "Couldn't reach the payment processor. Check your connection and try again." });
+      return;
+    }
+    if (!res.ok || !data.ok || !data.url) {
+      this.setState({ checkoutPending: false, checkoutError: "Couldn't start checkout. Please try again." });
+      return;
+    }
+    window.location.href = data.url; // real navigation — nothing below this line ever runs
+  }
+
+  // Item B: the other half of startRealCheckout — handles landing back on candidate.html after a
+  // real Stripe Checkout redirect (test-stripe-checkout's success_url/cancel_url both point here).
+  // Called once per mount, after session resolution has already landed (see componentDidMount) —
+  // resumeCandidateId and a real session token both need to already be in place for the tier
+  // re-check below to mean anything.
+  async handleCheckoutReturn() {
+    const url = new URL(window.location.href);
+    const checkout = url.searchParams.get('checkout');
+    if (!checkout) return;
+    // Single-use, the same discipline as verify_token/login_token elsewhere in this file — strip it
+    // immediately so a later refresh of this same tab never re-runs this handler.
+    url.searchParams.delete('checkout');
+    url.searchParams.delete('session_id');
+    window.history.replaceState({}, '', url.toString());
+
+    let returnCtx = null;
+    try { returnCtx = JSON.parse(localStorage.getItem('verifi_checkout_return') || 'null'); } catch (e) {}
+    try { localStorage.removeItem('verifi_checkout_return'); } catch (e) {}
+
+    if (checkout === 'cancel') {
+      this.setState({ checkoutCancelledNotice: true });
+      return;
+    }
+    if (checkout !== 'success') return;
+
+    // The real webhook write (test-stripe-webhook) can race this redirect — Stripe fires it
+    // independently of the browser, no ordering guarantee either way. Re-resolving the session
+    // (rather than trusting the redirect alone) is what actually confirms tier flipped, with a few
+    // spaced retries before giving up and telling the candidate honestly that it may still be
+    // processing, rather than either lying that it succeeded or leaving them on a stale Free view.
+    this.setState({ checkoutPending: true });
+    let confirmedPaid = this.state.accountTier === 'paid';
+    for (let i = 0; !confirmedPaid && i < 8; i++) {
+      if (i > 0) await new Promise((r) => setTimeout(r, 1500));
+      const ok = await this.resolveSession();
+      confirmedPaid = ok && this.state.accountTier === 'paid';
+    }
+    const patch = {
+      checkoutPending: false,
+      changePlanOpen: false,
+      tierSelection: confirmedPaid ? 'paid' : this.state.tierSelection,
+      checkoutSuccessNotice: confirmedPaid,
+      checkoutError: confirmedPaid ? null : "Payment may still be processing — check back in a moment, or contact support if this persists.",
+    };
+    if (returnCtx && returnCtx.billingCycle) patch.billingCycle = returnCtx.billingCycle;
+    if (confirmedPaid && returnCtx && returnCtx.upgradeReturnTab) {
+      patch.accountTab = returnCtx.upgradeReturnTab;
+      if (returnCtx.upgradeReturnTab === 'customization') patch.customizeTarget = returnCtx.upgradeReturnTarget;
+      if (returnCtx.upgradeReturnTab === 'views') patch.viewsTabPartner = returnCtx.upgradeReturnTarget;
+    }
+    this.setState(patch, () => { if (patch.accountTab === 'views') this.renderPdfPreview(); });
+  }
+
+  // Item B: the signup-time paid-tier modal's real "Confirm" action — deliberately NOT a Stripe
+  // interaction (see startRealCheckout's own header for exactly why: a full-page redirect mid-
+  // signup, before any session token is ever persisted, would strand the candidate with nothing to
+  // resolve back into). candidate_id alone is enough to call set-candidate-tier — no session
+  // required, same pattern already established by set-discoverable — so this is a genuine backend
+  // write, just not a real payment. The modal's own copy is honest about that now instead of
+  // claiming a PCI-compliant processor handoff that never happened.
+  async confirmSignupPaidSelection() {
+    const s = this.state;
+    if (!s.resumeCandidateId || s.checkoutPending) return;
+    this.setState({ checkoutPending: true, checkoutError: null });
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/set-candidate-tier', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate_id: s.resumeCandidateId, tier: 'paid' }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ checkoutPending: false, checkoutError: "Couldn't reach the server. Check your connection and try again." });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      this.setState({ checkoutPending: false, checkoutError: "Couldn't set your plan. Please try again." });
+      return;
+    }
+    this.setState({
+      checkoutPending: false, checkoutError: null,
+      paymentModalOpen: false, paymentModalMethod: null, paymentModalContext: null,
+      accountTier: 'paid', changePlanOpen: false, tierSelection: 'paid', screen: 'interstitial',
+    });
+    this.addActivityLog('Paid plan selected at signup');
+  }
+
+  // Item B: real backend write for a downgrade to Free — see set-candidate-tier's own header for
+  // why this never goes through Stripe (no test-mode charge to reverse; a real integration would
+  // cancel the Stripe subscription here too, out of scope for the alpha's test-mode wiring).
+  async confirmDowngrade() {
+    const s = this.state;
+    if (!s.resumeCandidateId) { this.setState({ checkoutError: 'No account is loaded — try refreshing.' }); return; }
+    this.setState({ checkoutPending: true, checkoutError: null });
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/set-candidate-tier', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate_id: s.resumeCandidateId, tier: 'free' }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ checkoutPending: false, checkoutError: "Couldn't reach the server. Check your connection and try again." });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      this.setState({ checkoutPending: false, checkoutError: "Couldn't switch to Free. Please try again." });
+      return;
+    }
+    this.setState({ checkoutPending: false, checkoutError: null, downgradeModalOpen: false, accountTier: 'free', tierSelection: 'free', changePlanOpen: false });
+    this.addActivityLog('Switch to Free confirmed');
   }
 
   // Passwordless login, step 1 (requesting device). Deliberately mirrors sendVerificationEmail's
@@ -7010,30 +7226,41 @@ class Component extends DCLogic {
       setBillingAnnual: () => this.setState({ billingCycle: 'annual' }),
       paymentModalOpen: s.paymentModalOpen,
       paymentModalMethodLabel: s.paymentModalMethod === 'card' ? 'Card' : s.paymentModalMethod === 'bank' ? 'Bank link' : s.paymentModalMethod === 'paypal' ? 'PayPal / Venmo' : '',
-      openPaymentCard: () => this.setState({ paymentModalOpen: true, paymentModalMethod: 'card', paymentModalContext: 'subscription' }),
-      openPaymentBank: () => this.setState({ paymentModalOpen: true, paymentModalMethod: 'bank', paymentModalContext: 'subscription' }),
-      openPaymentPaypal: () => this.setState({ paymentModalOpen: true, paymentModalMethod: 'paypal', paymentModalContext: 'subscription' }),
+      // Item B (2026-09-08 regression session): Card/Bank link/PayPal all now trigger the SAME real
+      // Stripe test-mode Checkout redirect (see startRealCheckout's own header) instead of opening
+      // the old simulated modal — Stripe's own hosted Checkout page is the real confirmation step
+      // now, a second local one would be redundant. Bank link/PayPal aren't independently verified
+      // as enabled on this test-mode account (only Card is proven working — see test-stripe-
+      // checkout's own scope note); Stripe's hosted page shows whichever payment methods are
+      // actually enabled regardless of which of these three buttons was clicked, so this stays
+      // honest either way — never a fake success for a method that silently wasn't real.
+      openPaymentCard: () => this.startRealCheckout(),
+      openPaymentBank: () => this.startRealCheckout(),
+      openPaymentPaypal: () => this.startRealCheckout(),
+      checkoutButtonLabelCard: s.checkoutPending ? 'Redirecting…' : 'Card',
+      checkoutButtonLabelBank: s.checkoutPending ? 'Redirecting…' : 'Bank link',
+      checkoutButtonLabelPaypal: s.checkoutPending ? 'Redirecting…' : 'PayPal / Venmo',
+      checkoutPending: s.checkoutPending,
+      checkoutError: s.checkoutError,
+      checkoutCancelledNotice: s.checkoutCancelledNotice,
+      checkoutSuccessNotice: s.checkoutSuccessNotice,
+      dismissCheckoutNotice: () => this.setState({ checkoutCancelledNotice: false, checkoutSuccessNotice: false, checkoutError: null }),
       closePaymentModal: () => this.setState({ paymentModalOpen: false, paymentModalMethod: null, paymentModalContext: null }),
-      confirmPaymentModal: () => {
-        const wasSignup = s.paymentModalContext === 'signup';
-        const patch = { paymentModalOpen: false, paymentModalMethod: null, paymentModalContext: null, accountTier: 'paid', changePlanOpen: false, tierSelection: 'paid', ...(wasSignup ? { screen: 'interstitial' } : {}) };
-        if (!wasSignup && s.upgradeReturnTab) {
-          patch.accountTab = s.upgradeReturnTab;
-          if (s.upgradeReturnTab === 'customization') patch.customizeTarget = s.upgradeReturnTarget;
-          if (s.upgradeReturnTab === 'views') patch.viewsTabPartner = s.upgradeReturnTarget;
-          patch.upgradeReturnTab = null; patch.upgradeReturnTarget = null;
-        }
-        this.setState(patch, () => { if (patch.accountTab === 'views') this.renderPdfPreview(); });
-        this.addActivityLog('Paid plan confirmed (' + (s.billingCycle === 'annual' ? '$50/yr' : '$4.99/mo') + ')');
-      },
+      // Item B: this modal (and confirmPaymentModal below) now only ever renders/fires for
+      // paymentModalContext === 'signup' — see advanceFromTiers. The Subscription tab's own upgrade
+      // path skips it entirely (openPaymentCard above goes straight to real Stripe). Real dead end
+      // this closes: used to flip accountTier locally with zero backend write; now calls the real
+      // set-candidate-tier endpoint (see that function's own header for exactly why this path is
+      // deliberately NOT how a real paid upgrade happens — no payment is actually collected here,
+      // and the modal's own copy says so now instead of claiming a PCI-compliant handoff that never
+      // happened).
+      confirmPaymentModal: () => this.confirmSignupPaidSelection(),
+      confirmPaymentModalLabel: s.checkoutPending ? 'Saving…' : 'Confirm Paid plan',
       downgradeModalOpen: s.downgradeModalOpen,
-      periodEndDate: s.billingCycle === 'annual' ? 'Jul 31, 2027' : 'Sep 1, 2026',
       openDowngradeModal: () => this.setState({ downgradeModalOpen: true }),
       closeDowngradeModal: () => this.setState({ downgradeModalOpen: false }),
-      confirmDowngradeModal: () => {
-        this.setState({ downgradeModalOpen: false, accountTier: 'free', tierSelection: 'free', changePlanOpen: false });
-        this.addActivityLog('Switch to Free confirmed');
-      },
+      confirmDowngradeModal: () => this.confirmDowngrade(),
+      confirmDowngradeModalLabel: s.checkoutPending ? 'Switching…' : 'Confirm switch to Free',
       phoneSendDisabled: !s.verifiedPhoneEntry || !s.verifiedPhoneEntry.trim(),
       phoneSendEnabled: !!s.verifiedPhoneEntry && !!s.verifiedPhoneEntry.trim(),
       phoneIsConfirmed: !!s.verifiedPhoneEntry && s.verifiedPhoneEntry === s.confirmedPhoneNumber,
@@ -7350,10 +7577,8 @@ class Component extends DCLogic {
       toggleOptInWorkHistory: (e) => this.setState({ optInWorkHistory: !!e.target.checked }),
       toggleOptInEducation: (e) => this.setState({ optInEducation: !!e.target.checked }),
       toggleOptInCertifications: (e) => this.setState({ optInCertifications: !!e.target.checked }),
-      accountTierLabel: s.accountTier === 'paid' ? 'Paid' : 'Free',
       isPaidTier: s.accountTier === 'paid',
       isFreeTier: s.accountTier === 'free',
-      toggleAccountTier: () => this.setState(st => ({ accountTier: st.accountTier === 'paid' ? 'free' : 'paid' })),
       resetAll: () => this.resetAll(),
       viewsTabPartner: s.viewsTabPartner,
       setViewsTabPartner: (e) => {

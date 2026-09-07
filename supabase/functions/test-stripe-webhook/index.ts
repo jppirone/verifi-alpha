@@ -7,6 +7,17 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "content-type, stripe-signature",
 };
 
+// Item B (2026-09-08 regression session): this function's signature-verification core is the
+// original HIP-POCKET FEASIBILITY TEST, proven working against a real Stripe webhook delivery (see
+// the RESULT block below, unchanged) — reused as-is, not rebuilt. What's new: on a real
+// checkout.session.completed with payment_status "paid", this now actually writes
+// candidates.tier = 'paid' (see test-stripe-checkout's own header for client_reference_id, the
+// mechanism that ties a session back to a real candidate_id) instead of only verifying and echoing
+// the event. Previously this function proved Stripe delivery works but touched the database not at
+// all — a real webhook could arrive all day and nothing downstream would ever know.
+//
+// Original header, still accurate for the signature-verification mechanism itself:
+//
 // HIP-POCKET FEASIBILITY TEST — companion to test-stripe-checkout. Proves the other half of the
 // mechanism: does this project actually learn a payment succeeded (not just that a checkout page
 // loaded)? Real Stripe webhook signature verification, implemented directly against the documented
@@ -49,6 +60,8 @@ const corsHeaders = {
 // application-level error message explaining why.
 
 const STRIPE_WEBHOOK_SECRET = Deno.env.get("STRIPE_WEBHOOK_SECRET");
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 async function verifyStripeSignature(payload: string, sigHeader: string, secret: string): Promise<{ valid: boolean; timestamp?: string }> {
   const parts: Record<string, string[]> = {};
@@ -133,6 +146,46 @@ export default {
         currency: session.currency,
         customerEmail: session.customer_details?.email ?? null,
       };
+
+      // Item B: the real write this event used to skip entirely. client_reference_id is set to
+      // candidate_id by test-stripe-checkout for exactly this purpose — Stripe's own documented
+      // mechanism for attributing a session back to an internal id without a second lookup.
+      // payment_status === "paid" (not just "the session completed") is the real gate: a completed
+      // subscription Checkout session is only ever "paid" once payment has actually gone through.
+      const candidateId: string | null = session.client_reference_id || null;
+      if (candidateId && session.payment_status === "paid") {
+        try {
+          const patchRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${encodeURIComponent(candidateId)}`, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              "apikey": SUPABASE_SERVICE_ROLE_KEY,
+              "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+              "Prefer": "return=representation",
+            },
+            body: JSON.stringify({
+              tier: "paid",
+              tier_updated_at: new Date().toISOString(),
+              stripe_checkout_session_id: session.id || null,
+            }),
+          });
+          const patchRows = patchRes.ok ? await patchRes.json().catch(() => []) : [];
+          summary.tierUpdate = {
+            attempted: true,
+            ok: patchRes.ok && Array.isArray(patchRows) && patchRows.length > 0,
+            candidateId,
+            status: patchRes.status,
+          };
+        } catch (e) {
+          // Never fail the webhook response over this — Stripe retries a non-2xx, and a real
+          // delivery success (signature verified, event parsed) shouldn't be reported as failed to
+          // Stripe's own dashboard just because the downstream write hit a transient error. The
+          // failure is still visible here, in this function's own invocation log and response body.
+          summary.tierUpdate = { attempted: true, ok: false, candidateId, error: String(e) };
+        }
+      } else if (!candidateId) {
+        summary.tierUpdate = { attempted: false, reason: "no_client_reference_id" };
+      }
     }
 
     return new Response(JSON.stringify(summary), {

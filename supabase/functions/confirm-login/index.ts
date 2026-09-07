@@ -112,7 +112,7 @@ export default {
       }
 
       const candRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=id,email,phone,full_name,first_name,last_name,deletion_scheduled_at`,
+        `${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=id,email,phone,full_name,first_name,last_name,deletion_scheduled_at,tier`,
         { headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } },
       );
       const candRows = candRes.ok ? await candRes.json() : [];
@@ -158,6 +158,8 @@ export default {
         // deliberately not blocked on this being set. candidate.html's applySession() is what
         // actually branches to the reactivate screen instead of the normal account on seeing this.
         deletion_scheduled_at: candidate.deletion_scheduled_at,
+        // Item B: real tier state — see resolve-session's own comment on this same field.
+        tier: candidate.tier,
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: "unhandled", detail: String(e) }), {

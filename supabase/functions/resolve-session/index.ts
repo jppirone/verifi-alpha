@@ -66,7 +66,7 @@ export default {
       }
 
       const candRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/candidates?id=eq.${session.candidate_id}&select=id,email,phone,full_name,first_name,last_name,deletion_scheduled_at`,
+        `${SUPABASE_URL}/rest/v1/candidates?id=eq.${session.candidate_id}&select=id,email,phone,full_name,first_name,last_name,deletion_scheduled_at,tier`,
         { headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } },
       );
       const candRows = candRes.ok ? await candRes.json() : [];
@@ -104,6 +104,10 @@ export default {
         // applySession() treats all three session-establishing paths (this one, confirm-login,
         // check-login-status) uniformly rather than trusting two of the three and not this one.
         deletion_scheduled_at: candidate.deletion_scheduled_at,
+        // Item B: real tier state (candidates.tier — see its own migration) replacing accountTier,
+        // 100% local React state before this. Every session-establishing path returns it, same
+        // "all three uniformly" reasoning as deletion_scheduled_at just above.
+        tier: candidate.tier,
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: "unhandled", detail: String(e) }), {
