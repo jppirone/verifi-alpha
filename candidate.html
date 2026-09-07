@@ -6317,21 +6317,24 @@ class Component extends DCLogic {
   // polled its way here — see that function's own header). Server-authoritative, not client-cached:
   // this is the read side of the same email_verifications row send-verification staged these onto,
   // so it works regardless of which device reaches it first.
-  applySignupConfirmation(data) {
+  async applySignupConfirmation(data) {
     this.clearDraft();
-    const resolvedEmail = data.email || this.state.email;
-    const resolvedPhone = data.phone || this.state.phone;
     this.setState({
-      screen: 'resumeConfirm', draft: null, verifyStatus: 'success',
-      email: resolvedEmail, phone: resolvedPhone,
-      resumeCandidateId: data.candidate_id || null,
+      draft: null, verifyStatus: 'success',
       optInWorkHistory: !!data.opt_in_work_history,
       optInEducation: !!data.opt_in_education,
       optInCertifications: !!data.opt_in_certifications,
-      // Item A: real seed for printedEmail/printedPhone — see seedContactFromAccount's own header.
-      ...this.seedContactFromAccount(resolvedEmail, resolvedPhone),
     });
-    if (data.candidate_id) this.loadResumeExtraction(data.candidate_id);
+    // Item 2 (2026-09-08 regression session): routes through applySession now instead of a hand-
+    // rolled screen:'resumeConfirm' + loadResumeExtraction — see confirm-verification's own header
+    // for why a real session token now exists here to persist. applySession does everything this
+    // used to do by hand (email/phone/name sync, seedContactFromAccount, tier) plus the SAME
+    // checkResumeFlowIncomplete routing check every returning session already goes through — for a
+    // candidate this fresh (nothing ever confirmed yet) that check correctly lands back on
+    // resumeConfirm with loadResumeExtraction already called, identical to the old hardcoded
+    // behavior — plus the one thing manual state-setting never could: a durable session a refresh
+    // can actually recover from, instead of a full logout mid-onboarding.
+    await this.applySession(data.session_token, data);
   }
 
   // The exact startResumePolling/startLoginPolling shape (see either's own header for the full
@@ -6388,7 +6391,15 @@ class Component extends DCLogic {
   // resolve-session (returning visit), confirm-login (the device that clicked the link), or
   // check-login-status (the device that requested it, once its poll observes confirmation).
   async applySession(sessionToken, profile) {
-    try { localStorage.setItem('verifi_session_token', sessionToken); } catch (e) {}
+    // Item 2 (2026-09-08 regression session): null-guarded — every existing caller (resolve-session,
+    // confirm-login, check-login-status) only ever calls this on success with a real token, but
+    // confirm-verification's own session issuance (new this session, see its own header) is
+    // deliberately best-effort and can legitimately pass null on a rare insert failure. Without this
+    // guard, localStorage.setItem would coerce that to the literal string "null" — a real, if
+    // eventually self-correcting, bug (resolveSession would treat it as a present-but-invalid token
+    // on the next mount, costing one failed round-trip before clearing it) that every other caller
+    // simply never had a way to trigger before now.
+    if (sessionToken) { try { localStorage.setItem('verifi_session_token', sessionToken); } catch (e) {} }
     // Real dead end this closes (2026-09-07 wiring audit): reactivateNeeded used to read
     // this.state.deletionScheduled — a purely local flag that only ever got set by
     // confirmDeactivate()'s own local-only setState, never by anything real. A candidate who

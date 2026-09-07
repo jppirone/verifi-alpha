@@ -10,6 +10,22 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "content-type",
 };
 
+// Item 2 (2026-09-08 regression session): identical to confirm-login's own hashToken/randomToken —
+// this function needed no session-issuing capability before today, because nothing past this point
+// (resumeConfirm → employerContact → tiers → enterAccount) ever established one; see the real
+// session-issuing block below for why that was a genuine gap, not by design.
+async function hashToken(raw: string): Promise<string> {
+  const bytes = new TextEncoder().encode(raw);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function randomToken(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 // MODIFIED for the resume pipeline (see supabase/migrations/20260903000000_resume_pipeline.sql).
 // Reconstructed from the exact deployed source (read via Monaco, since this function predates this
 // session and isn't in git) with one addition and one enrichment, both isolated to the signup path
@@ -194,6 +210,50 @@ export default {
         }
       }
 
+      // Item 2 (2026-09-08 regression session): real, confirmed regression (found live — a plain F5
+      // anywhere between here and enterAccount() logged the candidate all the way out, losing their
+      // place in onboarding). Root cause: this function is the moment a real candidate row first
+      // exists, but candidate.html's applySignupConfirmation() only ever set in-memory React state
+      // from its response — never a durable session — so resumeConfirm/employerContact/tiers had
+      // nothing to recover from on refresh (the pre-confirmation verifi_draft mechanism is explicitly
+      // cleared the instant confirmation succeeds, and nothing replaced it). Fix: issue a real
+      // session here, identical in shape to confirm-login's own (candidate_sessions row, raw token
+      // returned once, only its hash stored) — reuses the same already-audited mechanism every other
+      // returning-session path relies on, rather than inventing a second, weaker, onboarding-only
+      // continuity system. Issued unconditionally whenever a candidate row exists, same posture
+      // confirm-login documents for a deactivated candidate — this function isn't the place to decide
+      // whether the account is in good standing, only whether one exists to attach a session to.
+      let sessionToken: string | null = null;
+      let candidateTier: string | null = null;
+      if (candidateId) {
+        const rawSessionToken = randomToken();
+        const tokenHash = await hashToken(rawSessionToken);
+        const sessionExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+        const sessionRes = await fetch(`${SUPABASE_URL}/rest/v1/candidate_sessions`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "apikey": SUPABASE_SERVICE_ROLE_KEY,
+            "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+            "Prefer": "return=minimal",
+          },
+          body: JSON.stringify({ candidate_id: candidateId, token_hash: tokenHash, expires_at: sessionExpiresAt }),
+        });
+        if (sessionRes.ok) {
+          sessionToken = rawSessionToken;
+          const candRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=tier`, {
+            headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
+          });
+          const candRows = candRes.ok ? await candRes.json() : [];
+          candidateTier = candRows[0]?.tier ?? null;
+        }
+        // A failed session insert does NOT fail confirmation itself — same posture as
+        // resumeBackfillError above: the candidate row and resume linkage already succeeded, and a
+        // missing session here just means this one device falls back to the pre-existing (broken)
+        // behavior rather than losing the signup outcome entirely. session_token: null tells the
+        // client exactly that, rather than silently pretending success.
+      }
+
       return new Response(JSON.stringify({
         ok: true,
         email: record.email,
@@ -205,6 +265,8 @@ export default {
         opt_in_education: !!record.opt_in_education,
         opt_in_certifications: !!record.opt_in_certifications,
         resume_backfill_error: resumeBackfillError,
+        session_token: sessionToken,
+        tier: candidateTier,
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
