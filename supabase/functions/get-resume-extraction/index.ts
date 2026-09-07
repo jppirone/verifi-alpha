@@ -72,7 +72,21 @@ export default {
         });
       }
       if (!doc) {
-        return new Response(JSON.stringify({ ok: true, resume_document: null }), {
+        // continued_without_resume_at (candidates, not resume_documents — there is no
+        // resume_documents row to check when no document was ever uploaded, see
+        // skip-resume-extraction's "no doc" branch and its migration for the full reasoning) is the
+        // zero-upload counterpart to continued_without_data_at above: same purpose, different table,
+        // because this is the one candidate.html state where resume_documents structurally cannot
+        // hold the signal.
+        const { data: cand } = await supabase
+          .from("candidates")
+          .select("continued_without_resume_at")
+          .eq("id", candidate_id)
+          .maybeSingle();
+        return new Response(JSON.stringify({
+          ok: true, resume_document: null,
+          continued_without_resume_at: cand?.continued_without_resume_at ?? null,
+        }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }

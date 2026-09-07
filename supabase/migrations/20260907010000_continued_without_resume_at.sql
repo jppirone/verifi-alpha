@@ -1,0 +1,20 @@
+-- Real dead-end found live (2026-09-07), investigating Priority 1/2 of a session-refresh bug report:
+-- a candidate who NEVER uploads any resume at all and clicks "Continue without resume data" has no
+-- way to record that choice anywhere. skip-resume-extraction's own no-op branch for this exact case
+-- ("No resume_documents row at all for this candidate — nothing to mark... just nothing for this
+-- function to do") is correct given resume_documents.original_storage_path is NOT NULL — there is no
+-- row to attach continued_without_data_at to when no document was ever uploaded. The result:
+-- checkResumeFlowIncomplete's `if (!data.resume_document) return true;` branch returns incomplete
+-- FOREVER for such a candidate, on every future login, no matter how many times they click through —
+-- reproduced directly with a fresh real test candidate before writing this migration, not theorized.
+--
+-- This is the same class of bug Priority 2 asked about (a completion signal with nowhere to live,
+-- incorrectly re-blocking an otherwise-finished session) — just a different, more fundamental root
+-- cause than the orphaned-needs_review-row hypothesis (which was investigated and ruled out: needs_review
+-- rows ARE included in the normal single confirm submission, same as every other category — see
+-- confirm-resume-data's freeform update loop).
+--
+-- Fix: a completion signal on candidates itself, since resume_documents structurally cannot hold one
+-- when no document was ever uploaded. Nullable, only ever set once, by skip-resume-extraction's new
+-- "no doc" branch.
+alter table candidates add column if not exists continued_without_resume_at timestamptz;

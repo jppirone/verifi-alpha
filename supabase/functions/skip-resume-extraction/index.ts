@@ -56,9 +56,34 @@ export default {
       const docRows = await docRes.json();
       const doc = docRows[0];
       if (!doc) {
-        // No resume_documents row at all for this candidate — nothing to mark. Not an error the
-        // candidate did anything wrong about; just nothing for this function to do.
-        return new Response(JSON.stringify({ ok: true, marked: false }), {
+        // No resume_documents row at all for this candidate — real dead end found live (2026-09-07,
+        // investigating a session-refresh bug report): resume_documents.original_storage_path is NOT
+        // NULL, so there is no row here to attach continued_without_data_at to, which meant a
+        // candidate who never uploaded anything and clicked through anyway had this choice recorded
+        // NOWHERE — checkResumeFlowIncomplete's `if (!data.resume_document) return true` branch
+        // stayed permanently "incomplete" and re-routed them to resumeConfirm on every future login,
+        // confirmed by reproducing it directly with a fresh test candidate. Recorded on `candidates`
+        // instead, the one row that's guaranteed to already exist at this point.
+        const candPatchRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/candidates?id=eq.${encodeURIComponent(candidate_id)}`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              "apikey": SUPABASE_SERVICE_ROLE_KEY,
+              "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+              "Prefer": "return=minimal",
+            },
+            body: JSON.stringify({ continued_without_resume_at: new Date().toISOString() }),
+          },
+        );
+        if (!candPatchRes.ok) {
+          const errText = await candPatchRes.text();
+          return new Response(JSON.stringify({ ok: false, error: "update_failed", detail: errText }), {
+            status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        return new Response(JSON.stringify({ ok: true, marked: true, marked_on: "candidates" }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }

@@ -5499,9 +5499,40 @@ class Component extends DCLogic {
       const raw = localStorage.getItem('verifi_draft');
       if (raw) this.setState({ draft: JSON.parse(raw) });
     } catch (e) {}
+    this.mountResolveOrToken();
+  }
+
+  // Real bug, reproduced directly (2026-09-07): a candidate mid-session, on a validation/confirm
+  // screen, hit a normal browser refresh and got logged out with "this login link was already
+  // used" — a real single-use-token 409, not a display glitch. Root cause: this file's mount logic
+  // always let URL token PRESENCE win over an already-established session. verify_token/login_token
+  // are only meant to be consumed ONCE, at the moment they're clicked from an email — confirmLoginToken
+  // already stripped login_token from the URL on success for exactly this reason (see its own
+  // header), but that strip only protects a refresh AFTER that exact success handler has run. It
+  // does nothing for every other way a single-use token can still be sitting in the address bar on
+  // some later reload — a tab restored after being killed, a retry after a network error whose
+  // response never reached the strip-on-success code (server-side the token was still consumed),
+  // or (a second real gap, found investigating this one) confirmEmailToken's own success path never
+  // stripped verify_token at all — so ANY refresh right after first-time email confirmation, before
+  // ever establishing a durable session, would hit this exact same failure. A refresh is not a fresh
+  // click on the email link; it must never re-trigger single-use consumption. Fix: always check for
+  // an existing durable session FIRST — resolveSession() is authoritative on whether this device is
+  // already logged in — and only fall through to consuming a URL token when there either isn't one,
+  // or the stored one turns out to be genuinely dead (real logout/expiry elsewhere, not this bug).
+  async mountResolveOrToken() {
+    const alreadySessioned = await this.resolveSession();
+    if (alreadySessioned) {
+      // Session already answers "who is this" — a leftover URL token is now irrelevant. Clean it up
+      // so it can't cause this same confusion again on some future reload of this same tab/bookmark.
+      const url = new URL(window.location.href);
+      let changed = false;
+      if (url.searchParams.has('verify_token')) { url.searchParams.delete('verify_token'); changed = true; }
+      if (url.searchParams.has('login_token')) { url.searchParams.delete('login_token'); changed = true; }
+      if (changed) window.history.replaceState({}, '', url);
+      return;
+    }
     if (this.state.verifyToken) this.confirmEmailToken(this.state.verifyToken);
     else if (this.state.loginToken) this.confirmLoginToken(this.state.loginToken);
-    else this.resolveSession();
   }
 
   async sendVerificationEmail(email, phone, firstName, lastName, purpose = 'signup') {
@@ -5868,6 +5899,13 @@ class Component extends DCLogic {
     this.advanceFromTiers();
   }
 
+  // Strips verify_token from the URL on success — the exact same reason confirmLoginToken strips
+  // login_token (see that function's own header): without this, a refresh anytime after a
+  // first-time email confirmation (before any durable session exists to fall back on — see
+  // mountResolveOrToken) would resend the now-already-used token and hit a real 409 "already used"
+  // instead of just re-rendering wherever this device already was. This gap was real, not
+  // hypothetical — found investigating the parallel login_token bug, confirmLoginToken already had
+  // this fix and confirmEmailToken never did, same defect class, asymmetric fix.
   async confirmEmailToken(token) {
     let res, data;
     try {
@@ -5882,6 +5920,9 @@ class Component extends DCLogic {
       return;
     }
     if (res.ok && data.ok) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('verify_token');
+      window.history.replaceState({}, '', url);
       if (data.purpose === 'signup') {
         this.applySignupConfirmation(data);
         return;
@@ -6039,7 +6080,14 @@ class Component extends DCLogic {
       return false;
     }
     if (!res.ok || !data.ok) return false;
-    if (!data.resume_document) return true;
+    // continued_without_resume_at (candidates) is the zero-upload counterpart to
+    // continued_without_data_at (resume_documents) below — real dead end found live (2026-09-07):
+    // a candidate who never uploads anything at all and clicks "Continue without resume data" had
+    // that choice recorded nowhere (no resume_documents row exists to hold the signal), so this
+    // branch returned incomplete FOREVER regardless of what they'd already clicked through,
+    // reproduced directly with a fresh test candidate before this fix. See get-resume-extraction's
+    // own "if (!doc)" branch and the migration that added the column.
+    if (!data.resume_document) return !data.continued_without_resume_at;
     if (data.resume_document.continued_without_data_at) return false;
     const status = data.resume_document.extraction_status;
     if (status === 'pending' || status === 'ocr_done' || status === 'failed') return true;
@@ -6052,14 +6100,17 @@ class Component extends DCLogic {
     return allRows.some(r => !r.candidate_confirmed);
   }
 
-  // Called on every mount when there's no verify_token/login_token in the URL — the read side of
-  // applySession's write. A missing, revoked, or expired session all fail the same way (see
-  // resolve-session's own header): silently clear the stale local token and fall through to
-  // signupDetails, same as if no one had ever logged in on this device.
+  // Called whenever there's a durable session to check — see mountResolveOrToken, which now always
+  // tries this FIRST on every mount, ahead of any verify_token/login_token in the URL (that used to
+  // be this function's only caller, back when it ran solely in the "no URL token" branch). A
+  // missing, revoked, or expired session all fail the same way (see resolve-session's own header):
+  // silently clear the stale local token and fall through to signupDetails, same as if no one had
+  // ever logged in on this device. Returns true/false so the caller knows whether it's safe to skip
+  // consuming a single-use URL token this mount.
   async resolveSession() {
     let token;
     try { token = localStorage.getItem('verifi_session_token'); } catch (e) { token = null; }
-    if (!token) return;
+    if (!token) return false;
     let res, data;
     try {
       res = await fetch(this.SUPABASE_FN_URL + '/resolve-session', {
@@ -6069,13 +6120,14 @@ class Component extends DCLogic {
       });
       data = await res.json().catch(() => ({}));
     } catch (e) {
-      return;
+      return false;
     }
     if (!res.ok || !data.ok) {
       try { localStorage.removeItem('verifi_session_token'); } catch (e) {}
-      return;
+      return false;
     }
     this.applySession(token, data);
+    return true;
   }
 
   // Passwordless login, step 1 (requesting device). Deliberately mirrors sendVerificationEmail's
