@@ -1,0 +1,12 @@
+-- Real account deactivation (2026-09-07 wiring audit, item 5): confirmDeactivate()/
+-- reactivateAccount() in candidate.html were 100% local React state — clicking "deactivate"
+-- never told the server anything, so the account stayed fully logged in and fully accessible
+-- everywhere else (other devices, a fresh page load, staff-side views) exactly as before. This
+-- column is the real, persisted flag those two actions now read and write.
+--
+-- Deliberately WHEN-the-candidate-deactivated, not the eventual purge date: the purge date is a
+-- fixed +30-day offset from this timestamp, computed on read wherever it's displayed (candidate.html's
+-- applySession, and this migration's own comment for deactivate-account/reactivate-account mirrors
+-- that), rather than stored redundantly — one source of truth, no risk of the two drifting apart.
+-- null means "not deactivated" (the default, and what reactivation resets it back to).
+alter table candidates add column if not exists deletion_scheduled_at timestamptz;

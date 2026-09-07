@@ -3004,7 +3004,10 @@ a:hover{color:var(--color-accent)}
   <div class="card elev-md" style="width:100%;padding:var(--space-8);display:flex;flex-direction:column;gap:var(--space-3)">
     <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:22px;margin:0">Welcome back</h1>
     <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">Your account is deactivated and scheduled for permanent deletion on {{ deletionDateLabel }}. Logging in now reactivates it and cancels that deletion.</div>
-    <button type="button" class="btn btn-primary btn-block" style="margin-top:var(--space-3)" sc-camel-on-click="{{ reactivateAccount }}">Reactivate my account</button>
+    <button type="button" class="btn btn-primary btn-block" style="margin-top:var(--space-3)" disabled="{{ reactivatePending }}" sc-camel-on-click="{{ reactivateAccount }}">{{ reactivateButtonLabel }}</button>
+    <sc-if value="{{ reactivateError }}" hint-placeholder-val="{{ false }}">
+      <div style="font-size:12px;color:#e2735c">{{ reactivateError }}</div>
+    </sc-if>
     <div style="text-align:center;font-size:12px;color:var(--color-neutral-500);line-height:1.6">
       <a href="#" sc-camel-on-click="{{ cancelReactivate }}">Not now, leave my account scheduled for deletion</a>
     </div>
@@ -4036,9 +4039,12 @@ a:hover{color:var(--color-accent)}
           </sc-raw-table>
 
           <div style="display:flex;gap:var(--space-3)">
-            <button type="button" class="btn btn-primary" sc-camel-on-click="{{ deactConfirmButtonAction }}">{{ deactConfirmButtonLabel }}</button>
+            <button type="button" class="btn btn-primary" disabled="{{ deactConfirmButtonDisabled }}" sc-camel-on-click="{{ deactConfirmButtonAction }}">{{ deactConfirmButtonLabel }}</button>
             <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ cancelDeactivate }}">Cancel</button>
           </div>
+          <sc-if value="{{ deactivateError }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:#e2735c;margin-top:var(--space-2)">{{ deactivateError }}</div>
+          </sc-if>
         </div>
       </sc-if>
     </sc-if>
@@ -5126,6 +5132,7 @@ class Component extends DCLogic {
     tierSelection: 'free', billingCycle: 'monthly', changePlanOpen: false,
     deactStep: 'default', deactReason: '', deactNote: '', deactChoice: null, arrivedFromDeactivationPause: false,
     deletionScheduled: false, deletionDate: null,
+    deactivatePending: false, deactivateError: null, reactivatePending: false, reactivateError: null,
     paymentModalOpen: false, paymentModalMethod: null, paymentModalContext: null,
     downgradeModalOpen: false,
     interstitialLearnMoreOpen: false,
@@ -6136,7 +6143,25 @@ class Component extends DCLogic {
   // check-login-status (the device that requested it, once its poll observes confirmation).
   async applySession(sessionToken, profile) {
     try { localStorage.setItem('verifi_session_token', sessionToken); } catch (e) {}
-    const reactivateNeeded = this.state.deletionScheduled;
+    // Real dead end this closes (2026-09-07 wiring audit): reactivateNeeded used to read
+    // this.state.deletionScheduled — a purely local flag that only ever got set by
+    // confirmDeactivate()'s own local-only setState, never by anything real. A candidate who
+    // deactivated could log back in on any device (or after a page reload restored a fresh
+    // component instance with deletionScheduled back at its false default) and land straight in
+    // their normal account with no reactivation step at all — deactivation never actually took.
+    // resolve-session/confirm-login/check-login-status now all return the real
+    // candidates.deletion_scheduled_at (see each function's own header) — this reads THAT, not
+    // stale local state.
+    const reactivateNeeded = !!(profile && profile.deletion_scheduled_at);
+    // deletion_scheduled_at is WHEN the candidate deactivated, not the actual purge date — the
+    // real 30-day retention window (matching this screen's own copy and deactivate-account's own
+    // header) is computed from it here, same +30 days math the old local-only version used.
+    let deletionDate = null;
+    if (reactivateNeeded) {
+      const d = new Date(profile.deletion_scheduled_at);
+      d.setDate(d.getDate() + 30);
+      deletionDate = d.toISOString().slice(0, 10);
+    }
     const candidateId = (profile && profile.candidate_id) || this.state.resumeCandidateId;
     // Real dead end this closes (2026-09-07 wiring audit): profileFirst/profileLast (Profile Info's
     // actual editable name fields) and savedFirst/savedLast (the committed values Views' PDF header
@@ -6161,7 +6186,7 @@ class Component extends DCLogic {
       savedLast: last || this.state.savedLast,
       resumeCandidateId: candidateId,
     });
-    if (reactivateNeeded) { this.setState({ screen: 'reactivate' }); return; }
+    if (reactivateNeeded) { this.setState({ screen: 'reactivate', deletionScheduled: true, deletionDate }); return; }
 
     // Real dead end found live (2026-09-07), confirmed against two real candidates before this was
     // written, not theorized: screen only ever becomes 'resumeConfirm' in ONE place in this whole
@@ -6301,6 +6326,70 @@ class Component extends DCLogic {
     }
     this.setState({ loginRequestPending: false, loginRequestError: null, loginLinkSent: true, loginTokenId: data.login_token_id, loginPollExpired: false });
     this.startLoginPolling(data.login_token_id);
+  }
+
+  // Real dead end this closes (2026-09-07 wiring audit): confirmDeactivate() used to be 100%
+  // local state — a "deactivated" account wasn't actually deactivated server-side at all, so it
+  // stayed fully logged in, its session valid, its data undisturbed. Mirrors requestLoginLink's
+  // fetch shape. Clears the stored session token on success because the server just revoked every
+  // session row for this candidate (see deactivate-account's own header) — this device's token is
+  // now dead too, exactly like any other device's would be.
+  async deactivateAccount() {
+    const candidateId = this.state.resumeCandidateId;
+    if (!candidateId) { this.setState({ deactivateError: 'No account is loaded — try logging in again.' }); return; }
+    this.setState({ deactivatePending: true, deactivateError: null });
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/deactivate-account', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate_id: candidateId }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ deactivatePending: false, deactivateError: "Couldn't reach the server. Check your connection and try again." });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      this.setState({ deactivatePending: false, deactivateError: "Couldn't deactivate the account. Please try again." });
+      return;
+    }
+    try { localStorage.removeItem('verifi_session_token'); } catch (e) {}
+    this.addActivityLog('Account deactivated');
+    this.setState({
+      deactivatePending: false, deactivateError: null,
+      screen: 'deactivated', deactStep: 'default', deactReason: '', deactNote: '', deactChoice: null,
+      deletionScheduled: true, deletionDate: data.deletion_date,
+    });
+  }
+
+  // Real dead end this closes (2026-09-07 wiring audit): reactivateAccount() used to just clear
+  // local state and call enterAccount() — nothing server-side was ever un-scheduled, so
+  // candidates.deletion_scheduled_at (and the eventual real purge it drives) stayed set regardless
+  // of what this screen showed. Same fetch shape as deactivateAccount/requestLoginLink.
+  async reactivateAccountReal() {
+    const candidateId = this.state.resumeCandidateId;
+    if (!candidateId) { this.setState({ reactivateError: 'No account is loaded — try logging in again.' }); return; }
+    this.setState({ reactivatePending: true, reactivateError: null });
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/reactivate-account', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate_id: candidateId }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ reactivatePending: false, reactivateError: "Couldn't reach the server. Check your connection and try again." });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      this.setState({ reactivatePending: false, reactivateError: "Couldn't reactivate the account. Please try again." });
+      return;
+    }
+    this.setState({ reactivatePending: false, reactivateError: null, deletionScheduled: false, deletionDate: null });
+    this.addActivityLog('Account reactivated');
+    this.enterAccount(); this.addActivityLog('Logged in');
   }
 
   // Passwordless login, step 3 (requesting device, polling). Deliberately the exact
@@ -6669,22 +6758,19 @@ class Component extends DCLogic {
     const pd = (e) => { if (e && e.preventDefault) e.preventDefault(); };
     const openPlaceholder = (e) => { pd(e); this.setState({ placeholderModalOpen: true }); };
     const convertToFreeInstead = () => { this.setState({ accountTab: 'subscription', tierSelection: 'free', changePlanOpen: false, deactStep: 'default', deactReason: '', deactNote: '', deactChoice: null, downgradeModalOpen: true }); };
-    const confirmDeactivate = () => {
-      this.addActivityLog('Account deactivated');
-      const del = new Date(); del.setDate(del.getDate() + 30);
-      this.setState({ screen: 'deactivated', deactStep: 'default', deactReason: '', deactNote: '', deactChoice: null, deletionScheduled: true, deletionDate: del.toISOString().slice(0, 10) });
-    };
+    const confirmDeactivate = () => { if (!s.deactivatePending) this.deactivateAccount(); };
     const pauseInsteadOfDeactivate = () => {
       this.setState({ accountTab: 'sharing', deactStep: 'default', deactReason: '', deactNote: '', deactChoice: null, arrivedFromDeactivationPause: true });
     };
     return {
       noop: openPlaceholder,
       goLogin: (e) => { pd(e); this.setState({ screen: 'returning' }); },
-      reactivateAccount: () => {
-        this.setState({ deletionScheduled: false, deletionDate: null });
-        this.addActivityLog('Account reactivated');
-        this.enterAccount(); this.addActivityLog('Logged in');
-      },
+      reactivateAccount: () => { if (!s.reactivatePending) this.reactivateAccountReal(); },
+      reactivateButtonLabel: s.reactivatePending ? 'Reactivating…' : 'Reactivate my account',
+      reactivatePending: s.reactivatePending,
+      reactivateError: s.reactivateError,
+      deactivatePending: s.deactivatePending,
+      deactivateError: s.deactivateError,
       cancelReactivate: (e) => { pd(e); this.setState({ screen: 'signupDetails' }); },
       logOff: () => this.guardedNav(() => { this.addActivityLog('Logged off'); this.realLogOff(); }),
       isAccount: s.screen === 'account',
@@ -7237,8 +7323,9 @@ class Component extends DCLogic {
       dotDowngradeStyle: s.deactChoice === 'downgrade' ? 'border-color:var(--color-accent);background:var(--color-accent);box-shadow:inset 0 0 0 4px var(--color-bg)' : '',
       dotDeactivateStyle: s.deactChoice === null ? 'border-color:var(--color-accent);background:var(--color-accent);box-shadow:inset 0 0 0 4px var(--color-bg)' : '',
       setDeactChoiceDeactivate: () => this.setState({ deactChoice: null }),
-      deactConfirmButtonLabel: s.deactChoice === null ? 'Continue & deactivate now' : 'Continue',
+      deactConfirmButtonLabel: s.deactChoice === null ? (s.deactivatePending ? 'Deactivating…' : 'Continue & deactivate now') : 'Continue',
       deactConfirmButtonAction: s.deactChoice === 'downgrade' ? convertToFreeInstead : (s.deactChoice === 'pause' ? pauseInsteadOfDeactivate : confirmDeactivate),
+      deactConfirmButtonDisabled: s.deactChoice === null && s.deactivatePending,
       arrivedFromDeactivationPause: s.arrivedFromDeactivationPause,
       convertToFreeInstead: convertToFreeInstead,
       confirmDeactivate: confirmDeactivate,

@@ -112,7 +112,7 @@ export default {
       }
 
       const candRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=id,email,phone,full_name,first_name,last_name`,
+        `${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=id,email,phone,full_name,first_name,last_name,deletion_scheduled_at`,
         { headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } },
       );
       const candRows = candRes.ok ? await candRes.json() : [];
@@ -153,6 +153,11 @@ export default {
         full_name: candidate.full_name,
         first_name: candidate.first_name,
         last_name: candidate.last_name,
+        // A deactivated candidate can still log back in (that's how reactivation itself works —
+        // see reactivate-account's own header) — this new session is issued unconditionally above,
+        // deliberately not blocked on this being set. candidate.html's applySession() is what
+        // actually branches to the reactivate screen instead of the normal account on seeing this.
+        deletion_scheduled_at: candidate.deletion_scheduled_at,
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: "unhandled", detail: String(e) }), {

@@ -66,7 +66,7 @@ export default {
       }
 
       const candRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/candidates?id=eq.${session.candidate_id}&select=id,email,phone,full_name,first_name,last_name`,
+        `${SUPABASE_URL}/rest/v1/candidates?id=eq.${session.candidate_id}&select=id,email,phone,full_name,first_name,last_name,deletion_scheduled_at`,
         { headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } },
       );
       const candRows = candRes.ok ? await candRes.json() : [];
@@ -98,6 +98,12 @@ export default {
         full_name: candidate.full_name,
         first_name: candidate.first_name,
         last_name: candidate.last_name,
+        // Deactivation (see deactivate-account) always revokes every session in the same request
+        // that sets this, so a session that reaches this point should never actually carry a
+        // non-null value here — included anyway, defense-in-depth, so candidate.html's
+        // applySession() treats all three session-establishing paths (this one, confirm-login,
+        // check-login-status) uniformly rather than trusting two of the three and not this one.
+        deletion_scheduled_at: candidate.deletion_scheduled_at,
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: "unhandled", detail: String(e) }), {
