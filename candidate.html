@@ -3095,23 +3095,13 @@ a:hover{color:var(--color-accent)}
           <button type="button" class="btn btn-secondary" style="align-self:flex-start" sc-camel-on-click="{{ noop }}">Change email</button>
         </div>
 
-        <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
-          <div class="card-kicker">Password</div>
-          <sc-if value="{{ showPasswordForm }}" hint-placeholder-val="{{ false }}">
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-4)">
-              <div class="field"><label for="pf-curpw">Current password</label><input class="input" id="pf-curpw" type="password"></div>
-              <div class="field"><label for="pf-newpw">New password</label><input class="input" id="pf-newpw" type="password"></div>
-            </div>
-            <div style="display:flex;gap:var(--space-2)">
-              <button type="button" class="btn btn-primary" sc-camel-on-click="{{ closePasswordForm }}">Update password</button>
-              <button type="button" class="btn btn-ghost" sc-camel-on-click="{{ closePasswordForm }}">Cancel</button>
-            </div>
-          </sc-if>
-          <sc-if value="{{ noPasswordForm }}" hint-placeholder-val="{{ true }}">
-            <button type="button" class="btn btn-secondary" style="align-self:flex-start" sc-camel-on-click="{{ openPasswordForm }}">Change password</button>
-          </sc-if>
-        </div>
-
+        <!-- 2026-09-07 wiring audit, item 8: the "Change password" card that used to sit here was
+             removed, not just left alone — worse than vestigial, it was a real-looking form (actual
+             current/new password inputs) whose "Update password" and "Cancel" buttons both called
+             the exact same handler (close the form, no fetch, no validation, no success/error
+             state), so a candidate could type a real password into it and get zero feedback either
+             way. This app is passwordless (magic-link only, throughout candidate.html) — there is no
+             password to change. -->
         <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-6)">
           <div class="card-kicker">Contact Info</div>
           <!-- DEV-ONLY TEST SCENARIO PANEL — delete this block and the testScenario entry in renderVals() before handoff -->
@@ -5101,7 +5091,7 @@ class Component extends DCLogic {
     profileFirst: '', profileLast: '',
     savedFirst: '', savedLast: '',
     notifyEmail: false, notifySms: false, savedNotifyEmail: false, savedNotifySms: false,
-    showPasswordForm: false, kycVerified: false,
+    kycVerified: false,
     linkedinEnabled: false, linkedinLinked: true, linkedinPaused: false,
     indeedEnabled: false, indeedLinked: false, indeedPaused: false,
     glassdoorEnabled: false, glassdoorLinked: false, glassdoorPaused: false,
@@ -6823,10 +6813,6 @@ class Component extends DCLogic {
       setProfileFirst: (e) => this.setState({ profileFirst: e.target.value }),
       setProfileLast: (e) => this.setState({ profileLast: e.target.value }),
       setVerifiedPhoneEntry: (e) => this.setState({ verifiedPhoneEntry: e.target.value }),
-      showPasswordForm: s.showPasswordForm,
-      noPasswordForm: !s.showPasswordForm,
-      openPasswordForm: () => this.setState({ showPasswordForm: true }),
-      closePasswordForm: () => this.setState({ showPasswordForm: false }),
       kycVerified: s.kycVerified,
       kycUnverified: !s.kycVerified,
       toggleKyc: (e) => { pd(e); this.setState(st => ({ kycVerified: !st.kycVerified })); },
