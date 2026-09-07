@@ -98,39 +98,49 @@ export default {
 
       // Write candidate's (possibly corrected) fields and mark each row confirmed. Sequential, not
       // parallel — keeps error reporting attributable to a specific row if one update fails.
+      //
+      // .select("id") + a zero-row check on every one of these 5 loops — real gap found investigating
+      // a session-refresh bug report (2026-09-07): Supabase's update() does NOT set `error` when the
+      // filter matches zero rows (a stale id, or a candidate_id mismatch) — it just silently succeeds
+      // having changed nothing. Since candidate.html's checkResumeFlowIncomplete relies on every
+      // extracted row eventually getting candidate_confirmed=true, a silent zero-row update here would
+      // leave that one row permanently "incomplete" — re-routing a genuinely-finished candidate back to
+      // resumeConfirm forever, with no error ever surfaced to explain why. Verified live before this
+      // was written: a deliberately stale id on one category now returns a real error instead of a
+      // false ok:true.
       for (const w of work_history) {
-        const { error } = await supabase.from("work_history_items").update({
+        const { data, error } = await supabase.from("work_history_items").update({
           company: w.company ?? null, title: w.title ?? null,
           start_date: dateOrNull(w.start_date), end_date: dateOrNull(w.end_date),
           job_responsibilities: w.job_responsibilities ?? null,
           candidate_confirmed: true, updated_at: new Date().toISOString(),
-        }).eq("id", w.id).eq("candidate_id", candidate_id);
-        if (error) {
-          return new Response(JSON.stringify({ ok: false, error: "work_history_update_failed", detail: error.message, item_id: w.id }), {
+        }).eq("id", w.id).eq("candidate_id", candidate_id).select("id");
+        if (error || !data || data.length === 0) {
+          return new Response(JSON.stringify({ ok: false, error: "work_history_update_failed", detail: error ? error.message : "no matching row for this candidate", item_id: w.id }), {
             status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
       }
       for (const e of education) {
-        const { error } = await supabase.from("education_items").update({
+        const { data, error } = await supabase.from("education_items").update({
           institution: e.institution ?? null, degree: e.degree ?? null, field_of_study: e.field_of_study ?? null,
           start_date: dateOrNull(e.start_date), end_date: dateOrNull(e.end_date),
           candidate_confirmed: true, updated_at: new Date().toISOString(),
-        }).eq("id", e.id).eq("candidate_id", candidate_id);
-        if (error) {
-          return new Response(JSON.stringify({ ok: false, error: "education_update_failed", detail: error.message, item_id: e.id }), {
+        }).eq("id", e.id).eq("candidate_id", candidate_id).select("id");
+        if (error || !data || data.length === 0) {
+          return new Response(JSON.stringify({ ok: false, error: "education_update_failed", detail: error ? error.message : "no matching row for this candidate", item_id: e.id }), {
             status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
       }
       for (const c of certifications) {
-        const { error } = await supabase.from("certification_items").update({
+        const { data, error } = await supabase.from("certification_items").update({
           name: c.name ?? null, issuing_body: c.issuing_body ?? null,
           issue_date: dateOrNull(c.issue_date), expiration_date: dateOrNull(c.expiration_date),
           candidate_confirmed: true, updated_at: new Date().toISOString(),
-        }).eq("id", c.id).eq("candidate_id", candidate_id);
-        if (error) {
-          return new Response(JSON.stringify({ ok: false, error: "certification_update_failed", detail: error.message, item_id: c.id }), {
+        }).eq("id", c.id).eq("candidate_id", candidate_id).select("id");
+        if (error || !data || data.length === 0) {
+          return new Response(JSON.stringify({ ok: false, error: "certification_update_failed", detail: error ? error.message : "no matching row for this candidate", item_id: c.id }), {
             status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
@@ -140,21 +150,21 @@ export default {
       // No opt-in flag for skills exists (it was never one of the three categories collected at
       // signup, and this build doesn't add a fourth) — deliberately out of scope, not an oversight.
       for (const sk of skills) {
-        const { error } = await supabase.from("skill_items").update({
+        const { data, error } = await supabase.from("skill_items").update({
           skill_text: sk.skill_text ?? "", candidate_confirmed: true, updated_at: new Date().toISOString(),
-        }).eq("id", sk.id).eq("candidate_id", candidate_id);
-        if (error) {
-          return new Response(JSON.stringify({ ok: false, error: "skill_update_failed", detail: error.message, item_id: sk.id }), {
+        }).eq("id", sk.id).eq("candidate_id", candidate_id).select("id");
+        if (error || !data || data.length === 0) {
+          return new Response(JSON.stringify({ ok: false, error: "skill_update_failed", detail: error ? error.message : "no matching row for this candidate", item_id: sk.id }), {
             status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
       }
       for (const f of freeform) {
-        const { error } = await supabase.from("candidate_freeform_sections").update({
+        const { data, error } = await supabase.from("candidate_freeform_sections").update({
           content: f.content ?? null, candidate_confirmed: true, updated_at: new Date().toISOString(),
-        }).eq("id", f.id).eq("candidate_id", candidate_id);
-        if (error) {
-          return new Response(JSON.stringify({ ok: false, error: "freeform_update_failed", detail: error.message, item_id: f.id }), {
+        }).eq("id", f.id).eq("candidate_id", candidate_id).select("id");
+        if (error || !data || data.length === 0) {
+          return new Response(JSON.stringify({ ok: false, error: "freeform_update_failed", detail: error ? error.message : "no matching row for this candidate", item_id: f.id }), {
             status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
