@@ -54,9 +54,14 @@ export default {
         });
       }
 
+      // continued_without_data_at added for candidate.html's checkResumeFlowIncomplete (real dead-
+      // end fix, 2026-09-07): the signal that distinguishes "candidate explicitly clicked past this
+      // via skip-resume-extraction" from "never got back to it" — without it, applySession's
+      // returning-session check has no way to tell those two apart and would keep re-routing an
+      // intentional skip back into resumeConfirm forever.
       const { data: doc, error: docErr } = await supabase
         .from("resume_documents")
-        .select("id, original_storage_path, original_filename, mime_type, extraction_status, uploaded_at")
+        .select("id, original_storage_path, original_filename, mime_type, extraction_status, uploaded_at, continued_without_data_at")
         .eq("candidate_id", candidate_id)
         .order("uploaded_at", { ascending: false })
         .limit(1)

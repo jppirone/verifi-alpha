@@ -5956,19 +5956,77 @@ class Component extends DCLogic {
   // place profile fields + the account screen get applied together, whether the token arrived via
   // resolve-session (returning visit), confirm-login (the device that clicked the link), or
   // check-login-status (the device that requested it, once its poll observes confirmation).
-  applySession(sessionToken, profile) {
+  async applySession(sessionToken, profile) {
     try { localStorage.setItem('verifi_session_token', sessionToken); } catch (e) {}
     const reactivateNeeded = this.state.deletionScheduled;
+    const candidateId = (profile && profile.candidate_id) || this.state.resumeCandidateId;
     this.setState({
       sessionToken,
       email: (profile && profile.email) || this.state.email,
       phone: (profile && profile.phone) || this.state.phone,
       firstName: (profile && profile.first_name) || this.state.firstName,
       lastName: (profile && profile.last_name) || this.state.lastName,
-      resumeCandidateId: (profile && profile.candidate_id) || this.state.resumeCandidateId,
+      resumeCandidateId: candidateId,
     });
     if (reactivateNeeded) { this.setState({ screen: 'reactivate' }); return; }
+
+    // Real dead end found live (2026-09-07), confirmed against two real candidates before this was
+    // written, not theorized: screen only ever becomes 'resumeConfirm' in ONE place in this whole
+    // file — applySignupConfirmation, at the moment email confirmation completes. Every OTHER path
+    // that establishes a session (this function — resolve-session on a returning visit, confirm-
+    // login, check-login-status) used to route straight into enterAccount() unconditionally, with
+    // no check of whether the candidate had ever actually finished that screen. A candidate who
+    // closed the browser, lost connectivity, or just got distracted between "resume extracted" and
+    // clicking "Confirm and continue" — or before a still-processing extraction even finished —
+    // had no way back to it from anywhere in the app on any later visit, on any device: real,
+    // extracted data (confirmed live: one real account with 3 work history entries, 9
+    // certifications, 21 skills, 8 freeform sections) sitting with candidate_confirmed=false on
+    // every single row, across four separate real logins, permanently unreachable through the UI.
+    // This check closes that: before routing anywhere else on a resolved session, ask whether the
+    // resume flow is actually finished, and send them back to resumeConfirm if it isn't.
+    if (candidateId) {
+      const incomplete = await this.checkResumeFlowIncomplete(candidateId);
+      if (incomplete) {
+        this.setState({ screen: 'resumeConfirm' });
+        this.loadResumeExtraction(candidateId);
+        return;
+      }
+    }
     this.enterAccount();
+  }
+
+  // "Incomplete" = a resume_documents row exists, the candidate never explicitly clicked through
+  // via skip-resume-extraction (continued_without_data_at is null), and either it's still
+  // processing/failed (pending/ocr_done/failed — nothing to confirm yet, but the candidate still
+  // needs to SEE that state, not be dropped straight into the account screen past it) or it's
+  // 'extracted' with at least one row not yet candidate_confirmed. Reuses get-resume-extraction —
+  // already the real read side for this exact data — rather than standing up a second endpoint
+  // just to answer a yes/no question this one already has everything needed to answer. A network
+  // failure here fails open to the account screen rather than trapping a real login behind a
+  // broken pre-check — worse to block a working login than to occasionally under-detect this.
+  async checkResumeFlowIncomplete(candidateId) {
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/get-resume-extraction', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate_id: candidateId }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      return false;
+    }
+    if (!res.ok || !data.ok || !data.resume_document) return false;
+    if (data.resume_document.continued_without_data_at) return false;
+    const status = data.resume_document.extraction_status;
+    if (status === 'pending' || status === 'ocr_done' || status === 'failed') return true;
+    if (status !== 'extracted') return false;
+    const allRows = [
+      ...(data.work_history || []), ...(data.education || []), ...(data.certifications || []),
+      ...(data.skills || []), ...(data.freeform || []),
+    ];
+    if (allRows.length === 0) return false;
+    return allRows.some(r => !r.candidate_confirmed);
   }
 
   // Called on every mount when there's no verify_token/login_token in the URL — the read side of
