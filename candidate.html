@@ -3130,18 +3130,9 @@ a:hover{color:var(--color-accent)}
              password to change. -->
         <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-6)">
           <div class="card-kicker">Contact Info</div>
-          <!-- DEV-ONLY TEST SCENARIO PANEL — delete this block and the testScenario entry in renderVals() before handoff -->
-          <div style="display:flex;flex-direction:column;gap:var(--space-2);padding:var(--space-3);border:1px dashed var(--color-accent-700);border-radius:var(--radius-md);background:var(--color-neutral-900)">
-            <div style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--color-accent-300)">Test Scenario (dev only)</div>
-            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Not part of the candidate experience. Each button is a full reset of the contact state.</div>
-            <div style="display:flex;flex-wrap:wrap;gap:var(--space-2)">
-              <button type="button" class="btn btn-ghost" sc-camel-on-click="{{ testScenario.none }}">No contact info on resume</button>
-              <button type="button" class="btn btn-ghost" sc-camel-on-click="{{ testScenario.phoneOnly }}">Phone only on resume</button>
-              <button type="button" class="btn btn-ghost" sc-camel-on-click="{{ testScenario.emailOnly }}">Email only on resume</button>
-              <button type="button" class="btn btn-ghost" sc-camel-on-click="{{ testScenario.both }}">Both on resume</button>
-            </div>
-            <div style="font-size:12px;color:var(--color-neutral-500)">Active: {{ testScenario.active }}</div>
-          </div>
+          <!-- Item A (2026-09-08 regression session): the DEV-ONLY test-scenario panel that used to
+               sit here (four buttons resetting contact state to hardcoded fake scenarios) is gone —
+               removed entirely, not left dormant. See seedContactFromAccount's own header. -->
           <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Two separate things live here: the values printed on your resume and delivered to partners, and the values we have independently verified. They do not have to match. A verified value is only ever sent if you put it in a printed field yourself.</div>
 
           <div style="display:flex;flex-direction:column;gap:var(--space-3)">
@@ -3154,14 +3145,17 @@ a:hover{color:var(--color-accent)}
             </sc-if>
             <sc-if value="{{ printedPhoneDiffersFromResume }}" hint-placeholder-val="{{ false }}">
               <div style="display:flex;flex-direction:column;gap:6px;padding:var(--space-3);border:1px solid var(--color-neutral-800);border-radius:var(--radius-md)">
-                <div style="font-size:13px;color:var(--color-neutral-300)">Your original resume does not show this number.</div>
+                <div style="font-size:13px;color:var(--color-neutral-300)">This differs from the number on your account.</div>
                 <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
                   <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ keepPrintedPhoneChange }}">Keep this change</button>
                   <button type="button" class="btn btn-ghost" sc-camel-on-click="{{ revertPrintedPhone }}">Revert to original: {{ parsedResumePhone }}</button>
                 </div>
               </div>
             </sc-if>
-            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Pre-filled once from your parsed resume, if a number was found there. Editable at any time, with no re-verification required.</div>
+            <!-- Item A: was "Pre-filled once from your parsed resume, if a number was found there" —
+                 real resume-contact-extraction was never built (see seedContactFromAccount's own
+                 header); this now genuinely pre-fills from your account, so the copy says that. -->
+            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Pre-filled once from your account. Editable at any time, with no re-verification required.</div>
 
             <div class="field" style="max-width:280px">
               <label for="pf-phone">Verified Number</label>
@@ -3184,7 +3178,7 @@ a:hover{color:var(--color-accent)}
                 <span class="tag tag-outline">Not yet verified</span>
               </sc-if>
             </div>
-            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Pre-filled from your parsed resume, if a number was found there. Typing a number here never makes it verified: send a code and confirm it first.</div>
+            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Pre-filled from your account, if a number is on file. Typing a number here never makes it verified: send a code and confirm it first.</div>
 
             <div style="display:flex;flex-direction:column;gap:6px;padding:var(--space-3);border:1px solid var(--color-neutral-800);border-radius:var(--radius-md)">
               <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">What partners receive, phone</div>
@@ -3213,7 +3207,7 @@ a:hover{color:var(--color-accent)}
             <sc-if value="{{ printedEmailEdited }}" hint-placeholder-val="{{ false }}">
               <div style="font-size:12px;color:var(--color-accent-300);line-height:1.6">This email will appear on any resume generated from this system and will be sent to every downstream partner.</div>
             </sc-if>
-            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Pre-filled once from your parsed resume. Editable at any time.</div>
+            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Pre-filled once from your account email. Editable at any time.</div>
             <sc-if value="{{ showPrintedEmailOffer }}" hint-placeholder-val="{{ true }}">
               <div style="display:flex;flex-direction:column;gap:6px;padding:var(--space-3);border:1px solid var(--color-neutral-800);border-radius:var(--radius-md)">
                 <div style="font-size:13px;color:var(--color-neutral-300)">Use your account email as your Printed Email too?</div>
@@ -5217,7 +5211,7 @@ class Component extends DCLogic {
     crossValidationDone: false, crossValidationModalOpen: false, crossValidationContext: null, crossValidationPromptDismissed: false,
     cvOverviewOpen: false,
     cvEmailCodeInput: '', cvSmsCodeInput: '', cvEmailConfirmed: false, cvSmsConfirmed: false,
-    cvPhoneEntry: '(555) 012-3456', cvPhoneCodeInput: '', cvPhoneCodeSentFlag: false,
+    cvPhoneEntry: '', cvPhoneCodeInput: '', cvPhoneCodeSentFlag: false,
     tierSelection: 'free', billingCycle: 'monthly', changePlanOpen: false,
     deactStep: 'default', deactReason: '', deactNote: '', deactChoice: null, arrivedFromDeactivationPause: false,
     deletionScheduled: false, deletionDate: null,
@@ -5250,7 +5244,20 @@ class Component extends DCLogic {
     activityLog: this.seedActivityLog(),
     employerActivity: this.seedEmployerActivity(), tier1UnconfirmedCount: 7,
     empPage: 0, empConfirmId: null, empNotice: null,
-    ...this.contactScenarioPatch('both', this.SEEDED_PARSED_CONTACT) };
+    // Item A (2026-09-08 regression session): these all start genuinely blank — no real email/phone
+    // exists yet at getInitialState() time (before signup/login even happens), so nothing safe can
+    // be seeded here. seedContactFromAccount() (see its own header) fills these in for real, once,
+    // the moment the candidate's real account email/phone actually becomes known — applySession and
+    // applySignupConfirmation both call it. Previously this whole block was overwritten by
+    // ...contactScenarioPatch('both', SEEDED_PARSED_CONTACT) — a hardcoded dev literal
+    // ('(555) 012-3456' / 'you@email.com') every candidate saw regardless of their own real account;
+    // both that literal and the DEV-ONLY test-scenario switcher that drove it are gone now.
+    parsedResumePhone: '', printedPhone: '', savedPrintedPhone: '',
+    verifiedPhoneEntry: '', savedVerifiedPhoneEntry: '',
+    printedPhoneChangeKept: false,
+    parsedResumeEmail: '', printedEmail: '', savedPrintedEmail: '',
+    printedPhonePromptOpen: false, printedPhonePromptAnswered: false, printedEmailPromptDismissed: false,
+  };
   }
 
   defaultActivityEnd() {
@@ -5516,31 +5523,37 @@ class Component extends DCLogic {
     return map[s.deactReason] || 'Thanks for the detail. It\u2019s logged with your account.';
   }
 
-  SEEDED_PARSED_CONTACT = { phone: '(555) 012-3456', email: 'you@email.com' };
-  SCENARIO_PARSED_CONTACT = { phone: '(555) 234-5678', email: 'sample@email.com' };
-
-  // the single definition of what each contact scenario means, used by the initial state and by the dev panel
-  contactScenarioPatch(kind, source) {
-    const src = source || this.SCENARIO_PARSED_CONTACT;
-    const phone = kind === 'phoneOnly' || kind === 'both' ? src.phone : '';
-    const email = kind === 'emailOnly' || kind === 'both' ? src.email : '';
-    const names = { none: 'no contact info on resume', phoneOnly: 'phone only on resume', emailOnly: 'email only on resume', both: 'both on resume' };
-    return {
-      testScenarioName: names[kind],
-      parsedResumePhone: phone, printedPhone: phone, savedPrintedPhone: phone,
-      verifiedPhoneEntry: phone, savedVerifiedPhoneEntry: phone,
-      confirmedPhoneNumber: '', phoneConfirmed: false,
-      printedPhoneChangeKept: false,
-      parsedResumeEmail: email, printedEmail: email, savedPrintedEmail: email,
-      printedPhonePromptOpen: false, printedPhonePromptAnswered: false, printedEmailPromptDismissed: false,
-      phoneModalOpen: false, phoneModalPendingSave: false, phoneCodeInput: '',
-      cvPhoneEntry: phone, cvPhoneCodeInput: '', cvPhoneCodeSentFlag: false,
-    };
-  }
-
-  // DEV-ONLY: test-scenario switcher, delete this method with the panel in the template
-  applyTestScenario(kind) {
-    this.setState(this.contactScenarioPatch(kind));
+  // Item A (2026-09-08 regression session): the real seeding this app needed all along, replacing
+  // SEEDED_PARSED_CONTACT (a hardcoded '(555) 012-3456' / 'you@email.com' dev literal) and the
+  // DEV-ONLY test-scenario switcher (contactScenarioPatch/applyTestScenario) that drove it — both
+  // removed entirely, not left dormant. Decision made (not a unilateral call): collapse the
+  // printed/verified distinction for now rather than build real "extract contact info printed on
+  // the resume" — printedPhone/printedEmail seed from the candidate's own real account phone/email
+  // instead. Guarded exactly the way applySession already guards profileFirst/savedFirst (see that
+  // function's own header) — only fills a field that's genuinely still blank, so a candidate who's
+  // already edited their Printed Number/Email is never overwritten by a later call (e.g. a page
+  // reload re-resolving the same session). Email is genuinely verified (magic-link confirms
+  // ownership before an account exists at all); phone is whatever's on file, not SMS-verified until
+  // the candidate completes the separate "Send confirmation code" flow below — seeding it here is a
+  // convenience pre-fill, not a claim of verification, same as parsedResumePhone/printedPhone always
+  // meant "not yet verified" pre-collapse too.
+  //
+  // Real dead end this closes, worth flagging plainly (per instruction) even though it's not fixed
+  // today: this collapse means printed and verified start out IDENTICAL for every candidate, so
+  // Item 16's free-tier existence-check matching (designed to treat Printed and Verified email/phone
+  // as two genuinely distinct signals) now effectively only has ONE real signal until real
+  // printed-contact-extraction becomes its own separate feature later.
+  seedContactFromAccount(email, phone) {
+    const s = this.state;
+    const patch = {};
+    if (email && !s.printedEmail) {
+      patch.printedEmail = email; patch.savedPrintedEmail = email; patch.parsedResumeEmail = email;
+    }
+    if (phone && !s.printedPhone) {
+      patch.printedPhone = phone; patch.savedPrintedPhone = phone; patch.parsedResumePhone = phone;
+      patch.verifiedPhoneEntry = phone; patch.savedVerifiedPhoneEntry = phone; patch.cvPhoneEntry = phone;
+    }
+    return patch;
   }
 
   printedPhoneDivergesFromResume() {
@@ -5556,7 +5569,11 @@ class Component extends DCLogic {
     const s = this.state;
     const norm = (v) => (v || '').replace(/[^0-9a-z@.]/gi, '').toLowerCase();
     const verifiedPhone = s.confirmedPhoneNumber || '';
-    const verifiedEmail = s.email || 'you@email.com';
+    // Item A: was `s.email || 'you@email.com'` — a second, independent hardcoded fake literal
+    // baked directly into this function (distinct from SEEDED_PARSED_CONTACT, which only seeded
+    // initial state). s.email is real and always present once a candidate has an account at all;
+    // the fallback was dead weight that would have silently faked a value had it ever been reached.
+    const verifiedEmail = s.email || '';
     const printedPhone = (s.printedPhone || '').trim();
     const printedEmail = (s.printedEmail || '').trim();
     const stateOf = (printed, verified) => {
@@ -6166,13 +6183,17 @@ class Component extends DCLogic {
   // so it works regardless of which device reaches it first.
   applySignupConfirmation(data) {
     this.clearDraft();
+    const resolvedEmail = data.email || this.state.email;
+    const resolvedPhone = data.phone || this.state.phone;
     this.setState({
       screen: 'resumeConfirm', draft: null, verifyStatus: 'success',
-      email: data.email || this.state.email, phone: data.phone || this.state.phone,
+      email: resolvedEmail, phone: resolvedPhone,
       resumeCandidateId: data.candidate_id || null,
       optInWorkHistory: !!data.opt_in_work_history,
       optInEducation: !!data.opt_in_education,
       optInCertifications: !!data.opt_in_certifications,
+      // Item A: real seed for printedEmail/printedPhone — see seedContactFromAccount's own header.
+      ...this.seedContactFromAccount(resolvedEmail, resolvedPhone),
     });
     if (data.candidate_id) this.loadResumeExtraction(data.candidate_id);
   }
@@ -6263,10 +6284,12 @@ class Component extends DCLogic {
     // above.
     const first = (profile && profile.first_name) || this.state.firstName;
     const last = (profile && profile.last_name) || this.state.lastName;
+    const resolvedEmail = (profile && profile.email) || this.state.email;
+    const resolvedPhone = (profile && profile.phone) || this.state.phone;
     this.setState({
       sessionToken,
-      email: (profile && profile.email) || this.state.email,
-      phone: (profile && profile.phone) || this.state.phone,
+      email: resolvedEmail,
+      phone: resolvedPhone,
       firstName: first,
       lastName: last,
       profileFirst: first || this.state.profileFirst,
@@ -6274,6 +6297,10 @@ class Component extends DCLogic {
       savedFirst: first || this.state.savedFirst,
       savedLast: last || this.state.savedLast,
       resumeCandidateId: candidateId,
+      // Item A: real seed for printedEmail/printedPhone — see seedContactFromAccount's own header.
+      // Same guard as profileFirst/savedFirst above — covers a returning session exactly like a
+      // fresh signup, since this is the only other place email/phone are ever really learned.
+      ...this.seedContactFromAccount(resolvedEmail, resolvedPhone),
     });
     if (reactivateNeeded) { this.setState({ screen: 'reactivate', deletionScheduled: true, deletionDate }); return; }
 
@@ -7057,14 +7084,6 @@ class Component extends DCLogic {
       toggleNotifySms: () => this.setState(st => ({ notifySms: !st.notifySms })),
       notifySmsDisabled: !(!!s.verifiedPhoneEntry && s.verifiedPhoneEntry === s.confirmedPhoneNumber),
       notifySmsEnabled: !!s.verifiedPhoneEntry && s.verifiedPhoneEntry === s.confirmedPhoneNumber,
-      // DEV-ONLY: test-scenario switcher, delete this entry with the panel in the template
-      testScenario: {
-        active: s.testScenarioName || 'both on resume',
-        none: () => this.applyTestScenario('none'),
-        phoneOnly: () => this.applyTestScenario('phoneOnly'),
-        emailOnly: () => this.applyTestScenario('emailOnly'),
-        both: () => this.applyTestScenario('both'),
-      },
       printedPhone: s.printedPhone,
       setPrintedPhone: (e) => this.setState({ printedPhone: e.target.value, printedPhoneChangeKept: false }),
       parsedResumePhone: s.parsedResumePhone,
