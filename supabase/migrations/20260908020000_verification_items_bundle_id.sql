@@ -1,0 +1,13 @@
+-- Item D (2026-09-08 regression session): foundation-only piece of the future "bundle" concept
+-- (Item 15) — group every verification_items row that came from the same resume upload so a future
+-- staff.html build can roll them up, filter by bundle, or reassign the whole bundle at once. This
+-- migration and confirm-resume-data's threading of it are the ONLY things built now — no staff.html
+-- grouping UI, roll-up status, bundle-level filter, or reassign-whole-bundle action. Those stay
+-- flagged for a future dedicated session, per the decision made when this was scoped.
+--
+-- Nullable, no backfill: every existing verification_items row (real alpha-test data and the
+-- earlier "John Pirone" rows alike) simply has no bundle — genuinely ungrouped, not a guess at what
+-- bundle they'd belong to. Only rows inserted by confirm-resume-data going forward carry a real
+-- value, set at insert time from the resume_document_id the client already has in scope
+-- (resumeExtraction.resume_document.id) for the resume that produced them.
+alter table verification_items add column if not exists bundle_id uuid references resume_documents(id);

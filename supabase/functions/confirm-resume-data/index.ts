@@ -78,10 +78,18 @@ export default {
       const body = await req.json();
       const {
         candidate_id,
+        // Item D (2026-09-08 regression session): foundation-only piece of the future "bundle"
+        // concept (Item 15) — see the migration's own header. Optional and echoed straight from
+        // the client's resumeExtraction.resume_document.id (not re-derived here); absent on any
+        // call that predates this field or omits it for another reason, in which case every row
+        // this request inserts below simply gets bundle_id: null, same as every pre-Item-D row —
+        // an honest "ungrouped," never a guessed value.
+        resume_document_id = null,
         work_history = [], education = [], certifications = [], skills = [], freeform = [],
         opt_in = { work_history: false, education: false, certifications: false },
       }: {
         candidate_id: string;
+        resume_document_id?: string | null;
         work_history: WorkHistoryEdit[];
         education: EducationEdit[];
         certifications: CertificationEdit[];
@@ -198,7 +206,7 @@ export default {
             // from get-resume-extraction, same id this function's own update loop above just wrote
             // to), not a guess or a synthesized value.
             id: idRow, candidate_id, type: "Job Experience", claim: claimForWorkHistory(w), received: today, status: "New",
-            source_item_id: w.id,
+            source_item_id: w.id, bundle_id: resume_document_id,
           });
         }
       }
@@ -207,7 +215,7 @@ export default {
           const { data: idRow } = await supabase.rpc("nextval_verification_item_id");
           queueInserts.push({
             id: idRow, candidate_id, type: "Education", claim: claimForEducation(e), received: today, status: "New",
-            source_item_id: e.id,
+            source_item_id: e.id, bundle_id: resume_document_id,
           });
         }
       }
@@ -229,10 +237,10 @@ export default {
           id: idRow, candidate_id, type: "Certification", claim: claimForCertification(c), received: today,
           status: "Needs Reconciliation",
           internal_note: `Auto-flagged: this certification's name did not fuzzy-match anything in the candidate's own uploaded document (OCR'd text) — see certification_source_match. Not proof of fabrication (OCR coverage has real, documented gaps: vision-routed pages have no OCR text at all), but real enough to warrant a human look before treating it as verified. Name as extracted: ${JSON.stringify(c.name || "")}`,
-          source_item_id: c.id,
+          source_item_id: c.id, bundle_id: resume_document_id,
         } : {
           id: idRow, candidate_id, type: "Certification", claim: claimForCertification(c), received: today, status: "New",
-          source_item_id: c.id,
+          source_item_id: c.id, bundle_id: resume_document_id,
         });
       }
 
@@ -263,6 +271,7 @@ export default {
           received: today,
           status: "Needs Reconciliation",
           internal_note: `Auto-flagged: unstructured content from the candidate's resume that didn't map to a defined category (heading: ${JSON.stringify(f.heading || "(none)")}). Not independently validated against the uploaded document the way the structured fields above it are — review for anything that reads like an inserted job-description-style claim rather than content genuinely present on the original resume. Full content:\n\n${f.content || ""}`,
+          bundle_id: resume_document_id,
         });
       }
 

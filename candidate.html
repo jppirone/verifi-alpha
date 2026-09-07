@@ -7090,6 +7090,11 @@ class Component extends DCLogic {
     const ex = this.state.resumeExtraction;
     const body = {
       candidate_id: this.state.resumeCandidateId,
+      // Item D (2026-09-08 regression session): foundation-only threading for the future "bundle"
+      // concept (Item 15) — see confirm-resume-data's own header. ex.resume_document is already in
+      // scope here the same way resolveEmployerContact's own body uses it; null-guarded the same
+      // way, not assumed present.
+      resume_document_id: ex.resume_document ? ex.resume_document.id : null,
       work_history: ex.work_history.map(w => ({ id: w.id, company: w.company, title: w.title, start_date: w.start_date, end_date: w.end_date, job_responsibilities: w.job_responsibilities })),
       education: ex.education.map(x => ({ id: x.id, institution: x.institution, degree: x.degree, field_of_study: x.field_of_study, location: x.location, start_date: x.start_date, end_date: x.end_date })),
       // source_match is echoed back (not edited here) so confirm-resume-data can flag a
