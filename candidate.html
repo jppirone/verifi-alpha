@@ -5875,6 +5875,12 @@ class Component extends DCLogic {
     }
   }
 
+  // Real dead end found live (2026-09-07 wiring audit): set-discoverable didn't exist at all — a
+  // genuine 404, confirmed by direct probe — so no candidate has ever actually become discoverable
+  // via this toggle, regardless of what they chose here. Now built and wired by candidate_id, not
+  // email/phone: matches how every other write in this pipeline identifies its candidate once a
+  // real one exists (confirm-resume-data, skip-resume-extraction) — email/phone matching is this
+  // project's read-only existence-check pattern, not how a specific row gets written.
   async saveDiscoverableThenAdvance() {
     if (this.state.discoverableSavePending) return;
     this.setState({ discoverableSavePending: true, discoverableSaveError: null });
@@ -5883,7 +5889,7 @@ class Component extends DCLogic {
       const res = await fetch(this.SUPABASE_FN_URL + '/set-discoverable', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: this.state.email, phone: this.state.phone, discoverable: this.state.discoverable }),
+        body: JSON.stringify({ candidate_id: this.state.resumeCandidateId, discoverable: this.state.discoverable }),
       });
       const data = await res.json().catch(() => ({}));
       saved = res.ok && !!data.ok;
