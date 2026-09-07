@@ -2348,7 +2348,10 @@ th.sortable{cursor:pointer;user-select:none}
           <sc-for list="{{ rows }}" as="row" hint-placeholder-count="6">
             <sc-raw-tr style="cursor:pointer" onClick="{{ row.onOpen }}">
               <sc-raw-td style="font-family:ui-monospace,Menlo,monospace;font-size:12px">{{ row.id }}</sc-raw-td>
-              <sc-raw-td style="white-space:nowrap;font-weight:500">{{ row.candidateName }}</sc-raw-td>
+              <sc-raw-td style="white-space:nowrap">
+                <div style="font-weight:500">{{ row.candidateName }}</div>
+                <div style="font-size:11px;color:var(--color-neutral-500)">{{ row.candidateIdentifier }}</div>
+              </sc-raw-td>
               <sc-raw-td>{{ row.type }}</sc-raw-td>
               <sc-raw-td style="max-width:220px">{{ row.claim }}</sc-raw-td>
               <sc-raw-td style="white-space:nowrap;font-size:12px;color:var(--color-neutral-400)">{{ row.receivedDisp }}</sc-raw-td>
@@ -2388,7 +2391,12 @@ th.sortable{cursor:pointer;user-select:none}
     </sc-if>
 
     <sc-if value="{{ showDetail }}" hint-placeholder-val="{{ false }}">
-      <a href="#" onClick="{{ closeDetail }}" style="font-size:12px;display:inline-block;margin-bottom:var(--space-4)">← Back to queue</a>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-4)">
+        <a href="#" onClick="{{ closeDetail }}" style="font-size:12px">← Back to queue</a>
+        <sc-if value="{{ hasNextUnresolved }}" hint-placeholder-val="{{ false }}">
+          <a href="#" onClick="{{ openNextUnresolved }}" style="font-size:12px">{{ nextUnresolvedLabel }}</a>
+        </sc-if>
+      </div>
 
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-4);margin-bottom:var(--space-4)">
         <div>
@@ -2679,9 +2687,16 @@ th.sortable{cursor:pointer;user-select:none}
     <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="status-confirm-title">
       <div class="dialog-title" id="status-confirm-title">Confirm status change</div>
       <div class="dialog-body">Change this item's status from {{ currentStatusLabel }} to {{ pendingStatus }}?</div>
+      <sc-if value="{{ pendingStatusIsResolution }}" hint-placeholder-val="{{ false }}">
+        <div class="field" style="margin-top:var(--space-2)">
+          <label for="resolution-evidence">Evidence / reasoning (required to resolve this item)</label>
+          <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.5;margin-bottom:2px">What was checked and what it showed. Saved to this item's timeline — never shown to the candidate.</div>
+          <textarea class="input" id="resolution-evidence" rows="3" value="{{ resolutionEvidenceDraft }}" onChange="{{ setResolutionEvidenceDraft }}"></textarea>
+        </div>
+      </sc-if>
       <div class="dialog-actions">
         <button type="button" class="btn btn-secondary" onClick="{{ cancelStatusChange }}">Cancel</button>
-        <button type="button" class="btn btn-primary" onClick="{{ confirmStatusChange }}">Confirm change</button>
+        <button type="button" class="btn btn-primary" disabled="{{ confirmStatusChangeDisabled }}" onClick="{{ confirmStatusChange }}">Confirm change</button>
       </div>
     </div>
   </div>
@@ -2697,7 +2712,6 @@ class Component extends DCLogic {
   SUPABASE_FN_URL = 'https://ihmypoduvrzymasgactc.supabase.co/functions/v1';
   SUPABASE_ANON_KEY = 'sb_publishable_o3S1LP0utVvxTXPRb2aZxg_Fz2FWwBj';
 
-  WORKERS = ['Jordan Lee', 'Priya Nair', 'Sam Okafor'];
   // 'Needs Reconciliation' is a staff-internal working status — it exists so an ambiguous
   // automated-check result (multiple matches, a name that doesn't match, etc.) is visibly flagged
   // in the queue instead of sitting silently under 'New'. It is never shown to or implied to the
@@ -2708,6 +2722,12 @@ class Component extends DCLogic {
   // Webhooks, which has none configured on any table). Staff still resolve it into a real status
   // manually, exactly like every other status here.
   STATUS_OPTIONS = ['New', 'In Progress', 'Awaiting Response', 'Needs Reconciliation', 'Confirmed', 'Discrepancy', 'Unable to Verify'];
+  // Item 10 (2026-09-07 wiring audit): the real gap this closes — a status change to any of these
+  // three saved instantly with an empty timeline note (confirmStatusChange used to hardcode
+  // note: ''), so "why was this confirmed" had no real answer anywhere. 'Needs Reconciliation' is
+  // deliberately excluded — per its own comment above, it's a staff-internal working flag, not a
+  // resolution outcome.
+  RESOLUTION_STATUSES = ['Confirmed', 'Discrepancy', 'Unable to Verify'];
 
   statusTagClass(status) {
     if (status === 'Confirmed') return 'tag tag-accent';
@@ -2745,7 +2765,7 @@ class Component extends DCLogic {
     selectedId: null,
     noteSaveState: 'idle', noteFading: false,
     internalNoteSaveState: 'idle', internalNoteFading: false,
-    statusConfirmOpen: false, pendingStatus: null,
+    statusConfirmOpen: false, pendingStatus: null, resolutionEvidenceDraft: '',
     correctionFilter: false, correctionMode: null, correctionDraft: '', declineDraft: '',
     // Real search/filter, added after confirming none existed: candidate name (reuses the
     // candidateName field list-verification-items already resolves — first_name+last_name with a
@@ -2767,6 +2787,10 @@ class Component extends DCLogic {
     // prior staff visibility. Loaded lazily, once, the first time the Reporting tab is opened —
     // see selectTabReporting.
     resumeFailures: [], resumeFailuresLoading: false, resumeFailuresLoaded: false, resumeFailuresError: false,
+    // Item 12 (2026-09-07 wiring audit): the real staff roster (list-staff-users, see its own
+    // header), replacing the hardcoded WORKERS array. Loaded once per session alongside loadItems —
+    // see applyStaffSession.
+    staffNames: [],
   };
 
   _noteFlashCounter = 0;
@@ -2810,6 +2834,29 @@ class Component extends DCLogic {
       loginResolving: false,
     });
     this.loadItems();
+    this.loadStaffUsers();
+  }
+
+  // Item 12 (2026-09-07 wiring audit): real staff roster for the "Assign to" dropdown — see
+  // list-staff-users' own header for why this returns every staff_users row, not just workers.
+  async loadStaffUsers() {
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/list-staff-users', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      console.error('list-staff-users failed', e);
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      console.error('list-staff-users failed', data);
+      return;
+    }
+    this.setState({ staffNames: data.staff.map(su => su.name) });
   }
 
   async confirmStaffLogin(token) {
@@ -3299,6 +3346,11 @@ class Component extends DCLogic {
     const rows = sorted.map(it => ({
       id: it.id, type: it.type, claim: it.claim,
       candidateName: it.candidateName || '—',
+      // Item 9 (2026-09-07 wiring audit): the real dead end this closes — two real test accounts
+      // both showed as "John Pirone" here with nothing distinguishing them. Email is the identifier
+      // staff actually recognize; candidateId is only the fallback for the rare row with a
+      // candidate but no email on file (list-verification-items now returns both).
+      candidateIdentifier: it.candidateEmail || it.candidateId || '',
       receivedDisp: this.fmt(it.received), desiredDisp: this.fmt(it.desired), followUpDisp: this.fmt(it.followUp),
       automatedCheck: it.automatedCheck, status: it.status, statusTagClass: this.statusTagClass(it.status),
       assignedTo: it.assignedTo,
@@ -3313,6 +3365,24 @@ class Component extends DCLogic {
     }));
 
     const selected = s.selectedId ? s.items.find(it => it.id === s.selectedId) : null;
+
+    // Item 11 (2026-09-07 wiring audit): "next unresolved item" navigation — the real gap this
+    // closes is resolving one item required going back to the full list and re-finding the next one
+    // by hand, every single time. Walks the SAME sorted/filtered/scoped order the table itself shows
+    // (never a surprise jump outside what's currently visible), starting just after the selected
+    // item and wrapping once back to the top — skips anything already in a resolution status (see
+    // RESOLUTION_STATUSES) since there's nothing left to do on those.
+    let nextUnresolved = null;
+    if (selected) {
+      const idx = sorted.findIndex(it => it.id === selected.id);
+      if (idx !== -1) {
+        for (let i = 1; i <= sorted.length; i++) {
+          const candidate = sorted[(idx + i) % sorted.length];
+          if (candidate.id === selected.id) break;
+          if (!this.RESOLUTION_STATUSES.includes(candidate.status)) { nextUnresolved = candidate; break; }
+        }
+      }
+    }
 
     const openPlaceholder = () => {};
 
@@ -3404,7 +3474,7 @@ class Component extends DCLogic {
       showTable: !s.selectedId,
       showDetail: !!s.selectedId,
       rows,
-      workerOptions: this.WORKERS,
+      workerOptions: s.staffNames,
 
       nameFilter: s.nameFilter,
       setNameFilter: (e) => this.setState({ nameFilter: e.target.value }),
@@ -3487,6 +3557,14 @@ class Component extends DCLogic {
       },
 
       closeDetail: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ selectedId: null, correctionMode: null, correctionDraft: '', declineDraft: '', noteSaveState: 'idle', ...this.resetAutomatedCheckState(null, null) }); },
+      hasNextUnresolved: !!nextUnresolved,
+      nextUnresolvedLabel: nextUnresolved ? ('Next unresolved (' + nextUnresolved.id + ') →') : '',
+      openNextUnresolved: (e) => {
+        if (e && e.preventDefault) e.preventDefault();
+        if (!nextUnresolved) return;
+        const it = nextUnresolved;
+        this.setState({ selectedId: it.id, correctionMode: null, correctionDraft: '', declineDraft: '', noteSaveState: 'idle', statusConfirmOpen: false, pendingStatus: null, resolutionEvidenceDraft: '', ...this.resetAutomatedCheckState(it.type, it.candidateName) });
+      },
       detailSyncError: !!(selected && s.syncFailures[selected.id]),
       retryDetailSync: () => { if (selected) this.retrySync(selected.id); },
       detailCandidateName: selected ? (selected.candidateName || '—') : '',
@@ -3583,15 +3661,24 @@ class Component extends DCLogic {
 
       setDetailStatus: (e) => {
         if (!selected || e.target.value === selected.status) return;
-        this.setState({ statusConfirmOpen: true, pendingStatus: e.target.value });
+        this.setState({ statusConfirmOpen: true, pendingStatus: e.target.value, resolutionEvidenceDraft: '' });
       },
-      cancelStatusChange: () => this.setState({ statusConfirmOpen: false, pendingStatus: null }),
+      cancelStatusChange: () => this.setState({ statusConfirmOpen: false, pendingStatus: null, resolutionEvidenceDraft: '' }),
+      pendingStatusIsResolution: this.RESOLUTION_STATUSES.includes(s.pendingStatus),
+      resolutionEvidenceDraft: s.resolutionEvidenceDraft,
+      setResolutionEvidenceDraft: (e) => this.setState({ resolutionEvidenceDraft: e.target.value }),
+      confirmStatusChangeDisabled: this.RESOLUTION_STATUSES.includes(s.pendingStatus) && !s.resolutionEvidenceDraft.trim(),
       confirmStatusChange: () => {
         if (!selected) return;
         const newStatus = s.pendingStatus;
+        const evidence = s.resolutionEvidenceDraft.trim();
+        // Real gate, not just a disabled button: a resolution status change is blocked here too if
+        // evidence is blank, so a stale click (or anything else that could reach this handler
+        // without the UI's own disabled state) can't slip an unexplained resolution through.
+        if (this.RESOLUTION_STATUSES.includes(newStatus) && !evidence) return;
         this.updateItem(selected.id, { status: newStatus });
-        this.addTimelineEntry(selected.id, { date: new Date().toISOString(), actor: s.currentUser, action: 'Status changed to ' + newStatus + '.', note: '' });
-        this.setState({ statusConfirmOpen: false, pendingStatus: null });
+        this.addTimelineEntry(selected.id, { date: new Date().toISOString(), actor: s.currentUser, action: 'Status changed to ' + newStatus + '.', note: evidence });
+        this.setState({ statusConfirmOpen: false, pendingStatus: null, resolutionEvidenceDraft: '' });
       },
 
       timelineRows: selected ? selected.timeline.map(ev => ({

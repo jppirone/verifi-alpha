@@ -16,7 +16,7 @@ export default {
       return new Response(null, { headers: corsHeaders });
     }
     try {
-      const url = SUPABASE_URL + "/rest/v1/verification_items?select=id,type,claim,received,desired,follow_up,note,internal_note,automated_check,status,assigned_to,correction_requested,correction_note,correction_field,correction_value,verification_item_timeline(event_date,actor,action,note),candidates(full_name,first_name,last_name,email,phone)&order=id.asc&verification_item_timeline.order=event_date.asc";
+      const url = SUPABASE_URL + "/rest/v1/verification_items?select=id,type,claim,received,desired,follow_up,note,internal_note,automated_check,status,assigned_to,correction_requested,correction_note,correction_field,correction_value,verification_item_timeline(event_date,actor,action,note),candidates(id,full_name,first_name,last_name,email,phone)&order=id.asc&verification_item_timeline.order=event_date.asc";
       const res = await fetch(url, {
         headers: {
           "apikey": SUPABASE_SERVICE_ROLE_KEY,
@@ -56,6 +56,11 @@ export default {
           : null,
         candidateEmail: r.candidates ? r.candidates.email : null,
         candidatePhone: r.candidates ? r.candidates.phone : null,
+        // Real dead end this closes (2026-09-07 wiring audit, item 9): the queue list view showed
+        // only candidateName — two real test accounts with the same name were visually
+        // indistinguishable there. candidateEmail already covers the normal case; this id is only
+        // the fallback for the rare row with a candidate but no email on file.
+        candidateId: r.candidates ? r.candidates.id : null,
         timeline: (r.verification_item_timeline || []).map((t) => ({
           date: t.event_date,
           actor: t.actor,
