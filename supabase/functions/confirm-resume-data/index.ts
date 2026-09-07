@@ -193,7 +193,12 @@ export default {
         for (const w of work_history) {
           const { data: idRow } = await supabase.rpc("nextval_verification_item_id");
           queueInserts.push({
+            // source_item_id (Item C, 2026-09-08): the real back-reference this table never had —
+            // see the migration's own header. w.id is the real work_history_items.id (echoed back
+            // from get-resume-extraction, same id this function's own update loop above just wrote
+            // to), not a guess or a synthesized value.
             id: idRow, candidate_id, type: "Job Experience", claim: claimForWorkHistory(w), received: today, status: "New",
+            source_item_id: w.id,
           });
         }
       }
@@ -202,6 +207,7 @@ export default {
           const { data: idRow } = await supabase.rpc("nextval_verification_item_id");
           queueInserts.push({
             id: idRow, candidate_id, type: "Education", claim: claimForEducation(e), received: today, status: "New",
+            source_item_id: e.id,
           });
         }
       }
@@ -223,8 +229,10 @@ export default {
           id: idRow, candidate_id, type: "Certification", claim: claimForCertification(c), received: today,
           status: "Needs Reconciliation",
           internal_note: `Auto-flagged: this certification's name did not fuzzy-match anything in the candidate's own uploaded document (OCR'd text) — see certification_source_match. Not proof of fabrication (OCR coverage has real, documented gaps: vision-routed pages have no OCR text at all), but real enough to warrant a human look before treating it as verified. Name as extracted: ${JSON.stringify(c.name || "")}`,
+          source_item_id: c.id,
         } : {
           id: idRow, candidate_id, type: "Certification", claim: claimForCertification(c), received: today, status: "New",
+          source_item_id: c.id,
         });
       }
 

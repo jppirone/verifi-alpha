@@ -2965,6 +2965,91 @@ a:hover{color:var(--color-accent)}
 </div>
 </sc-if>
 
+<!-- Item C (2026-09-08 regression session): new interim screen, shown once, after resumeConfirm's
+     confirmation completes and before the candidate reaches the account screen. See
+     checkEmployerContactIncomplete's own header for the session-routing requirement this satisfies —
+     a refresh or browser close mid-entry here must return the candidate to THIS screen next time,
+     never back to resumeConfirm (already resolved) and never forward past it if never reached. No
+     education section (see this screen's own migration header for why). -->
+<sc-if value="{{ isEmployerContact }}" hint-placeholder-val="{{ false }}">
+<div style="max-width:640px;margin:0 auto;padding:88px 20px 60px;display:flex;flex-direction:column;gap:var(--space-4)">
+  <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:22px;margin:0">Employer &amp; certification contact details</h1>
+  <div style="font-size:13px;font-weight:600;color:var(--color-neutral-200);line-height:1.6;padding:var(--space-3);border:1px solid var(--color-accent-700);border-radius:var(--radius-md);background:var(--color-neutral-900)">Everything on this screen is optional. Items we can't verify automatically may take longer to resolve without this information.</div>
+
+  <sc-if value="{{ hasEmployerContactWork }}" hint-placeholder-val="{{ true }}">
+    <div style="display:flex;flex-direction:column;gap:var(--space-3)">
+      <div class="card-kicker">Employer contact details</div>
+      <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">If you only know a general line (HR, front desk, main number) with no specific person's name, that's still useful — leave the name blank.</div>
+      <sc-for list="{{ employerContactWorkRows }}" as="row" hint-placeholder-count="2">
+        <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+          <div style="font-size:14px;font-weight:600">{{ row.label }}</div>
+          <sc-if value="{{ row.expanded }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+              <div class="field" style="flex:1;min-width:200px">
+                <label>Registered business name (if different)</label>
+                <input class="input" value="{{ row.employerNameOverride }}" sc-camel-on-change="{{ row.onEmployerNameOverride }}">
+              </div>
+              <div class="field" style="flex:1;min-width:200px">
+                <label>Registered business location (if different)</label>
+                <input class="input" placeholder="City, ST" value="{{ row.employerLocationOverride }}" sc-camel-on-change="{{ row.onEmployerLocationOverride }}">
+              </div>
+            </div>
+            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+              <div class="field" style="flex:1;min-width:200px">
+                <label>Contact phone (optional)</label>
+                <input class="input" value="{{ row.contactPhone }}" sc-camel-on-change="{{ row.onContactPhone }}">
+              </div>
+              <div class="field" style="flex:1;min-width:200px">
+                <label>Contact name (optional)</label>
+                <input class="input" value="{{ row.contactName }}" sc-camel-on-change="{{ row.onContactName }}">
+              </div>
+            </div>
+          </sc-if>
+          <sc-if value="{{ row.collapsed }}" hint-placeholder-val="{{ false }}">
+            <button type="button" class="btn btn-ghost" style="align-self:flex-start" sc-camel-on-click="{{ row.toggleExpand }}">Add details</button>
+          </sc-if>
+        </div>
+      </sc-for>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ hasEmployerContactCerts }}" hint-placeholder-val="{{ false }}">
+    <div style="display:flex;flex-direction:column;gap:var(--space-3)">
+      <div class="card-kicker">Certification contact details</div>
+      <sc-for list="{{ employerContactCertRows }}" as="row" hint-placeholder-count="1">
+        <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+          <div style="font-size:14px;font-weight:600">{{ row.label }}</div>
+          <sc-if value="{{ row.expanded }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+              <div class="field" style="flex:1;min-width:200px">
+                <label>Badge / verification link (optional)</label>
+                <input class="input" value="{{ row.verificationLink }}" sc-camel-on-change="{{ row.onVerificationLink }}">
+              </div>
+              <div class="field" style="flex:1;min-width:200px">
+                <label>Contact phone at issuing body (optional)</label>
+                <input class="input" value="{{ row.contactPhone }}" sc-camel-on-change="{{ row.onContactPhone }}">
+              </div>
+            </div>
+          </sc-if>
+          <sc-if value="{{ row.collapsed }}" hint-placeholder-val="{{ false }}">
+            <button type="button" class="btn btn-ghost" style="align-self:flex-start" sc-camel-on-click="{{ row.toggleExpand }}">Add details</button>
+          </sc-if>
+        </div>
+      </sc-for>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ employerContactError }}" hint-placeholder-val="{{ false }}">
+    <div style="font-size:12px;color:#e2735c">{{ employerContactError }}</div>
+  </sc-if>
+
+  <div style="display:flex;gap:var(--space-3)">
+    <button type="button" class="btn btn-primary" disabled="{{ employerContactPending }}" sc-camel-on-click="{{ submitEmployerContact }}">{{ employerContactSubmitLabel }}</button>
+    <button type="button" class="btn btn-ghost" disabled="{{ employerContactPending }}" sc-camel-on-click="{{ skipEmployerContact }}">Skip this step</button>
+  </div>
+</div>
+</sc-if>
+
 <sc-if value="{{ isTiers }}" hint-placeholder-val="{{ false }}">
 <div style="max-width:640px;margin:0 auto;padding:88px 20px 40px;display:flex;flex-direction:column;gap:var(--space-4)">
   <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:22px;margin:0">Choose how you'd like to continue</h1>
@@ -5240,6 +5325,10 @@ class Component extends DCLogic {
     resumeCandidateId: null, resumeExtraction: null, resumeExtractionLoading: false,
     pdfViewerScale: 1.3,
     resumeConfirmPending: false, resumeConfirmError: null,
+    // Item C (2026-09-08 regression session): the new employer/certification contact-details
+    // screen. employerContactExpanded tracks per-row "Add details" expand state for the >5-jobs
+    // collapsed-by-default layout (see employerContactDefaultExpand in renderVals).
+    employerContactExpanded: {}, employerContactPending: false, employerContactError: null,
     verificationFilter: 'active', upgradeModalOpen: false, upgradeReturnTab: null, upgradeReturnTarget: null,
     verificationItems: [], verificationItemsLoading: false, verificationItemsError: null, verificationItemsLoadedFor: null,
     correctionResponseOpenId: null, correctionValueDraft: '', correctionNoteDraft: '',
@@ -6380,6 +6469,19 @@ class Component extends DCLogic {
         this.loadResumeExtraction(candidateId);
         return;
       }
+      // Item C (2026-09-08 regression session): the returning-session counterpart to
+      // submitResumeConfirmation's forward-flow routing — same class of gap Item 1 fixed this
+      // morning for "continue without resume data," one step later in the flow. Only reachable once
+      // the check above has already confirmed the resume flow itself is genuinely done — a refresh
+      // or browser close mid-entry on the employer-contact screen must land back on THAT screen
+      // next time, never resumeConfirm (already resolved) and never forward past it if never
+      // reached or resolved. See checkEmployerContactIncomplete's own header.
+      const contactIncomplete = await this.checkEmployerContactIncomplete(candidateId);
+      if (contactIncomplete) {
+        this.setState({ screen: 'employerContact' });
+        this.loadResumeExtraction(candidateId);
+        return;
+      }
     }
     this.enterAccount();
   }
@@ -7018,7 +7120,87 @@ class Component extends DCLogic {
       return;
     }
     this.stopResumePolling();
-    this.setState({ resumeConfirmPending: false, resumeConfirmError: null, screen: 'tiers' });
+    // Item C (2026-09-08 regression session): the new employer/certification contact-details
+    // screen goes here now instead of straight to 'tiers' — but only when there's actually
+    // something to ask about (matching this screen's own "no education section" reasoning: nothing
+    // real to show, no reason to force an extra screen). checkEmployerContactIncomplete (the
+    // returning-session counterpart to this forward-flow check) applies the exact same condition.
+    const hasContactAskables = ex.work_history.length > 0 || ex.certifications.length > 0;
+    this.setState({ resumeConfirmPending: false, resumeConfirmError: null, screen: hasContactAskables ? 'employerContact' : 'tiers' });
+  }
+
+  // Item C: the write side of the new employer/certification contact-details screen — real
+  // submission (skip=false, candidate-entered values from resumeExtraction) or explicit Skip
+  // (skip=true, empty arrays). Either way this is what sets resume_documents.
+  // employer_contact_resolved_at for real (see resolve-employer-contact-details' own header) —
+  // "Skip this step" being genuinely zero-cost to the candidate doesn't mean it's untracked; it's a
+  // real, resolved choice, same precedent skip-resume-extraction already established.
+  async resolveEmployerContact(skip) {
+    const s = this.state;
+    const ex = s.resumeExtraction;
+    if (!s.resumeCandidateId || !ex || !ex.resume_document || s.employerContactPending) return;
+    this.setState({ employerContactPending: true, employerContactError: null });
+    const body = {
+      candidate_id: s.resumeCandidateId,
+      resume_document_id: ex.resume_document.id,
+      work_history: skip ? [] : ex.work_history.map(w => ({
+        id: w.id,
+        employer_name_override: w.employer_name_override || '',
+        employer_location_override: w.employer_location_override || '',
+        contact_phone: w.contact_phone || '',
+        contact_name: w.contact_name || '',
+      })),
+      certifications: skip ? [] : ex.certifications.map(c => ({
+        id: c.id,
+        verification_link: c.verification_link || '',
+        contact_phone: c.contact_phone || '',
+      })),
+    };
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/resolve-employer-contact-details', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ employerContactPending: false, employerContactError: "Couldn't reach the server. Check your connection and try again." });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      this.setState({ employerContactPending: false, employerContactError: "Couldn't save. Please try again." });
+      return;
+    }
+    this.setState({ employerContactPending: false, employerContactError: null, screen: 'tiers' });
+  }
+
+  // Item C: the returning-session counterpart to submitResumeConfirmation's forward-flow check
+  // above — applySession calls this (see its own updated header) once checkResumeFlowIncomplete has
+  // already returned false, to decide whether THIS screen still needs to be shown before
+  // enterAccount(). Reuses get-resume-extraction (already the real read side for this exact data,
+  // same reasoning checkResumeFlowIncomplete's own header gives) rather than a second endpoint.
+  // Fails open (treated as complete) on any network/parse error — same posture as
+  // checkResumeFlowIncomplete, worse to block a working login than to occasionally under-detect
+  // this one optional step.
+  async checkEmployerContactIncomplete(candidateId) {
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/get-resume-extraction', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate_id: candidateId }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      return false;
+    }
+    if (!res.ok || !data.ok) return false;
+    if (!data.resume_document) return false; // no resume at all — resumeConfirm's own check owns this case
+    if (data.resume_document.continued_without_data_at) return false; // resume flow explicitly skipped — nothing to ask about
+    const hasContactAskables = (data.work_history || []).length > 0 || (data.certifications || []).length > 0;
+    if (!hasContactAskables) return false; // same "nothing real to show" reasoning as the forward-flow check
+    return !data.resume_document.employer_contact_resolved_at;
   }
 
   resetAll() {
@@ -7699,6 +7881,7 @@ class Component extends DCLogic {
       isPreview: s.screen === 'preview',
       isCheckEmail: s.screen === 'checkEmail',
       isResumeConfirm: s.screen === 'resumeConfirm',
+      isEmployerContact: s.screen === 'employerContact',
       isTiers: s.screen === 'tiers',
       resumeExtractionLoading: s.resumeExtractionLoading,
       resumeStillProcessing: !s.resumeExtractionLoading && !!s.resumeExtraction && s.resumeExtraction.resume_document &&
@@ -7708,6 +7891,57 @@ class Component extends DCLogic {
       resumeNoDocument: !s.resumeExtractionLoading && !s.resumeExtraction,
       resumeReadyToConfirm: !s.resumeExtractionLoading && !!s.resumeExtraction && s.resumeExtraction.resume_document &&
         s.resumeExtraction.resume_document.extraction_status === 'extracted',
+      // Item C (2026-09-08 regression session): the new employer/certification contact-details
+      // screen. "If 5 or fewer confirmed jobs, show all fields inline and expanded by default. If
+      // more than 5, default to collapsed per-row with a lightweight Add details expand" — per-
+      // category count, per the item's own spec (a candidate with 6 jobs and 1 cert still gets the
+      // cert expanded by default; the 5-item threshold is about not overwhelming one long list, not
+      // a combined total).
+      ...(() => {
+        const ex = s.resumeExtraction;
+        const workHistory = (ex && ex.work_history) || [];
+        const certifications = (ex && ex.certifications) || [];
+        const workDefaultExpand = workHistory.length <= 5;
+        const certDefaultExpand = certifications.length <= 5;
+        const toggleExpand = (id) => this.setState(st => ({ employerContactExpanded: { ...st.employerContactExpanded, [id]: !st.employerContactExpanded[id] } }));
+        return {
+          hasEmployerContactWork: workHistory.length > 0,
+          hasEmployerContactCerts: certifications.length > 0,
+          employerContactWorkRows: workHistory.map(w => {
+            const expanded = workDefaultExpand || !!s.employerContactExpanded[w.id];
+            return {
+              label: [w.title, w.company].filter(Boolean).join(' at ') || 'Job',
+              expanded, collapsed: !expanded,
+              toggleExpand: () => toggleExpand(w.id),
+              employerNameOverride: w.employer_name_override || '',
+              employerLocationOverride: w.employer_location_override || '',
+              contactPhone: w.contact_phone || '',
+              contactName: w.contact_name || '',
+              onEmployerNameOverride: (e) => this.updateResumeItem('work_history', w.id, 'employer_name_override', e.target.value),
+              onEmployerLocationOverride: (e) => this.updateResumeItem('work_history', w.id, 'employer_location_override', e.target.value),
+              onContactPhone: (e) => this.updateResumeItem('work_history', w.id, 'contact_phone', e.target.value),
+              onContactName: (e) => this.updateResumeItem('work_history', w.id, 'contact_name', e.target.value),
+            };
+          }),
+          employerContactCertRows: certifications.map(c => {
+            const expanded = certDefaultExpand || !!s.employerContactExpanded[c.id];
+            return {
+              label: c.name || 'Certification',
+              expanded, collapsed: !expanded,
+              toggleExpand: () => toggleExpand(c.id),
+              verificationLink: c.verification_link || '',
+              contactPhone: c.contact_phone || '',
+              onVerificationLink: (e) => this.updateResumeItem('certifications', c.id, 'verification_link', e.target.value),
+              onContactPhone: (e) => this.updateResumeItem('certifications', c.id, 'contact_phone', e.target.value),
+            };
+          }),
+        };
+      })(),
+      employerContactPending: s.employerContactPending,
+      employerContactError: s.employerContactError,
+      employerContactSubmitLabel: s.employerContactPending ? 'Saving…' : 'Continue',
+      submitEmployerContact: () => this.resolveEmployerContact(false),
+      skipEmployerContact: () => this.resolveEmployerContact(true),
       checkResumeAgain: () => this.checkResumeAgain(),
       skipResumeConfirm: () => this.skipResumeConfirm(),
       resumeOriginalUrl: (s.resumeExtraction && s.resumeExtraction.resume_document && s.resumeExtraction.resume_document.original_signed_url) || '',

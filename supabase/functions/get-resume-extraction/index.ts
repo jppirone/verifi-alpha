@@ -59,9 +59,11 @@ export default {
       // via skip-resume-extraction" from "never got back to it" — without it, applySession's
       // returning-session check has no way to tell those two apart and would keep re-routing an
       // intentional skip back into resumeConfirm forever.
+      // employer_contact_resolved_at added for Item C (2026-09-08): same class of signal, one step
+      // later in the flow — see checkEmployerContactIncomplete's own header in candidate.html.
       const { data: doc, error: docErr } = await supabase
         .from("resume_documents")
-        .select("id, original_storage_path, original_filename, mime_type, extraction_status, uploaded_at, continued_without_data_at")
+        .select("id, original_storage_path, original_filename, mime_type, extraction_status, uploaded_at, continued_without_data_at, employer_contact_resolved_at")
         .eq("candidate_id", candidate_id)
         .order("uploaded_at", { ascending: false })
         .limit(1)

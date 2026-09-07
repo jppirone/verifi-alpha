@@ -2440,6 +2440,32 @@ th.sortable{cursor:pointer;user-select:none}
           <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.5">{{ detailAutomatedCheck }}</div>
         </div>
 
+        <!-- Item C (2026-09-08 regression session): candidate-stated employer/certification
+             contact details, from the new interim screen after resumeConfirm — visible here so a
+             case with a known contact/entity hint is distinguishable from one without, the moment
+             staff opens it. Never validated, never a claim staff verify against — a hint for
+             outreach only, labeled as such. -->
+        <sc-if value="{{ detailHasContactHint }}" hint-placeholder-val="{{ false }}">
+          <div style="padding:10px 12px;border:1px solid var(--color-accent-700);border-radius:6px;background:var(--color-neutral-900);display:flex;flex-direction:column;gap:4px">
+            <div style="font-size:11px;color:var(--color-accent-300);text-transform:uppercase;letter-spacing:0.04em">Candidate-stated contact hint (not verified)</div>
+            <sc-if value="{{ detailContactEmployerName }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:13px">Registered business name: {{ detailContactEmployerName }}</div>
+            </sc-if>
+            <sc-if value="{{ detailContactEmployerLocation }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:13px">Registered location: {{ detailContactEmployerLocation }}</div>
+            </sc-if>
+            <sc-if value="{{ detailContactPhone }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:13px">Contact phone: {{ detailContactPhone }}</div>
+            </sc-if>
+            <sc-if value="{{ detailContactName }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:13px">Contact name: {{ detailContactName }}</div>
+            </sc-if>
+            <sc-if value="{{ detailContactVerificationLink }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:13px">Verification link: <a href="{{ detailContactVerificationLink }}" target="_blank" rel="noopener">{{ detailContactVerificationLink }}</a></div>
+            </sc-if>
+          </div>
+        </sc-if>
+
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-4)">
           <div class="field">
             <label for="detail-status">Status</label>
@@ -3579,6 +3605,14 @@ class Component extends DCLogic {
       detailDesiredDisp: selected ? this.fmt(selected.desired) : '',
       detailFollowUp: selected ? selected.followUp : '',
       detailAutomatedCheck: selected ? selected.automatedCheck : '',
+      // Item C (2026-09-08 regression session): candidate-stated contact hints — see
+      // list-verification-items' own header for hasContactHint and where these come from.
+      detailHasContactHint: !!(selected && selected.hasContactHint),
+      detailContactEmployerName: selected ? (selected.employerNameOverride || '') : '',
+      detailContactEmployerLocation: selected ? (selected.employerLocationOverride || '') : '',
+      detailContactPhone: selected ? (selected.contactPhone || '') : '',
+      detailContactName: selected ? (selected.contactName || '') : '',
+      detailContactVerificationLink: selected ? (selected.verificationLink || '') : '',
 
       // No automated check applies to unstructured needs_review content (no credly/dbpr/sunbiz
       // lookup makes sense against free text) — same reasoning as excluding Education.
