@@ -2784,7 +2784,16 @@ a:hover{color:var(--color-accent)}
   </sc-if>
 
   <sc-if value="{{ resumeNoDocument }}" hint-placeholder-val="{{ false }}">
-    <div class="card elev-sm" style="padding:var(--space-8);text-align:center;color:var(--color-neutral-400);font-size:14px">No resume on file — nothing to confirm here.</div>
+    <div class="card elev-md" style="padding:var(--space-8);text-align:center;display:flex;flex-direction:column;gap:var(--space-3);align-items:center">
+      <div style="font-size:15px">No resume on file yet.</div>
+      <div style="font-size:13px;color:var(--color-neutral-500);line-height:1.5">Your account is confirmed, but we don't have a resume to read yet — a real, reachable state (see checkResumeFlowIncomplete's own header: the background upload started at signup can fail or never finish independently of email confirmation succeeding, including across two different devices). Upload one to continue.</div>
+      <input type="file" id="resume-nodoc-file-input" accept="image/jpeg,image/png,image/heic,image/heif,image/webp,application/pdf" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden" sc-camel-on-change="{{ onPickRetryResumeFile }}">
+      <label for="resume-nodoc-file-input" class="btn btn-primary" style="cursor:pointer">Upload your resume</label>
+      <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ skipResumeConfirm }}">Continue without resume data</button>
+      <sc-if value="{{ resumeFileError }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:12px;color:#e2735c">{{ resumeFileError }}</div>
+      </sc-if>
+    </div>
   </sc-if>
 
   <sc-if value="{{ resumeReadyToConfirm }}" hint-placeholder-val="{{ false }}">
@@ -5995,15 +6004,28 @@ class Component extends DCLogic {
     this.enterAccount();
   }
 
-  // "Incomplete" = a resume_documents row exists, the candidate never explicitly clicked through
-  // via skip-resume-extraction (continued_without_data_at is null), and either it's still
-  // processing/failed (pending/ocr_done/failed — nothing to confirm yet, but the candidate still
-  // needs to SEE that state, not be dropped straight into the account screen past it) or it's
-  // 'extracted' with at least one row not yet candidate_confirmed. Reuses get-resume-extraction —
-  // already the real read side for this exact data — rather than standing up a second endpoint
-  // just to answer a yes/no question this one already has everything needed to answer. A network
-  // failure here fails open to the account screen rather than trapping a real login behind a
-  // broken pre-check — worse to block a working login than to occasionally under-detect this.
+  // "Incomplete" = the candidate never explicitly clicked through via skip-resume-extraction
+  // (continued_without_data_at is null) AND EITHER no resume_documents row exists for them at all,
+  // OR one does and it's still processing/failed (pending/ocr_done/failed — nothing to confirm
+  // yet, but the candidate still needs to SEE that state, not be dropped straight into the account
+  // screen past it), OR it's 'extracted' with at least one row not yet candidate_confirmed. Reuses
+  // get-resume-extraction — already the real read side for this exact data — rather than standing
+  // up a second endpoint just to answer a yes/no question this one already has everything needed
+  // to answer. A network/parse failure here fails open (treated as complete, routes to account)
+  // rather than trapping a real login behind a broken pre-check — worse to block a working login
+  // than to occasionally under-detect this.
+  //
+  // The "no resume_documents row at all" branch is real, not hypothetical — caught live testing
+  // this exact check: sendVerificationEmail's upload (uploadResumeInBackground) is an unawaited,
+  // silently-swallowed-on-failure background call that starts once send-verification succeeds and
+  // the screen has already moved to checkEmail — it is NOT what gates email confirmation. A
+  // candidate can legitimately reach a confirmed session with zero resume_documents rows: the
+  // background upload can fail, time out, or simply never finish if the tab closes mid-flight —
+  // and critically, email confirmation itself can happen from an ENTIRELY DIFFERENT device (click
+  // the link on your phone after starting on a laptop), which never had the staged file at all.
+  // data.resume_document being null after a successful, ok:true response is exactly that state,
+  // not an error — get-resume-extraction returns it deliberately (see that function's own "if
+  // (!doc)" branch) — so it must count as incomplete, same as every other unfinished state.
   async checkResumeFlowIncomplete(candidateId) {
     let res, data;
     try {
@@ -6016,7 +6038,8 @@ class Component extends DCLogic {
     } catch (e) {
       return false;
     }
-    if (!res.ok || !data.ok || !data.resume_document) return false;
+    if (!res.ok || !data.ok) return false;
+    if (!data.resume_document) return true;
     if (data.resume_document.continued_without_data_at) return false;
     const status = data.resume_document.extraction_status;
     if (status === 'pending' || status === 'ocr_done' || status === 'failed') return true;
@@ -6225,8 +6248,24 @@ class Component extends DCLogic {
       return;
     }
     if (!data.resume_document) {
+      // Real bug this used to be, found live testing checkResumeFlowIncomplete (2026-09-07): this
+      // forced screen straight to 'tiers' any time no resume_documents row existed yet, silently
+      // skipping the resume step entirely — regardless of WHY this function was called or what
+      // screen the caller had deliberately set. That was invisible before today because the only
+      // caller was applySignupConfirmation, moments after a fresh signup, where a still-in-flight
+      // background upload racing email confirmation was the one real way to land here — "just move
+      // on to tiers" read as a reasonable enough guess for that narrow case. It stopped being safe
+      // the moment a second caller existed: applySession's returning-session check (see its own
+      // header) can reach here for a candidate who signed up and never got a resume in at all —
+      // forcing 'tiers' there means the account/resume step is silently bypassed on every future
+      // login too, exactly the "logged in, nothing imported, bypassed the resume screen" gap this
+      // whole investigation started from. Leaving `screen` alone here — whatever the caller already
+      // set stays set (resumeConfirm, in both current callers) — and clearing resumeExtraction to
+      // null is what actually matters: it's what resumeNoDocument's own check reads, and that
+      // state now renders a real, working "Upload your resume" control (see the markup) instead of
+      // either a dead-end message or this silent skip.
       this.stopResumePolling();
-      this.setState({ resumeExtractionLoading: false, resumeExtraction: null, screen: 'tiers' });
+      this.setState({ resumeExtractionLoading: false, resumeExtraction: null });
       return;
     }
     this.setState({ resumeExtractionLoading: false, resumeExtraction: data });
