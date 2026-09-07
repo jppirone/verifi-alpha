@@ -73,8 +73,15 @@ function findMatchingCommit(path, liveHash) {
       continue; // file didn't exist at this commit, or was renamed — skip, keep walking back
     }
     if (sha256(content) === liveHash) {
-      const info = git(`log -1 --format=%h|%ci|%s ${sha}`);
-      const [shortSha, date, subject] = info.split("|");
+      // Real bug, caught running this for the first time outside this file's own earlier ad hoc
+      // verification: `|` in the --format string is a shell metacharacter. execSync runs through
+      // cmd.exe on Windows (the actual environment this was authored and first tested in) and it
+      // splits "git log ... --format=%h|%ci|%s <sha>" into three piped commands instead of passing
+      // `|` through as literal format text — silent on some shells, a hard "not recognized" failure
+      // on cmd.exe. "::" is not special to any common shell, so it survives execSync's default
+      // shell on every platform this might run under.
+      const info = git(`log -1 --format=%h::%ci::%s ${sha}`);
+      const [shortSha, date, subject] = info.split("::");
       return { matchIndex: i, sha, shortSha, date, subject };
     }
   }
