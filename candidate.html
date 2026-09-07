@@ -7223,7 +7223,17 @@ class Component extends DCLogic {
         s.resumeExtraction.freeform.filter(f => f.section_type === 'needs_review').forEach(f => blocks.push({
           kind: 'needs_review', position: typeof f.position === 'number' ? f.position : Infinity,
           heading: f.heading || '', hasHeading: !!(f.heading || '').trim(),
-          content: f.content || '',
+          // Display-only readability fix: "Selected Career Highlights" comes back from extraction as
+          // one flat run-on string (the source is a multi-cell table; freeform content has no
+          // concept of cells, so every cell's text gets concatenated) — a real reported readability
+          // problem, not a data-loss one. A line break between each sentence-item, not a table (this
+          // stays a plain textarea, same as every other needs_review entry — matches the ask
+          // exactly). Scoped to this one heading rather than every needs_review block: other
+          // freeform content is either already short or is genuine flowing prose that a blind
+          // sentence-split would mangle, not run-on the same way.
+          content: /^selected career highlights$/i.test((f.heading || '').trim())
+            ? (f.content || '').replace(/\.\s+(?=[A-Z])/g, '.\n')
+            : (f.content || ''),
           onChange: (e) => this.updateResumeFreeform(f.id, e.target.value),
         }));
         blocks.sort((a, b) => a.position - b.position);

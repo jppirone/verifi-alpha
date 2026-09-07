@@ -485,10 +485,11 @@ type RasterizePageResult = {
   status: number;
 };
 
-async function callRasterizePage(storagePath: string, pageNumber: number, opts?: { targetDpi?: number; forceVision?: boolean }): Promise<RasterizePageResult> {
+async function callRasterizePage(storagePath: string, pageNumber: number, opts?: { targetDpi?: number; forceVision?: boolean; previousPageContext?: string }): Promise<RasterizePageResult> {
   const body: Record<string, unknown> = { storage_path: storagePath, page_number: pageNumber };
   if (opts?.targetDpi) body.target_dpi = opts.targetDpi;
   if (opts?.forceVision) body.force_vision = true;
+  if (opts?.previousPageContext) body.previous_page_context = opts.previousPageContext;
   const res = await fetch(RASTERIZE_FN_URL, {
     method: "POST",
     headers: {
@@ -513,16 +514,16 @@ async function callRasterizePage(storagePath: string, pageNumber: number, opts?:
 // heavier WASM memory use entirely rather than just shrinking what it has to process, the
 // strongest lever actually available against a resource ceiling neither this page's content nor
 // its own request can predict or control.
-async function rasterizePageWithRetry(storagePath: string, pageNumber: number): Promise<RasterizePageResult> {
-  const attempt1 = await callRasterizePage(storagePath, pageNumber);
+async function rasterizePageWithRetry(storagePath: string, pageNumber: number, previousPageContext?: string): Promise<RasterizePageResult> {
+  const attempt1 = await callRasterizePage(storagePath, pageNumber, { previousPageContext });
   if (attempt1.data?.code !== RESOURCE_LIMIT_CODE) return attempt1;
   console.log(`upload-resume: page ${pageNumber} hit ${RESOURCE_LIMIT_CODE} at default DPI, retrying at ${RASTERIZE_RETRY_DPI} DPI`);
 
-  const attempt2 = await callRasterizePage(storagePath, pageNumber, { targetDpi: RASTERIZE_RETRY_DPI });
+  const attempt2 = await callRasterizePage(storagePath, pageNumber, { targetDpi: RASTERIZE_RETRY_DPI, previousPageContext });
   if (attempt2.data?.code !== RESOURCE_LIMIT_CODE) return attempt2;
   console.log(`upload-resume: page ${pageNumber} hit ${RESOURCE_LIMIT_CODE} again at ${RASTERIZE_RETRY_DPI} DPI, retrying with force_vision`);
 
-  return await callRasterizePage(storagePath, pageNumber, { targetDpi: RASTERIZE_RETRY_DPI, forceVision: true });
+  return await callRasterizePage(storagePath, pageNumber, { targetDpi: RASTERIZE_RETRY_DPI, forceVision: true, previousPageContext });
 }
 
 // Merges N per-page ExtractionResult objects (one per rasterize-pdf-page call) into one. Plain
@@ -547,8 +548,102 @@ function globalizePosition(pageNumber: number, localPosition: number | undefined
   return pageNumber * PAGE_POSITION_SPAN + localPosition;
 }
 
+// Real page-boundary corruption, confirmed live against a real document (john.pirone's resume,
+// 2026-09-07 investigation) by rendering all 4 pages and reading them directly, not guessed from
+// position numbers alone: a certifications bullet list split 9/1 across a page boundary, a job's
+// last 2 bullets left on the following page, and a "WORKPLACE STRENGTHS" list split 3/2 across a
+// boundary all lost their section attribution on the later page — each page is extracted by a
+// completely independent model call (see rasterize-pdf-page's own per-page prompt) with zero
+// knowledge of what was still open at the end of the previous one.
+//
+// describeTrailingItem is half the fix: after each page's OWN extraction, this summarizes whatever
+// was position-last on THAT page (the most plausible thing a following page might continue), so it
+// can be threaded into the NEXT page's rasterize-pdf-page call as previous_page_context — see that
+// function's own buildContinuationContext for how it's used. Deliberately excludes education: a
+// degree entry is one complete fact, not an open-ended list a following page would plausibly
+// continue, so including it would just be noise the model has to read past.
+function describeTrailingItem(extraction: ExtractionResult): string | undefined {
+  type Candidate = { position: number; describe: () => string };
+  const candidates: Candidate[] = [];
+  for (const w of extraction.work_history) {
+    if (typeof w.position !== "number") continue;
+    candidates.push({
+      position: w.position,
+      describe: () => `a work-history entry at "${w.company || "(unnamed company)"}" as "${w.title || "(unnamed title)"}", whose visible responsibilities on that page ended with: "...${(w.job_responsibilities || "").slice(-220)}"`,
+    });
+  }
+  for (const c of extraction.certifications) {
+    if (typeof c.position !== "number") continue;
+    candidates.push({
+      position: c.position,
+      describe: () => `a certifications list, whose last visible entry on that page was "${c.name || "(unnamed)"}"${c.issuing_body ? ` (${c.issuing_body})` : ""}`,
+    });
+  }
+  for (const f of extraction.freeform) {
+    if (typeof f.position !== "number") continue;
+    candidates.push({
+      position: f.position,
+      describe: () => `a freeform section${f.heading ? ` titled "${f.heading}"` : " with no visible heading"} (type: ${f.section_type}), whose visible content on that page ended with: "...${(f.content || "").slice(-220)}"`,
+    });
+  }
+  if (candidates.length === 0) return undefined;
+  candidates.sort((a, b) => b.position - a.position);
+  return candidates[0].describe();
+}
+
+// The other half of the fix: even when the previous-page context above works exactly as intended,
+// the result is still two separate rows (one per page) until something recombines them. This finds
+// page-adjacent pairs — the last item globalized onto page N and the first item globalized onto
+// page N+1 — that share the same heading (freeform) or the same company+title (work_history), and
+// merges them into one row. Deliberately conservative: only merges on an EXACT match (normalized
+// for case/whitespace only) across NUMERICALLY ADJACENT pages, never a fuzzy guess. A genuinely new
+// section that happens to reuse a heading elsewhere in the document is a same-content-different-
+// pages case the prompt's own dedup rule already owns — not this function's job, and not something
+// this would touch anyway (the page-adjacency check alone rules out anything not a boundary case).
+// Certifications are deliberately NOT handled here — a continuation certification, once correctly
+// classified via the context hint, is already a normal, independent entry needing no merge.
+function mergeBoundaryContinuations(extraction: ExtractionResult): ExtractionResult {
+  const pageOf = (pos: number | undefined) => (typeof pos === "number" ? Math.floor(pos / PAGE_POSITION_SPAN) : null);
+  const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
+
+  const freeform = [...extraction.freeform].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+  const mergedFreeform: typeof freeform = [];
+  for (const item of freeform) {
+    const prev = mergedFreeform[mergedFreeform.length - 1];
+    const prevPage = pageOf(prev?.position);
+    const itemPage = pageOf(item.position);
+    if (
+      prev && prevPage !== null && itemPage !== null && itemPage === prevPage + 1 &&
+      prev.heading && item.heading && norm(prev.heading) === norm(item.heading)
+    ) {
+      prev.content = `${prev.content}\n\n${item.content}`.trim();
+      continue;
+    }
+    mergedFreeform.push({ ...item });
+  }
+
+  const workHistory = [...extraction.work_history].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+  const mergedWorkHistory: typeof workHistory = [];
+  for (const item of workHistory) {
+    const prev = mergedWorkHistory[mergedWorkHistory.length - 1];
+    const prevPage = pageOf(prev?.position);
+    const itemPage = pageOf(item.position);
+    if (
+      prev && prevPage !== null && itemPage !== null && itemPage === prevPage + 1 &&
+      prev.company && item.company && norm(prev.company) === norm(item.company) &&
+      prev.title && item.title && norm(prev.title) === norm(item.title)
+    ) {
+      prev.job_responsibilities = `${prev.job_responsibilities}\n\n${item.job_responsibilities}`.trim();
+      continue;
+    }
+    mergedWorkHistory.push({ ...item });
+  }
+
+  return { ...extraction, freeform: mergedFreeform, work_history: mergedWorkHistory };
+}
+
 function mergeExtractions(pages: Array<{ pageNumber: number; extraction: ExtractionResult }>): ExtractionResult {
-  return {
+  const merged = {
     work_history: pages.flatMap(({ pageNumber, extraction }) =>
       extraction.work_history.map((w) => ({ ...w, position: globalizePosition(pageNumber, w.position) ?? undefined }))),
     education: pages.flatMap(({ pageNumber, extraction }) =>
@@ -566,6 +661,7 @@ function mergeExtractions(pages: Array<{ pageNumber: number; extraction: Extract
     freeform: pages.flatMap(({ pageNumber, extraction }) =>
       extraction.freeform.map((f) => ({ ...f, position: globalizePosition(pageNumber, f.position) ?? undefined }))),
   };
+  return mergeBoundaryContinuations(merged);
 }
 
 export default {
@@ -715,11 +811,18 @@ export default {
         // the gap in coverage is visible in the stored text itself, not silently absent.
         const pageOcrTexts: string[] = [];
         let pageCount = 1;
+        // Page-boundary continuation context (2026-09-07, priority-3 investigation — see
+        // describeTrailingItem's own header for the full story): pages are already requested
+        // strictly in order in this loop, one full round-trip at a time, so this is simply "what did
+        // the page we just finished end with" carried into the next call. undefined on page 1 (there
+        // is no previous page) — buildContinuationContext treats that as "say nothing," unchanged
+        // prompt behavior for a single-page resume or the first page of any resume.
+        let previousPageContext: string | undefined;
         for (let pageNumber = 1; pageNumber <= pageCount && pageNumber <= MAX_PDF_PAGES; pageNumber++) {
           let pageData: { ok?: boolean; page_count?: number; extraction?: unknown; ocr_raw_text?: string; code?: string; error?: string; message?: string };
           let pageOk: boolean;
           try {
-            const result = await rasterizePageWithRetry(originalPath, pageNumber);
+            const result = await rasterizePageWithRetry(originalPath, pageNumber, previousPageContext);
             pageOk = result.ok;
             pageData = result.data;
           } catch (fetchErr) {
@@ -741,6 +844,7 @@ export default {
           }
           pageExtractions.push({ pageNumber, extraction: pageData.extraction });
           pageOcrTexts.push(`--- page ${pageNumber} ---\n` + (pageData.ocr_raw_text ?? "(vision-routed page, no OCR text)"));
+          previousPageContext = describeTrailingItem(pageData.extraction);
           if (pageNumber === 1 && typeof pageData.page_count === "number" && pageData.page_count > 0) {
             pageCount = pageData.page_count;
           }

@@ -222,7 +222,37 @@ a guess.
 
 If a category has no entries, return an empty array for it — do not omit the key.`;
 
-const VISION_EXTRACTION_PROMPT = `You are extracting structured data directly from the attached image of one page of a resume. Read the document as printed — do not invent information that is not actually present in the image in some recognizable form. This may be one page of a multi-page resume; only extract what is actually visible on this page.
+// Page-boundary continuation context — real bug, confirmed against a real document (john.pirone's
+// resume, 2026-09-07 investigation, priority 3 of a real bug report): every page is extracted by a
+// completely independent call with zero knowledge of what came immediately before it. Confirmed
+// live, visually, against the actual rendered pages: a certifications bullet list split 9/1 across
+// a page boundary landed its 10th item as an orphaned needs_review entry with a self-referential
+// heading; a job's last 2 bullets landed on the following page as a headerless orphan; a "WORKPLACE
+// STRENGTHS" list split 3/2 across a boundary did the same to its trailing 2 bullets. The
+// ZERO-LOSS RULE already stops content from being silently dropped in this situation — it correctly
+// routes it to needs_review — but that's not the same as staying attached to the section it's
+// actually part of. This context block is the fix: the caller (upload-resume) threads forward a
+// short, factual summary of whatever was last on the PREVIOUS page, and this page's own model
+// (which can actually see whether ITS content plainly continues that) decides whether to reuse it.
+function buildContinuationContext(previousPageContext?: string | null): string {
+  if (!previousPageContext) return "";
+  return `
+
+CONTEXT FROM THE PREVIOUS PAGE (informational only — you are still extracting ONLY what's visible on
+THIS page's image/text; use this only to correctly attribute genuine continuations, never to invent
+content that isn't actually here): the previous page ended with ${previousPageContext}
+If THIS page's own content plainly begins as a direct continuation of that — e.g. one or more more
+bullet points in the same list with the same tone/topic, appearing before any new heading — extract
+it using the EXACT SAME heading/company/title given above (copied verbatim, not reworded) rather
+than leaving it unlabeled or inventing a new needs_review entry for it. If a certifications list was
+still open and this page's first item(s) match that same short "Name (issuer)" pattern with no new
+section header first, extract them as normal certifications entries, not freeform. If this page's
+opening content is clearly unrelated, or introduces its own new visible heading, treat it as
+entirely separate, exactly as you would any other content on the page.`;
+}
+
+function buildVisionExtractionPrompt(previousPageContext?: string | null): string {
+  return `You are extracting structured data directly from the attached image of one page of a resume. Read the document as printed — do not invent information that is not actually present in the image in some recognizable form. This may be one page of a multi-page resume; only extract what is actually visible on this page.
 
 Return ONLY a single JSON object, no prose before or after it, matching exactly this shape:
 
@@ -235,9 +265,10 @@ ${FIELD_DEFINITIONS}
   level) in a "summary" or "hobbies_other" freeform entry — do not silently drop it, and do not
   invent a precision level the graphic doesn't actually convey.
 
-${DATE_RULES}`;
+${DATE_RULES}${buildContinuationContext(previousPageContext)}`;
+}
 
-function buildOcrExtractionPrompt(ocrText: string): string {
+function buildOcrExtractionPrompt(ocrText: string, previousPageContext?: string | null): string {
   return `You are extracting structured data from the raw OCR text of one page of a resume. The OCR
 text below may contain recognition errors (misread characters, words glued together, minor
 garbling) — do your best to read through that, but do not invent information that is not actually
@@ -250,7 +281,7 @@ ${SCHEMA_SHAPE}
 
 ${FIELD_DEFINITIONS}
 
-${DATE_RULES}
+${DATE_RULES}${buildContinuationContext(previousPageContext)}
 
 --- BEGIN RESUME OCR TEXT ---
 ${ocrText}
@@ -286,7 +317,7 @@ function extractJsonFromClaudeResponse(claudeData: any): { parsed: unknown; pars
   }
 }
 
-async function runVisionExtraction(pngBase64: string): Promise<ExtractionResult> {
+async function runVisionExtraction(pngBase64: string, previousPageContext?: string | null): Promise<ExtractionResult> {
   if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not configured");
   const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -298,7 +329,7 @@ async function runVisionExtraction(pngBase64: string): Promise<ExtractionResult>
         role: "user",
         content: [
           { type: "image", source: { type: "base64", media_type: "image/png", data: pngBase64 } },
-          { type: "text", text: VISION_EXTRACTION_PROMPT },
+          { type: "text", text: buildVisionExtractionPrompt(previousPageContext) },
         ],
       }],
     }),
@@ -314,7 +345,7 @@ async function runVisionExtraction(pngBase64: string): Promise<ExtractionResult>
   return parsed;
 }
 
-async function runHaikuExtraction(ocrText: string): Promise<ExtractionResult> {
+async function runHaikuExtraction(ocrText: string, previousPageContext?: string | null): Promise<ExtractionResult> {
   if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not configured");
   const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -322,7 +353,7 @@ async function runHaikuExtraction(ocrText: string): Promise<ExtractionResult> {
     body: JSON.stringify({
       model: HAIKU_MODEL,
       max_tokens: 4096,
-      messages: [{ role: "user", content: buildOcrExtractionPrompt(ocrText) }],
+      messages: [{ role: "user", content: buildOcrExtractionPrompt(ocrText, previousPageContext) }],
     }),
   });
   if (!claudeRes.ok) {
@@ -453,7 +484,7 @@ export default {
       return new Response(null, { headers: corsHeaders });
     }
     try {
-      const { storage_path, page_number, target_dpi, force_vision } = await req.json();
+      const { storage_path, page_number, target_dpi, force_vision, previous_page_context } = await req.json();
       if (!storage_path || typeof storage_path !== "string") {
         return new Response(JSON.stringify({ ok: false, error: "storage_path_required" }), {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -608,7 +639,7 @@ export default {
 
       if (useVision) {
         const visionStart = Date.now();
-        extraction = await runVisionExtraction(bytesToB64(pngBytes));
+        extraction = await runVisionExtraction(bytesToB64(pngBytes), previous_page_context);
         extractionMs = Date.now() - visionStart;
       } else {
         const ocrStart = Date.now();
@@ -617,7 +648,7 @@ export default {
         ocrText = await runTesseract(rgba, renderedWidth, renderedHeight);
         ocrMs = Date.now() - ocrStart;
         const haikuStart = Date.now();
-        extraction = await runHaikuExtraction(ocrText);
+        extraction = await runHaikuExtraction(ocrText, previous_page_context);
         extractionMs = Date.now() - haikuStart;
       }
 
