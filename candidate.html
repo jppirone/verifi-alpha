@@ -2876,7 +2876,10 @@ a:hover{color:var(--color-accent)}
             <div class="field" style="flex:1;min-width:160px"><label>Degree</label><input class="input" value="{{ section.degree }}" sc-camel-on-change="{{ section.onDegree }}"></div>
             <div class="field" style="flex:1;min-width:160px"><label>Field of study</label><input class="input" value="{{ section.fieldOfStudy }}" sc-camel-on-change="{{ section.onFieldOfStudy }}"></div>
           </div>
-          <div class="field"><label>Institution</label><input class="input" value="{{ section.institution }}" sc-camel-on-change="{{ section.onInstitution }}"></div>
+          <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+            <div class="field" style="flex:1;min-width:160px"><label>Institution</label><input class="input" value="{{ section.institution }}" sc-camel-on-change="{{ section.onInstitution }}"></div>
+            <div class="field" style="flex:1;min-width:160px"><label>Location</label><input class="input" placeholder="City, ST" value="{{ section.location }}" sc-camel-on-change="{{ section.onLocation }}"></div>
+          </div>
           <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
             <div class="field" style="flex:1;min-width:140px"><label>Start date</label><input class="input" type="date" value="{{ section.startDate }}" sc-camel-on-change="{{ section.onStartDate }}"></div>
             <div class="field" style="flex:1;min-width:140px"><label>End date</label><input class="input" type="date" value="{{ section.endDate }}" sc-camel-on-change="{{ section.onEndDate }}"></div>
@@ -4451,7 +4454,7 @@ class Component extends DCLogic {
       })) },
       { key: 'education', label: 'Education', items: education.map(e => ({
         key: e.id,
-        label: [e.degree, e.institution].filter(Boolean).join(', ') + (e.end_date ? ` (Graduated ${this.monthYearLabel(e.end_date)})` : ''),
+        label: [e.degree, [e.institution, e.location].filter(Boolean).join(', ')].filter(Boolean).join(', ') + (e.end_date ? ` (Graduated ${this.monthYearLabel(e.end_date)})` : ''),
       })) },
       { key: 'skills', label: 'Skills' },
       { key: 'certifications', label: 'Certifications', items: certifications.map(c => ({
@@ -6642,7 +6645,7 @@ class Component extends DCLogic {
     const body = {
       candidate_id: this.state.resumeCandidateId,
       work_history: ex.work_history.map(w => ({ id: w.id, company: w.company, title: w.title, start_date: w.start_date, end_date: w.end_date, job_responsibilities: w.job_responsibilities })),
-      education: ex.education.map(x => ({ id: x.id, institution: x.institution, degree: x.degree, field_of_study: x.field_of_study, start_date: x.start_date, end_date: x.end_date })),
+      education: ex.education.map(x => ({ id: x.id, institution: x.institution, degree: x.degree, field_of_study: x.field_of_study, location: x.location, start_date: x.start_date, end_date: x.end_date })),
       // source_match is echoed back (not edited here) so confirm-resume-data can flag a
       // structurally-unmatched certification for staff regardless of the opt-in checkbox below —
       // see that function's own header (bug-2 defense-in-depth).
@@ -7414,10 +7417,12 @@ class Component extends DCLogic {
         s.resumeExtraction.education.forEach(x => blocks.push({
           kind: 'education', position: typeof x.position === 'number' ? x.position : Infinity,
           degree: x.degree || '', fieldOfStudy: x.field_of_study || '', institution: x.institution || '',
+          location: x.location || '',
           startDate: x.start_date || '', endDate: x.end_date || '',
           onDegree: (e) => this.updateResumeItem('education', x.id, 'degree', e.target.value),
           onFieldOfStudy: (e) => this.updateResumeItem('education', x.id, 'field_of_study', e.target.value),
           onInstitution: (e) => this.updateResumeItem('education', x.id, 'institution', e.target.value),
+          onLocation: (e) => this.updateResumeItem('education', x.id, 'location', e.target.value),
           onStartDate: (e) => this.updateResumeItem('education', x.id, 'start_date', e.target.value),
           onEndDate: (e) => this.updateResumeItem('education', x.id, 'end_date', e.target.value),
         }));

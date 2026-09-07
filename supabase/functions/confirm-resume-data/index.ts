@@ -30,7 +30,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 type WorkHistoryEdit = { id: string; company?: string; title?: string; start_date?: string; end_date?: string; job_responsibilities?: string };
-type EducationEdit = { id: string; institution?: string; degree?: string; field_of_study?: string; start_date?: string; end_date?: string };
+type EducationEdit = { id: string; institution?: string; degree?: string; field_of_study?: string; location?: string; start_date?: string; end_date?: string };
 // source_match is echoed back by the client (candidate.html already has it, straight from
 // get-resume-extraction) for the same reason section_type/heading are on FreeformEdit below — this
 // function only needs it to decide which certifications get the unconditional staff flag, not to
@@ -53,7 +53,7 @@ function claimForWorkHistory(w: WorkHistoryEdit): string {
 }
 function claimForEducation(e: EducationEdit): string {
   const dates = [e.start_date, e.end_date].filter(Boolean).join(" – ");
-  return [e.degree, e.field_of_study, e.institution, dates].filter(Boolean).join(", ");
+  return [e.degree, e.field_of_study, e.institution, e.location, dates].filter(Boolean).join(", ");
 }
 function claimForCertification(c: CertificationEdit): string {
   return [c.name, c.issuing_body, c.issue_date].filter(Boolean).join(", ");
@@ -124,6 +124,7 @@ export default {
       for (const e of education) {
         const { data, error } = await supabase.from("education_items").update({
           institution: e.institution ?? null, degree: e.degree ?? null, field_of_study: e.field_of_study ?? null,
+          location: e.location ?? null,
           start_date: dateOrNull(e.start_date), end_date: dateOrNull(e.end_date),
           candidate_confirmed: true, updated_at: new Date().toISOString(),
         }).eq("id", e.id).eq("candidate_id", candidate_id).select("id");

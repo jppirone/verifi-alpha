@@ -134,7 +134,7 @@ Return ONLY a single JSON object, no prose before or after it, matching exactly 
       "job_responsibilities": string, "extraction_confidence": "high" | "medium" | "low", "position": number }
   ],
   "education": [
-    { "institution": string, "degree": string, "field_of_study": string,
+    { "institution": string, "degree": string, "field_of_study": string, "location": string,
       "start_date": string, "end_date": string, "extraction_confidence": "high" | "medium" | "low", "position": number }
   ],
   "certifications": [
@@ -171,6 +171,12 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   and all belong in work_history. Don't treat different header wording as different categories.
 
 - education = DEGREE-GRANTING PROGRAMS ONLY (e.g. B.A., B.S., M.S., MBA, Ph.D., Associate's).
+
+- education's "location" field = the institution's city/state (or city/country outside the US) as
+  printed on the resume, near the institution's name, e.g. "Gainesville, FL". Copy it verbatim in
+  whatever form it appears — do not reformat, abbreviate, or expand it. Use an empty string "" when
+  no location is given for that institution — never infer or guess one from the institution's real-
+  world location; only what's actually printed counts.
 
 - certifications = standalone credentials: certifications, licenses, bootcamps, and similar
   short-form credentials that are NOT part of a degree program. A coding bootcamp goes in
@@ -262,7 +268,7 @@ If a category has no entries, return an empty array for it — do not omit the k
 
 type ExtractionResult = {
   work_history: Array<{ company: string; title: string; start_date: string; end_date: string; job_responsibilities: string; extraction_confidence: string; position?: number }>;
-  education: Array<{ institution: string; degree: string; field_of_study: string; start_date: string; end_date: string; extraction_confidence: string; position?: number }>;
+  education: Array<{ institution: string; degree: string; field_of_study: string; location?: string; start_date: string; end_date: string; extraction_confidence: string; position?: number }>;
   certifications: Array<{ name: string; issuing_body: string; issue_date: string; expiration_date: string; extraction_confidence: string; position?: number }>;
   skills: Array<string>;
   skills_position?: number | null;
