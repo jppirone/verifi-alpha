@@ -157,6 +157,19 @@ export default {
 
       // Opted-in categories → real staff-queue intake, one verification_items row per confirmed
       // item in that category.
+      //
+      // status: "New" is set explicitly on every push below, INCLUDING these three, even though
+      // "New" is also the column's own DB default — a real bug, caught live testing this exact
+      // change: Supabase's PostgREST batches one JS array into a single INSERT built from the
+      // UNION of keys across every object in the array. Once the needs_review push further down
+      // started setting `status` explicitly (it has to — "Needs Reconciliation", not "New"), that
+      // widened the batch's column list to include `status` for every row in the same call, and a
+      // row that doesn't supply a key POSTgREST includes in that widened column list gets an
+      // explicit NULL, not the column default — NULL only falls back to a DEFAULT when the column
+      // is omitted from the statement entirely, which stops being true once a sibling row in the
+      // same batch supplies it. That surfaced as a real NOT NULL violation on `status` the moment
+      // a needs_review row and an opted-in row were confirmed in the same request. Setting it
+      // explicitly here removes the dependency on batch-shape entirely.
       const today = new Date().toISOString().slice(0, 10);
       const queueInserts: Record<string, unknown>[] = [];
 
@@ -164,7 +177,7 @@ export default {
         for (const w of work_history) {
           const { data: idRow } = await supabase.rpc("nextval_verification_item_id");
           queueInserts.push({
-            id: idRow, candidate_id, type: "Job Experience", claim: claimForWorkHistory(w), received: today,
+            id: idRow, candidate_id, type: "Job Experience", claim: claimForWorkHistory(w), received: today, status: "New",
           });
         }
       }
@@ -172,7 +185,7 @@ export default {
         for (const e of education) {
           const { data: idRow } = await supabase.rpc("nextval_verification_item_id");
           queueInserts.push({
-            id: idRow, candidate_id, type: "Education", claim: claimForEducation(e), received: today,
+            id: idRow, candidate_id, type: "Education", claim: claimForEducation(e), received: today, status: "New",
           });
         }
       }
@@ -180,7 +193,7 @@ export default {
         for (const c of certifications) {
           const { data: idRow } = await supabase.rpc("nextval_verification_item_id");
           queueInserts.push({
-            id: idRow, candidate_id, type: "Certification", claim: claimForCertification(c), received: today,
+            id: idRow, candidate_id, type: "Certification", claim: claimForCertification(c), received: today, status: "New",
           });
         }
       }
