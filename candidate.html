@@ -2798,20 +2798,43 @@ a:hover{color:var(--color-accent)}
 
   <sc-if value="{{ resumeReadyToConfirm }}" hint-placeholder-val="{{ false }}">
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:var(--space-4);align-items:start">
-    <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3);position:sticky;top:88px">
-      <div class="card-kicker">Your uploaded document</div>
-      <div style="width:100%;aspect-ratio:8.5 / 11;background:#ffffff;border-radius:2px;box-shadow:var(--shadow-lg);overflow:auto">
+    <!-- Item 14 (2026-09-07 wiring audit): this panel used to be a plain <iframe> (for the browser's
+         own native PDF viewer) wrapped in a div that ALSO had its own overflow:auto and a height
+         fixed by aspect-ratio (tied to the panel's WIDTH, not the PDF's real content height) — two
+         nested scroll containers fighting each other is exactly the real bug reported: drag-to-scroll
+         inside the doc got captured by the OUTER div's limited, aspect-ratio-capped height instead of
+         the PDF's actual full height. Also had zero zoom capability — the iframe's native viewer
+         toolbar isn't reliably present/controllable across browsers, and wasn't visible in practice.
+         Replaced with the same PDF.js canvas-render approach already proven for the Views tab's own
+         PDF preview (renderPdfPreview) — real zoom (scale controls this app owns), and a single real
+         scroll container sized to a genuine fixed height, not nested inside another one. -->
+    <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3);height:calc(100vh - 160px);overflow:hidden">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
+        <div class="card-kicker">Your uploaded document</div>
         <sc-if value="{{ resumeIsPdf }}" hint-placeholder-val="{{ false }}">
-          <iframe src="{{ resumeOriginalUrl }}" style="width:100%;height:100%;border:0;display:block"></iframe>
-        </sc-if>
-        <sc-if value="{{ resumeIsImage }}" hint-placeholder-val="{{ true }}">
-          <img src="{{ resumeOriginalUrl }}" style="width:100%;display:block">
+          <div style="display:flex;align-items:center;gap:4px">
+            <button type="button" class="btn btn-ghost" style="font-size:13px;padding:2px 9px;line-height:1.4" sc-camel-on-click="{{ zoomOutPdf }}">−</button>
+            <span style="font-size:11px;color:var(--color-neutral-500);min-width:38px;text-align:center">{{ pdfZoomLabel }}</span>
+            <button type="button" class="btn btn-ghost" style="font-size:13px;padding:2px 9px;line-height:1.4" sc-camel-on-click="{{ zoomInPdf }}">+</button>
+            <button type="button" class="btn btn-ghost" style="font-size:11px;padding:2px 8px" sc-camel-on-click="{{ resetPdfZoom }}">Reset</button>
+          </div>
         </sc-if>
       </div>
-      <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">This is exactly what you uploaded, unmodified.</div>
+      <div style="flex:1;min-height:0;overflow:auto;background:#525659;border-radius:2px;box-shadow:var(--shadow-lg);padding:12px;display:flex;flex-direction:column;align-items:center">
+        <sc-if value="{{ resumeIsPdf }}" hint-placeholder-val="{{ false }}">
+          <div id="original-pdf-viewer-container" style="display:flex;flex-direction:column;align-items:center;gap:10px;width:100%"></div>
+        </sc-if>
+        <sc-if value="{{ resumeIsImage }}" hint-placeholder-val="{{ true }}">
+          <img src="{{ resumeOriginalUrl }}" style="max-width:100%;display:block;background:#fff">
+        </sc-if>
+      </div>
+      <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6;flex-shrink:0">This is exactly what you uploaded, unmodified.</div>
     </div>
 
-    <div style="display:flex;flex-direction:column;gap:var(--space-4)">
+    <!-- Independently scrollable, same fixed height as the document panel — no longer relying on
+         page-level scroll (or the old position:sticky) to keep both panels usable together; each
+         scrolls on its own, unaffected by the other. -->
+    <div style="display:flex;flex-direction:column;gap:var(--space-4);height:calc(100vh - 160px);overflow-y:auto;padding-right:4px">
       <sc-if value="{{ resumeHasSummary }}" hint-placeholder-val="{{ false }}">
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
         <div class="card-kicker">Summary</div>
@@ -5002,6 +5025,78 @@ class Component extends DCLogic {
     }
   }
 
+  // Item 14 (2026-09-07 wiring audit): the resumeConfirm screen's "Your uploaded document" panel,
+  // for a PDF upload — renders the REAL original file (resumeOriginalUrl, a signed storage URL),
+  // not the ATS-rebuild renderPdfPreview above renders for Views. Deliberately mirrors that
+  // function's own retry-until-container-exists / lazy-pdfjsLib-load pattern rather than
+  // introducing a second one, but loads via getDocument({ url }) instead of building bytes locally,
+  // and re-renders at this.state.pdfViewerScale (the new real zoom control) instead of a fixed 1.3.
+  renderOriginalPdfViewer() {
+    const s = this.state;
+    // Same source resumeIsPdf/resumeOriginalUrl (renderVals) derive from — no separate cached
+    // field, so this can never drift out of sync with what the screen is actually showing.
+    const doc = s.resumeExtraction && s.resumeExtraction.resume_document;
+    // extraction_status === 'extracted' matches resumeReadyToConfirm's own gate exactly — the
+    // container this method looks for below only exists in the DOM once that's true (still-polling
+    // states render a different screen entirely), so checking it here up front avoids an indefinite
+    // requestAnimationFrame retry loop for as long as a resume is still mid-processing.
+    if (!doc || doc.mime_type !== 'application/pdf' || !doc.original_signed_url || doc.extraction_status !== 'extracted') return;
+    const container = document.getElementById('original-pdf-viewer-container');
+    if (!container) { requestAnimationFrame(() => this.renderOriginalPdfViewer()); return; }
+    const url = doc.original_signed_url;
+    const scale = s.pdfViewerScale;
+    // Re-entrancy guard: zoom clicks can fire faster than a render completes, and this container
+    // is also re-checked on every resumeConfirm re-render (setState from typing in an unrelated
+    // field) — without this, overlapping renders would both append canvases into the same
+    // container, doubling the page count visually.
+    if (this._pdfViewerRenderKey === url + '|' + scale) return;
+    this._pdfViewerRenderKey = url + '|' + scale;
+    try {
+      container.innerHTML = '';
+      if (!window.pdfjsLib) {
+        const msg = document.createElement('div');
+        msg.style.cssText = 'color:#ccc;font-size:12px;padding:24px;text-align:center';
+        msg.textContent = 'Loading document…';
+        container.appendChild(msg);
+        setTimeout(() => { this._pdfViewerRenderKey = null; this.renderOriginalPdfViewer(); }, 300);
+        return;
+      }
+      if (window.pdfjsLib.GlobalWorkerOptions && !window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      }
+      window.pdfjsLib.getDocument({ url }).promise.then(pdf => {
+        // Stale response guard — the candidate may have zoomed again (or navigated away) while this
+        // fetch/parse was in flight.
+        if (this._pdfViewerRenderKey !== url + '|' + scale) return;
+        const renderPage = (pageNum) => {
+          pdf.getPage(pageNum).then(page => {
+            if (this._pdfViewerRenderKey !== url + '|' + scale) return;
+            const viewport = page.getViewport({ scale });
+            const canvas = document.createElement('canvas');
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            canvas.style.cssText = 'max-width:100%;box-shadow:0 0 0 1px rgba(0,0,0,0.2);background:#fff';
+            container.appendChild(canvas);
+            const ctx = canvas.getContext('2d');
+            page.render({ canvasContext: ctx, viewport });
+            if (pageNum < pdf.numPages) renderPage(pageNum + 1);
+          }).catch(e2 => { console.error('original pdf page render error', String(e2)); });
+        };
+        renderPage(1);
+      }).catch(e => {
+        console.error('original pdf getDocument error', String(e));
+        if (this._pdfViewerRenderKey !== url + '|' + scale) return;
+        container.innerHTML = '';
+        const err = document.createElement('div');
+        err.style.cssText = 'color:#ccc;font-size:12px;padding:24px;text-align:center';
+        err.textContent = 'Preview unavailable.';
+        container.appendChild(err);
+      });
+    } catch (e) {
+      console.error('renderOriginalPdfViewer sync error', String(e), e && e.stack);
+    }
+  }
+
   startVerificationGate(context) {
     const s = this.state;
     if (!s.crossValidationDone && !s.kycVerified) {
@@ -5108,6 +5203,7 @@ class Component extends DCLogic {
     resumeFileStaged: null, resumeFileError: null,
     resumeEmailVerificationId: null, resumeDocumentId: null,
     resumeCandidateId: null, resumeExtraction: null, resumeExtractionLoading: false,
+    pdfViewerScale: 1.3,
     resumeConfirmPending: false, resumeConfirmError: null,
     verificationFilter: 'active', upgradeModalOpen: false, upgradeReturnTab: null, upgradeReturnTarget: null,
     verificationItems: [], verificationItemsLoading: false, verificationItemsError: null, verificationItemsLoadedFor: null,
@@ -6554,6 +6650,11 @@ class Component extends DCLogic {
     this.setState({ resumeExtractionLoading: false, resumeExtraction: data }, () => {
       this.refreshCzCategoryDefaults();
       this.seedSkillItemsIfBlank();
+      // Item 14: this is the one real choke point both resumeConfirm entry paths (a fresh signup
+      // via applySignupConfirmation, and a returning candidate via checkResumeFlowIncomplete) funnel
+      // through — renderOriginalPdfViewer no-ops on its own if the extracted document isn't a PDF or
+      // the container isn't mounted yet (retries via rAF), so this is safe to call unconditionally.
+      this.renderOriginalPdfViewer();
     });
     const status = data.resume_document.extraction_status;
     if (status === 'pending' || status === 'ocr_done') {
@@ -7366,11 +7467,15 @@ class Component extends DCLogic {
       checkResumeAgain: () => this.checkResumeAgain(),
       skipResumeConfirm: () => this.skipResumeConfirm(),
       resumeOriginalUrl: (s.resumeExtraction && s.resumeExtraction.resume_document && s.resumeExtraction.resume_document.original_signed_url) || '',
-      // A PDF can't render via <img> the way a photo can — the confirm screen below picks an
-      // <iframe> (browser's native PDF viewer) or <img> based on this, rather than always assuming
-      // an image the way it did before PDF uploads existed.
+      // A PDF can't render via <img> the way a photo can — the confirm screen below picks a
+      // PDF.js canvas render (see renderOriginalPdfViewer) or a plain <img> based on this, rather
+      // than always assuming an image the way it did before PDF uploads existed.
       resumeIsPdf: !!(s.resumeExtraction && s.resumeExtraction.resume_document && s.resumeExtraction.resume_document.mime_type === 'application/pdf'),
       resumeIsImage: !!(s.resumeExtraction && s.resumeExtraction.resume_document && s.resumeExtraction.resume_document.mime_type !== 'application/pdf'),
+      pdfZoomLabel: Math.round(s.pdfViewerScale / 1.3 * 100) + '%',
+      zoomInPdf: () => this.setState(st => ({ pdfViewerScale: Math.min(3.25, +(st.pdfViewerScale + 0.325).toFixed(3)) }), () => this.renderOriginalPdfViewer()),
+      zoomOutPdf: () => this.setState(st => ({ pdfViewerScale: Math.max(0.455, +(st.pdfViewerScale - 0.325).toFixed(3)) }), () => this.renderOriginalPdfViewer()),
+      resetPdfZoom: () => this.setState({ pdfViewerScale: 1.3 }, () => this.renderOriginalPdfViewer()),
       resumeHasSummary: !!(s.resumeExtraction && s.resumeExtraction.freeform.some(f => f.section_type === 'summary')),
       resumeSummaryContent: (() => {
         const f = s.resumeExtraction && s.resumeExtraction.freeform.find(f => f.section_type === 'summary');
