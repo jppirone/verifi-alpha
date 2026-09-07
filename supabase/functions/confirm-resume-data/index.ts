@@ -31,7 +31,12 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 type WorkHistoryEdit = { id: string; company?: string; title?: string; start_date?: string; end_date?: string; job_responsibilities?: string };
 type EducationEdit = { id: string; institution?: string; degree?: string; field_of_study?: string; start_date?: string; end_date?: string };
-type CertificationEdit = { id: string; name?: string; issuing_body?: string; issue_date?: string; expiration_date?: string };
+// source_match is echoed back by the client (candidate.html already has it, straight from
+// get-resume-extraction) for the same reason section_type/heading are on FreeformEdit below — this
+// function only needs it to decide which certifications get the unconditional staff flag, not to
+// validate anything. See the queueInserts loop for why an unmatched cert overrides opt-in rather
+// than needing it.
+type CertificationEdit = { id: string; name?: string; issuing_body?: string; issue_date?: string; expiration_date?: string; source_match?: string };
 // section_type/heading are echoed back by the client (candidate.html already has them, straight
 // from get-resume-extraction) rather than re-fetched here — this function only needs them to decide
 // which freeform rows are needs_review for the staff-queue flag below, not to validate anything.
@@ -189,13 +194,27 @@ export default {
           });
         }
       }
-      if (opt_in.certifications) {
-        for (const c of certifications) {
-          const { data: idRow } = await supabase.rpc("nextval_verification_item_id");
-          queueInserts.push({
-            id: idRow, candidate_id, type: "Certification", claim: claimForCertification(c), received: today, status: "New",
-          });
-        }
+      // Certifications: one queue row per item, EXCEPT this is the one category where a real
+      // structural signal can override plain opt-in — see certification_source_match's own
+      // migration for the full reasoning (bug-2 defense-in-depth). An item whose source_match is
+      // 'unmatched' (its name isn't traceable, even loosely, to anything in the document's own OCR
+      // text) gets flagged UNCONDITIONALLY, the same non-blocking-but-flagged pattern already used
+      // for needs_review below — real fabrication risk doesn't become less real just because the
+      // candidate happened not to check the "submit for verification" box for that one item. A
+      // matched or not-independently-checkable ('matched'/'not_checked'/null) item follows the
+      // ordinary opt-in rule exactly as before. Each certification contributes AT MOST one row
+      // either way — never both — so opting in never double-inserts.
+      for (const c of certifications) {
+        const unmatched = c.source_match === "unmatched";
+        if (!unmatched && !opt_in.certifications) continue;
+        const { data: idRow } = await supabase.rpc("nextval_verification_item_id");
+        queueInserts.push(unmatched ? {
+          id: idRow, candidate_id, type: "Certification", claim: claimForCertification(c), received: today,
+          status: "Needs Reconciliation",
+          internal_note: `Auto-flagged: this certification's name did not fuzzy-match anything in the candidate's own uploaded document (OCR'd text) — see certification_source_match. Not proof of fabrication (OCR coverage has real, documented gaps: vision-routed pages have no OCR text at all), but real enough to warrant a human look before treating it as verified. Name as extracted: ${JSON.stringify(c.name || "")}`,
+        } : {
+          id: idRow, candidate_id, type: "Certification", claim: claimForCertification(c), received: today, status: "New",
+        });
       }
 
       // needs_review → staff visibility, unconditional (NOT gated by any opt_in flag above).

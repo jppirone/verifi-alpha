@@ -300,6 +300,12 @@ export default {
         p_skills: parsed.skills,
         p_skills_position: parsed.skills_position ?? null,
         p_freeform: parsed.freeform,
+        // This path only ever runs once real OCR text exists — extraction_status must already be
+        // 'ocr_done' to reach here at all (see the check above) — so doc.ocr_raw_text (already
+        // fetched) is real, not a guess, and already the exact same text this document's own
+        // extraction was performed against. Bug-2 defense-in-depth: see the migration that added
+        // certification_source_match for why this is being threaded through now.
+        p_ocr_text: doc.ocr_raw_text,
       });
       if (rpcErr) {
         await supabase.from("resume_documents").update({ extraction_status: "failed" }).eq("id", resume_document_id);

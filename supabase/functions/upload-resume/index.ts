@@ -703,9 +703,20 @@ export default {
       if (isPdf) {
         console.log(`upload-resume: ${docId} is a PDF, routing through rasterize-pdf-page`);
         const pageExtractions: Array<{ pageNumber: number; extraction: ExtractionResult }> = [];
+        // Real gap this closes (2026-09-07, bug-2 defense-in-depth investigation): rasterize-pdf-page
+        // returns ocr_raw_text in its own per-page response, but nothing here ever read it — the
+        // only thing pulled off pageData was `.extraction`. For a multi-page PDF (the real, common
+        // case — this is exactly the document that surfaced bug 2), that meant no OCR text existed
+        // ANYWHERE in the database once extraction finished, confirmed directly against the deployed
+        // code before writing this. Collected here, per page, in page order; joined with a page
+        // marker (not just concatenated blind) so a human or a future tool can still tell where a
+        // given stretch of text came from. A vision-routed page contributes nothing here (there is
+        // no OCR step for vision, by architecture, not an oversight) — its marker is still emitted so
+        // the gap in coverage is visible in the stored text itself, not silently absent.
+        const pageOcrTexts: string[] = [];
         let pageCount = 1;
         for (let pageNumber = 1; pageNumber <= pageCount && pageNumber <= MAX_PDF_PAGES; pageNumber++) {
-          let pageData: { ok?: boolean; page_count?: number; extraction?: unknown; code?: string; error?: string; message?: string };
+          let pageData: { ok?: boolean; page_count?: number; extraction?: unknown; ocr_raw_text?: string; code?: string; error?: string; message?: string };
           let pageOk: boolean;
           try {
             const result = await rasterizePageWithRetry(originalPath, pageNumber);
@@ -729,12 +740,14 @@ export default {
             }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
           }
           pageExtractions.push({ pageNumber, extraction: pageData.extraction });
+          pageOcrTexts.push(`--- page ${pageNumber} ---\n` + (pageData.ocr_raw_text ?? "(vision-routed page, no OCR text)"));
           if (pageNumber === 1 && typeof pageData.page_count === "number" && pageData.page_count > 0) {
             pageCount = pageData.page_count;
           }
         }
 
         const merged = mergeExtractions(pageExtractions);
+        const combinedOcrText = pageOcrTexts.join("\n\n");
         const { error: pdfRpcErr } = await supabase.rpc("insert_resume_extraction", {
           p_resume_document_id: docId,
           p_candidate_id: docRow.candidate_id,
@@ -744,6 +757,7 @@ export default {
           p_skills: merged.skills,
           p_skills_position: merged.skills_position ?? null,
           p_freeform: merged.freeform,
+          p_ocr_text: combinedOcrText,
         });
         if (pdfRpcErr) {
           await supabase.from("resume_documents").update({ extraction_status: "failed" }).eq("id", docId);
@@ -751,6 +765,14 @@ export default {
             status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
+
+        // ocr_raw_text: previously written only by the single-image tesseract branch below (see
+        // that branch's own update() call) — never for a PDF. Written here now too, real retained
+        // value beyond just feeding certification_source_match above: an auditable record of what
+        // the pipeline actually read off the document, the same reason it was already kept for
+        // images. Best-effort — a failure here doesn't fail the upload; the extraction itself
+        // already succeeded and was already inserted above.
+        await supabase.from("resume_documents").update({ ocr_raw_text: combinedOcrText }).eq("id", docId);
 
         const { error: pdfStatusErr } = await supabase
           .from("resume_documents")
@@ -798,6 +820,12 @@ export default {
           p_skills: extraction.skills,
           p_skills_position: extraction.skills_position ?? null,
           p_freeform: extraction.freeform,
+          // Explicit null, not omitted: this path is vision-only by construction (that's the whole
+          // reason it exists — see this branch's own header), so there is no OCR text and never
+          // will be for a document that came through here. certification_source_match's own
+          // contract treats null as "not_checked," an honest "couldn't verify either way," not a
+          // false "unmatched" — see the migration that introduced it.
+          p_ocr_text: null,
         });
         if (rpcErr) {
           await supabase.from("resume_documents").update({ extraction_status: "failed" }).eq("id", docId);

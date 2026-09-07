@@ -6360,7 +6360,10 @@ class Component extends DCLogic {
       candidate_id: this.state.resumeCandidateId,
       work_history: ex.work_history.map(w => ({ id: w.id, company: w.company, title: w.title, start_date: w.start_date, end_date: w.end_date, job_responsibilities: w.job_responsibilities })),
       education: ex.education.map(x => ({ id: x.id, institution: x.institution, degree: x.degree, field_of_study: x.field_of_study, start_date: x.start_date, end_date: x.end_date })),
-      certifications: ex.certifications.map(c => ({ id: c.id, name: c.name, issuing_body: c.issuing_body, issue_date: c.issue_date, expiration_date: c.expiration_date })),
+      // source_match is echoed back (not edited here) so confirm-resume-data can flag a
+      // structurally-unmatched certification for staff regardless of the opt-in checkbox below —
+      // see that function's own header (bug-2 defense-in-depth).
+      certifications: ex.certifications.map(c => ({ id: c.id, name: c.name, issuing_body: c.issuing_body, issue_date: c.issue_date, expiration_date: c.expiration_date, source_match: c.source_match })),
       skills: ex.skills.map(s => ({ id: s.id, skill_text: s.skill_text })),
       // section_type/heading are echoed back (not edited here) so confirm-resume-data can flag
       // needs_review rows for staff without a second round-trip to look up what kind of freeform
