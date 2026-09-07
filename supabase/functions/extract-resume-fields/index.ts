@@ -297,9 +297,28 @@ export default {
         });
       }
 
+      // Item 1 (2026-09-08 regression session): race-window fix, not a guess — reproduced live
+      // against two real accounts (jpirone@yahoo.com, john.pirone@gmail.com), both permanently
+      // stuck on confirm-resume-data with "no matching row for this candidate" because every one
+      // of their work_history_items/etc. rows had candidate_id NULL despite resume_documents'
+      // own candidate_id being correctly set. Root cause: `doc.candidate_id` above was read ONCE,
+      // before the slow Claude call this function just made — if the candidate confirmed their
+      // signup email (triggering confirm-verification's one-time backfill_resume_pipeline_
+      // candidate_id RPC) DURING that call, the backfill runs, finds none of these rows to fix yet
+      // (they don't exist until the insert below), and sets resume_documents.candidate_id — but
+      // this function then inserts using the STALE null it already captured. Nothing ever re-runs
+      // that backfill afterward, so the corruption is permanent. Re-reading candidate_id here,
+      // immediately before the insert, shrinks that window from several seconds (a real LLM call)
+      // to a single fast query — doesn't require doc's other already-fetched fields, so this one
+      // extra read is cheap and isolated. See get-resume-extraction's own self-heal for the other
+      // half of this fix: repairing accounts already corrupted before this existed.
+      const { data: freshDoc } = await supabase
+        .from("resume_documents").select("candidate_id").eq("id", resume_document_id).maybeSingle();
+      const currentCandidateId = freshDoc?.candidate_id ?? doc.candidate_id;
+
       const { error: rpcErr } = await supabase.rpc("insert_resume_extraction", {
         p_resume_document_id: resume_document_id,
-        p_candidate_id: doc.candidate_id,
+        p_candidate_id: currentCandidateId,
         p_work_history: parsed.work_history,
         p_education: parsed.education,
         p_certifications: parsed.certifications,

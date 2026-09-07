@@ -858,9 +858,20 @@ export default {
 
         const merged = mergeExtractions(pageExtractions);
         const combinedOcrText = pageOcrTexts.join("\n\n");
+        // Item 1 (2026-09-08 regression session): race-window fix — see extract-resume-fields' own
+        // header for the full mechanism, reproduced live against two real accounts. docRow.candidate_id
+        // was captured once, at the top of this function, before the per-page rasterizePageWithRetry
+        // loop above — several real, sequential network round-trips for a multi-page resume, easily
+        // several seconds. If the candidate confirmed their signup email during that window,
+        // confirm-verification's one-time backfill would have already set resume_documents.candidate_id
+        // (finding no child rows yet to fix, since they don't exist until the insert below) — using
+        // the stale captured value here would permanently orphan every row this call is about to
+        // insert. Re-reading it fresh, immediately before the insert, shrinks that window to one query.
+        const { data: freshDocPdf } = await supabase
+          .from("resume_documents").select("candidate_id").eq("id", docId).maybeSingle();
         const { error: pdfRpcErr } = await supabase.rpc("insert_resume_extraction", {
           p_resume_document_id: docId,
-          p_candidate_id: docRow.candidate_id,
+          p_candidate_id: freshDocPdf?.candidate_id ?? docRow.candidate_id,
           p_work_history: merged.work_history,
           p_education: merged.education,
           p_certifications: merged.certifications,
@@ -921,9 +932,15 @@ export default {
           });
         }
 
+        // Item 1 (2026-09-08 regression session): same race-window fix as the PDF branch above and
+        // extract-resume-fields — docRow.candidate_id was captured before the vision call just made
+        // (a real, network-bound Claude call), which is exactly the window a fast signup-email
+        // confirmation could land in and permanently orphan every row about to be inserted.
+        const { data: freshDocVision } = await supabase
+          .from("resume_documents").select("candidate_id").eq("id", docId).maybeSingle();
         const { error: rpcErr } = await supabase.rpc("insert_resume_extraction", {
           p_resume_document_id: docId,
-          p_candidate_id: docRow.candidate_id,
+          p_candidate_id: freshDocVision?.candidate_id ?? docRow.candidate_id,
           p_work_history: extraction.work_history,
           p_education: extraction.education,
           p_certifications: extraction.certifications,

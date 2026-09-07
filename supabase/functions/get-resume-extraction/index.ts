@@ -104,6 +104,27 @@ export default {
         if (!healErr) effectiveStatus = "failed";
       }
 
+      // Item 1 (2026-09-08 regression session) self-heal — the other half of this fix, alongside
+      // the race-window shrink in extract-resume-fields/upload-resume (see either's own header for
+      // the full mechanism): reproduced live against two real accounts, both permanently stuck on
+      // confirm-resume-data because their work_history_items/education_items/certification_items/
+      // skill_items/candidate_freeform_sections rows had candidate_id NULL despite THIS resume_
+      // documents row's own candidate_id being real (the query above only returns rows where it
+      // is). `doc` is reached here only when candidate_id already matches the caller's real
+      // candidate_id, so it's always correct to backfill any of this specific resume's children
+      // still sitting at candidate_id IS NULL — same self-heal-on-read philosophy already
+      // established above for stale extraction_status, applied to the other real corruption this
+      // session found. Best-effort: a failure here doesn't block the read (the child rows returned
+      // below are used to submit confirm-resume-data next, not read directly for correctness), and
+      // running this on every read is cheap — each PATCH is a no-op once already healed.
+      await Promise.all([
+        supabase.from("work_history_items").update({ candidate_id }).eq("resume_document_id", doc.id).is("candidate_id", null),
+        supabase.from("education_items").update({ candidate_id }).eq("resume_document_id", doc.id).is("candidate_id", null),
+        supabase.from("certification_items").update({ candidate_id }).eq("resume_document_id", doc.id).is("candidate_id", null),
+        supabase.from("skill_items").update({ candidate_id }).eq("resume_document_id", doc.id).is("candidate_id", null),
+        supabase.from("candidate_freeform_sections").update({ candidate_id }).eq("resume_document_id", doc.id).is("candidate_id", null),
+      ]).catch(() => {});
+
       const [workHistory, education, certifications, skills, freeform, signed] = await Promise.all([
         supabase.from("work_history_items").select("*").eq("resume_document_id", doc.id).order("start_date", { ascending: false }),
         supabase.from("education_items").select("*").eq("resume_document_id", doc.id).order("start_date", { ascending: false }),
