@@ -4674,7 +4674,17 @@ class Component extends DCLogic {
       skills: true,
       certifications: allTrue('certifications'),
       misc: true,
-      summaryId: 'sum-generic',
+      // Item 4 (2026-09-08 regression session): this used to be the literal string
+      // 'sum-generic' -- a placeholder fixture id left over from before Item B's real
+      // candidate_summary_versions backend existed. It never matched any real saved
+      // summary's real (server-issued) id, so getSummaryText's old fallback silently
+      // substituted the generic summary into the generated document for every target,
+      // regardless of what a candidate picked, until they happened to explicitly change
+      // that specific target's selection. null means "not yet customized" -- see
+      // seedCzSummaryDefaults, which fills this in with the real generic summary's own id
+      // the first time real summaries are available, and getSummaryText, which now treats
+      // null and '' (a real, explicit "No summary" choice) differently.
+      summaryId: null,
     };
     return { ...base, ...(this.PARTNER_DEFAULT_RULES[partnerKey] || {}) };
   }
@@ -4745,7 +4755,7 @@ class Component extends DCLogic {
       savedSummariesError: null,
       savedSummaries: data.summaries || [],
       savedSummariesLoadedFor: candidateId,
-    });
+    }, () => this.seedCzSummaryDefaults());
   }
 
   roleDescription(key) {
@@ -4763,14 +4773,54 @@ class Component extends DCLogic {
     setTimeout(() => { if (this._cmFlashCounter === id) this.setState({ cmFlashField: null, cmFlashFading: false }); }, 1500);
   }
 
+  // Item 4 (2026-09-08 regression session): the old version treated "id doesn't match any
+  // real saved summary" as one case, which silently conflated two very different
+  // situations -- a target that was never customized (summaryId still at its placeholder
+  // default) and a candidate's real, explicit "No summary" choice (summaryId === '', from
+  // the <option value=""> in the Customization tab's dropdown) -- both fell through to the
+  // same generic-summary fallback, so explicitly choosing "No summary" had no visible
+  // effect on the generated document. null now means "never customized" (falls back to the
+  // generic summary, same as before); '' means a real, explicit "No summary" choice and is
+  // now honored (returns empty, no fallback). A real id that no longer matches anything
+  // (e.g. that summary version was deleted after being selected) also falls back to the
+  // generic summary rather than silently producing an empty document.
   getSummaryText(target) {
     const s = this.state;
     const list = s.savedSummaries || [];
-    const id = target && s.customization[target] ? s.customization[target].summaryId : '';
-    const found = list.find(su => su.id === id);
-    if (found) return found.content;
+    const custom = target && s.customization[target];
+    const id = custom ? custom.summaryId : null;
+    if (id === '') return '';
+    if (id) {
+      const found = list.find(su => su.id === id);
+      if (found) return found.content;
+    }
     const generic = list.find(su => su.partner_key === '');
     return generic ? generic.content : '';
+  }
+
+  // Item 4 (2026-09-08 regression session): companion to the summaryId default fix above --
+  // seeds every target's summaryId to the real generic (no-partner) summary's own id, the
+  // first time real summaries are available, same "seed once real data arrives, only if
+  // still untouched" convention already used by refreshCzCategoryDefaults/
+  // seedSkillItemsIfBlank elsewhere in this file. Only touches targets still at null (never
+  // customized) -- never overwrites a real explicit choice, including '' ("No summary").
+  seedCzSummaryDefaults() {
+    const generic = (this.state.savedSummaries || []).find(su => su.partner_key === '');
+    if (!generic) return;
+    this.setState(st => {
+      const next = {};
+      let changed = false;
+      for (const key of Object.keys(st.customization)) {
+        const entry = st.customization[key];
+        if (entry && entry.summaryId == null) {
+          next[key] = { ...entry, summaryId: generic.id };
+          changed = true;
+        } else {
+          next[key] = entry;
+        }
+      }
+      return changed ? { customization: next } : {};
+    });
   }
 
   setCustomizeSummaryId(id) {
@@ -4846,7 +4896,11 @@ class Component extends DCLogic {
     this.setState(st => {
       const cz = {};
       Object.keys(st.customization).forEach(k => {
-        cz[k] = st.customization[k].summaryId === id ? { ...st.customization[k], summaryId: '' } : st.customization[k];
+        // Item 4 (2026-09-08 regression session): null here, not '' -- a target whose
+        // assigned summary just got deleted out from under it should gracefully fall back
+        // to the generic summary (via seedCzSummaryDefaults, triggered by the loadSummaries
+        // call below), not silently go blank the way an explicit "No summary" choice would.
+        cz[k] = st.customization[k].summaryId === id ? { ...st.customization[k], summaryId: null } : st.customization[k];
       });
       return { customization: cz };
     });
@@ -5380,7 +5434,11 @@ class Component extends DCLogic {
     this.setState(st => ({
       customization: { ...st.customization, [target]: this.defaultCzCategorySet(target) },
       czFlashField: null, czResetFlash: true, czResetFading: false,
-    }));
+      // Item 4 (2026-09-08 regression session): defaultCzCategorySet's summaryId is null
+      // ("not customized") -- without re-seeding here, the dropdown would show "No summary"
+      // right after a reset while the generated document actually still falls back to the
+      // real generic summary, a real display/behavior mismatch a candidate would notice.
+    }), () => this.seedCzSummaryDefaults());
     setTimeout(() => { if (this._czFlashCounter === id) this.setState({ czResetFading: true }); }, 900);
     setTimeout(() => { if (this._czFlashCounter === id) this.setState({ czResetFlash: false, czResetFading: false }); }, 1500);
   }
@@ -7744,7 +7802,15 @@ class Component extends DCLogic {
       setVisAll: () => this.setState({ visibility: 'all' }),
       tabIsViews: s.accountTab === 'views',
       tabViewsClass: s.accountTab === 'views' ? 'btn-secondary' : 'btn-ghost',
-      selectTabViews: () => this.guardedNav(() => this.setState({ accountTab: 'views' }, () => this.renderPdfPreview())),
+      // Item 4 (2026-09-08 regression session): ensureSummariesLoaded used to be wired only
+      // to Content Manager's own tab-select handler -- a candidate who went straight to
+      // Views (a normal path; nothing requires visiting Content Manager first) never
+      // triggered the real summaries load at all, so savedSummaries stayed [] and the
+      // generated document's summary silently fell back to nothing (or, before the
+      // seedCzSummaryDefaults fix above, to whatever the summaryId placeholder happened to
+      // resolve to). Same real-dead-end pattern already fixed for resumeExtraction via
+      // ensureResumeExtractionLoaded, applied here.
+      selectTabViews: () => this.guardedNav(() => { this.ensureSummariesLoaded(); this.setState({ accountTab: 'views' }, () => this.renderPdfPreview()); }),
       downloadPdf: () => {
         if (!this._pdfBlobUrl) return;
         const a = document.createElement('a');
@@ -7757,7 +7823,12 @@ class Component extends DCLogic {
       partnerOptions: this.PARTNERS,
       tabIsCustomization: s.accountTab === 'customization',
       tabCustomizationClass: s.accountTab === 'customization' ? 'btn-secondary' : 'btn-ghost',
-      selectTabCustomization: () => this.guardedNav(() => this.setState({ accountTab: 'customization' })),
+      // Item 4 (2026-09-08 regression session): same ensureSummariesLoaded gap as
+      // selectTabViews above -- a candidate landing on Customization directly would see the
+      // per-target summary dropdown offering only "No summary" (summaryOptionsForTarget
+      // filters off the still-empty savedSummaries) with no way to know real saved
+      // summaries existed until they happened to visit Content Manager first.
+      selectTabCustomization: () => this.guardedNav(() => { this.ensureSummariesLoaded(); this.setState({ accountTab: 'customization' }); }),
       customizeTarget: s.customizeTarget,
       setCustomizeTarget: (e) => {
         const val = e.target.value;
