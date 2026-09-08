@@ -8,15 +8,16 @@ const corsHeaders = {
 };
 
 // Item C (2026-09-08 session): read-only tier check, keyed by candidate_id alone — no session
-// token required. Built for the signup-time paid-tier pop-up checkout (see
-// startSignupPaidCheckout's own header in candidate.html): that flow is deliberately a pop-up, not
-// a full-page redirect, so the main window's own component instance — and resumeCandidateId — is
-// never destroyed, and it can't reuse resolve-session's own re-check loop the way
-// handleCheckoutReturn does post-signup (resolve-session needs a session token; this needs only the
-// candidate_id already in memory there). This is the same real-webhook-race concern as that
-// function's own header — test-stripe-webhook fires independently of the pop-up's redirect back, no
-// ordering guarantee — so the signup flow polls this after the pop-up reports success, rather than
-// trusting the pop-up's own redirect alone.
+// token required. Originally built for the signup-time paid-tier pop-up checkout, which couldn't
+// reuse resolve-session's own re-check loop (resolve-session needs a session token; a pop-up-based
+// flow only ever has the candidate_id in memory). candidate.html no longer calls this: that flow was
+// switched from a pop-up to a full-page redirect (see startRealCheckout's own header) once it turned
+// out a session token genuinely does exist by that point in signup, so it now reuses
+// resolve-session's own retry loop directly, same as every other real checkout return in this file.
+// Left deployed as a small, real, standalone read-only utility — useful for exactly this kind of
+// live verification independent of a session (candidate_id in, tier out), and a plausible template
+// for employer.html's own future payment-paths session if it ends up needing the same id-only shape
+// keyed by whatever its own id is.
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
