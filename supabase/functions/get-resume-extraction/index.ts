@@ -20,21 +20,38 @@ const corsHeaders = {
 // plus every draft row tied to it.
 //
 // extraction_status is returned as-is EXCEPT for one real, confirmed failure mode: a Supabase
-// Edge Function CPU-time kill (real limit, confirmed live against a real resume photo tonight —
-// 2 seconds CPU time, uniform across every plan tier, verified against Supabase's own current
-// docs rather than assumed) terminates the isolate directly. That bypasses upload-resume's own
+// Edge Function CPU-time kill terminates the isolate directly. That bypasses upload-resume's own
 // catch block entirely, so the row is left at 'pending' (or extract-resume-fields' equivalent
 // kill leaves it at 'ocr_done') forever — no exception was ever thrown for anything to catch.
 // There is no reachable path back to the client from a dead isolate, so nothing upstream can mark
 // this row failed at the moment it happens. This function is the one place that DOES get a chance
-// to notice: if a document has sat in 'pending' or 'ocr_done' past STALE_SECONDS, no real run
-// legitimately takes that long (every successful OCR+extraction run tonight finished in single-digit
-// seconds), so it's treated as dead and corrected to 'failed' right here, in the database, not just
-// in this response — an honest self-heal on read, not a client-side illusion of failure while the
-// stored row still claims 'pending'. This is what turns "candidate reaches the confirm screen and
-// sees 'still processing' forever with no way to know it already died" into a real, accurate
-// failed state they can act on.
-const STALE_SECONDS = 60;
+// to notice: if a document has sat in 'pending' or 'ocr_done' past STALE_SECONDS, it's treated as
+// dead and corrected to 'failed' right here, in the database, not just in this response — an
+// honest self-heal on read, not a client-side illusion of failure while the stored row still
+// claims 'pending'.
+//
+// Item 1 (2026-09-08 regression session, SEV0): STALE_SECONDS was 60, set from "every successful
+// OCR+extraction run tonight finished in single-digit seconds" — that was true for the small
+// tesseract-OCR image path this was originally tuned against, but PDFs (upload-resume's PDF
+// branch) run the WHOLE pipeline synchronously in the same request — one rasterize-pdf-page call
+// per page, each a real network-bound vision/OCR call, merged and inserted before this row ever
+// leaves 'pending' — and never pass through 'ocr_done' at all. Reproduced live, directly timed,
+// against both real test documents this session: a 2-page PDF ("726," previously verified fast
+// and reliable) took 86.7s end-to-end; a 4-page PDF ("626") took 39.5s on one run — real variance
+// tied to concurrent platform load (see upload-resume's own RASTERIZE RETRY CONTRACT comment for
+// why), not a fixed per-document number. At 60s, this self-heal was firing WHILE the real
+// upload-resume invocation was still genuinely in flight and about to succeed: it flipped the row
+// to 'failed' in the database, the candidate.html poll immediately showed the "we couldn't read
+// that document" screen and (see loadResumeExtraction) stopped polling entirely, and moments later
+// the real upload-resume call finished, inserted the real extracted rows, and overwrote
+// extraction_status back to 'extracted' — correctly, in the database — but with no one left
+// listening. 240s keeps real headroom (2.5x+) above every real timing measured so far while still
+// bounding a genuinely dead isolate to a few minutes rather than forever. This alone doesn't fully
+// close the race for an even slower document — see candidate.html's loadResumeExtraction for the
+// other half of this fix: the client no longer stops polling on 'failed', so even if this
+// threshold is still someday too short, a false positive self-corrects instead of stranding the
+// candidate on a dead-end screen.
+const STALE_SECONDS = 240;
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;

@@ -6045,19 +6045,28 @@ class Component extends DCLogic {
     }
   }
 
-  // Real, confirmed failure mode (not hypothetical): a Supabase Edge Function CPU-time kill (2s
-  // CPU time, uniform across every plan tier — verified live against a real resume photo tonight,
-  // then re-confirmed against Supabase's own current docs rather than assumed) terminates the
-  // function's isolate directly. No exception is thrown back to this fetch() — the connection
-  // just never resolves — so without a client-side ceiling, this call would hang forever with the
-  // request itself never settling. 45s is generous relative to every real run tonight (successful
-  // OCR+extraction finished in single-digit seconds) while still bounding it. This is one half of
-  // the fix — the other half is get-resume-extraction's own stale-row self-heal, and the piece
-  // that actually surfaces either of those to the candidate is resumeConfirm's own polling (see
-  // startResumePolling) reading that self-heal back, not this call's own success/failure — this
-  // function runs in the background, often before the candidate has even opened the confirm
-  // screen, so nothing it observes about its own outcome is guaranteed to still be relevant by the
-  // time they do.
+  // Real, confirmed failure mode (not hypothetical): a Supabase Edge Function CPU-time kill
+  // terminates the function's isolate directly. No exception is thrown back to this fetch() — the
+  // connection just never resolves — so without a client-side ceiling, this call would hang
+  // forever with the request itself never settling. This is one half of the fix — the other half
+  // is get-resume-extraction's own stale-row self-heal, and the piece that actually surfaces
+  // either of those to the candidate is resumeConfirm's own polling (see startResumePolling)
+  // reading that self-heal back, not this call's own success/failure — this function runs in the
+  // background, often before the candidate has even opened the confirm screen, so nothing it
+  // observes about its own outcome is guaranteed to still be relevant by the time they do.
+  //
+  // Item 1 (2026-09-08 regression session, SEV0): the timeout passed in below was 45s, set from
+  // "successful OCR+extraction finished in single-digit seconds" — true for the small tesseract-
+  // OCR image path this was originally tuned against, but upload-resume's PDF branch runs the
+  // WHOLE pipeline (one rasterize-pdf-page call per page) synchronously in this same request.
+  // Reproduced live, directly timed, against both real test documents this session: "726" (2
+  // pages) took 86.7s end-to-end, "626" (4 pages) took 39.5s on one run — real variance tied to
+  // concurrent platform load, not a fixed per-document number (see upload-resume's own RASTERIZE
+  // RETRY CONTRACT comment). At 45s this call was aborting client-side while upload-resume kept
+  // running server-side and finished successfully moments later — retryResumeUpload's caller sets
+  // a user-visible "Couldn't reach the server" error directly off this abort, which is the exact
+  // same false-failure bug as get-resume-extraction's self-heal, on a separate path. Callers below
+  // now pass 240000 (4 min), the same real-timing-informed margin used for STALE_SECONDS there.
   async fetchWithTimeout(url, options, timeoutMs) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -6084,7 +6093,7 @@ class Component extends DCLogic {
           width: staged.width,
           height: staged.height,
         }),
-      }, 45000);
+      }, 240000);
       data = await res.json().catch(() => ({}));
     } catch (e) {
       return;
@@ -6101,7 +6110,7 @@ class Component extends DCLogic {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
         body: JSON.stringify({ resume_document_id: resumeDocumentId }),
-      }, 45000);
+      }, 240000);
       data = await res.json().catch(() => ({}));
     } catch (e) {
       return;
@@ -6135,7 +6144,7 @@ class Component extends DCLogic {
           width: staged.width,
           height: staged.height,
         }),
-      }, 45000);
+      }, 240000);
       data = await res.json().catch(() => ({}));
     } catch (e) {
       this.setState({ resumeExtractionLoading: false, resumeFileError: "Couldn't reach the server. Please try again." });
@@ -7124,7 +7133,19 @@ class Component extends DCLogic {
       this.renderOriginalPdfViewer();
     });
     const status = data.resume_document.extraction_status;
-    if (status === 'pending' || status === 'ocr_done') {
+    // Item 1 (2026-09-08 regression session, SEV0): 'failed' used to stop polling here, the same
+    // as a genuine terminal state ('extracted'). Reproduced live, directly timed: get-resume-
+    // extraction's own self-heal (see its header) can mark a row 'failed' while the real
+    // upload-resume invocation is still genuinely in flight and about to succeed — when it does,
+    // extraction_status gets correctly overwritten back to 'extracted' in the database moments
+    // later, but nothing was still polling to notice. Raising get-resume-extraction's own
+    // STALE_SECONDS reduces how often this fires at all, but doesn't make it impossible for an
+    // even slower document — this is the other half: 'failed' no longer stops the poll, so a false
+    // positive self-corrects on its own (the very next 12s tick sees 'extracted' and the screen
+    // moves on) instead of permanently stranding the candidate on a dead-end screen. A genuinely
+    // dead extraction just keeps returning 'failed' every tick — harmless, the same failure screen
+    // stays showing, exactly as before.
+    if (status === 'pending' || status === 'ocr_done' || status === 'failed') {
       this.startResumePolling(candidateId);
     } else {
       this.stopResumePolling();
