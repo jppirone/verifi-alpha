@@ -130,7 +130,7 @@ Return ONLY a single JSON object, no prose before or after it, matching exactly 
 
 {
   "work_history": [
-    { "company": string, "title": string, "start_date": string, "end_date": string,
+    { "company": string, "title": string, "location": string, "start_date": string, "end_date": string,
       "job_responsibilities": string, "extraction_confidence": "high" | "medium" | "low", "position": number }
   ],
   "education": [
@@ -169,6 +169,12 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
 - Work-history section headers vary by resume — "Experience", "Work History", "Professional
   Experience", "Employment History", "Job Description", and similar all describe the SAME concept
   and all belong in work_history. Don't treat different header wording as different categories.
+
+- work_history's "location" field = the employer's city/state (or city/country outside the US) as
+  printed on the resume, near the company name or role, e.g. "Austin, TX" — same rule as education's
+  "location" field below, just for the employer instead of the institution. Copy it verbatim in
+  whatever form it appears; use an empty string "" when no location is given for that role — never
+  infer or guess one from the employer's real-world location.
 
 - education = DEGREE-GRANTING PROGRAMS ONLY (e.g. B.A., B.S., M.S., MBA, Ph.D., Associate's).
 
@@ -267,7 +273,7 @@ a guess.
 If a category has no entries, return an empty array for it — do not omit the key.`;
 
 type ExtractionResult = {
-  work_history: Array<{ company: string; title: string; start_date: string; end_date: string; job_responsibilities: string; extraction_confidence: string; position?: number }>;
+  work_history: Array<{ company: string; title: string; location?: string; start_date: string; end_date: string; job_responsibilities: string; extraction_confidence: string; position?: number }>;
   education: Array<{ institution: string; degree: string; field_of_study: string; location?: string; start_date: string; end_date: string; extraction_confidence: string; position?: number }>;
   certifications: Array<{ name: string; issuing_body: string; issue_date: string; expiration_date: string; extraction_confidence: string; position?: number }>;
   skills: Array<string>;

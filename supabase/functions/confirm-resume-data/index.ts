@@ -29,7 +29,7 @@ const corsHeaders = {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-type WorkHistoryEdit = { id: string; company?: string; title?: string; start_date?: string; end_date?: string; job_responsibilities?: string };
+type WorkHistoryEdit = { id: string; company?: string; title?: string; location?: string; start_date?: string; end_date?: string; job_responsibilities?: string };
 type EducationEdit = { id: string; institution?: string; degree?: string; field_of_study?: string; location?: string; start_date?: string; end_date?: string };
 // source_match is echoed back by the client (candidate.html already has it, straight from
 // get-resume-extraction) for the same reason section_type/heading are on FreeformEdit below — this
@@ -49,7 +49,7 @@ function dateOrNull(v: unknown): string | null {
 
 function claimForWorkHistory(w: WorkHistoryEdit): string {
   const dates = [w.start_date, w.end_date || "Present"].filter(Boolean).join(" – ");
-  return [w.title, w.company, dates].filter(Boolean).join(", ");
+  return [w.title, w.company, w.location, dates].filter(Boolean).join(", ");
 }
 function claimForEducation(e: EducationEdit): string {
   const dates = [e.start_date, e.end_date].filter(Boolean).join(" – ");
@@ -119,6 +119,7 @@ export default {
       for (const w of work_history) {
         const { data, error } = await supabase.from("work_history_items").update({
           company: w.company ?? null, title: w.title ?? null,
+          location: w.location ?? null,
           start_date: dateOrNull(w.start_date), end_date: dateOrNull(w.end_date),
           job_responsibilities: w.job_responsibilities ?? null,
           candidate_confirmed: true, updated_at: new Date().toISOString(),

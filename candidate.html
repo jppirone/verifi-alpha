@@ -2885,6 +2885,9 @@ a:hover{color:var(--color-accent)}
             <div class="field" style="flex:1;min-width:160px"><label>Company</label><input class="input" value="{{ section.company }}" sc-camel-on-change="{{ section.onCompany }}"></div>
           </div>
           <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+            <div class="field" style="flex:1;min-width:160px"><label>Location</label><input class="input" placeholder="City, ST" value="{{ section.location }}" sc-camel-on-change="{{ section.onLocation }}"></div>
+          </div>
+          <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
             <div class="field" style="flex:1;min-width:140px"><label>Start date</label><input class="input" type="date" value="{{ section.startDate }}" sc-camel-on-change="{{ section.onStartDate }}"></div>
             <div class="field" style="flex:1;min-width:140px"><label>End date (blank = present)</label><input class="input" type="date" value="{{ section.endDate }}" sc-camel-on-change="{{ section.onEndDate }}"></div>
           </div>
@@ -7106,7 +7109,7 @@ class Component extends DCLogic {
       // scope here the same way resolveEmployerContact's own body uses it; null-guarded the same
       // way, not assumed present.
       resume_document_id: ex.resume_document ? ex.resume_document.id : null,
-      work_history: ex.work_history.map(w => ({ id: w.id, company: w.company, title: w.title, start_date: w.start_date, end_date: w.end_date, job_responsibilities: w.job_responsibilities })),
+      work_history: ex.work_history.map(w => ({ id: w.id, company: w.company, title: w.title, location: w.location, start_date: w.start_date, end_date: w.end_date, job_responsibilities: w.job_responsibilities })),
       education: ex.education.map(x => ({ id: x.id, institution: x.institution, degree: x.degree, field_of_study: x.field_of_study, location: x.location, start_date: x.start_date, end_date: x.end_date })),
       // source_match is echoed back (not edited here) so confirm-resume-data can flag a
       // structurally-unmatched certification for staff regardless of the opt-in checkbox below —
@@ -8005,10 +8008,12 @@ class Component extends DCLogic {
         s.resumeExtraction.work_history.forEach(w => blocks.push({
           kind: 'work_history', position: typeof w.position === 'number' ? w.position : Infinity,
           title: w.title || '', company: w.company || '',
+          location: w.location || '',
           startDate: w.start_date || '', endDate: w.end_date || '',
           jobResponsibilities: w.job_responsibilities || '',
           onTitle: (e) => this.updateResumeItem('work_history', w.id, 'title', e.target.value),
           onCompany: (e) => this.updateResumeItem('work_history', w.id, 'company', e.target.value),
+          onLocation: (e) => this.updateResumeItem('work_history', w.id, 'location', e.target.value),
           onStartDate: (e) => this.updateResumeItem('work_history', w.id, 'start_date', e.target.value),
           onEndDate: (e) => this.updateResumeItem('work_history', w.id, 'end_date', e.target.value),
           onResponsibilities: (e) => this.updateResumeItem('work_history', w.id, 'job_responsibilities', e.target.value),
