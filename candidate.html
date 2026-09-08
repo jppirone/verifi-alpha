@@ -3984,6 +3984,15 @@ a:hover{color:var(--color-accent)}
               <button type="button" class="btn btn-ghost" style="font-size:11px;padding:2px 8px" sc-camel-on-click="{{ dismissCheckoutNotice }}">Dismiss</button>
             </div>
           </sc-if>
+          <!-- Item 7 (2026-09-08 regression session): same dismissible-banner pattern as
+               checkoutSuccessNotice above, for confirmDowngrade's own already-real backend write --
+               see downgradeSuccessNotice's own header for why this was missing before. -->
+          <sc-if value="{{ downgradeSuccessNotice }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border:1px solid var(--color-divider);border-radius:6px">
+              <span style="font-size:12px;color:var(--color-accent-300)">You've switched to the Free plan.</span>
+              <button type="button" class="btn btn-ghost" style="font-size:11px;padding:2px 8px" sc-camel-on-click="{{ dismissCheckoutNotice }}">Dismiss</button>
+            </div>
+          </sc-if>
         </div>
       </div>
     </sc-if>
@@ -5515,6 +5524,11 @@ class Component extends DCLogic {
     // Item B (2026-09-08 regression session): real Stripe test-mode checkout state — see
     // startRealCheckout/handleCheckoutReturn's own headers.
     checkoutPending: false, checkoutError: null, checkoutCancelledNotice: false, checkoutSuccessNotice: false,
+    // Item 7 (2026-09-08 regression session): confirmDowngrade already made a real, checked backend
+    // write (set-candidate-tier) before this fix -- the tier genuinely changed -- but nothing told
+    // the candidate it worked; the modal just closed silently. Mirrors checkoutSuccessNotice's own
+    // dismissible-banner pattern above rather than inventing a new one.
+    downgradeSuccessNotice: false,
     deactStep: 'default', deactReason: '', deactNote: '', deactChoice: null, arrivedFromDeactivationPause: false,
     deletionScheduled: false, deletionDate: null,
     deactivatePending: false, deactivateError: null, reactivatePending: false, reactivateError: null,
@@ -6931,7 +6945,7 @@ class Component extends DCLogic {
       this.setState({ checkoutPending: false, checkoutError: "Couldn't switch to Free. Please try again." });
       return;
     }
-    this.setState({ checkoutPending: false, checkoutError: null, downgradeModalOpen: false, accountTier: 'free', tierSelection: 'free', changePlanOpen: false });
+    this.setState({ checkoutPending: false, checkoutError: null, downgradeModalOpen: false, accountTier: 'free', tierSelection: 'free', changePlanOpen: false, downgradeSuccessNotice: true });
     this.addActivityLog('Switch to Free confirmed');
   }
 
@@ -7653,7 +7667,8 @@ class Component extends DCLogic {
       checkoutError: s.checkoutError,
       checkoutCancelledNotice: s.checkoutCancelledNotice,
       checkoutSuccessNotice: s.checkoutSuccessNotice,
-      dismissCheckoutNotice: () => this.setState({ checkoutCancelledNotice: false, checkoutSuccessNotice: false, checkoutError: null }),
+      downgradeSuccessNotice: s.downgradeSuccessNotice,
+      dismissCheckoutNotice: () => this.setState({ checkoutCancelledNotice: false, checkoutSuccessNotice: false, checkoutError: null, downgradeSuccessNotice: false }),
       downgradeModalOpen: s.downgradeModalOpen,
       openDowngradeModal: () => this.setState({ downgradeModalOpen: true }),
       closeDowngradeModal: () => this.setState({ downgradeModalOpen: false }),
