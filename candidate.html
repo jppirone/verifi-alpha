@@ -3669,6 +3669,12 @@ a:hover{color:var(--color-accent)}
               <div class="card-kicker">Summaries</div>
               <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ openNewSummary }}">+ New Summary</button>
             </div>
+            <sc-if value="{{ savedSummariesLoading }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:13px;color:var(--color-neutral-500)">Loading your summaries…</div>
+            </sc-if>
+            <sc-if value="{{ savedSummariesError }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:13px;color:var(--color-neutral-500)">We couldn't load your summaries just now. Try refreshing the page.</div>
+            </sc-if>
             <sc-for list="{{ summaryCards }}" as="su" hint-placeholder-count="2">
               <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
                 <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3)">
@@ -4262,9 +4268,12 @@ a:hover{color:var(--color-accent)}
             <textarea class="input" id="summary-text" rows="3" value="{{ summaryModalText }}" sc-camel-on-change="{{ setSummaryModalText }}"></textarea>
           </div>
         </div>
+        <sc-if value="{{ summaryModalError }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:#e2735c;padding:0 var(--space-4)">{{ summaryModalError }}</div>
+        </sc-if>
         <div class="dialog-actions">
           <button type="button" class="btn btn-ghost" sc-camel-on-click="{{ closeSummaryModal }}">Cancel</button>
-          <button type="button" class="btn btn-primary" sc-camel-on-click="{{ saveSummaryModal }}">Save summary</button>
+          <button type="button" class="btn btn-primary" disabled="{{ summaryModalSaving }}" sc-camel-on-click="{{ saveSummaryModal }}">{{ summaryModalSaveLabel }}</button>
         </div>
       </div>
     </div>
@@ -4718,11 +4727,41 @@ class Component extends DCLogic {
     return out;
   }
 
-  seedSummaries() {
-    return [
-      { id: 'sum-generic', name: 'Default summary', partnerKey: '', text: 'Product-minded engineer with 6 years building and shipping consumer web applications.' },
-      { id: 'sum-linkedin', name: 'LinkedIn leadership angle', partnerKey: 'linkedin', text: 'Product-minded engineer with 6 years shipping consumer web applications, now leading cross-functional delivery on a two-week cadence.' },
-    ];
+  // Item B (2026-09-08 session): lazy-load-on-tab-visit, same pattern as
+  // ensureVerificationItemsLoaded/loadVerificationItems — a candidate's first visit to Content
+  // Manager loads the real backend rows (list-candidate-summaries own auto-seed handles the
+  // "nothing exists yet" case server-side, see its own header).
+  ensureSummariesLoaded() {
+    const s = this.state;
+    const candidateId = s.resumeCandidateId;
+    if (!candidateId || s.savedSummariesLoadedFor === candidateId || s.savedSummariesLoading) return;
+    this.loadSummaries(candidateId);
+  }
+
+  async loadSummaries(candidateId) {
+    this.setState({ savedSummariesLoading: true, savedSummariesError: null });
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/list-candidate-summaries', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate_id: candidateId }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ savedSummariesLoading: false, savedSummariesError: 'network' });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      this.setState({ savedSummariesLoading: false, savedSummariesError: 'load_failed' });
+      return;
+    }
+    this.setState({
+      savedSummariesLoading: false,
+      savedSummariesError: null,
+      savedSummaries: data.summaries || [],
+      savedSummariesLoadedFor: candidateId,
+    });
   }
 
   roleDescription(key) {
@@ -4745,9 +4784,9 @@ class Component extends DCLogic {
     const list = s.savedSummaries || [];
     const id = target && s.customization[target] ? s.customization[target].summaryId : '';
     const found = list.find(su => su.id === id);
-    if (found) return found.text;
-    const generic = list.find(su => su.partnerKey === '');
-    return generic ? generic.text : '';
+    if (found) return found.content;
+    const generic = list.find(su => su.partner_key === '');
+    return generic ? generic.content : '';
   }
 
   setCustomizeSummaryId(id) {
@@ -4762,26 +4801,72 @@ class Component extends DCLogic {
     setTimeout(() => { if (this._czFlashCounter === fid) this.setState({ czFlashField: null, czFlashFading: false }); }, 1500);
   }
 
-  saveSummaryFromModal() {
-    this.setState(st => {
-      const name = (st.summaryModalName || '').trim() || 'Untitled summary';
-      const text = (st.summaryModalText || '').trim();
-      const partnerKey = st.summaryModalPartner || '';
-      if (st.summaryModalId) {
-        return { savedSummaries: st.savedSummaries.map(su => su.id === st.summaryModalId ? { ...su, name, partnerKey, text } : su), summaryModalOpen: false };
-      }
-      return { savedSummaries: [...st.savedSummaries, { id: 'sum-' + Date.now(), name, partnerKey, text }], summaryModalOpen: false };
-    });
+  // Item B (2026-09-08 session): real create/update against candidate_summary_versions — see
+  // create-candidate-summary/update-candidate-summary's own headers. Re-fetches from
+  // list-candidate-summaries after a successful write rather than guessing the new local shape,
+  // same convention already established for verification-item writes elsewhere in this file (see
+  // loadVerificationItems' own header) — the server response is the one source of truth for
+  // origin/timestamps this screen never invents locally.
+  async saveSummaryFromModal() {
+    const s = this.state;
+    const candidateId = s.resumeCandidateId;
+    if (!candidateId || s.summaryModalSaving) return;
+    const name = (s.summaryModalName || '').trim() || 'Untitled summary';
+    const content = s.summaryModalText || '';
+    const partner_key = s.summaryModalPartner || '';
+    this.setState({ summaryModalSaving: true, summaryModalError: null });
+    const fn = s.summaryModalId ? 'update-candidate-summary' : 'create-candidate-summary';
+    const body = s.summaryModalId
+      ? { candidate_id: candidateId, id: s.summaryModalId, name, content, partner_key }
+      : { candidate_id: candidateId, name, content, partner_key };
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/' + fn, {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ summaryModalSaving: false, summaryModalError: "Couldn't reach the server. Check your connection and try again." });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      this.setState({ summaryModalSaving: false, summaryModalError: "Couldn't save this summary. Please try again." });
+      return;
+    }
+    this.setState({ summaryModalSaving: false, summaryModalError: null, summaryModalOpen: false });
+    this.loadSummaries(candidateId);
   }
 
-  deleteSummary(id) {
+  // Item B: real delete against candidate_summary_versions — see delete-candidate-summary's own
+  // header (candidate_id-scoped, same discipline as every other write in this pipeline). Clears
+  // any per-partner customization pointing at the deleted id, same local cleanup the old fixture
+  // version already did — that half of this function was never fake, only the persistence was.
+  async deleteSummary(id) {
+    const s = this.state;
+    const candidateId = s.resumeCandidateId;
+    if (!candidateId) return;
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/delete-candidate-summary', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate_id: candidateId, id }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      return;
+    }
+    if (!res.ok || !data.ok) return;
     this.setState(st => {
       const cz = {};
       Object.keys(st.customization).forEach(k => {
         cz[k] = st.customization[k].summaryId === id ? { ...st.customization[k], summaryId: '' } : st.customization[k];
       });
-      return { savedSummaries: st.savedSummaries.filter(su => su.id !== id), customization: cz };
+      return { customization: cz };
     });
+    this.loadSummaries(candidateId);
   }
 
   sanitizeAts(text) {
@@ -5388,8 +5473,12 @@ class Component extends DCLogic {
       linkedin: this.defaultCzCategorySet('linkedin'), indeed: this.defaultCzCategorySet('indeed'), glassdoor: this.defaultCzCategorySet('glassdoor'),
     },
     roleDescriptions: this.seedRoleDescriptions(),
-    savedSummaries: this.seedSummaries(),
+    // Item B (2026-09-08 session): no longer seeded from a client fixture — real backend now,
+    // see ensureSummariesLoaded's own header. Starts empty; the Content Manager tab's first visit
+    // loads (and auto-seeds server-side, from the real extracted summary) the real rows.
+    savedSummaries: [], savedSummariesLoading: false, savedSummariesError: null, savedSummariesLoadedFor: null,
     summaryModalOpen: false, summaryModalId: null, summaryModalName: '', summaryModalPartner: '', summaryModalText: '',
+    summaryModalSaving: false, summaryModalError: null,
     cmFlashField: null, cmFlashFading: false,
     // No longer seeded from a fixture (see removed applySkillFixture/seedSkillItems) — this grid's
     // real data source is now the resumeConfirm screen's confirmed skill_items (see resumeExtraction.
@@ -7701,9 +7790,9 @@ class Component extends DCLogic {
       showCzResetSaved: s.czResetFlash,
       czResetFadeStyle: s.czResetFading ? 'transition:opacity 0.5s ease;opacity:0' : 'transition:opacity 0.15s ease;opacity:1',
       resetCzToDefault: () => this.resetCzToDefault(),
-      summaryOptionsForTarget: s.customizeTarget ? s.savedSummaries.filter(su => su.partnerKey === '' || su.partnerKey === s.customizeTarget).map(su => ({
+      summaryOptionsForTarget: s.customizeTarget ? s.savedSummaries.filter(su => su.partner_key === '' || su.partner_key === s.customizeTarget).map(su => ({
         id: su.id,
-        label: su.name + (su.partnerKey ? ' (' + ((this.PARTNERS.find(p => p.key === su.partnerKey) || {}).label || '') + ')' : ' (Generic)'),
+        label: su.name + (su.partner_key ? ' (' + ((this.PARTNERS.find(p => p.key === su.partner_key) || {}).label || '') + ')' : ' (Generic)'),
       })) : [],
       customizeSummaryId: s.customizeTarget && s.customization[s.customizeTarget] ? (s.customization[s.customizeTarget].summaryId || '') : '',
       setCustomizeSummaryId: (e) => this.setCustomizeSummaryId(e.target.value),
@@ -7715,7 +7804,7 @@ class Component extends DCLogic {
       summarySavedFadeStyle: s.czFlashFading ? 'transition:opacity 0.5s ease;opacity:0' : 'transition:opacity 0.15s ease;opacity:1',
       tabIsContentManager: s.accountTab === 'contentManager',
       tabContentManagerClass: s.accountTab === 'contentManager' ? 'btn-secondary' : 'btn-ghost',
-      selectTabContentManager: () => this.guardedNav(() => this.setState({ accountTab: 'contentManager' })),
+      selectTabContentManager: () => this.guardedNav(() => { this.setState({ accountTab: 'contentManager' }); this.ensureSummariesLoaded(); }),
       cmRoles: this.getCzCategories().find(c => c.key === 'experience').items.map(it => ({
         label: it.label,
         description: this.roleDescription(it.key),
@@ -7783,19 +7872,24 @@ class Component extends DCLogic {
       })),
       skillOverflow: s.skillOverflow,
       setSkillOverflow: (e) => this.setState({ skillOverflow: e.target.value }),
+      savedSummariesLoading: s.savedSummariesLoading,
+      savedSummariesError: !!s.savedSummariesError,
       summaryCards: s.savedSummaries.map(su => ({
         name: su.name,
-        preview: su.text.length > 130 ? su.text.slice(0, 130) + '\u2026' : su.text,
-        tagLabel: su.partnerKey ? ((this.PARTNERS.find(p => p.key === su.partnerKey) || {}).label || 'Generic') : 'Generic',
-        onEdit: () => this.setState({ summaryModalOpen: true, summaryModalId: su.id, summaryModalName: su.name, summaryModalPartner: su.partnerKey, summaryModalText: su.text }),
+        preview: su.content.length > 130 ? su.content.slice(0, 130) + '\u2026' : su.content,
+        tagLabel: su.partner_key ? ((this.PARTNERS.find(p => p.key === su.partner_key) || {}).label || 'Generic') : 'Generic',
+        onEdit: () => this.setState({ summaryModalOpen: true, summaryModalId: su.id, summaryModalName: su.name, summaryModalPartner: su.partner_key, summaryModalText: su.content, summaryModalError: null }),
         onDelete: () => this.deleteSummary(su.id),
       })),
-      openNewSummary: () => this.setState({ summaryModalOpen: true, summaryModalId: null, summaryModalName: '', summaryModalPartner: '', summaryModalText: '' }),
+      openNewSummary: () => this.setState({ summaryModalOpen: true, summaryModalId: null, summaryModalName: '', summaryModalPartner: '', summaryModalText: '', summaryModalError: null }),
       summaryModalOpen: s.summaryModalOpen,
       summaryModalTitle: s.summaryModalId ? 'Edit summary' : 'New summary',
       summaryModalName: s.summaryModalName,
       summaryModalPartner: s.summaryModalPartner,
       summaryModalText: s.summaryModalText,
+      summaryModalSaving: s.summaryModalSaving,
+      summaryModalError: s.summaryModalError,
+      summaryModalSaveLabel: s.summaryModalSaving ? 'Saving…' : 'Save summary',
       setSummaryModalName: (e) => this.setState({ summaryModalName: e.target.value }),
       setSummaryModalPartner: (e) => this.setState({ summaryModalPartner: e.target.value }),
       setSummaryModalText: (e) => this.setState({ summaryModalText: e.target.value }),
