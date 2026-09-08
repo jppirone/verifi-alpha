@@ -124,6 +124,13 @@ const VISION_MODEL = "claude-sonnet-5";
 // Same schema/field definitions as extract-resume-fields's prompt (keep both in sync if the schema
 // changes), plus one addition: this path reads the image directly, so it can also describe
 // non-text graphical content (language-proficiency bars/icons) that OCR structurally cannot see.
+//
+// Item 2 (2026-09-08 regression session): certifications carve-out + de-collided NEVER FABRICATE
+// example below, mirroring the same fix in rasterize-pdf-page/index.ts and extract-resume-fields/
+// index.ts (rasterize-pdf-page's own header has the full story). This copy was missing the
+// carve-out entirely before this fix — kept in sync now so the same misclassification can't
+// resurface via this specific fallback path (stitched/oversized single images) either, even
+// though it wasn't the path that actually reproduced the bug.
 const VISION_EXTRACTION_PROMPT = `You are extracting structured data directly from the attached image of a resume. Read the document as printed — do not invent information that is not actually present in the image in some recognizable form.
 
 Return ONLY a single JSON object, no prose before or after it, matching exactly this shape:
@@ -188,6 +195,18 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   short-form credentials that are NOT part of a degree program. A coding bootcamp goes in
   certifications UNLESS the resume text itself frames it as part of a degree program (e.g. a
   university-issued certificate within a degree track) — read the actual framing, don't assume.
+  A bulleted/itemized LIST of named credentials directly under a certifications-style heading (e.g.
+  "Certifications", "Professional Certifications", "AI & Emerging Technology Certifications") IS
+  the "real, specific items listed under it" case the NEVER FABRICATE rule below asks you to extract
+  — each bullet becomes its own certifications entry with that bullet's own text as "name", even when
+  a DIFFERENT part of the same resume (e.g. an EDUCATION section's "Continuing Education" line) later
+  describes the same body of coursework in one narrative sentence. THE DECISIVE SIGNAL IS SHAPE, NOT
+  WORDING: two or more distinctly named items separated by bullets, semicolons, or line breaks under
+  one heading is always a real list to extract, item by item — this holds even when the heading or a
+  nearby summary sentence elsewhere on the page happens to share vocabulary (a provider name, an
+  hours figure, a topic word) with the NEVER FABRICATE rule's own worked example below. Matching that
+  example's WORDING is never a reason to withhold extraction from an itemized list that is otherwise
+  real — only the ABSENCE of individually named items is.
 
 - skills = a FLAT LIST of individual skill, competency, or keyword terms presented as a list rather
   than prose — commonly under a heading like "Skills," "Core Competencies," "Technical Skills,"
@@ -211,11 +230,17 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   certification's "name", a job's "title", a degree's "institution", etc.) must be a specific line
   that names that exact real-world thing, copied from the text, never synthesized, paraphrased, or
   mutated from a section header or from prose that only DESCRIBES having done something in general
-  terms. Example of what NOT to do: a "Continuing Education" note reading "55+ hours of AI &
-  emerging technology certification coursework, Coursiv, 2024-2025" is a narrative summary, not a
-  named credential — it must NOT become a certifications entry with an invented name like "AI &
-  emerging technology certification coursework." That kind of content goes to "needs_review" only,
-  verbatim, untouched. The same applies to every other category: a section header alone (e.g. "AI &
+  terms. Example of what NOT to do: a one-line note under "Continuing Education" reading "Completed
+  40+ hours of professional-development coursework through an online training provider,
+  2023-2024" — with no individual course or credential named anywhere in it — is a narrative
+  summary, not a named credential; it must NOT become a certifications entry with an invented name
+  like "professional-development coursework." That kind of content goes to "needs_review" only,
+  verbatim, untouched. This example is about the total ABSENCE of any individually named item,
+  never about specific words like "hours," "coursework," or a provider's name — a real resume
+  section using similar-sounding phrasing while ALSO listing individually named credentials (see
+  the certifications definition above) is the OPPOSITE case and must be extracted, item by item,
+  never folded into needs_review just because the surrounding wording looks similar to this
+  example. The same applies to every other category: a section header alone (e.g. "AI &
   Emerging Technology") is not itself an item — if the header has real, specific items listed under
   it, extract those (each is its own real entry); if it doesn't (no items follow it, or it's only
   ever described in summary form), the header and its content go to needs_review together,
