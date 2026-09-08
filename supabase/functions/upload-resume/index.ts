@@ -610,7 +610,19 @@ function describeTrailingItem(extraction: ExtractionResult): string | undefined 
 // classified via the context hint, is already a normal, independent entry needing no merge.
 function mergeBoundaryContinuations(extraction: ExtractionResult): ExtractionResult {
   const pageOf = (pos: number | undefined) => (typeof pos === "number" ? Math.floor(pos / PAGE_POSITION_SPAN) : null);
-  const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
+  // Severity 1 (2026-09-08 regression session, item 4/5 investigation): reproduced live against
+  // the real document this whole merge logic was built against — the SAME heading
+  // ("AI & EMERGING TECHNOLOGY CERTIFICATIONS...") came back as "AI" from one page's vision call
+  // and "Al" (capital A, lowercase L) from the other, a real font-rendering ambiguity between
+  // capital I and lowercase l that vision models genuinely mis-transcribe — and plain
+  // .toLowerCase() doesn't fix it: "ai" vs "al" are still different strings. That silently broke
+  // this exact merge (the 9-item certifications list stayed split across the page boundary,
+  // compounding the separate certifications-classification gap investigated the same session).
+  // Folding lowercase "l" to "i" before comparing is a targeted, heading-comparison-only fix for
+  // this specific, confirmed ambiguity — not a general text-normalization change, and scoped to
+  // exact whole-heading equality, so it can't cause a false merge between two otherwise-different
+  // headings the way a substring or fuzzy match could.
+  const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ").replace(/l/g, "i");
 
   const freeform = [...extraction.freeform].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
   const mergedFreeform: typeof freeform = [];

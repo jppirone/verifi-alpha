@@ -103,6 +103,17 @@ as "needs_review" for everything else that doesn't fit anywhere — needs_review
 fallback, always available, always correct when nothing else fits. Never force content into a
 category it doesn't genuinely belong in just to give it a home.
 
+MULTI-COLUMN TABLE READING ORDER (real, confirmed failure mode — a section laid out as a 2- or
+3-column grid of short bullet cells, e.g. "Selected Career Highlights" or similar, got its cells
+read in the wrong order and spliced together mid-sentence): when a section's bullets are visually
+arranged in a table/grid of columns rather than one single vertical list, read each CELL in full
+before moving to the next — complete cell 1's whole sentence, then cell 2's whole sentence, in the
+grid's own left-to-right, top-to-bottom reading order (row by row, not column by column, unless the
+page's own visual layout clearly reads top-to-bottom within a column first). Never interleave two
+different cells' sentences into one merged entry, and never let a word or clause from one cell
+bleed into another's. If uncertain which reading order the grid actually uses, prefer keeping each
+bullet's own sentence fully intact and separate over guessing at a merged order.
+
 FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable buckets:
 
 - work_history = PAID EMPLOYMENT ONLY. If a role reads as unpaid — volunteer work, an unpaid
@@ -128,6 +139,14 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   short-form credentials that are NOT part of a degree program. A coding bootcamp goes in
   certifications UNLESS the resume text itself frames it as part of a degree program (e.g. a
   university-issued certificate within a degree track) — read the actual framing, don't assume.
+  A bulleted/itemized LIST of named credentials directly under a certifications-style heading (e.g.
+  "Certifications", "Professional Certifications", "AI & Emerging Technology Certifications") IS
+  the "real, specific items listed under it" case the NEVER FABRICATE rule below asks you to extract
+  — each bullet becomes its own certifications entry with that bullet's own text as "name", even when
+  a DIFFERENT part of the same resume (e.g. an EDUCATION section's "Continuing Education" line) later
+  describes the same body of coursework in one narrative sentence. The list itself is never narrative
+  just because a summary sentence about it exists elsewhere — extract the list on its own terms, from
+  what's actually itemized under ITS OWN heading, not from how a different section phrases it.
 
 - skills = a FLAT LIST of individual skill, competency, or keyword terms presented as a list rather
   than prose — commonly under a heading like "Skills," "Core Competencies," "Technical Skills,"
