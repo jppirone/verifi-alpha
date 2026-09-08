@@ -25,7 +25,14 @@ headers: { ...corsHeaders, "Content-Type": "application/json" },
 });
 }
 
-const filter = `or=(email.eq.${encodeURIComponent(email)},phone.eq.${encodeURIComponent(phone)})`;
+// Regression fix (2026-09-08, Item A): this used to join email/phone with `or=(...)`, so a
+// candidate matching EITHER field alone reported exists:true even when the other field belonged
+// to a different account entirely — reproduced live: a real email with a deliberately wrong
+// phone, and a wrong email with a real phone, both returned exists:true before this fix. The
+// validation above already guarantees both email and phone are present here, so (unlike
+// check-existence, which also handles either field alone) this only ever needs the `and=(...)`
+// composite form — both must match the SAME row.
+const filter = `and=(email.eq.${encodeURIComponent(email)},phone.eq.${encodeURIComponent(phone)})`;
 const lookupRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates?select=id&${filter}&limit=1`, {
 headers: {
 "apikey": SUPABASE_SERVICE_ROLE_KEY,
