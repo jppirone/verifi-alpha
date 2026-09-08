@@ -5155,7 +5155,14 @@ class Component extends DCLogic {
     if (nameLine) push(nameLine);
     const contactLine = [deliveredContact.phone.value, deliveredContact.email.value].filter(Boolean).join(' \u00b7 ');
     if (contactLine) push(contactLine);
-    push(this.getSummaryText(target));
+    // Item 9 (2026-09-08 regression session): this used to push the whole summary as ONE line --
+    // unlike EXPERIENCE's roleDescription and SKILLS a few lines below, both already wrapped via
+    // wrapText before being pushed. buildAtsPdfBytes below has no wrapping of its own (it's a raw
+    // per-line PDF text-show operator at a fixed x position, one push() call = one literal line at
+    // one y position) -- an unwrapped line longer than the page's usable width just runs off the
+    // right edge instead of continuing on a new line, confirmed live against a real long summary.
+    const summaryText = this.getSummaryText(target);
+    if (summaryText) this.wrapText(summaryText, 90).forEach(w => push(w));
     push('');
     const expCat = cats.find(c => c.key === 'experience');
     const expVal = catVal('experience');
@@ -5188,7 +5195,13 @@ class Component extends DCLogic {
     const certItems = certCat.items.filter(it => (target ? certVal[it.key] : true));
     if (certItems.length) {
       push('CERTIFICATIONS', true);
-      certItems.forEach(it => { push(it.label); push(''); });
+      // Item 9 (2026-09-08 regression session): it.label is name + issuing_body + issue date joined
+      // into one string with no length cap (see getCzCategories' own certifications mapping) -- a
+      // real certification's own "name" can itself be a long narrative sentence (confirmed live,
+      // Item 2's own investigation: 726's real "Generative AI and Automation (Coursework,
+      // 2024–2026): applied GenAI for content creation..." certification, well over 200 chars).
+      // Same unwrapped-single-line bug as the summary fix above, same fix.
+      certItems.forEach(it => { this.wrapText(it.label, 90).forEach(w => push(w)); push(''); });
     }
     const hobbiesText = this.realHobbiesText();
     if (catVal('misc') && hobbiesText) {
