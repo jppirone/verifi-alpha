@@ -7419,7 +7419,16 @@ class Component extends DCLogic {
       selectTierPaid: () => { if (s.accountTier === 'paid') return; this.setState({ tierSelection: 'paid' }); },
       isCurrentlyPaid: s.accountTier === 'paid',
       showUpgradeFlow: (s.tierSelection === 'paid' && s.accountTier === 'free') || s.changePlanOpen,
-      openChangePlan: () => this.setState({ changePlanOpen: true }),
+      // Item 10 (2026-09-08 regression session): reproduced live via code trace — this was the one
+      // paid-gate entry point into startRealCheckout that never set upgradeReturnTab, unlike
+      // setCustomizeTarget/setViewsTabPartner just below (see either's own comment). startRealCheckout
+      // does a genuine full-page redirect to Stripe that destroys this component instance entirely;
+      // handleCheckoutReturn only restores accountTab on the way back when upgradeReturnTab was
+      // stashed before the redirect — without it, a fresh mount's enterAccount() defaults to
+      // accountTab:'profile', landing the candidate on Profile Info instead of back on Subscription
+      // after "Change plan or payment method." Already on the Subscription tab when this fires, so
+      // upgradeReturnTarget (only meaningful for Customization/Views' per-partner return) stays null.
+      openChangePlan: () => this.setState({ changePlanOpen: true, upgradeReturnTab: 'subscription', upgradeReturnTarget: null }),
       billingSummary: s.billingCycle === 'annual' ? '$50/yr' : '$4.99/mo',
       billingMonthly: s.billingCycle === 'monthly',
       billingAnnual: s.billingCycle === 'annual',
