@@ -3588,7 +3588,14 @@ a:hover{color:var(--color-accent)}
             </div>
             <div class="card elev-sm" style="display:flex;flex-direction:column;gap:2px;opacity:0.7">
               <div class="card-kicker">Summary sent to this target</div>
-              <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">{{ customizeSummaryPreview }}</div>
+              <!-- Item 8 (2026-09-08 regression session): this box used to grow to fit its content,
+                   full-length, same as everywhere else on this screen -- unlike the job-responsibilities
+                   textarea a few rows above (rows="3", native browser scroll once content exceeds that),
+                   a long summary here just pushed the rest of the page down instead of scrolling in
+                   place, so seeing the whole thing meant scrolling the WHOLE page rather than this one
+                   box, or going back to Content Manager to read it in the edit modal instead. Bounded
+                   height + its own overflow-y:auto mirrors that same textarea's own overflow behavior. -->
+              <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6;max-height:100px;overflow-y:auto">{{ customizeSummaryPreview }}</div>
             </div>
           </div>
         </sc-if>
