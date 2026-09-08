@@ -2820,7 +2820,17 @@ a:hover{color:var(--color-accent)}
           </div>
         </sc-if>
       </div>
-      <div style="flex:1;min-height:0;overflow:auto;background:#525659;border-radius:2px;box-shadow:var(--shadow-lg);padding:12px;display:flex;flex-direction:column;align-items:center">
+      <!-- Item 13 (2026-09-08 regression session): reproduced live, both prior fixes' assumption
+           checked directly against computed styles rather than patched again on faith — the fixed-
+           height + own overflow-y:auto structure those fixes built is genuinely correct (confirmed:
+           this container's scrollHeight/clientHeight are independent of the fields panel's), so the
+           "capped by page-level scroll" feel wasn't a nesting bug at all. It's scroll CHAINING: with
+           no overscroll-behavior set, a wheel/drag gesture that runs past this container's own top or
+           bottom edge falls through to the next scrollable ancestor — the actual page, which really is
+           taller than the viewport here — so the panel visually "stops" and the whole page moves
+           instead, exactly the reported symptom, on a structure that was never actually broken.
+           overscroll-behavior:contain stops the chain at this container's own boundary. -->
+      <div style="flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;background:#525659;border-radius:2px;box-shadow:var(--shadow-lg);padding:12px;display:flex;flex-direction:column;align-items:center">
         <sc-if value="{{ resumeIsPdf }}" hint-placeholder-val="{{ false }}">
           <div id="original-pdf-viewer-container" style="display:flex;flex-direction:column;align-items:center;gap:10px;width:100%"></div>
         </sc-if>
@@ -2833,8 +2843,10 @@ a:hover{color:var(--color-accent)}
 
     <!-- Independently scrollable, same fixed height as the document panel — no longer relying on
          page-level scroll (or the old position:sticky) to keep both panels usable together; each
-         scrolls on its own, unaffected by the other. -->
-    <div style="display:flex;flex-direction:column;gap:var(--space-4);height:calc(100vh - 160px);overflow-y:auto;padding-right:4px">
+         scrolls on its own, unaffected by the other. overscroll-behavior:contain (Item 13, see the
+         document panel's own comment) stops this panel's own scroll from chaining into the page too,
+         at either its top or bottom edge. -->
+    <div style="display:flex;flex-direction:column;gap:var(--space-4);height:calc(100vh - 160px);overflow-y:auto;overscroll-behavior:contain;padding-right:4px">
       <sc-if value="{{ resumeHasSummary }}" hint-placeholder-val="{{ false }}">
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
         <div class="card-kicker">Summary</div>
@@ -5198,7 +5210,20 @@ class Component extends DCLogic {
             const canvas = document.createElement('canvas');
             canvas.width = viewport.width;
             canvas.height = viewport.height;
-            canvas.style.cssText = 'max-width:100%;box-shadow:0 0 0 1px rgba(0,0,0,0.2);background:#fff';
+            // Item 14 (2026-09-08 regression session): reproduced live via computed styles at
+            // multiple zoom levels before touching this — max-width:100% here was unconditionally
+            // clamping the canvas's ON-SCREEN width to its scroll container's width, regardless of
+            // canvas.width/height (the actual pixel size the scale above already sets correctly).
+            // A Letter-width page is wider than this panel at essentially every scale this control
+            // offers, so the clamp was active immediately and stayed active through every zoom level
+            // — confirmed: canvas.width grew from 795 to 1392px across three zoom-in clicks while
+            // getBoundingClientRect().width stayed pinned at exactly 368px throughout, and the scroll
+            // container's scrollWidth never exceeded its clientWidth. The container already has its
+            // own overflow:auto (see its own comment) specifically so a zoomed-in canvas can be
+            // scrolled into — removing the clamp is what actually lets that happen; the previous
+            // "Item 14" fix (2026-09-07) built the real scale control but this line silently
+            // neutralized it the whole time.
+            canvas.style.cssText = 'box-shadow:0 0 0 1px rgba(0,0,0,0.2);background:#fff';
             container.appendChild(canvas);
             const ctx = canvas.getContext('2d');
             page.render({ canvasContext: ctx, viewport });
