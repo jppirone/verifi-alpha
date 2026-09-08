@@ -94,6 +94,21 @@ const HAIKU_MODEL = "claude-haiku-4-5";
 // certifications block with no visible issuing header on this page) ended up wrongly dumped into
 // hobbies_other instead of needs_review or its real category. The fix below makes needs_review the
 // one, explicit, universal fallback and narrows hobbies_other back to what it actually means.
+//
+// Item 2 (2026-09-08 regression session, distinct from the earlier "AI"/"Al" merge-boundary fix in
+// upload-resume's mergeBoundaryContinuations): the NEVER FABRICATE rule's own worked example used
+// to read almost word-for-word like a REAL resume's own genuine, itemized certifications list
+// ("55+ hours", "AI & emerging technology", a named course provider, "Coursiv") — reproduced live
+// against a real 4-page resume ("626") that has exactly that vocabulary in BOTH a genuine bulleted
+// list of 8 named credentials under its own "AI & Emerging Technology Certifications" heading AND
+// a separate one-line "Continuing Education" narrative mention elsewhere on the page. The model
+// folded the entire real list into needs_review, matching the NEVER FABRICATE example's WORDING
+// rather than applying the certifications definition's own shape-based carve-out (already present
+// from an earlier fix, verified only against a different, easier document) a few lines above it.
+// Below: the worked example is now deliberately generic and shares no vocabulary with any real
+// resume content, to remove that specific collision, and both rules now explicitly cross-reference
+// each other so "the wording looks like the negative example" can't override "this is actually a
+// real itemized list" — the distinction was always meant to be about shape, not wording.
 const FIELD_DEFINITIONS = `ZERO-LOSS RULE (hard requirement — read this before classifying anything): every visible heading,
 paragraph, table, or list on the page must be accounted for somewhere in your output. Never omit
 visible content for any reason. Classify it into a real category (work_history, education,
@@ -150,9 +165,13 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   the "real, specific items listed under it" case the NEVER FABRICATE rule below asks you to extract
   — each bullet becomes its own certifications entry with that bullet's own text as "name", even when
   a DIFFERENT part of the same resume (e.g. an EDUCATION section's "Continuing Education" line) later
-  describes the same body of coursework in one narrative sentence. The list itself is never narrative
-  just because a summary sentence about it exists elsewhere — extract the list on its own terms, from
-  what's actually itemized under ITS OWN heading, not from how a different section phrases it.
+  describes the same body of coursework in one narrative sentence. THE DECISIVE SIGNAL IS SHAPE, NOT
+  WORDING: two or more distinctly named items separated by bullets, semicolons, or line breaks under
+  one heading is always a real list to extract, item by item — this holds even when the heading or a
+  nearby summary sentence elsewhere on the page happens to share vocabulary (a provider name, an
+  hours figure, a topic word) with the NEVER FABRICATE rule's own worked example below. Matching that
+  example's WORDING is never a reason to withhold extraction from an itemized list that is otherwise
+  real — only the ABSENCE of individually named items is.
 
 - skills = a FLAT LIST of individual skill, competency, or keyword terms presented as a list rather
   than prose — commonly under a heading like "Skills," "Core Competencies," "Technical Skills,"
@@ -176,17 +195,23 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   certification's "name", a job's "title", a degree's "institution", etc.) must be a specific line
   that names that exact real-world thing, copied from the text, never synthesized, paraphrased, or
   mutated from a section header or from prose that only DESCRIBES having done something in general
-  terms. Example of what NOT to do: a "Continuing Education" note reading "55+ hours of AI &
-  emerging technology certification coursework, Coursiv, 2024-2025" is a narrative summary, not a
-  named credential — it must NOT become a certifications entry with an invented name like "AI &
-  emerging technology certification coursework." That kind of content goes to "needs_review" only,
-  verbatim, untouched. The same applies to every other category: a section header alone (e.g. "AI &
-  Emerging Technology") is not itself an item — if the header has real, specific items listed under
-  it on this page, extract those (each is its own real entry); if it doesn't (no items follow it on
-  this page, or it's only ever described in summary form), the header and its content go to
-  needs_review together, untouched, and no entry is invented to fill the gap. When in doubt whether
-  something is a genuine standalone named item or just a description of one, treat it as
-  needs_review — inventing an entry is never the safe choice, omitting nothing is.
+  terms. Example of what NOT to do: a one-line note under "Continuing Education" reading "Completed
+  40+ hours of professional-development coursework through an online training provider,
+  2023-2024" — with no individual course or credential named anywhere in it — is a narrative
+  summary, not a named credential; it must NOT become a certifications entry with an invented name
+  like "professional-development coursework." That kind of content goes to "needs_review" only,
+  verbatim, untouched. This example is about the total ABSENCE of any individually named item,
+  never about specific words like "hours," "coursework," or a provider's name — a real resume
+  section using similar-sounding phrasing while ALSO listing individually named credentials (see
+  the certifications definition above) is the OPPOSITE case and must be extracted, item by item,
+  never folded into needs_review just because the surrounding wording looks similar to this
+  example. The same applies to every other category: a section header alone (e.g. "AI & Emerging
+  Technology") is not itself an item — if the header has real, specific items listed under it on
+  this page, extract those (each is its own real entry); if it doesn't (no items follow it on this
+  page, or it's only ever described in summary form), the header and its content go to needs_review
+  together, untouched, and no entry is invented to fill the gap. When in doubt whether something is
+  a genuine standalone named item or just a description of one, treat it as needs_review —
+  inventing an entry is never the safe choice, omitting nothing is.
 
 - "summary" (freeform) = any professional summary / objective / about-me blurb at the top of the
   resume. "hobbies_other" (freeform) = interests, hobbies, and volunteer/community activities ONLY
