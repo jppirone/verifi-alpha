@@ -2829,10 +2829,24 @@ a:hover{color:var(--color-accent)}
            bottom edge falls through to the next scrollable ancestor — the actual page, which really is
            taller than the viewport here — so the panel visually "stops" and the whole page moves
            instead, exactly the reported symptom, on a structure that was never actually broken.
-           overscroll-behavior:contain stops the chain at this container's own boundary. -->
-      <div style="flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;background:#525659;border-radius:2px;box-shadow:var(--shadow-lg);padding:12px;display:flex;flex-direction:column;align-items:center">
+           overscroll-behavior:contain stops the chain at this container's own boundary.
+           Item 6 (2026-09-08 regression session): align-items:center on THIS flex column is a
+           separate, real bug from the above, confirmed live via getBoundingClientRect at 100% zoom
+           against a real rendered page (795px canvas in a 392px-wide panel): a plain `center` value
+           overflows symmetrically in BOTH directions once content is wider than the container, but an
+           overflow:auto scroll container can only reveal the "after start" half of that overflow by
+           scrolling -- scrollLeft can't go negative, so the "before start" half (measured live: ~201px
+           of the canvas's own left edge) is permanently clipped and unreachable at ANY scroll
+           position, regardless of zoom level or document width. This is why yesterday's zoom fix,
+           verified only at 125%, didn't catch it: whether the cut-off is actually visible/reachable
+           depends on how much wider the canvas is than the panel at a given zoom, not on the fix
+           itself -- 125% happened not to expose it as visibly as 100% did with this document.
+           align-items:safe center (CSS Box Alignment "safe" keyword, well-supported in evergreen
+           browsers) is the standard fix for exactly this: it centers when the content fits, and falls
+           back to start-alignment -- fully scrollable, nothing clipped -- the moment it doesn't. -->
+      <div style="flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;background:#525659;border-radius:2px;box-shadow:var(--shadow-lg);padding:12px;display:flex;flex-direction:column;align-items:safe center">
         <sc-if value="{{ resumeIsPdf }}" hint-placeholder-val="{{ false }}">
-          <div id="original-pdf-viewer-container" style="display:flex;flex-direction:column;align-items:center;gap:10px;width:100%"></div>
+          <div id="original-pdf-viewer-container" style="display:flex;flex-direction:column;align-items:safe center;gap:10px;width:100%"></div>
         </sc-if>
         <sc-if value="{{ resumeIsImage }}" hint-placeholder-val="{{ true }}">
           <img src="{{ resumeOriginalUrl }}" style="max-width:100%;display:block;background:#fff">
