@@ -3105,6 +3105,16 @@ a:hover{color:var(--color-accent)}
 </div>
 </sc-if>
 
+<!-- Item C (2026-09-08 session): only ever rendered inside the pop-up window
+     startSignupPaidCheckout opens — see handleCheckoutPopupReturn's own header. The main app
+     window never sets screen to this value. -->
+<sc-if value="{{ isCheckoutPopupClosing }}" hint-placeholder-val="{{ false }}">
+<div style="max-width:420px;margin:0 auto;padding:80px 20px 40px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:var(--space-3)">
+  <div style="font-size:17px">{{ checkoutPopupClosingTitle }}</div>
+  <div style="font-size:13px;color:var(--color-neutral-400)">You can close this window now.</div>
+</div>
+</sc-if>
+
 <sc-if value="{{ isInterstitial }}" hint-placeholder-val="{{ false }}">
 <div style="max-width:460px;margin:0 auto;padding:120px 20px 40px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:var(--space-4)">
   <div class="card elev-md" style="width:100%;padding:var(--space-8);display:flex;flex-direction:column;gap:var(--space-3);text-align:left">
@@ -4472,20 +4482,21 @@ a:hover{color:var(--color-accent)}
 </div>
 </sc-if>
 
-<!-- Item B (2026-09-08 regression session): this modal now only ever renders during signup (see
-     advanceFromTiers/confirmSignupPaidSelection's own header) — the Subscription tab's real upgrade
-     path (openPaymentCard etc.) skips straight to a genuine Stripe test-mode redirect instead.
-     Copy rewritten to stop claiming a "PCI-compliant hosted form" handoff that never happened: no
-     real payment is collected at signup, on purpose (a full-page Stripe redirect this early would
-     strand the candidate — see confirmSignupPaidSelection's own header) — this sets the real
-     candidates.tier backend field directly via set-candidate-tier, honestly, with real billing
-     deferred to the Subscription tab after the account exists. -->
+<!-- Item C (2026-09-08 session): this modal only ever renders during signup (the Subscription
+     tab's real upgrade path — openPaymentCard etc. — skips straight to a genuine Stripe test-mode
+     redirect instead, a full-page one, since a real session exists by then). Now a genuine Stripe
+     test-mode Checkout too, opened in a pop-up rather than a full-page redirect — see
+     startSignupPaidCheckout's own header for exactly why a pop-up is what makes real Stripe
+     wiring possible this early in signup, before any session token exists to resolve a full-page
+     redirect back into. The pop-up warning below is shown upfront, before the checkout attempt
+     ever starts, per the explicit ask for this feature — not only surfaced after a blocked pop-up
+     fails. -->
 <sc-if value="{{ paymentModalOpen }}" hint-placeholder-val="{{ false }}">
   <div class="dialog-backdrop">
     <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="payment-modal-title">
       <div class="dialog-title" id="payment-modal-title">Start on Paid</div>
       <div class="dialog-body">
-        No payment is collected during signup. This sets your account to the Paid plan now; manage billing for real, any time, from the Subscription tab once your account exists.
+        This opens Stripe's real, secure checkout (test mode for this alpha) in a pop-up window — your account isn't charged for real, but the checkout flow itself is real. <strong>Pop-ups must be allowed for this site</strong> for it to open; if your browser blocks it, allow pop-ups and try again.
         <sc-if value="{{ checkoutError }}" hint-placeholder-val="{{ false }}">
           <div style="margin-top:var(--space-3);font-size:12px;color:#e2735c">{{ checkoutError }}</div>
         </sc-if>
@@ -5354,6 +5365,7 @@ class Component extends DCLogic {
 
   componentWillUnmount() {
     if (this._pdfBlobUrl) URL.revokeObjectURL(this._pdfBlobUrl);
+    this.stopSignupCheckoutPolling();
   }
 
   toggleCzItem(target, categoryKey, itemKey) {
@@ -5980,6 +5992,20 @@ class Component extends DCLogic {
   state = this.getInitialState();
 
   componentDidMount() {
+    // Item C (2026-09-08 session): this exact file also loads inside the popup window that
+    // startSignupPaidCheckout opens (Stripe's own success_url/cancel_url point right back at
+    // candidate.html, same as the post-signup flow — see that function's own header for why a
+    // POPUP rather than a full-page redirect is what makes real Stripe wiring possible this early
+    // in signup, before any session token exists). window.opener is only ever set on a window we
+    // opened ourselves this way — a real visitor loading this URL directly never has one — so this
+    // check is what tells the popup apart from a normal load and skips mounting the real app in it
+    // entirely, before mountResolveOrToken/handleCheckoutReturn (built for the OTHER, full-page-
+    // redirect flow) get a chance to run and do something confusing in a window nobody's meant to
+    // use as an app.
+    if (window.opener && new URL(window.location.href).searchParams.has('checkout')) {
+      this.handleCheckoutPopupReturn();
+      return;
+    }
     try {
       const raw = localStorage.getItem('verifi_draft');
       if (raw) this.setState({ draft: JSON.parse(raw) });
@@ -6798,31 +6824,131 @@ class Component extends DCLogic {
     this.setState(patch, () => { if (patch.accountTab === 'views') this.renderPdfPreview(); });
   }
 
-  // Item B: the signup-time paid-tier modal's real "Confirm" action — deliberately NOT a Stripe
-  // interaction (see startRealCheckout's own header for exactly why: a full-page redirect mid-
-  // signup, before any session token is ever persisted, would strand the candidate with nothing to
-  // resolve back into). candidate_id alone is enough to call set-candidate-tier — no session
-  // required, same pattern already established by set-discoverable — so this is a genuine backend
-  // write, just not a real payment. The modal's own copy is honest about that now instead of
-  // claiming a PCI-compliant processor handoff that never happened.
-  async confirmSignupPaidSelection() {
+  // Item C (2026-09-08 session): the signup-time paid-tier modal's real "Confirm" action — now a
+  // genuine Stripe test-mode Checkout, reusing test-stripe-checkout (see its own header) exactly as
+  // the Subscription tab's already-real upgrade path does, but via a pop-up rather than a full-page
+  // redirect — the explicit design choice for this screen (a mid-signup purchase shouldn't navigate
+  // the candidate's own tab away from the flow they're in the middle of), not a workaround for a
+  // missing session: Item 2 (this same session, earlier) made confirm-verification issue a real
+  // session token immediately, and applySignupConfirmation persists it via applySession right away
+  // — checked directly against a fresh signup while building this, a session token is already in
+  // localStorage by the time this screen is ever reached, so a full-page startRealCheckout redirect
+  // would in fact survive and resolve on return. (An EARLIER version of this comment, and of
+  // test-stripe-checkout's own header, claimed no session token exists yet at this point — that
+  // predates Item 2 and is no longer true; noted here so it isn't trusted again.) Kept as a pop-up
+  // regardless, per the explicit ask for this feature: this window never navigates away,
+  // resumeCandidateId stays in memory the whole time, and Stripe's own success/cancel redirect
+  // lands in the popup, not here — see handleCheckoutPopupReturn, the other half of this pair.
+  //
+  // window.open() is called as the very first statement, before any await — an async gap ahead of
+  // it (e.g. awaiting the checkout-session fetch first) is exactly what triggers most browsers'
+  // popup blockers, since it falls outside the click's own user-gesture window. The modal's own
+  // copy warns that pop-ups must be allowed BEFORE this ever runs, not only shown here on failure —
+  // per the explicit ask for this feature.
+  startSignupPaidCheckout() {
     const s = this.state;
     if (!s.resumeCandidateId || s.checkoutPending) return;
+    const popup = window.open('about:blank', 'verifi_signup_checkout', 'width=500,height=760');
+    if (!popup || popup.closed) {
+      this.setState({ checkoutError: "Your browser blocked the payment pop-up. Please allow pop-ups for this site and try again." });
+      return;
+    }
+    this._signupCheckoutPopup = popup;
+    try { localStorage.removeItem('verifi_signup_checkout_popup_result'); } catch (e) {}
     this.setState({ checkoutPending: true, checkoutError: null });
+    this.launchSignupCheckoutPopup(popup, s.resumeCandidateId, s.billingCycle);
+  }
+
+  async launchSignupCheckoutPopup(popup, candidateId, billingCycle) {
     let res, data;
     try {
-      res = await fetch(this.SUPABASE_FN_URL + '/set-candidate-tier', {
+      res = await fetch(this.SUPABASE_FN_URL + '/test-stripe-checkout', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_id: s.resumeCandidateId, tier: 'paid' }),
+        body: JSON.stringify({ candidate_id: candidateId, billing_cycle: billingCycle }),
       });
       data = await res.json().catch(() => ({}));
     } catch (e) {
-      this.setState({ checkoutPending: false, checkoutError: "Couldn't reach the server. Check your connection and try again." });
+      try { popup.close(); } catch (e2) {}
+      this.setState({ checkoutPending: false, checkoutError: "Couldn't reach the payment processor. Check your connection and try again." });
       return;
     }
-    if (!res.ok || !data.ok) {
-      this.setState({ checkoutPending: false, checkoutError: "Couldn't set your plan. Please try again." });
+    if (!res.ok || !data.ok || !data.url) {
+      try { popup.close(); } catch (e2) {}
+      this.setState({ checkoutPending: false, checkoutError: "Couldn't start checkout. Please try again." });
+      return;
+    }
+    if (popup.closed) {
+      // Candidate closed the popup while the checkout session was being created — a real, honest
+      // cancel, not an error worth surfacing.
+      this.setState({ checkoutPending: false });
+      return;
+    }
+    popup.location.href = data.url;
+    this.startSignupCheckoutPolling();
+  }
+
+  // Same startResumePolling/startLoginPolling shape (see either's own header) — a live interval
+  // poll, started when the popup flow begins and stopped once it resolves. Polls localStorage, not
+  // the network: the popup itself (running this exact same file — see handleCheckoutPopupReturn)
+  // is what writes the real result there the moment Stripe redirects it back, so this is noticing a
+  // same-origin, synchronous local write, not a round trip — a much shorter interval than this
+  // file's network-backed polls is appropriate here for exactly that reason.
+  startSignupCheckoutPolling() {
+    if (this._signupCheckoutPollTimer) return;
+    this._signupCheckoutPollTimer = setInterval(() => this.checkSignupCheckoutPopup(), 800);
+  }
+
+  stopSignupCheckoutPolling() {
+    if (this._signupCheckoutPollTimer) {
+      clearInterval(this._signupCheckoutPollTimer);
+      this._signupCheckoutPollTimer = null;
+    }
+  }
+
+  async checkSignupCheckoutPopup() {
+    let raw = null;
+    try { raw = localStorage.getItem('verifi_signup_checkout_popup_result'); } catch (e) {}
+    if (!raw) {
+      // Nothing written yet. Also treat a popup the candidate closed manually — never completed
+      // checkout, never got a chance to redirect back and write a result — as a real, honest
+      // cancel rather than leaving the modal spinning forever.
+      if (this._signupCheckoutPopup && this._signupCheckoutPopup.closed) {
+        this.stopSignupCheckoutPolling();
+        this._signupCheckoutPopup = null;
+        this.setState({ checkoutPending: false });
+      }
+      return;
+    }
+    this.stopSignupCheckoutPolling();
+    try { localStorage.removeItem('verifi_signup_checkout_popup_result'); } catch (e) {}
+    this._signupCheckoutPopup = null;
+    let result = null;
+    try { result = JSON.parse(raw); } catch (e) {}
+    if (!result || result.status !== 'success') {
+      this.setState({ checkoutPending: false });
+      return;
+    }
+    // Same real webhook race as handleCheckoutReturn's own — re-check rather than trust the
+    // popup's redirect alone. No session token exists yet to reuse resolveSession's own retry loop
+    // (see this function's own header), so this polls get-candidate-tier instead — the read-only,
+    // candidate_id-only counterpart built for exactly this gap (see that function's own header).
+    let confirmedPaid = false;
+    for (let i = 0; !confirmedPaid && i < 8; i++) {
+      if (i > 0) await new Promise((r) => setTimeout(r, 1500));
+      let tRes, tData;
+      try {
+        tRes = await fetch(this.SUPABASE_FN_URL + '/get-candidate-tier', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ candidate_id: this.state.resumeCandidateId }),
+        });
+        tData = await tRes.json().catch(() => ({}));
+      } catch (e) { continue; }
+      confirmedPaid = tRes.ok && tData.ok && tData.tier === 'paid';
+    }
+    if (!confirmedPaid) {
+      this.setState({ checkoutPending: false, checkoutError: "Payment may still be processing — check back in a moment, or contact support if this persists." });
       return;
     }
     this.setState({
@@ -6831,6 +6957,29 @@ class Component extends DCLogic {
       accountTier: 'paid', changePlanOpen: false, tierSelection: 'paid', screen: 'interstitial',
     });
     this.addActivityLog('Paid plan selected at signup');
+  }
+
+  // Item C: the other half of startSignupPaidCheckout — this runs in the POPUP window (see
+  // componentDidMount's own early branch, which is what routes execution here instead of mounting
+  // the full app in that window). Its only job is to hand the result back to the real app window
+  // (via localStorage, same-origin and synchronous — no postMessage/BroadcastChannel plumbing
+  // needed for a same-origin popup) and close itself; nothing about a real Stripe redirect needs a
+  // full app mount in a window nobody's meant to interact with beyond this.
+  handleCheckoutPopupReturn() {
+    const url = new URL(window.location.href);
+    const checkout = url.searchParams.get('checkout');
+    try {
+      localStorage.setItem('verifi_signup_checkout_popup_result', JSON.stringify({
+        status: checkout === 'success' ? 'success' : 'cancel',
+        ts: Date.now(),
+      }));
+    } catch (e) {}
+    this.setState({ screen: 'checkoutPopupClosing' });
+    // Only ever true for a window we opened ourselves via window.open — close() on a window the
+    // browser opened any other way is silently ignored, so this can't accidentally close a tab a
+    // candidate navigated to directly. The visible "you can close this window" copy (see its own
+    // markup) is the fallback for the rare browser that blocks scripted close entirely.
+    setTimeout(() => { try { window.close(); } catch (e) {} }, 600);
   }
 
   // Item B: real backend write for a downgrade to Free — see set-candidate-tier's own header for
@@ -7569,17 +7718,14 @@ class Component extends DCLogic {
       checkoutCancelledNotice: s.checkoutCancelledNotice,
       checkoutSuccessNotice: s.checkoutSuccessNotice,
       dismissCheckoutNotice: () => this.setState({ checkoutCancelledNotice: false, checkoutSuccessNotice: false, checkoutError: null }),
-      closePaymentModal: () => this.setState({ paymentModalOpen: false, paymentModalMethod: null, paymentModalContext: null }),
-      // Item B: this modal (and confirmPaymentModal below) now only ever renders/fires for
+      closePaymentModal: () => this.setState({ paymentModalOpen: false, paymentModalMethod: null, paymentModalContext: null, checkoutError: null }),
+      // Item C: this modal (and confirmPaymentModal below) only ever renders/fires for
       // paymentModalContext === 'signup' — see advanceFromTiers. The Subscription tab's own upgrade
-      // path skips it entirely (openPaymentCard above goes straight to real Stripe). Real dead end
-      // this closes: used to flip accountTier locally with zero backend write; now calls the real
-      // set-candidate-tier endpoint (see that function's own header for exactly why this path is
-      // deliberately NOT how a real paid upgrade happens — no payment is actually collected here,
-      // and the modal's own copy says so now instead of claiming a PCI-compliant handoff that never
-      // happened).
-      confirmPaymentModal: () => this.confirmSignupPaidSelection(),
-      confirmPaymentModalLabel: s.checkoutPending ? 'Saving…' : 'Confirm Paid plan',
+      // path skips it entirely (openPaymentCard above goes straight to real Stripe, full-page,
+      // since a session already exists by then). This one opens the same real Stripe test-mode
+      // Checkout in a pop-up instead — see startSignupPaidCheckout's own header.
+      confirmPaymentModal: () => this.startSignupPaidCheckout(),
+      confirmPaymentModalLabel: s.checkoutPending ? 'Waiting for checkout…' : 'Confirm Paid plan',
       downgradeModalOpen: s.downgradeModalOpen,
       openDowngradeModal: () => this.setState({ downgradeModalOpen: true }),
       closeDowngradeModal: () => this.setState({ downgradeModalOpen: false }),
@@ -8278,6 +8424,8 @@ class Component extends DCLogic {
       discoverableSavePending: s.discoverableSavePending,
       discoverableSaveError: s.discoverableSaveError,
       continueFromTiersLabel: s.discoverableSavePending ? 'Saving preference…' : 'Continue',
+      isCheckoutPopupClosing: s.screen === 'checkoutPopupClosing',
+      checkoutPopupClosingTitle: (new URL(window.location.href)).searchParams.get('checkout') === 'success' ? 'Payment complete.' : 'Checkout cancelled.',
       isInterstitial: s.screen === 'interstitial',
       interstitialLearnMoreOpen: s.interstitialLearnMoreOpen,
       interstitialLearnMoreClosed: !s.interstitialLearnMoreOpen,
