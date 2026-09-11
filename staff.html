@@ -2582,6 +2582,30 @@ th.sortable{cursor:pointer;user-select:none}
           </div>
         </sc-if>
 
+        <sc-if value="{{ acIsCosos }}" hint-placeholder-val="{{ false }}">
+          <div class="field" style="max-width:420px">
+            <label for="ac-cosos-name">Employer / entity name</label>
+            <input class="input" id="ac-cosos-name" value="{{ acCososEntityName }}" onChange="{{ setAcCososEntityName }}">
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ acIsCodora }}" hint-placeholder-val="{{ false }}">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3);max-width:520px">
+            <div class="field">
+              <label for="ac-codora-first">First name</label>
+              <input class="input" id="ac-codora-first" value="{{ acCodoraFirstName }}" onChange="{{ setAcCodoraFirstName }}">
+            </div>
+            <div class="field">
+              <label for="ac-codora-last">Last name</label>
+              <input class="input" id="ac-codora-last" value="{{ acCodoraLastName }}" onChange="{{ setAcCodoraLastName }}">
+            </div>
+          </div>
+          <div class="field" style="max-width:260px">
+            <label for="ac-codora-lic">License number (optional)</label>
+            <input class="input" id="ac-codora-lic" value="{{ acCodoraLicenseNumber }}" onChange="{{ setAcCodoraLicenseNumber }}">
+          </div>
+        </sc-if>
+
         <div style="display:flex;align-items:center;gap:var(--space-3)">
           <button type="button" class="btn btn-primary" onClick="{{ runAutomatedCheck }}">{{ acRunLabel }}</button>
           <sc-if value="{{ acShowValidationError }}" hint-placeholder-val="{{ false }}">
@@ -2779,7 +2803,11 @@ class Component extends DCLogic {
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   }
 
-  CHECK_LABELS = { credly: 'Credly Badge', dbpr: 'DBPR License', sunbiz: 'Sunbiz (Employer)' };
+  // codora/cosos (2026-09-11 status-check session, Colorado wiring): verify-co-dora-license and
+  // verify-co-sos-entity already existed as deployed functions with zero references anywhere in
+  // this file — written but never wired into the staff UI. Wired the same way as their FL
+  // counterparts (dbpr/sunbiz) below.
+  CHECK_LABELS = { credly: 'Credly Badge', dbpr: 'DBPR License (FL)', sunbiz: 'Sunbiz (FL Employer)', codora: 'DORA License (CO)', cosos: 'CO SOS (Employer)' };
 
   state = {
     screen: 'login',
@@ -2810,7 +2838,7 @@ class Component extends DCLogic {
     nameFilter: '', itemIdFilter: '', typeFilter: '',
     syncFailures: {},
     automatedCheckType: 'credly',
-    automatedCheckInputs: { badgeUrl: '', dbprFirstName: '', dbprLastName: '', dbprLicenseNumber: '', sunbizEntityName: '' },
+    automatedCheckInputs: { badgeUrl: '', dbprFirstName: '', dbprLastName: '', dbprLicenseNumber: '', sunbizEntityName: '', codoraFirstName: '', codoraLastName: '', codoraLicenseNumber: '', cososEntityName: '' },
     automatedCheckRunning: false,
     automatedCheckValidationError: '',
     automatedCheckLastResult: null,
@@ -2970,7 +2998,7 @@ class Component extends DCLogic {
     const { first, last } = this.splitCandidateName(candidateName);
     return {
       automatedCheckType: this.defaultAutomatedCheckType(itemType),
-      automatedCheckInputs: { badgeUrl: '', dbprFirstName: first, dbprLastName: last, dbprLicenseNumber: '', sunbizEntityName: employerName || '' },
+      automatedCheckInputs: { badgeUrl: '', dbprFirstName: first, dbprLastName: last, dbprLicenseNumber: '', sunbizEntityName: employerName || '', codoraFirstName: first, codoraLastName: last, codoraLicenseNumber: '', cososEntityName: employerName || '' },
       automatedCheckRunning: false,
       automatedCheckValidationError: '',
       automatedCheckLastResult: null,
@@ -3007,6 +3035,32 @@ class Component extends DCLogic {
       return { text: data.matches.length + ' match(es) found:\n' + lines.join('\n'), needsReview };
     }
 
+    // codora (2026-09-11, Colorado wiring): same multi-match array shape as dbpr — see
+    // verify-co-dora-license's own header on why a license number alone is never treated as unique.
+    if (checkType === 'codora') {
+      if (!data.found || !data.matches || data.matches.length === 0) return { text: 'No matching license found.', needsReview: false };
+      const lines = data.matches.map((m) => {
+        const matchLabel = m.exactMatch === true ? 'exact name match' : m.exactMatch === false ? 'name does NOT match' : 'name not checked';
+        return '• ' + m.name + ' — ' + m.licenseType + (m.subCategory ? (' / ' + m.subCategory) : '') + (m.licenseNumber ? (' #' + m.licenseNumber) : '') + ', ' + m.status + (m.expirationDate ? (' (expires ' + m.expirationDate + ')') : '') + ' — ' + matchLabel;
+      });
+      const needsReview = data.matches.length > 1 || data.matches.some((m) => m.exactMatch === false);
+      return { text: data.matches.length + ' match(es) found:\n' + lines.join('\n'), needsReview };
+    }
+
+    // cosos (2026-09-11, Colorado wiring): also a multi-match array (unlike sunbiz's single best
+    // guess) — verify-co-sos-entity's own header documents a real case (CROCS, INC.) where the same
+    // exact legal name genuinely has two distinct registry records, so every match is surfaced
+    // rather than resolved to one.
+    if (checkType === 'cosos') {
+      if (!data.found || !data.matches || data.matches.length === 0) return { text: 'No matching entity found.', needsReview: false };
+      const lines = data.matches.map((m) => {
+        const matchLabel = m.exactMatch === true ? 'exact name match' : m.exactMatch === false ? 'approximate match' : 'match not checked';
+        return '• ' + m.name + ' — ' + (m.status || 'unknown status') + (m.entityType ? (', ' + m.entityType) : '') + (m.jurisdiction ? (', ' + m.jurisdiction) : '') + ' — ' + matchLabel;
+      });
+      const needsReview = data.matches.length > 1 || data.matches.some((m) => m.exactMatch === false);
+      return { text: data.matches.length + ' match(es) found:\n' + lines.join('\n'), needsReview };
+    }
+
     // sunbiz
     if (!data.found) return { text: 'No matching entity found.', needsReview: false };
     const exact = !!data.exactMatch;
@@ -3028,6 +3082,15 @@ class Component extends DCLogic {
       if (inputs.dbprFirstName.trim()) body.first_name = inputs.dbprFirstName.trim();
       if (inputs.dbprLastName.trim()) body.last_name = inputs.dbprLastName.trim();
       if (inputs.dbprLicenseNumber.trim()) body.license_number = inputs.dbprLicenseNumber.trim();
+    } else if (checkType === 'codora') {
+      path = '/verify-co-dora-license';
+      body = {};
+      if (inputs.codoraFirstName.trim()) body.first_name = inputs.codoraFirstName.trim();
+      if (inputs.codoraLastName.trim()) body.last_name = inputs.codoraLastName.trim();
+      if (inputs.codoraLicenseNumber.trim()) body.license_number = inputs.codoraLicenseNumber.trim();
+    } else if (checkType === 'cosos') {
+      path = '/verify-co-sos-entity';
+      body = { entity_name: inputs.cososEntityName.trim() };
     } else {
       path = '/verify-fl-sos-entity';
       body = { entity_name: inputs.sunbizEntityName.trim() };
@@ -3675,16 +3738,19 @@ class Component extends DCLogic {
       // identically for every item type — a Job Experience item offered Credly/DBPR (which verify a
       // credential, not an employer) and a Certification item offered Sunbiz (which verifies a
       // business entity, not a credential). Real fix: filter by selected.type, the same real field
-      // showAutomatedCheckSection above already branches on — Credly/DBPR only make sense against a
-      // Certification; Sunbiz only makes sense against a Job Experience employer.
+      // showAutomatedCheckSection above already branches on — Credly/DBPR/DORA only make sense
+      // against a Certification; Sunbiz/CO SOS only make sense against a Job Experience employer.
+      // codora/cosos added same session, Colorado wiring — see CHECK_LABELS' own comment.
       checkTypeOptions: [
         { value: 'credly', label: 'Credly Badge' },
         { value: 'dbpr', label: 'DBPR License (FL)' },
-        { value: 'sunbiz', label: 'Sunbiz — Employer (unreliable)' },
+        { value: 'codora', label: 'DORA License (CO)' },
+        { value: 'sunbiz', label: 'Sunbiz — Employer (unreliable, FL)' },
+        { value: 'cosos', label: 'CO SOS — Employer' },
       ].filter(opt => {
         if (!selected) return true;
-        if (selected.type === 'Certification') return opt.value === 'credly' || opt.value === 'dbpr';
-        if (selected.type === 'Job Experience') return opt.value === 'sunbiz';
+        if (selected.type === 'Certification') return opt.value === 'credly' || opt.value === 'dbpr' || opt.value === 'codora';
+        if (selected.type === 'Job Experience') return opt.value === 'sunbiz' || opt.value === 'cosos';
         return true;
       }),
       automatedCheckType: s.automatedCheckType,
@@ -3692,16 +3758,26 @@ class Component extends DCLogic {
       acIsCredly: s.automatedCheckType === 'credly',
       acIsDbpr: s.automatedCheckType === 'dbpr',
       acIsSunbiz: s.automatedCheckType === 'sunbiz',
+      acIsCodora: s.automatedCheckType === 'codora',
+      acIsCosos: s.automatedCheckType === 'cosos',
       acBadgeUrl: s.automatedCheckInputs.badgeUrl,
       acDbprFirstName: s.automatedCheckInputs.dbprFirstName,
       acDbprLastName: s.automatedCheckInputs.dbprLastName,
       acDbprLicenseNumber: s.automatedCheckInputs.dbprLicenseNumber,
       acSunbizEntityName: s.automatedCheckInputs.sunbizEntityName,
+      acCodoraFirstName: s.automatedCheckInputs.codoraFirstName,
+      acCodoraLastName: s.automatedCheckInputs.codoraLastName,
+      acCodoraLicenseNumber: s.automatedCheckInputs.codoraLicenseNumber,
+      acCososEntityName: s.automatedCheckInputs.cososEntityName,
       setAcBadgeUrl: (e) => this.setState(st => ({ automatedCheckInputs: { ...st.automatedCheckInputs, badgeUrl: e.target.value } })),
       setAcDbprFirstName: (e) => this.setState(st => ({ automatedCheckInputs: { ...st.automatedCheckInputs, dbprFirstName: e.target.value } })),
       setAcDbprLastName: (e) => this.setState(st => ({ automatedCheckInputs: { ...st.automatedCheckInputs, dbprLastName: e.target.value } })),
       setAcDbprLicenseNumber: (e) => this.setState(st => ({ automatedCheckInputs: { ...st.automatedCheckInputs, dbprLicenseNumber: e.target.value } })),
       setAcSunbizEntityName: (e) => this.setState(st => ({ automatedCheckInputs: { ...st.automatedCheckInputs, sunbizEntityName: e.target.value } })),
+      setAcCodoraFirstName: (e) => this.setState(st => ({ automatedCheckInputs: { ...st.automatedCheckInputs, codoraFirstName: e.target.value } })),
+      setAcCodoraLastName: (e) => this.setState(st => ({ automatedCheckInputs: { ...st.automatedCheckInputs, codoraLastName: e.target.value } })),
+      setAcCodoraLicenseNumber: (e) => this.setState(st => ({ automatedCheckInputs: { ...st.automatedCheckInputs, codoraLicenseNumber: e.target.value } })),
+      setAcCososEntityName: (e) => this.setState(st => ({ automatedCheckInputs: { ...st.automatedCheckInputs, cososEntityName: e.target.value } })),
       acRunLabel: s.automatedCheckRunning ? 'Running…' : 'Run check',
       runAutomatedCheck: () => {
         if (!selected || s.automatedCheckRunning) return;
@@ -3711,6 +3787,8 @@ class Component extends DCLogic {
         if (type === 'credly' && !inputs.badgeUrl.trim()) err = 'Enter a badge URL.';
         if (type === 'dbpr' && !inputs.dbprLastName.trim() && !inputs.dbprLicenseNumber.trim()) err = 'Enter a last name or a license number.';
         if (type === 'sunbiz' && !inputs.sunbizEntityName.trim()) err = 'Enter an employer/entity name.';
+        if (type === 'codora' && !inputs.codoraLastName.trim() && !inputs.codoraLicenseNumber.trim()) err = 'Enter a last name or a license number.';
+        if (type === 'cosos' && !inputs.cososEntityName.trim()) err = 'Enter an employer/entity name.';
         if (err) { this.setState({ automatedCheckValidationError: err }); return; }
         this.setState({ automatedCheckRunning: true, automatedCheckValidationError: '', automatedCheckLastResult: null });
         this.runAutomatedCheckRequest(selected.id, type, inputs);
