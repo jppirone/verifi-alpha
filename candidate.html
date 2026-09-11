@@ -2859,8 +2859,11 @@ a:hover{color:var(--color-accent)}
          page-level scroll (or the old position:sticky) to keep both panels usable together; each
          scrolls on its own, unaffected by the other. overscroll-behavior:contain (Item 13, see the
          document panel's own comment) stops this panel's own scroll from chaining into the page too,
-         at either its top or bottom edge. -->
-    <div style="display:flex;flex-direction:column;gap:var(--space-4);height:calc(100vh - 160px);overflow-y:auto;overscroll-behavior:contain;padding-right:4px">
+         at either its top or bottom edge. padding-bottom (Item 9, 2026-09-11 status-check session):
+         without it, the confirm button below — the last element in this scrolling column — sits
+         flush against the container's own bottom edge, so its own border/focus ring gets visually
+         clipped by the overflow boundary once scrolled all the way down. -->
+    <div style="display:flex;flex-direction:column;gap:var(--space-4);height:calc(100vh - 160px);overflow-y:auto;overscroll-behavior:contain;padding-right:4px;padding-bottom:var(--space-4)">
       <sc-if value="{{ resumeHasSummary }}" hint-placeholder-val="{{ false }}">
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
         <div class="card-kicker">Summary</div>
@@ -6111,6 +6114,17 @@ class Component extends DCLogic {
     // resolved, not in parallel with it — it needs resumeCandidateId/a real session token in place
     // before it can meaningfully re-check tier state.
     this.mountResolveOrToken().then(() => this.handleCheckoutReturn());
+    // Item 7 (2026-09-11 status-check session): confirmed live, navigating away (tab close, refresh,
+    // back button) while checkoutPending is true — the window between clicking a payment method and
+    // the actual redirect to the processor's hosted checkout, or between confirming a downgrade and
+    // that request landing — was silently allowed with no warning at all. checkoutPending is the
+    // same flag that already drives every checkout/downgrade button's disabled + "Redirecting…"/
+    // "Switching…" state (see its own state comment), so it's the correct single signal here too.
+    window.addEventListener('beforeunload', (e) => {
+      if (!this.state.checkoutPending) return;
+      e.preventDefault();
+      e.returnValue = '';
+    });
   }
 
   // Real bug, reproduced directly (2026-09-07): a candidate mid-session, on a validation/confirm
