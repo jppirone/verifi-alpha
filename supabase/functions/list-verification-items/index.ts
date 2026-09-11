@@ -43,7 +43,7 @@ export default {
 
       const [workHistoryContacts, certContacts] = await Promise.all([
         workHistoryIds.length
-          ? fetch(`${SUPABASE_URL}/rest/v1/work_history_items?id=in.(${workHistoryIds.join(",")})&select=id,employer_name_override,employer_location_override,contact_phone,contact_name`, { headers: REST_HEADERS }).then((r) => r.ok ? r.json() : [])
+          ? fetch(`${SUPABASE_URL}/rest/v1/work_history_items?id=in.(${workHistoryIds.join(",")})&select=id,company,employer_name_override,employer_location_override,contact_phone,contact_name`, { headers: REST_HEADERS }).then((r) => r.ok ? r.json() : [])
           : Promise.resolve([]),
         certIds.length
           ? fetch(`${SUPABASE_URL}/rest/v1/certification_items?id=in.(${certIds.join(",")})&select=id,verification_link,contact_phone`, { headers: REST_HEADERS }).then((r) => r.ok ? r.json() : [])
@@ -60,6 +60,13 @@ export default {
         const contactPhone = wc?.contact_phone || cc?.contact_phone || null;
         const contactName = wc?.contact_name || null;
         const verificationLink = cc?.verification_link || null;
+        // Item 13 (2026-09-11 status-check session): the real employer name to run an automated
+        // Sunbiz check against, computed once here rather than in staff.html — candidate-supplied
+        // employer_name_override (see hasContactHint's own comment: candidate-stated, staff outreach
+        // only) is more likely to be current/accurate than whatever the resume parse landed on, so it
+        // wins when present; company (the resume-parsed original) is the fallback, never the other
+        // way around.
+        const employerNameResolved = employerNameOverride || wc?.company || null;
         return {
         id: r.id,
         type: r.type,
@@ -94,6 +101,7 @@ export default {
         // verification claim (see the migration's own header). hasContactHint lets the list/detail
         // view flag a row with something to show without every consumer re-deriving the same check.
         employerNameOverride, employerLocationOverride, contactPhone, contactName, verificationLink,
+        employerNameResolved,
         hasContactHint: !!(employerNameOverride || employerLocationOverride || contactPhone || contactName || verificationLink),
         timeline: (r.verification_item_timeline || []).map((t: any) => ({
           date: t.event_date,

@@ -2413,6 +2413,13 @@ th.sortable{cursor:pointer;user-select:none}
           <span class="{{ detailStatusTagClass }}">{{ detailStatus }}</span>
         </div>
 
+        <div style="display:flex;align-items:center;gap:var(--space-3)">
+          <button type="button" class="btn btn-ghost" style="font-size:12px;padding:4px 10px" disabled="{{ sourceDocLoading }}" onClick="{{ viewSourceDocument }}">{{ sourceDocLabel }}</button>
+          <sc-if value="{{ sourceDocError }}" hint-placeholder-val="{{ false }}">
+            <span style="font-size:12px;color:#b00020">{{ sourceDocError }}</span>
+          </sc-if>
+        </div>
+
         <sc-if value="{{ detailSyncError }}" hint-placeholder-val="{{ false }}">
           <div style="display:flex;align-items:center;gap:var(--space-2);padding:8px 10px;border:1px solid #b00020;border-radius:6px;background:rgba(176,0,32,0.06)">
             <span style="font-size:12px;color:#b00020">Some changes to this item didn't save.</span>
@@ -2807,6 +2814,11 @@ class Component extends DCLogic {
     automatedCheckRunning: false,
     automatedCheckValidationError: '',
     automatedCheckLastResult: null,
+    // Item 11 (2026-09-11 status-check session): the real gap this closes — staff had no way at all
+    // to see the original document a candidate submitted, only the structured rows extracted from
+    // it. Transient, per-item-view state (reset alongside automatedCheck* on selectedId change) —
+    // not persisted, since the signed URL itself is short-lived (1hr, see get-resume-extraction).
+    sourceDocLoading: false, sourceDocError: null,
     // Reporting tab: candidates whose resume extraction failed and who never reached the
     // verification queue any other way (see list-resume-extraction-failures) — confirmed to be a
     // real, current, silent dead end (two real candidates found in exactly this state) with zero
@@ -2948,14 +2960,22 @@ class Component extends DCLogic {
     return { first: parts[0], last: parts.slice(1).join(' ') };
   }
 
-  resetAutomatedCheckState(itemType, candidateName) {
+  // Item 13 (2026-09-11 status-check session): employerName was never wired in at all before this —
+  // the Sunbiz input always started blank regardless of what the candidate or the resume already
+  // said about the employer. employerNameResolved (see list-verification-items' own comment) already
+  // prioritizes the candidate-supplied override over the resume-parsed original server-side, so this
+  // just has to pass it through as the pre-fill; staff can still edit or clear it before running the
+  // check.
+  resetAutomatedCheckState(itemType, candidateName, employerName) {
     const { first, last } = this.splitCandidateName(candidateName);
     return {
       automatedCheckType: this.defaultAutomatedCheckType(itemType),
-      automatedCheckInputs: { badgeUrl: '', dbprFirstName: first, dbprLastName: last, dbprLicenseNumber: '', sunbizEntityName: '' },
+      automatedCheckInputs: { badgeUrl: '', dbprFirstName: first, dbprLastName: last, dbprLicenseNumber: '', sunbizEntityName: employerName || '' },
       automatedCheckRunning: false,
       automatedCheckValidationError: '',
       automatedCheckLastResult: null,
+      sourceDocLoading: false,
+      sourceDocError: null,
     };
   }
 
@@ -3064,6 +3084,35 @@ class Component extends DCLogic {
       automatedCheckRunning: false,
       automatedCheckLastResult: { text: summary.text, needsReview: summary.needsReview, failed: !data.ok, checkLabel },
     });
+  }
+
+  // Item 11 (2026-09-11 status-check session): staff previously had no way to see the original
+  // document a candidate submitted — only the structured rows an LLM extracted from it, with no way
+  // to check those against the real source. Reuses get-resume-extraction as-is rather than adding a
+  // new endpoint: it already takes a bare candidate_id (same auth model as every other function in
+  // this pipeline) and already returns a signed URL to the original file for exactly this purpose on
+  // the candidate side (see its own header) — a verification_items row's candidateId is all this
+  // needs. Fetched on demand rather than alongside the item itself since the signed URL is only
+  // valid for 1hr; opened in a new tab rather than embedded, since the original can be an image or a
+  // PDF and this queue has no viewer for either.
+  async viewSourceDocument(candidateId) {
+    if (!candidateId) { this.setState({ sourceDocError: 'No candidate on this item.' }); return; }
+    this.setState({ sourceDocLoading: true, sourceDocError: null });
+    let data;
+    try {
+      const res = await fetch(this.SUPABASE_FN_URL + '/get-resume-extraction', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate_id: candidateId }),
+      });
+      data = await res.json().catch(() => ({ ok: false, error: 'invalid_response' }));
+    } catch (e) {
+      data = { ok: false, error: 'network_error' };
+    }
+    const url = data && data.ok && data.resume_document ? data.resume_document.original_signed_url : null;
+    if (!url) { this.setState({ sourceDocLoading: false, sourceDocError: "Couldn't load the original document." }); return; }
+    window.open(url, '_blank', 'noopener');
+    this.setState({ sourceDocLoading: false });
   }
 
   async loadItems() {
@@ -3384,7 +3433,7 @@ class Component extends DCLogic {
       isAdminEditable: isAdmin,
       isWorkerRow: !isAdmin,
       syncError: !!s.syncFailures[it.id],
-      onOpen: () => this.setState({ selectedId: it.id, correctionMode: null, correctionDraft: '', declineDraft: '', noteSaveState: 'idle', ...this.resetAutomatedCheckState(it.type, it.candidateName) }),
+      onOpen: () => this.setState({ selectedId: it.id, correctionMode: null, correctionDraft: '', declineDraft: '', noteSaveState: 'idle', ...this.resetAutomatedCheckState(it.type, it.candidateName, it.employerNameResolved) }),
       stopClick: (e) => { if (e && e.stopPropagation) e.stopPropagation(); },
       onReassign: (e) => { if (e.stopPropagation) e.stopPropagation(); this.updateItem(it.id, { assignedTo: e.target.value }); },
       onRetrySync: (e) => { if (e.stopPropagation) e.stopPropagation(); this.retrySync(it.id); },
@@ -3589,7 +3638,7 @@ class Component extends DCLogic {
         if (e && e.preventDefault) e.preventDefault();
         if (!nextUnresolved) return;
         const it = nextUnresolved;
-        this.setState({ selectedId: it.id, correctionMode: null, correctionDraft: '', declineDraft: '', noteSaveState: 'idle', statusConfirmOpen: false, pendingStatus: null, resolutionEvidenceDraft: '', ...this.resetAutomatedCheckState(it.type, it.candidateName) });
+        this.setState({ selectedId: it.id, correctionMode: null, correctionDraft: '', declineDraft: '', noteSaveState: 'idle', statusConfirmOpen: false, pendingStatus: null, resolutionEvidenceDraft: '', ...this.resetAutomatedCheckState(it.type, it.candidateName, it.employerNameResolved) });
       },
       detailSyncError: !!(selected && s.syncFailures[selected.id]),
       retryDetailSync: () => { if (selected) this.retrySync(selected.id); },
@@ -3605,6 +3654,11 @@ class Component extends DCLogic {
       detailDesiredDisp: selected ? this.fmt(selected.desired) : '',
       detailFollowUp: selected ? selected.followUp : '',
       detailAutomatedCheck: selected ? selected.automatedCheck : '',
+      // Item 11 (2026-09-11 status-check session): see viewSourceDocument's own header.
+      sourceDocLoading: s.sourceDocLoading,
+      sourceDocError: s.sourceDocError,
+      sourceDocLabel: s.sourceDocLoading ? 'Loading…' : 'View original document',
+      viewSourceDocument: (e) => { if (e && e.preventDefault) e.preventDefault(); if (selected) this.viewSourceDocument(selected.candidateId); },
       // Item C (2026-09-08 regression session): candidate-stated contact hints — see
       // list-verification-items' own header for hasContactHint and where these come from.
       detailHasContactHint: !!(selected && selected.hasContactHint),
@@ -3617,11 +3671,22 @@ class Component extends DCLogic {
       // No automated check applies to unstructured needs_review content (no credly/dbpr/sunbiz
       // lookup makes sense against free text) — same reasoning as excluding Education.
       showAutomatedCheckSection: !!(selected && selected.type !== 'Education' && selected.type !== 'Needs Review'),
+      // Item 12 (2026-09-11 status-check session): this used to be a flat, static array shown
+      // identically for every item type — a Job Experience item offered Credly/DBPR (which verify a
+      // credential, not an employer) and a Certification item offered Sunbiz (which verifies a
+      // business entity, not a credential). Real fix: filter by selected.type, the same real field
+      // showAutomatedCheckSection above already branches on — Credly/DBPR only make sense against a
+      // Certification; Sunbiz only makes sense against a Job Experience employer.
       checkTypeOptions: [
         { value: 'credly', label: 'Credly Badge' },
         { value: 'dbpr', label: 'DBPR License (FL)' },
         { value: 'sunbiz', label: 'Sunbiz — Employer (unreliable)' },
-      ],
+      ].filter(opt => {
+        if (!selected) return true;
+        if (selected.type === 'Certification') return opt.value === 'credly' || opt.value === 'dbpr';
+        if (selected.type === 'Job Experience') return opt.value === 'sunbiz';
+        return true;
+      }),
       automatedCheckType: s.automatedCheckType,
       setAutomatedCheckType: (e) => this.setState({ automatedCheckType: e.target.value, automatedCheckValidationError: '', automatedCheckLastResult: null }),
       acIsCredly: s.automatedCheckType === 'credly',
