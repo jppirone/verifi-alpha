@@ -143,7 +143,14 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
 - Deduplication: if the same role, credential, or skill term appears more than once anywhere in the
   document (e.g. listed once under "Experience" and again under a separate "Leadership" or
   "Highlights" section), extract it ONCE. Do not create duplicate entries for repeated mentions of
-  the same underlying fact.
+  the same underlying fact. This also applies ACROSS categories, not just within one: once a
+  credential, role, or degree has been captured as its own structured entry (work_history,
+  education, or certifications), do not also restate it — by name or by close paraphrase — inside a
+  needs_review entry, even if it sits under a section heading that also contains other, genuinely
+  uncaptured content. Only the uncaptured remainder of that section (content that doesn't name any
+  already-extracted item) belongs in needs_review — a section heading is not dropped just because
+  part of its content was already extracted elsewhere, only the part restating an already-extracted
+  item is.
 
 - NEVER FABRICATE A STRUCTURED ENTRY FROM A HEADER OR A SUMMARY SENTENCE (hard rule — a real,
   confirmed failure mode, not a hypothetical): a structured entry's identifying field (a
