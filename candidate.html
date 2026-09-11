@@ -4635,7 +4635,7 @@ class Component extends DCLogic {
       })) },
       { key: 'education', label: 'Education', items: education.map(e => ({
         key: e.id,
-        label: [e.degree, [e.institution, e.location].filter(Boolean).join(', ')].filter(Boolean).join(', ') + (e.end_date ? ` (Graduated ${this.monthYearLabel(e.end_date)})` : ''),
+        label: [e.degree, e.field_of_study, [e.institution, e.location].filter(Boolean).join(', ')].filter(Boolean).join(', ') + (e.end_date ? ` (Graduated ${this.monthYearLabel(e.end_date)})` : ''),
       })) },
       { key: 'skills', label: 'Skills' },
       { key: 'certifications', label: 'Certifications', items: certifications.map(c => ({
@@ -4658,18 +4658,6 @@ class Component extends DCLogic {
     const endLabel = end ? this.monthYearLabel(end) : (start ? 'Present' : '');
     if (!startLabel && !endLabel) return '';
     return ` (${[startLabel, endLabel].filter(Boolean).join('-')})`;
-  }
-
-  // Real hobbies/other content for the "Additional Information" section of the Views PDF and
-  // Customization's "misc" category — pulled from the same candidate_freeform_sections rows
-  // resumeConfirm itself reads, filtered to section_type 'hobbies_other' (see get-resume-
-  // extraction/insert_resume_extraction for why that's the real, distinct category — 'needs_review'
-  // freeform is deliberately excluded here, that content was flagged as unresolved, not confirmed
-  // shareable). Replaces the hardcoded CATEGORY_CONTENT.misc fixture string.
-  realHobbiesText() {
-    const ex = this.state.resumeExtraction;
-    const rows = ((ex && ex.freeform) || []).filter(f => f.section_type === 'hobbies_other');
-    return rows.map(f => f.content).filter(Boolean).join(' ');
   }
 
   _czFlashCounter = 0;
@@ -5164,51 +5152,81 @@ class Component extends DCLogic {
     const summaryText = this.getSummaryText(target);
     if (summaryText) this.wrapText(summaryText, 90).forEach(w => push(w));
     push('');
-    const expCat = cats.find(c => c.key === 'experience');
-    const expVal = catVal('experience');
-    const expItems = expCat.items.filter(it => (target ? expVal[it.key] : true));
-    if (expItems.length) {
-      push('EXPERIENCE', true);
-      expItems.forEach(it => {
-        push(it.label);
-        this.wrapText(this.roleDescription(it.key), 90).forEach(w => push(w));
-        push('');
+    // Item 6 (2026-09-11 status-check session): this used to render every category in a fixed
+    // EXPERIENCE -> EDUCATION -> SKILLS -> CERTIFICATIONS -> ADDITIONAL INFORMATION template
+    // order, unconditionally, regardless of where those sections actually appeared in the
+    // candidate's real source document -- and needs_review content (anything the extraction
+    // couldn't confidently place into a structured category) was never rendered into the
+    // generated PDF at all, under any category, ever (the old realHobbiesText() helper this
+    // replaces only ever surfaced section_type === 'hobbies_other', deliberately excluding
+    // needs_review). Real fix: reuse the exact position-sorted "blocks" pattern already proven
+    // live for the resumeConfirm screen (resumeSectionsOrdered, elsewhere in this file) -- one
+    // array spanning every work_history/education/certification/skills(one block)/freeform row,
+    // sorted by each row's own real `position` (captured at parse time from the source
+    // document's actual layout -- see upload-resume's globalizePosition), so entries interleave
+    // in their true document order instead of being bucketed into a fixed template. needs_review
+    // and hobbies_other blocks render their own real `heading` verbatim (uppercased) instead of
+    // a generic category label, in their correct position -- this is what actually closes the
+    // "content silently vanishes" gap, not just a reordering. Item labels are pulled from
+    // getCzCategories() (the same source Customization itself renders) so both surfaces always
+    // agree, and every label/body flows through wrapText -- which also resolves Item 4 (field of
+    // study, already added to getCzCategories' own label) and Item 5 (long job titles) as a
+    // natural side effect, with no separate fix needed for either.
+    const ex = s.resumeExtraction;
+    const blocks = [];
+    if (ex) {
+      const expVal = catVal('experience');
+      cats.find(c => c.key === 'experience').items.forEach(it => {
+        if (target && !expVal[it.key]) return;
+        const w = ex.work_history.find(row => row.id === it.key);
+        if (!w) return;
+        blocks.push({ kind: 'experience', position: typeof w.position === 'number' ? w.position : Infinity, label: it.label, body: this.roleDescription(it.key) });
       });
-    }
-    const eduCat = cats.find(c => c.key === 'education');
-    const eduVal = catVal('education');
-    const eduItems = eduCat.items.filter(it => (target ? eduVal[it.key] : true));
-    if (eduItems.length) {
-      push('EDUCATION', true);
-      eduItems.forEach(it => { push(it.label); push(''); });
-    }
-    if (catVal('skills')) {
-      const skillLine = this.deliveredSkills().join(', ');
-      if (skillLine) {
-        push('SKILLS', true);
-        this.wrapText(skillLine, 90).forEach(w => push(w));
-        push('');
+      const eduVal = catVal('education');
+      cats.find(c => c.key === 'education').items.forEach(it => {
+        if (target && !eduVal[it.key]) return;
+        const x = ex.education.find(row => row.id === it.key);
+        if (!x) return;
+        blocks.push({ kind: 'education', position: typeof x.position === 'number' ? x.position : Infinity, label: it.label, body: '' });
+      });
+      const certVal = catVal('certifications');
+      cats.find(c => c.key === 'certifications').items.forEach(it => {
+        if (target && !certVal[it.key]) return;
+        const c = ex.certifications.find(row => row.id === it.key);
+        if (!c) return;
+        blocks.push({ kind: 'certifications', position: typeof c.position === 'number' ? c.position : Infinity, label: it.label, body: '' });
+      });
+      if (catVal('skills') && ex.skills && ex.skills.length > 0) {
+        const skillLine = this.deliveredSkills().join(', ');
+        if (skillLine) {
+          const positions = ex.skills.map(sk => sk.section_position).filter(p => typeof p === 'number');
+          blocks.push({ kind: 'skills', position: positions.length ? Math.min(...positions) : Infinity, label: '', body: skillLine });
+        }
+      }
+      if (catVal('misc')) {
+        ex.freeform.filter(f => f.section_type === 'needs_review' || f.section_type === 'hobbies_other').forEach(f => {
+          const content = (f.content || '').trim();
+          if (!content) return;
+          blocks.push({ kind: 'misc', position: typeof f.position === 'number' ? f.position : Infinity, label: (f.heading || '').trim(), body: content });
+        });
       }
     }
-    const certCat = cats.find(c => c.key === 'certifications');
-    const certVal = catVal('certifications');
-    const certItems = certCat.items.filter(it => (target ? certVal[it.key] : true));
-    if (certItems.length) {
-      push('CERTIFICATIONS', true);
-      // Item 9 (2026-09-08 regression session): it.label is name + issuing_body + issue date joined
-      // into one string with no length cap (see getCzCategories' own certifications mapping) -- a
-      // real certification's own "name" can itself be a long narrative sentence (confirmed live,
-      // Item 2's own investigation: 726's real "Generative AI and Automation (Coursework,
-      // 2024–2026): applied GenAI for content creation..." certification, well over 200 chars).
-      // Same unwrapped-single-line bug as the summary fix above, same fix.
-      certItems.forEach(it => { this.wrapText(it.label, 90).forEach(w => push(w)); push(''); });
-    }
-    const hobbiesText = this.realHobbiesText();
-    if (catVal('misc') && hobbiesText) {
-      push('ADDITIONAL INFORMATION', true);
-      push(hobbiesText);
+    blocks.sort((a, b) => a.position - b.position);
+
+    const sectionHeader = { experience: 'EXPERIENCE', education: 'EDUCATION', skills: 'SKILLS', certifications: 'CERTIFICATIONS' };
+    let lastHeading = null;
+    blocks.forEach(b => {
+      const heading = b.kind === 'misc' ? (b.label || 'ADDITIONAL INFORMATION').toUpperCase() : sectionHeader[b.kind];
+      if (heading !== lastHeading) push(heading, true);
+      lastHeading = heading;
+      if (b.kind === 'skills' || b.kind === 'misc') {
+        this.wrapText(b.body, 90).forEach(w => push(w));
+      } else {
+        this.wrapText(b.label, 90).forEach(w => push(w));
+        if (b.body) this.wrapText(b.body, 90).forEach(w => push(w));
+      }
       push('');
-    }
+    });
     return lines;
   }
 
