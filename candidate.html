@@ -2864,6 +2864,13 @@ a:hover{color:var(--color-accent)}
          flush against the container's own bottom edge, so its own border/focus ring gets visually
          clipped by the overflow boundary once scrolled all the way down. -->
     <div style="display:flex;flex-direction:column;gap:var(--space-4);height:calc(100vh - 160px);overflow-y:auto;overscroll-behavior:contain;padding-right:4px;padding-bottom:var(--space-4)">
+      <!-- Item 1 (2026-09-11 status-check session, CRITICAL): the real, independent way to reject
+           what's shown here — see discardResumeDocument's own header for the full story. Placed at
+           the top of this column, not buried near Confirm at the bottom, so it's genuinely available
+           before a candidate has to scroll past everything to reach it. -->
+      <div style="display:flex;justify-content:flex-end">
+        <button type="button" class="btn btn-ghost" style="font-size:12px;color:var(--color-neutral-500)" sc-camel-on-click="{{ openRejectResumeModal }}">This isn't right — start over</button>
+      </div>
       <sc-if value="{{ resumeHasSummary }}" hint-placeholder-val="{{ false }}">
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
         <div class="card-kicker">Summary</div>
@@ -2993,6 +3000,27 @@ a:hover{color:var(--color-accent)}
       <button type="button" class="btn btn-primary btn-block" disabled="{{ resumeConfirmPending }}" sc-camel-on-click="{{ confirmResumeData }}">{{ resumeConfirmLabel }}</button>
     </div>
   </div>
+  </sc-if>
+
+  <!-- Item 1 (2026-09-11 status-check session, CRITICAL): confirmation for the reject/start-over
+       action — see discardResumeDocument's own header. Same dialog-backdrop pattern already used
+       for downgradeModalOpen elsewhere in this file. -->
+  <sc-if value="{{ rejectResumeModalOpen }}" hint-placeholder-val="{{ false }}">
+    <div class="dialog-backdrop">
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="reject-resume-modal-title">
+        <div class="dialog-title" id="reject-resume-modal-title">Start over with a different file?</div>
+        <div class="dialog-body">
+          This discards everything read from this document — nothing here is submitted or kept. You'll be able to upload a different file right after.
+          <sc-if value="{{ rejectResumeError }}" hint-placeholder-val="{{ false }}">
+            <div style="margin-top:var(--space-3);font-size:12px;color:#e2735c">{{ rejectResumeError }}</div>
+          </sc-if>
+        </div>
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-secondary" disabled="{{ rejectResumePending }}" sc-camel-on-click="{{ closeRejectResumeModal }}">Cancel</button>
+          <button type="button" class="btn btn-primary" disabled="{{ rejectResumePending }}" sc-camel-on-click="{{ confirmRejectResume }}">{{ rejectResumeConfirmLabel }}</button>
+        </div>
+      </div>
+    </div>
   </sc-if>
 </div>
 </sc-if>
@@ -3766,6 +3794,25 @@ a:hover{color:var(--color-accent)}
                 </div>
                 <textarea class="input" rows="3" value="{{ role.description }}" sc-camel-on-change="{{ role.onChange }}"></textarea>
                 <div style="font-size:11px;color:var(--color-neutral-600);line-height:1.6">Not independently verified. This is your own description, and it's editable directly.</div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+
+        <!-- Item 3 (2026-09-11 status-check session): needs_review content had ZERO representation
+             anywhere in this tab (or Customization) before this -- unconditionally, not just for a
+             sparse document, since getCzCategories() (the source both tabs render from) has no
+             needs_review category at all. Shown here regardless of tier -- this is about a candidate
+             being able to see/edit content that's actually theirs, not a premium editing feature like
+             job responsibilities above, so it isn't gated by isFreeTier/isPaidTier the way that is. -->
+        <sc-if value="{{ hasFlaggedContent }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:var(--space-3)">
+            <div class="card-kicker">Flagged for review</div>
+            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Content from your resume that didn't clearly fit a standard category. Edit it directly, or use Customization to control which delivery targets receive it.</div>
+            <sc-for list="{{ flaggedContentItems }}" as="fc" hint-placeholder-count="2">
+              <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
+                <div style="font-size:13px;color:var(--color-neutral-400)">{{ fc.heading }}</div>
+                <textarea class="input" rows="3" value="{{ fc.content }}" sc-camel-on-change="{{ fc.onChange }}"></textarea>
               </div>
             </sc-for>
           </div>
@@ -4630,6 +4677,7 @@ class Component extends DCLogic {
     const workHistory = (ex && ex.work_history) || [];
     const education = (ex && ex.education) || [];
     const certifications = (ex && ex.certifications) || [];
+    const needsReview = ((ex && ex.freeform) || []).filter(f => f.section_type === 'needs_review');
     return [
       { key: 'experience', label: 'Job Experience', items: workHistory.map(w => ({
         key: w.id,
@@ -4644,6 +4692,17 @@ class Component extends DCLogic {
       { key: 'certifications', label: 'Certifications', items: certifications.map(c => ({
         key: c.id,
         label: [c.name, c.issuing_body].filter(Boolean).join(', ') + (c.issue_date ? ` (Issued ${this.monthYearLabel(c.issue_date)})` : ''),
+      })) },
+      // Item 3 (2026-09-11 status-check session): needs_review previously had no representation in
+      // Customization at all -- content flagged from the resume as not fitting a standard category
+      // had no per-item control over which delivery target received it, unlike every other real
+      // category here. Itemized the same way as the others (real freeform row id as the key) rather
+      // than lumped into the single misc boolean below, so each flagged section can be included or
+      // excluded independently -- buildResumeLines' own needs_review handling now reads this per-item
+      // state instead of the old single misc gate (see its own comment).
+      { key: 'needsReview', label: 'Flagged for review', items: needsReview.map(f => ({
+        key: f.id,
+        label: (f.heading || '').trim() || 'Untitled section',
       })) },
       { key: 'misc', label: 'Hobbies & other activities' },
     ];
@@ -4694,6 +4753,7 @@ class Component extends DCLogic {
       education: allTrue('education'),
       skills: true,
       certifications: allTrue('certifications'),
+      needsReview: allTrue('needsReview'),
       misc: true,
       // Item 4 (2026-09-08 regression session): this used to be the literal string
       // 'sum-generic' -- a placeholder fixture id left over from before Item B's real
@@ -5206,8 +5266,23 @@ class Component extends DCLogic {
           blocks.push({ kind: 'skills', position: positions.length ? Math.min(...positions) : Infinity, label: '', body: skillLine });
         }
       }
+      // Item 3 (2026-09-11 status-check session): needs_review now reads per-item catVal like every
+      // other real category above (see getCzCategories' own comment on why it's itemized now)
+      // instead of the single misc boolean gate this used to share with hobbies_other -- a candidate
+      // can now exclude one flagged section from a delivery target without losing every flagged
+      // section. hobbies_other stays under the single misc boolean below, unchanged -- that gap
+      // wasn't part of what Item 3 reported.
+      const needsReviewVal = catVal('needsReview');
+      cats.find(c => c.key === 'needsReview').items.forEach(it => {
+        if (target && !needsReviewVal[it.key]) return;
+        const f = ex.freeform.find(row => row.id === it.key && row.section_type === 'needs_review');
+        if (!f) return;
+        const content = (f.content || '').trim();
+        if (!content) return;
+        blocks.push({ kind: 'misc', position: typeof f.position === 'number' ? f.position : Infinity, label: (f.heading || '').trim(), body: content });
+      });
       if (catVal('misc')) {
-        ex.freeform.filter(f => f.section_type === 'needs_review' || f.section_type === 'hobbies_other').forEach(f => {
+        ex.freeform.filter(f => f.section_type === 'hobbies_other').forEach(f => {
           const content = (f.content || '').trim();
           if (!content) return;
           blocks.push({ kind: 'misc', position: typeof f.position === 'number' ? f.position : Infinity, label: (f.heading || '').trim(), body: content });
@@ -5544,6 +5619,8 @@ class Component extends DCLogic {
     resumeCandidateId: null, resumeExtraction: null, resumeExtractionLoading: false,
     pdfViewerScale: 1.3,
     resumeConfirmPending: false, resumeConfirmError: null,
+    // Item 1 (2026-09-11 status-check session, CRITICAL): see discardResumeDocument's own header.
+    rejectResumeModalOpen: false, rejectResumePending: false, rejectResumeError: null,
     // Item C (2026-09-08 regression session): the new employer/certification contact-details
     // screen. employerContactExpanded tracks per-row "Add details" expand state for the >5-jobs
     // collapsed-by-default layout (see employerContactDefaultExpand in renderVals).
@@ -7454,6 +7531,48 @@ class Component extends DCLogic {
     this.setState({ resumeConfirmPending: false, resumeConfirmError: null, screen: hasContactAskables ? 'employerContact' : 'tiers' });
   }
 
+  // Item 1 (2026-09-11 status-check session, CRITICAL): real sequence reproduced this week — a
+  // candidate on resumeConfirm saw content misclassified into needs_review and wanted to reject/
+  // restart, but Confirm was the only available forward action on the screen. Forced to click
+  // Confirm just to escape a bad state (not because the data was approved), they proceeded into
+  // the rest of the flow with a "confirmation" that was never a real, willing approval — a real
+  // integrity gap for what Confirm is supposed to mean everywhere else in the system, not just
+  // this one case. This is the client side of the fix: a real reject/start-over action, available
+  // on resumeConfirm itself, independent of and before Confirm. Calls discard-resume-document
+  // (see its own header) to atomically delete the current resume_document and everything
+  // extracted from it — not a soft local reset — then clears resumeExtraction to null, which
+  // naturally routes the UI into the exact same "No resume on file yet — Upload your resume" flow
+  // resumeNoDocument already renders (same file picker, same onPickRetryResumeFile/
+  // retryResumeUpload path), so the next upload starts genuinely clean rather than layering a new
+  // resume_document on top of orphaned rows from the rejected one.
+  async discardResumeDocument() {
+    const s = this.state;
+    const ex = s.resumeExtraction;
+    if (!s.resumeCandidateId || !ex || !ex.resume_document || s.rejectResumePending) return;
+    this.setState({ rejectResumePending: true, rejectResumeError: null });
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/discard-resume-document', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate_id: s.resumeCandidateId, resume_document_id: ex.resume_document.id }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ rejectResumePending: false, rejectResumeError: "Couldn't reach the server. Check your connection and try again." });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      this.setState({ rejectResumePending: false, rejectResumeError: "Couldn't discard this document. Please try again." });
+      return;
+    }
+    this.stopResumePolling();
+    this.setState({
+      rejectResumePending: false, rejectResumeModalOpen: false, rejectResumeError: null,
+      resumeExtraction: null, resumeDocumentId: null,
+    });
+  }
+
   // Item C: the write side of the new employer/certification contact-details screen — real
   // submission (skip=false, candidate-entered values from resumeExtraction) or explicit Skip
   // (skip=true, empty arrays). Either way this is what sets resume_documents.
@@ -8006,6 +8125,15 @@ class Component extends DCLogic {
         savedFadeStyle: s.cmFlashFading ? 'transition:opacity 0.5s ease;opacity:0' : 'transition:opacity 0.15s ease;opacity:1',
       })),
       cmUpgradePrompt: () => this.setState({ upgradeModalOpen: true, upgradeModalContext: 'contentManager' }),
+      // Item 3 (2026-09-11 status-check session): see the template's own comment on this section.
+      flaggedContentItems: ((s.resumeExtraction && s.resumeExtraction.freeform) || [])
+        .filter(f => f.section_type === 'needs_review')
+        .map(f => ({
+          heading: (f.heading || '').trim() || 'Untitled section',
+          content: f.content || '',
+          onChange: (e) => this.updateResumeFreeform(f.id, e.target.value),
+        })),
+      hasFlaggedContent: !!(s.resumeExtraction && s.resumeExtraction.freeform && s.resumeExtraction.freeform.some(f => f.section_type === 'needs_review')),
       freeSummaryPreview: this.getSummaryText(''),
       freeSkillsPreview: this.deliveredSkills(),
       skillFields: s.skillItems.map((val, i) => ({
@@ -8405,6 +8533,14 @@ class Component extends DCLogic {
       resumeConfirmError: s.resumeConfirmError,
       resumeConfirmLabel: s.resumeConfirmPending ? 'Saving…' : 'Confirm and continue',
       confirmResumeData: () => this.submitResumeConfirmation(),
+      // Item 1 (2026-09-11 status-check session, CRITICAL): see discardResumeDocument's own header.
+      rejectResumeModalOpen: s.rejectResumeModalOpen,
+      rejectResumePending: s.rejectResumePending,
+      rejectResumeError: s.rejectResumeError,
+      rejectResumeConfirmLabel: s.rejectResumePending ? 'Discarding…' : 'Discard and start over',
+      openRejectResumeModal: () => this.setState({ rejectResumeModalOpen: true, rejectResumeError: null }),
+      closeRejectResumeModal: () => this.setState({ rejectResumeModalOpen: false, rejectResumeError: null }),
+      confirmRejectResume: () => this.discardResumeDocument(),
       isVerifying: s.screen === 'verifying',
       verifyPending: s.verifyStatus === 'pending',
       verifyFailed: s.verifyStatus === 'error',
