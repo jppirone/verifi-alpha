@@ -1,0 +1,16 @@
+-- Item 8 (2026-09-11 status-check session): real root cause of the recurring "session routing
+-- lands somewhere wrong after a refresh" pattern -- tourEverShown in candidate.html was PURE
+-- in-memory React state (getInitialState() default: false), never persisted anywhere, backend or
+-- localStorage. Confirmed live and by code: every fresh mount of the app re-evaluates
+-- `first = !this.state.tourEverShown` as true regardless of whether this candidate finished the
+-- tour in a prior session, so enterAccount() force-resets accountTab to 'profile' and reactivates
+-- the onboarding tour on every single page load -- not just after checkout, on ANY refresh, for
+-- ANY candidate, forever. tourExit then force-sets accountTab to 'verification' on top of that.
+-- A candidate who just completed a real subscription and refreshes the page gets yanked back into
+-- onboarding instead of landing back on Subscription.
+--
+-- Fix: a real completion signal on candidates, same pattern as continued_without_resume_at /
+-- employer_contact_resolved_at / deletion_scheduled_at -- nullable, set once, the moment a
+-- candidate actually finishes (or explicitly exits) the tour, read back on every session
+-- resolution so tourEverShown can be seeded correctly instead of defaulting to false forever.
+alter table candidates add column if not exists tour_completed_at timestamptz;

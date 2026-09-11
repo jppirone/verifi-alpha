@@ -5823,6 +5823,22 @@ class Component extends DCLogic {
     this.ensureResumeExtractionLoaded();
   }
 
+  // Item 8 (2026-09-11 status-check session): the real backend write behind tour_completed_at —
+  // see the migration and mark-tour-complete's own headers for the full story. Fire-and-forget,
+  // best-effort, same convention already used for resolve-session's own last_seen_at touch: the
+  // local tourEverShown:true set by tourExit's own setState is what actually drives THIS
+  // session's UI immediately, so a failed write here only risks the tour reactivating again on a
+  // FUTURE session, never breaks anything in the current one.
+  markTourComplete() {
+    const candidateId = this.state.resumeCandidateId;
+    if (!candidateId) return;
+    fetch(this.SUPABASE_FN_URL + '/mark-tour-complete', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ candidate_id: candidateId }),
+    }).catch(() => {});
+  }
+
   ensureResumeExtractionLoaded() {
     const s = this.state;
     if (!s.resumeCandidateId || s.resumeExtraction || s.resumeExtractionLoading) return;
@@ -6679,6 +6695,15 @@ class Component extends DCLogic {
       // confirm-login/check-login-status all always select tier — but matches the same defensive
       // shape as first/last/email/phone above rather than assuming the field is always present).
       accountTier: (profile && profile.tier) || this.state.accountTier,
+      // Item 8 (2026-09-11 status-check session): real completion signal (candidates.
+      // tour_completed_at — see its own migration) replacing the old tourEverShown default of
+      // false, which was pure in-memory React state that reset on every fresh mount — confirmed
+      // live as the actual mechanism forcing the onboarding tour to reactivate and accountTab to
+      // reset on every single page load, not just post-checkout. Only ever flips false->true here
+      // (never true->false) — same one-directional-fact guard as accountTier/deletion_scheduled_at
+      // above, so a session-resolve response with nothing to say never un-completes an already-
+      // locally-known-complete tour.
+      tourEverShown: !!(profile && profile.tour_completed_at) || this.state.tourEverShown,
     });
     if (reactivateNeeded) { this.setState({ screen: 'reactivate', deletionScheduled: true, deletionDate }); return; }
 
@@ -8458,7 +8483,7 @@ class Component extends DCLogic {
       tourRectHeight: s.tourRect.height,
       tourNext: () => this.setState(st => { const steps = this.getTourSteps(); const step = Math.min(st.tourStep + 1, steps.length - 1); return { tourStep: step, accountTab: steps[step].tab }; }, () => this.measureTourTarget()),
       tourBack: () => this.setState(st => { const steps = this.getTourSteps(); const step = Math.max(st.tourStep - 1, 0); return { tourStep: step, accountTab: steps[step].tab }; }, () => this.measureTourTarget()),
-      tourExit: () => { this.setState({ tourActive: false, tourEverShown: true, accountTab: 'verification' }); this.ensureVerificationItemsLoaded(); },
+      tourExit: () => { this.setState({ tourActive: false, tourEverShown: true, accountTab: 'verification' }); this.ensureVerificationItemsLoaded(); this.markTourComplete(); },
       overlayOpen: s.overlayOpen,
       tabWhat: s.overlayTab === 0,
       tabWhy: s.overlayTab === 1,

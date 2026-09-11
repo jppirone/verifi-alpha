@@ -66,7 +66,7 @@ export default {
       }
 
       const candRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/candidates?id=eq.${session.candidate_id}&select=id,email,phone,full_name,first_name,last_name,deletion_scheduled_at,tier`,
+        `${SUPABASE_URL}/rest/v1/candidates?id=eq.${session.candidate_id}&select=id,email,phone,full_name,first_name,last_name,deletion_scheduled_at,tier,tour_completed_at`,
         { headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } },
       );
       const candRows = candRes.ok ? await candRes.json() : [];
@@ -108,6 +108,14 @@ export default {
         // 100% local React state before this. Every session-establishing path returns it, same
         // "all three uniformly" reasoning as deletion_scheduled_at just above.
         tier: candidate.tier,
+        // Item 8 (2026-09-11 status-check session): real completion signal (candidates.
+        // tour_completed_at — see its own migration) replacing tourEverShown, 100% local, never-
+        // persisted React state before this (confirmed live: reset to false on every fresh mount,
+        // forcing the onboarding tour to reactivate and accountTab to reset on every page load,
+        // not just after checkout — the actual mechanism behind this week's recurring "session
+        // routing lands somewhere wrong after a refresh" reports). Same "all three uniformly"
+        // reasoning as tier/deletion_scheduled_at above.
+        tour_completed_at: candidate.tour_completed_at,
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: "unhandled", detail: String(e) }), {

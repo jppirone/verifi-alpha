@@ -103,10 +103,10 @@ export default {
       const rpcRows = await rpcRes.json();
       const sessionToken = rpcRows?.[0]?.session_token ?? null;
 
-      let candidate: { email?: string; phone?: string; full_name?: string; first_name?: string; last_name?: string; deletion_scheduled_at?: string | null; tier?: string } = {};
+      let candidate: { email?: string; phone?: string; full_name?: string; first_name?: string; last_name?: string; deletion_scheduled_at?: string | null; tier?: string; tour_completed_at?: string | null } = {};
       if (record.candidate_id) {
         const candRes = await fetch(
-          `${SUPABASE_URL}/rest/v1/candidates?id=eq.${record.candidate_id}&select=email,phone,full_name,first_name,last_name,deletion_scheduled_at,tier`,
+          `${SUPABASE_URL}/rest/v1/candidates?id=eq.${record.candidate_id}&select=email,phone,full_name,first_name,last_name,deletion_scheduled_at,tier,tour_completed_at`,
           { headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } },
         );
         const candRows = candRes.ok ? await candRes.json() : [];
@@ -128,6 +128,9 @@ export default {
         deletion_scheduled_at: candidate.deletion_scheduled_at,
         // Item B: real tier state — see resolve-session's own comment on this same field.
         tier: candidate.tier,
+        // Item 8 (2026-09-11 status-check session): see resolve-session's own comment on this
+        // same field.
+        tour_completed_at: candidate.tour_completed_at,
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: "unhandled", detail: String(e) }), {
