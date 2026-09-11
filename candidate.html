@@ -7426,6 +7426,20 @@ class Component extends DCLogic {
       this.setState({ resumeConfirmPending: false, resumeConfirmError: "Couldn't reach the server. Check your connection and try again." });
       return;
     }
+    // Cross-tab session awareness (2026-09-11 status-check session): confirm-resume-data's own
+    // atomic guard (see its header) rejects a second confirm for the same resume_document with this
+    // specific error — the real, concrete case being guarded against is another tab having already
+    // confirmed this exact resume while this one sat open with its own (now necessarily stale, and
+    // therefore intentionally discarded rather than resubmitted) local edits. From the candidate's
+    // own point of view their resume genuinely IS confirmed — just via the other tab — so this
+    // routes forward exactly like a real success rather than surfacing a confusing error for
+    // something that already happened.
+    if (!res.ok && data.error === 'already_confirmed') {
+      this.stopResumePolling();
+      const hasContactAskables = ex.work_history.length > 0 || ex.certifications.length > 0;
+      this.setState({ resumeConfirmPending: false, resumeConfirmError: null, screen: hasContactAskables ? 'employerContact' : 'tiers' });
+      return;
+    }
     if (!res.ok || !data.ok) {
       this.setState({ resumeConfirmPending: false, resumeConfirmError: "Couldn't save your changes. Please try again." });
       return;

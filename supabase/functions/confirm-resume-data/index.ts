@@ -104,6 +104,40 @@ export default {
         });
       }
 
+      // Cross-tab session awareness (2026-09-11 status-check session): the real, atomic guard
+      // against this function running twice for the same resume_document — confirmed live during
+      // dual-tab magic-link testing this week, a candidate with two tabs on the same session could
+      // confirm in one and then, unaware, confirm again in the other (with whatever stale local
+      // edits that tab still had), silently inserting a SECOND full pass of verification_items for
+      // the same rows. The conditional UPDATE below (`confirmed_at is null`) is evaluated by
+      // Postgres as part of one statement — same single-use-token pattern already proven for
+      // confirm-login (see that function's own header) — so the loser of a race, or a genuinely
+      // later second submission, gets a real, honest "already confirmed" response instead of
+      // silently re-running every insert below. Only guarded when resume_document_id is actually
+      // present (it always is from the real client — see submitResumeConfirmation's own body — but
+      // stays optional per Item D's own foundation-only framing) so no existing caller breaks.
+      if (resume_document_id) {
+        const claimRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/resume_documents?id=eq.${resume_document_id}&candidate_id=eq.${candidate_id}&confirmed_at=is.null`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              "apikey": SUPABASE_SERVICE_ROLE_KEY,
+              "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+              "Prefer": "return=representation",
+            },
+            body: JSON.stringify({ confirmed_at: new Date().toISOString() }),
+          },
+        );
+        const claimedRows = claimRes.ok ? await claimRes.json() : [];
+        if (!claimedRows.length) {
+          return new Response(JSON.stringify({ ok: false, error: "already_confirmed" }), {
+            status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
+
       // Write candidate's (possibly corrected) fields and mark each row confirmed. Sequential, not
       // parallel — keeps error reporting attributable to a specific row if one update fails.
       //

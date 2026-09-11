@@ -1,0 +1,17 @@
+-- Cross-tab session awareness (2026-09-11 status-check session): the real bug this closes, observed
+-- directly during dual-tab magic-link testing this week — confirm-resume-data had zero protection
+-- against being invoked twice for the same resume_document. A candidate with two tabs open on the
+-- same session (the normal shape of a magic-link login: the requesting tab and the tab that clicked
+-- the email link can both land on resumeConfirm) who confirms in one tab and then, unaware, confirms
+-- again in the other — with whatever stale local checkbox/edit state that second tab still had in
+-- memory — got a SECOND full pass of verification_items inserted for the same work_history/
+-- education/certification rows, silently duplicating the staff queue, with no error, no warning, and
+-- no coordination between the tabs at all.
+--
+-- confirmed_at is the atomic single-use guard: confirm-resume-data claims it with one conditional
+-- UPDATE (`confirmed_at is null`), the exact same pattern already proven for confirm-login's own
+-- single-use token consumption (see that function's own header) — Postgres's row-level locking
+-- decides which of two concurrent/sequential confirm calls wins, not a check-then-write race in
+-- application code. The loser gets a real, honest "already confirmed" response instead of silently
+-- re-running the whole insert pass.
+alter table resume_documents add column if not exists confirmed_at timestamptz;
