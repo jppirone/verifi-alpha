@@ -2332,6 +2332,9 @@ th.sortable{cursor:pointer;user-select:none}
         <sc-raw-thead>
           <sc-raw-tr>
             <sc-raw-th class="sortable" onClick="{{ sortById }}">ID{{ arrowId }}</sc-raw-th>
+            <!-- Item 13 (2026-09-12 live-testing session): document-access link, now per row — see
+                 the rows-building code's own comment for why this reuses viewSourceDocument as-is. -->
+            <sc-raw-th>Doc</sc-raw-th>
             <sc-raw-th class="sortable" onClick="{{ sortByCandidate }}">Candidate{{ arrowCandidate }}</sc-raw-th>
             <sc-raw-th class="sortable" onClick="{{ sortByType }}">Type{{ arrowType }}</sc-raw-th>
             <sc-raw-th>Claim</sc-raw-th>
@@ -2348,6 +2351,11 @@ th.sortable{cursor:pointer;user-select:none}
           <sc-for list="{{ rows }}" as="row" hint-placeholder-count="6">
             <sc-raw-tr style="cursor:pointer" onClick="{{ row.onOpen }}">
               <sc-raw-td style="font-family:ui-monospace,Menlo,monospace;font-size:12px">{{ row.id }}</sc-raw-td>
+              <sc-raw-td onClick="{{ row.stopClick }}">
+                <sc-if value="{{ row.hasCandidate }}" hint-placeholder-val="{{ true }}">
+                  <button type="button" class="btn btn-ghost" style="font-size:12px;padding:2px 8px" disabled="{{ sourceDocLoading }}" onClick="{{ row.onOpenDoc }}" title="View original document">View</button>
+                </sc-if>
+              </sc-raw-td>
               <sc-raw-td style="white-space:nowrap">
                 <div style="font-weight:500">{{ row.candidateName }}</div>
                 <div style="font-size:11px;color:var(--color-neutral-500)">{{ row.candidateIdentifier }}</div>
@@ -3500,6 +3508,14 @@ class Component extends DCLogic {
       stopClick: (e) => { if (e && e.stopPropagation) e.stopPropagation(); },
       onReassign: (e) => { if (e.stopPropagation) e.stopPropagation(); this.updateItem(it.id, { assignedTo: e.target.value }); },
       onRetrySync: (e) => { if (e.stopPropagation) e.stopPropagation(); this.retrySync(it.id); },
+      // Item 13 (2026-09-12 live-testing session): "View original document" was confirmed present
+      // on item detail, but the queue LIST view had no document-access link at all — staff had to
+      // click into every row individually just to see whether the source document backed it up.
+      // Same viewSourceDocument(candidateId) call the detail panel's own button already uses (see
+      // its own header) — no new fetch/endpoint, just exposed one level earlier. hasCandidate mirrors
+      // viewSourceDocument's own "No candidate on this item" guard — some rows genuinely have none.
+      hasCandidate: !!it.candidateId,
+      onOpenDoc: (e) => { if (e && e.stopPropagation) e.stopPropagation(); this.viewSourceDocument(it.candidateId); },
     }));
 
     const selected = s.selectedId ? s.items.find(it => it.id === s.selectedId) : null;
