@@ -53,13 +53,21 @@ export default {
         });
       }
 
-      // type=neq."Needs Review": that type is confirm-resume-data's own internal, staff-only flag
-      // for needs_review content (see its header) — never a claim the candidate actually submitted
-      // for verification, so it never belongs on the candidate's own status tab. Same staff-only
-      // trust boundary already used for internal_note and automated_check, just applied as a row
-      // filter instead of a column omission since this one is a whole extra kind of row, not a field.
+      // Item 14 (2026-09-12 live-testing session): type='Needs Review' rows used to be excluded
+      // entirely here — real content flagged from the candidate's own resume (a section that didn't
+      // fit work_history/education/certifications — see confirm-resume-data's own header on why
+      // needs_review is a real, by-design, ongoing category, not just a bug artifact) was visible to
+      // staff in the queue but the candidate had no way to know it existed at all. Confirmed live:
+      // Item 7/10 collapsed the SPECIFIC duplicate-item failure mode that originally motivated this
+      // (a disconnected needs_review entry alongside an already-fully-captured structured item), but
+      // genuine needs_review content is still a normal, permanent outcome for real unclassifiable
+      // resume content — this filter was hiding that category outright, not just deduplicating it.
+      // Still never returns internal_note or automated_check (staff-only, unchanged) — `claim` is
+      // the same short, candidate-derived preview text already used in the staff queue list
+      // (claimForNeedsReview), safe to reuse here since it's built from the candidate's own resume
+      // content, not staff commentary.
       const url = SUPABASE_URL + "/rest/v1/verification_items?select=id,type,claim,status,created_at,note,correction_requested,correction_note,correction_value&candidate_id=eq."
-        + encodeURIComponent(candidate_id) + "&type=neq." + encodeURIComponent("Needs Review") + "&order=created_at.asc";
+        + encodeURIComponent(candidate_id) + "&order=created_at.asc";
       const res = await fetch(url, {
         headers: {
           "apikey": SUPABASE_SERVICE_ROLE_KEY,

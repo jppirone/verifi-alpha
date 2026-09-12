@@ -3551,6 +3551,10 @@ a:hover{color:var(--color-accent)}
                   </div>
                 </sc-if>
               </sc-if>
+
+              <sc-if value="{{ row.isNeedsReview }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:12px;color:var(--color-neutral-400);border-top:1px solid var(--color-divider);padding-top:8px">{{ row.needsReviewNote }}</div>
+              </sc-if>
             </div>
           </sc-for>
         </sc-if>
@@ -5083,7 +5087,12 @@ class Component extends DCLogic {
     return 'tag-neutral';
   }
 
-  VERIFICATION_CATEGORY_LABELS = { 'Job Experience': 'Job Experience', 'Education': 'Education', 'Certification': 'Certifications' };
+  // Item 14 (2026-09-12 live-testing session): 'Needs Review' added — see
+  // list-candidate-verification-items' own header for why these rows are now included at all.
+  // Deliberately NOT added to VERIFICATION_CATEGORY_ORDER below: the category-summary cards are
+  // "parts of your record" (job history, education, certifications), and a flagged freeform blurb
+  // isn't one of those — it gets its own distinct rendering in getVerificationItemRows instead.
+  VERIFICATION_CATEGORY_LABELS = { 'Job Experience': 'Job Experience', 'Education': 'Education', 'Certification': 'Certifications', 'Needs Review': 'Flagged content' };
   VERIFICATION_CATEGORY_ORDER = ['Job Experience', 'Education', 'Certification'];
 
   // The P133 verification floor: a category only ever shows as having a confirmed status if at
@@ -5116,14 +5125,23 @@ class Component extends DCLogic {
       })
       .map(it => {
         const isDiscrepancy = it.status === 'Discrepancy';
+        // Item 14: a needs_review row's raw status is always 'Needs Reconciliation' (confirm-resume-
+        // data's own status for this, see its header), but that status ALSO occurs on a genuinely-
+        // submitted, opted-in certification staff has a structural concern about (source_match
+        // 'unmatched') — the generic fallback label "Submitted, pending review" is honest for that
+        // case but wrong for a needs_review row the candidate never actually submitted for anything.
+        // Distinguished by type, not status, since status alone can't tell the two apart.
+        const isNeedsReview = it.type === 'Needs Review';
         const formOpen = s.correctionResponseOpenId === it.id;
         return {
           id: it.id,
           categoryLabel: this.VERIFICATION_CATEGORY_LABELS[it.type] || it.type,
           claim: it.claim || '(no description on file)',
-          safeLabel: this.verificationSafeLabel(it.status),
-          tagClass: this.verificationTagClass(it.status),
+          safeLabel: isNeedsReview ? 'Flagged, not submitted' : this.verificationSafeLabel(it.status),
+          tagClass: isNeedsReview ? 'tag-neutral' : this.verificationTagClass(it.status),
           isDiscrepancy,
+          isNeedsReview,
+          needsReviewNote: "We flagged this content from your resume because it didn't cleanly fit job history, education, or a certification. It's visible to staff for review — no action is needed from you unless someone reaches out.",
           discrepancyNote: it.note || "Staff hasn't added an explanation yet.",
           hasResponded: isDiscrepancy && !!it.correctionRequested,
           canRespond: isDiscrepancy && !it.correctionRequested,
