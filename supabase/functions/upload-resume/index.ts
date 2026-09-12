@@ -136,6 +136,7 @@ const VISION_EXTRACTION_PROMPT = `You are extracting structured data directly fr
 Return ONLY a single JSON object, no prose before or after it, matching exactly this shape:
 
 {
+  "candidate_location": string,
   "work_history": [
     { "company": string, "title": string, "location": string, "start_date": string, "end_date": string,
       "job_responsibilities": string, "extraction_confidence": "high" | "medium" | "low", "position": number }
@@ -181,6 +182,14 @@ that catch-all is for content that genuinely doesn't fit any category, not for c
 one perfectly but happens to lack a visible label.
 
 FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable buckets:
+
+- "candidate_location" (top-level, not inside any category) = the candidate's OWN personal
+  location, as printed near their name/contact line at the top of the resume (e.g. "Sebastian FL",
+  "Austin, TX") — copy it verbatim, in whatever form it's printed. This is NOT the same field as
+  work_history's or education's own "location" (an employer's or institution's location) — never
+  confuse the two, and never copy an employer/institution location into this field just because the
+  candidate's own location wasn't printed. Use an empty string "" when no personal location is
+  printed anywhere on the page — never infer or guess one.
 
 - work_history = PAID EMPLOYMENT ONLY. If a role reads as unpaid — volunteer work, an unpaid
   internship explicitly described as unpaid, community service — do NOT put it in work_history.
@@ -330,6 +339,7 @@ a guess.
 If a category has no entries, return an empty array for it — do not omit the key.`;
 
 type ExtractionResult = {
+  candidate_location?: string;
   work_history: Array<{ company: string; title: string; location?: string; start_date: string; end_date: string; job_responsibilities: string; extraction_confidence: string; position?: number }>;
   education: Array<{ institution: string; degree: string; field_of_study: string; location?: string; start_date: string; end_date: string; extraction_confidence: string; position?: number }>;
   certifications: Array<{ name: string; issuing_body: string; license_number?: string; issue_date: string; expiration_date: string; extraction_confidence: string; position?: number }>;
@@ -725,6 +735,14 @@ function mergeBoundaryContinuations(extraction: ExtractionResult): ExtractionRes
 
 function mergeExtractions(pages: Array<{ pageNumber: number; extraction: ExtractionResult }>): ExtractionResult {
   const merged = {
+    // Item 19 (2026-09-12 live-testing session): same "first page that actually reported one"
+    // pattern as skills_position just below — a candidate's own personal location, printed once
+    // near their name/contact line, only ever realistically appears on page 1, but this doesn't
+    // hard-code that assumption.
+    candidate_location: (() => {
+      const withLocation = pages.find(({ extraction }) => !!extraction.candidate_location);
+      return withLocation ? withLocation.extraction.candidate_location : "";
+    })(),
     work_history: pages.flatMap(({ pageNumber, extraction }) =>
       extraction.work_history.map((w) => ({ ...w, position: globalizePosition(pageNumber, w.position) ?? undefined }))),
     education: pages.flatMap(({ pageNumber, extraction }) =>
@@ -954,6 +972,7 @@ export default {
           p_skills_position: merged.skills_position ?? null,
           p_freeform: merged.freeform,
           p_ocr_text: combinedOcrText,
+          p_candidate_location: merged.candidate_location || null,
         });
         if (pdfRpcErr) {
           await supabase.from("resume_documents").update({ extraction_status: "failed" }).eq("id", docId);
@@ -1028,6 +1047,7 @@ export default {
           // contract treats null as "not_checked," an honest "couldn't verify either way," not a
           // false "unmatched" — see the migration that introduced it.
           p_ocr_text: null,
+          p_candidate_location: extraction.candidate_location || null,
         });
         if (rpcErr) {
           await supabase.from("resume_documents").update({ extraction_status: "failed" }).eq("id", docId);

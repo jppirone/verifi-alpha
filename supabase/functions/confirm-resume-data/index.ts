@@ -89,11 +89,17 @@ export default {
         // this request inserts below simply gets bundle_id: null, same as every pre-Item-D row —
         // an honest "ungrouped," never a guessed value.
         resume_document_id = null,
+        // Item 19 (2026-09-12 live-testing session): the candidate's own edit to their extracted
+        // personal location (see resume_documents' own migration header) — written in the same
+        // atomic claim PATCH below as confirmed_at, since both belong to the same resume_document
+        // row and both only ever get set once, at confirm time.
+        candidate_location = null,
         work_history = [], education = [], certifications = [], skills = [], freeform = [],
         opt_in = { work_history: false, education: false, certifications: false },
       }: {
         candidate_id: string;
         resume_document_id?: string | null;
+        candidate_location?: string | null;
         work_history: WorkHistoryEdit[];
         education: EducationEdit[];
         certifications: CertificationEdit[];
@@ -131,7 +137,7 @@ export default {
               "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
               "Prefer": "return=representation",
             },
-            body: JSON.stringify({ confirmed_at: new Date().toISOString() }),
+            body: JSON.stringify({ confirmed_at: new Date().toISOString(), candidate_location: candidate_location || null }),
           },
         );
         const claimedRows = claimRes.ok ? await claimRes.json() : [];

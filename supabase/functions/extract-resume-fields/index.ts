@@ -56,6 +56,7 @@ text in some recognizable form.
 Return ONLY a single JSON object, no prose before or after it, matching exactly this shape:
 
 {
+  "candidate_location": string,
   "work_history": [
     { "company": string, "title": string, "location": string, "start_date": string, "end_date": string,
       "job_responsibilities": string, "extraction_confidence": "high" | "medium" | "low", "position": number }
@@ -101,6 +102,14 @@ that catch-all is for content that genuinely doesn't fit any category, not for c
 one perfectly but happens to lack a visible label.
 
 FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable buckets:
+
+- "candidate_location" (top-level, not inside any category) = the candidate's OWN personal
+  location, as printed near their name/contact line at the top of the resume (e.g. "Sebastian FL",
+  "Austin, TX") — copy it verbatim, in whatever form it's printed. This is NOT the same field as
+  work_history's or education's own "location" (an employer's or institution's location) — never
+  confuse the two, and never copy an employer/institution location into this field just because the
+  candidate's own location wasn't printed. Use an empty string "" when no personal location is
+  printed anywhere on the page — never infer or guess one.
 
 - work_history = PAID EMPLOYMENT ONLY. If a role reads as unpaid — volunteer work, an unpaid
   internship explicitly described as unpaid, community service — do NOT put it in work_history.
@@ -250,6 +259,7 @@ ${ocrText}
 }
 
 type ExtractionResult = {
+  candidate_location?: string;
   work_history: Array<{ company: string; title: string; location?: string; start_date: string; end_date: string; job_responsibilities: string; extraction_confidence: string; position?: number }>;
   education: Array<{ institution: string; degree: string; field_of_study: string; location?: string; start_date: string; end_date: string; extraction_confidence: string; position?: number }>;
   certifications: Array<{ name: string; issuing_body: string; license_number?: string; issue_date: string; expiration_date: string; extraction_confidence: string; position?: number }>;
@@ -396,6 +406,7 @@ export default {
         // extraction was performed against. Bug-2 defense-in-depth: see the migration that added
         // certification_source_match for why this is being threaded through now.
         p_ocr_text: doc.ocr_raw_text,
+        p_candidate_location: parsed.candidate_location || null,
       });
       if (rpcErr) {
         await supabase.from("resume_documents").update({ extraction_status: "failed" }).eq("id", resume_document_id);

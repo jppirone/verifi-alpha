@@ -2871,6 +2871,14 @@ a:hover{color:var(--color-accent)}
       <div style="display:flex;justify-content:flex-end">
         <button type="button" class="btn btn-ghost" style="font-size:12px;color:var(--color-neutral-500)" sc-camel-on-click="{{ openRejectResumeModal }}">This isn't right — start over</button>
       </div>
+      <!-- Item 19 (2026-09-12 live-testing session): candidate_location, same trust category as
+           every other candidate-stated/document-extracted field on this screen — editable here,
+           unconditionally shown (not gated on whether the document happened to print one), the same
+           way Location fields on individual work_history/education entries always render. -->
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
+        <div class="card-kicker">Location</div>
+        <input class="input" placeholder="City, ST" value="{{ resumeLocationValue }}" sc-camel-on-change="{{ onResumeLocationChange }}">
+      </div>
       <sc-if value="{{ resumeHasSummary }}" hint-placeholder-val="{{ false }}">
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
         <div class="card-kicker">Summary</div>
@@ -3695,6 +3703,19 @@ a:hover{color:var(--color-accent)}
 
         <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">
           This is the part of your record you write yourself: as many named summary versions as you want, your skills, and the responsibilities under each verified role. Choose which summary a partner receives on the Customization tab.
+        </div>
+
+        <!-- Item 19 (2026-09-12 live-testing session): matches Customization's own "Always
+             included" block (name/location/contact) — real dead end this closes: name and contact
+             info are edited from the Basic Info / Contact Info cards on this same account, but there
+             was no read-only confirmation of what actually always goes out, visible from Content
+             Manager itself, before this. -->
+        <div class="card elev-sm" style="display:flex;flex-direction:column;gap:2px;opacity:0.7">
+          <div class="card-kicker">Always included</div>
+          <div style="font-size:13px;color:var(--color-neutral-400)" title="Always included, cannot be removed">{{ alwaysIncludedLine }}</div>
+          <sc-if value="{{ showAlwaysIncludedPrivateNote }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:11px;color:var(--color-neutral-600);line-height:1.6">{{ alwaysIncludedPrivateNote }}</div>
+          </sc-if>
         </div>
 
         <sc-if value="{{ isFreeTier }}" hint-placeholder-val="{{ false }}">
@@ -5213,6 +5234,11 @@ class Component extends DCLogic {
     // in practice, not a gap that needed a fallback string at all.
     const nameLine = [s.savedFirst, s.savedLast].filter(Boolean).join(' ');
     if (nameLine) push(nameLine);
+    // Item 19 (2026-09-12 live-testing session): candidate_location, same trust category as every
+    // other candidate-stated/document-extracted field already flowing through this function --
+    // placed between name and contact line, matching resumeConfirm's own Location field's position.
+    const locationLine = (s.resumeExtraction && s.resumeExtraction.resume_document && s.resumeExtraction.resume_document.candidate_location) || '';
+    if (locationLine) push(locationLine);
     const contactLine = [deliveredContact.phone.value, deliveredContact.email.value].filter(Boolean).join(' \u00b7 ');
     if (contactLine) push(contactLine);
     // Item 9 (2026-09-08 regression session): this used to push the whole summary as ONE line --
@@ -7455,6 +7481,16 @@ class Component extends DCLogic {
     });
   }
 
+  // Item 19 (2026-09-12 live-testing session): candidate_location lives on resume_document itself,
+  // not in one of the array categories updateResumeItem edits — same edit-in-place pattern, just
+  // against the singular resume_document object instead of a list entry.
+  updateResumeDocument(field, value) {
+    this.setState(st => {
+      if (!st.resumeExtraction || !st.resumeExtraction.resume_document) return {};
+      return { resumeExtraction: { ...st.resumeExtraction, resume_document: { ...st.resumeExtraction.resume_document, [field]: value } } };
+    });
+  }
+
   updateResumeFreeform(id, value) {
     this.setState(st => {
       if (!st.resumeExtraction) return {};
@@ -7487,6 +7523,10 @@ class Component extends DCLogic {
       // scope here the same way resolveEmployerContact's own body uses it; null-guarded the same
       // way, not assumed present.
       resume_document_id: ex.resume_document ? ex.resume_document.id : null,
+      // Item 19 (2026-09-12 live-testing session): the candidate's own edit to their extracted
+      // personal location, echoed from resume_document the same way resume_document_id above is —
+      // confirm-resume-data writes it in the same atomic claim PATCH as confirmed_at.
+      candidate_location: ex.resume_document ? ex.resume_document.candidate_location : null,
       work_history: ex.work_history.map(w => ({ id: w.id, company: w.company, title: w.title, location: w.location, start_date: w.start_date, end_date: w.end_date, job_responsibilities: w.job_responsibilities })),
       education: ex.education.map(x => ({ id: x.id, institution: x.institution, degree: x.degree, field_of_study: x.field_of_study, location: x.location, start_date: x.start_date, end_date: x.end_date })),
       // source_match is echoed back (not edited here) so confirm-resume-data can flag a
@@ -8118,7 +8158,10 @@ class Component extends DCLogic {
       customizeSummaryId: s.customizeTarget && s.customization[s.customizeTarget] ? (s.customization[s.customizeTarget].summaryId || '') : '',
       setCustomizeSummaryId: (e) => this.setCustomizeSummaryId(e.target.value),
       customizeSummaryPreview: this.getSummaryText(s.customizeTarget),
-      alwaysIncludedLine: [[s.savedFirst, s.savedLast].filter(Boolean).join(' '), this.resolveDeliveredContact().phone.value, this.resolveDeliveredContact().email.value].filter(Boolean).join(' \u00b7 '),
+      // Item 19 (2026-09-12 live-testing session): candidate_location added between name and phone,
+      // matching buildResumeLines' own header line ordering (name, location, contact) so this
+      // preview stays truthful to what the generated PDF actually contains.
+      alwaysIncludedLine: [[s.savedFirst, s.savedLast].filter(Boolean).join(' '), (s.resumeExtraction && s.resumeExtraction.resume_document && s.resumeExtraction.resume_document.candidate_location) || '', this.resolveDeliveredContact().phone.value, this.resolveDeliveredContact().email.value].filter(Boolean).join(' \u00b7 '),
       showAlwaysIncludedPrivateNote: !!(this.resolveDeliveredContact().phone.statement || this.resolveDeliveredContact().email.statement),
       alwaysIncludedPrivateNote: [this.resolveDeliveredContact().phone.statement, this.resolveDeliveredContact().email.statement].filter(Boolean).join('. '),
       showSummarySaved: s.czFlashField === 'summaryId',
@@ -8431,6 +8474,12 @@ class Component extends DCLogic {
       zoomInPdf: () => this.setState(st => ({ pdfViewerScale: Math.min(3.25, +(st.pdfViewerScale + 0.325).toFixed(3)) }), () => this.renderOriginalPdfViewer()),
       zoomOutPdf: () => this.setState(st => ({ pdfViewerScale: Math.max(0.455, +(st.pdfViewerScale - 0.325).toFixed(3)) }), () => this.renderOriginalPdfViewer()),
       resetPdfZoom: () => this.setState({ pdfViewerScale: 1.3 }, () => this.renderOriginalPdfViewer()),
+      // Item 19 (2026-09-12 live-testing session): candidate_location lives on resume_document
+      // itself (see updateResumeDocument), not in one of the array categories — same edit-in-place
+      // pattern as resumeSummaryContent/onResumeSummaryChange just below, just against the singular
+      // resume_document object instead of a freeform entry.
+      resumeLocationValue: (s.resumeExtraction && s.resumeExtraction.resume_document && s.resumeExtraction.resume_document.candidate_location) || '',
+      onResumeLocationChange: (e) => this.updateResumeDocument('candidate_location', e.target.value),
       resumeHasSummary: !!(s.resumeExtraction && s.resumeExtraction.freeform.some(f => f.section_type === 'summary')),
       resumeSummaryContent: (() => {
         const f = s.resumeExtraction && s.resumeExtraction.freeform.find(f => f.section_type === 'summary');
