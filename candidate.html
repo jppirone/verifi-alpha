@@ -2956,6 +2956,10 @@ a:hover{color:var(--color-accent)}
             <div class="field" style="flex:1;min-width:160px"><label>Name</label><input class="input" value="{{ section.name }}" sc-camel-on-change="{{ section.onName }}"></div>
             <div class="field" style="flex:1;min-width:160px"><label>Issuing body</label><input class="input" value="{{ section.issuingBody }}" sc-camel-on-change="{{ section.onIssuingBody }}"></div>
           </div>
+          <!-- Item 7 (2026-09-12 live-testing session): a sibling field to Name, not a replacement —
+               a real license/permit/registration number when the resume prints one, separate from
+               whatever informal or formal name the candidate's own document uses. -->
+          <div class="field"><label>License number</label><input class="input" value="{{ section.licenseNumber }}" sc-camel-on-change="{{ section.onLicenseNumber }}"></div>
           <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
             <div class="field" style="flex:1;min-width:140px"><label>Issue date</label><input class="input" type="date" value="{{ section.issueDate }}" sc-camel-on-change="{{ section.onIssueDate }}"></div>
             <div class="field" style="flex:1;min-width:140px"><label>Expiration date</label><input class="input" type="date" value="{{ section.expirationDate }}" sc-camel-on-change="{{ section.onExpirationDate }}"></div>
@@ -4691,7 +4695,12 @@ class Component extends DCLogic {
       { key: 'skills', label: 'Skills' },
       { key: 'certifications', label: 'Certifications', items: certifications.map(c => ({
         key: c.id,
-        label: [c.name, c.issuing_body].filter(Boolean).join(', ') + (c.issue_date ? ` (Issued ${this.monthYearLabel(c.issue_date)})` : ''),
+        // Item 7 (2026-09-12 live-testing session): license_number rendered alongside name here too
+        // — this is the single label source Customization, Content Manager's cmRoles-style previews,
+        // and buildResumeLines' PDF output all read from (see Item 4/6's own comments on why), so
+        // fixing it once here keeps every surface in sync rather than needing the same fix repeated
+        // per screen. Always rendered together with name, never split apart or silently dropped.
+        label: [c.name, c.issuing_body, c.license_number ? `Lic #${c.license_number}` : ''].filter(Boolean).join(', ') + (c.issue_date ? ` (Issued ${this.monthYearLabel(c.issue_date)})` : ''),
       })) },
       // Item 3 (2026-09-11 status-check session): needs_review previously had no representation in
       // Customization at all -- content flagged from the resume as not fitting a standard category
@@ -7483,7 +7492,7 @@ class Component extends DCLogic {
       // source_match is echoed back (not edited here) so confirm-resume-data can flag a
       // structurally-unmatched certification for staff regardless of the opt-in checkbox below —
       // see that function's own header (bug-2 defense-in-depth).
-      certifications: ex.certifications.map(c => ({ id: c.id, name: c.name, issuing_body: c.issuing_body, issue_date: c.issue_date, expiration_date: c.expiration_date, source_match: c.source_match })),
+      certifications: ex.certifications.map(c => ({ id: c.id, name: c.name, issuing_body: c.issuing_body, license_number: c.license_number, issue_date: c.issue_date, expiration_date: c.expiration_date, source_match: c.source_match })),
       skills: ex.skills.map(s => ({ id: s.id, skill_text: s.skill_text })),
       // section_type/heading are echoed back (not edited here) so confirm-resume-data can flag
       // needs_review rows for staff without a second round-trip to look up what kind of freeform
@@ -8481,10 +8490,11 @@ class Component extends DCLogic {
         }));
         s.resumeExtraction.certifications.forEach(c => blocks.push({
           kind: 'certification', position: typeof c.position === 'number' ? c.position : Infinity,
-          name: c.name || '', issuingBody: c.issuing_body || '',
+          name: c.name || '', issuingBody: c.issuing_body || '', licenseNumber: c.license_number || '',
           issueDate: c.issue_date || '', expirationDate: c.expiration_date || '',
           onName: (e) => this.updateResumeItem('certifications', c.id, 'name', e.target.value),
           onIssuingBody: (e) => this.updateResumeItem('certifications', c.id, 'issuing_body', e.target.value),
+          onLicenseNumber: (e) => this.updateResumeItem('certifications', c.id, 'license_number', e.target.value),
           onIssueDate: (e) => this.updateResumeItem('certifications', c.id, 'issue_date', e.target.value),
           onExpirationDate: (e) => this.updateResumeItem('certifications', c.id, 'expiration_date', e.target.value),
         }));

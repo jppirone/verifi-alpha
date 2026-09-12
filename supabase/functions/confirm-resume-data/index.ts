@@ -36,7 +36,7 @@ type EducationEdit = { id: string; institution?: string; degree?: string; field_
 // function only needs it to decide which certifications get the unconditional staff flag, not to
 // validate anything. See the queueInserts loop for why an unmatched cert overrides opt-in rather
 // than needing it.
-type CertificationEdit = { id: string; name?: string; issuing_body?: string; issue_date?: string; expiration_date?: string; source_match?: string };
+type CertificationEdit = { id: string; name?: string; issuing_body?: string; license_number?: string; issue_date?: string; expiration_date?: string; source_match?: string };
 // section_type/heading are echoed back by the client (candidate.html already has them, straight
 // from get-resume-extraction) rather than re-fetched here — this function only needs them to decide
 // which freeform rows are needs_review for the staff-queue flag below, not to validate anything.
@@ -56,7 +56,11 @@ function claimForEducation(e: EducationEdit): string {
   return [e.degree, e.field_of_study, e.institution, e.location, dates].filter(Boolean).join(", ");
 }
 function claimForCertification(c: CertificationEdit): string {
-  return [c.name, c.issuing_body, c.issue_date].filter(Boolean).join(", ");
+  // Item 7 (2026-09-12 live-testing session): license_number included in the staff-facing claim
+  // text too — this is the field a real state-licensing-board lookup (the DBPR/DORA automated
+  // checks already wired into staff.html) actually needs visible at a glance, not just stored.
+  const licenseLabel = c.license_number ? `Lic #${c.license_number}` : null;
+  return [c.name, c.issuing_body, licenseLabel, c.issue_date].filter(Boolean).join(", ");
 }
 // Truncated, not the full content — this is a queue-list preview (claim), not the review surface
 // itself; internal_note below carries the full, untruncated content plus the reason it's flagged.
@@ -179,7 +183,7 @@ export default {
       }
       for (const c of certifications) {
         const { data, error } = await supabase.from("certification_items").update({
-          name: c.name ?? null, issuing_body: c.issuing_body ?? null,
+          name: c.name ?? null, issuing_body: c.issuing_body ?? null, license_number: c.license_number ?? null,
           issue_date: dateOrNull(c.issue_date), expiration_date: dateOrNull(c.expiration_date),
           candidate_confirmed: true, updated_at: new Date().toISOString(),
         }).eq("id", c.id).eq("candidate_id", candidate_id).select("id");

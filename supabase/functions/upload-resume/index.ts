@@ -145,7 +145,7 @@ Return ONLY a single JSON object, no prose before or after it, matching exactly 
       "start_date": string, "end_date": string, "extraction_confidence": "high" | "medium" | "low", "position": number }
   ],
   "certifications": [
-    { "name": string, "issuing_body": string, "issue_date": string, "expiration_date": string,
+    { "name": string, "issuing_body": string, "license_number": string, "issue_date": string, "expiration_date": string,
       "extraction_confidence": "high" | "medium" | "low", "position": number }
   ],
   "skills": [ string ],
@@ -207,6 +207,15 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   hours figure, a topic word) with the NEVER FABRICATE rule's own worked example below. Matching that
   example's WORDING is never a reason to withhold extraction from an itemized list that is otherwise
   real — only the ABSENCE of individually named items is.
+
+- certifications' "license_number" field = the credential's own license, permit, or registration
+  number, when the resume actually prints one (e.g. "Lic # CFC1425829", "License No. 12345", "Cert
+  #A-9982") — copy it verbatim, including any prefix letters, exactly as printed. This is a SIBLING
+  field to "name", never a replacement: "name" stays whatever the resume actually calls the
+  credential — a formal title (e.g. "Certified Plumbing Contractor") or an informal trade name
+  (e.g. "Plumber") are both real, correct values for "name"; a license number being present is
+  never a reason to invent a more formal name than what's printed. Use an empty string "" when no
+  license/permit/registration number is printed for that credential — never guess or fabricate one.
 
 - skills = a FLAT LIST of individual skill, competency, or keyword terms presented as a list rather
   than prose — commonly under a heading like "Skills," "Core Competencies," "Technical Skills,"
@@ -307,7 +316,7 @@ If a category has no entries, return an empty array for it — do not omit the k
 type ExtractionResult = {
   work_history: Array<{ company: string; title: string; location?: string; start_date: string; end_date: string; job_responsibilities: string; extraction_confidence: string; position?: number }>;
   education: Array<{ institution: string; degree: string; field_of_study: string; location?: string; start_date: string; end_date: string; extraction_confidence: string; position?: number }>;
-  certifications: Array<{ name: string; issuing_body: string; issue_date: string; expiration_date: string; extraction_confidence: string; position?: number }>;
+  certifications: Array<{ name: string; issuing_body: string; license_number?: string; issue_date: string; expiration_date: string; extraction_confidence: string; position?: number }>;
   skills: Array<string>;
   skills_position?: number | null;
   freeform: Array<{ section_type: string; heading: string; content: string; position?: number }>;
