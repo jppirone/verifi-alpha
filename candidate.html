@@ -3693,6 +3693,14 @@ a:hover{color:var(--color-accent)}
             </sc-for>
           </div>
 
+          <!-- Item 18 (2026-09-12 live-testing session): clear, non-blocking warning when every
+               content category for this target is deselected — never stops the candidate from
+               actually doing it (that's a real, valid choice, e.g. a contact-only share), just makes
+               sure it's not an accident they don't notice until a partner receives almost nothing. -->
+          <sc-if value="{{ allDeselected }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:#e2b93c;background:color-mix(in srgb, #e2b93c 12%, transparent);border:1px solid color-mix(in srgb, #e2b93c 35%, transparent);border-radius:var(--radius-md);padding:10px 12px">You've deselected everything. This means only your contact information will be sent.</div>
+          </sc-if>
+
           <div style="display:flex;justify-content:flex-end;align-items:center;gap:var(--space-3)">
             <sc-if value="{{ showCzResetSaved }}" hint-placeholder-val="{{ false }}">
               <span style="font-size:11px;color:var(--color-accent-300);{{ czResetFadeStyle }}">Reset</span>
@@ -8264,6 +8272,17 @@ class Component extends DCLogic {
           })) : [],
         };
       }) : [],
+      // Item 18 (2026-09-12 live-testing session): "anything selected" checked directly per category
+      // (Object.values(...).some(Boolean), never .every()) so an empty itemized category can't
+      // accidentally read as "selected" the same vacuous-truth way Item 3/17 just fixed for the
+      // checked/toggle logic above — an empty {} correctly contributes nothing either way here.
+      allDeselected: (() => {
+        if (!s.customizeTarget) return false;
+        const val = s.customization[s.customizeTarget];
+        if (!val) return false;
+        const anySelected = ['experience', 'education', 'certifications', 'needsReview'].some(k => Object.values(val[k] || {}).some(Boolean)) || !!val.skills || !!val.misc;
+        return !anySelected;
+      })(),
       showCzResetSaved: s.czResetFlash,
       czResetFadeStyle: s.czResetFading ? 'transition:opacity 0.5s ease;opacity:0' : 'transition:opacity 0.15s ease;opacity:1',
       resetCzToDefault: () => this.resetCzToDefault(),
