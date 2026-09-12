@@ -6353,14 +6353,19 @@ class Component extends DCLogic {
     // resolved, not in parallel with it — it needs resumeCandidateId/a real session token in place
     // before it can meaningfully re-check tier state.
     this.mountResolveOrToken().then(() => this.handleCheckoutReturn());
-    // Item 7 (2026-09-11 status-check session): confirmed live, navigating away (tab close, refresh,
-    // back button) while checkoutPending is true — the window between clicking a payment method and
-    // the actual redirect to the processor's hosted checkout, or between confirming a downgrade and
-    // that request landing — was silently allowed with no warning at all. checkoutPending is the
-    // same flag that already drives every checkout/downgrade button's disabled + "Redirecting…"/
-    // "Switching…" state (see its own state comment), so it's the correct single signal here too.
+    // Item 7 (2026-09-11 status-check session), corrected by Item 16 (2026-09-12 live-testing
+    // session): originally gated on checkoutPending alone, which only arms in the brief window
+    // between clicking a payment method and the actual redirect landing — reported live as firing
+    // "too early" in the sense that mattered: a candidate who selects a paid tier, looks over the
+    // payment options, and navigates away WITHOUT ever clicking Card/Bank/PayPal got no warning at
+    // all, even though they'd already committed to upgrading and stood to lose that intent. Broadened
+    // to checkoutGuardActive() (below), armed from the moment a paid tier is actually selected —
+    // matches showUpgradeFlow's own "mid-upgrade" definition — through checkoutPending's own brief
+    // redirect window, plus the equivalent changePlanOpen flow for an already-paid candidate
+    // switching plans. Still disarms immediately on selecting Free again (tierSelection flips back),
+    // or once checkout/switch actually completes.
     window.addEventListener('beforeunload', (e) => {
-      if (!this.state.checkoutPending) return;
+      if (!this.checkoutGuardActive()) return;
       e.preventDefault();
       e.returnValue = '';
     });
@@ -7132,6 +7137,17 @@ class Component extends DCLogic {
   // exact redirect survives and resolves on return the same way it already does for the Subscription
   // tab. Consolidated onto this one function rather than keeping a separate pop-up-based path once
   // that turned out to be unnecessary — see handleCheckoutReturn's own header for the return side.
+
+  // Item 16 (2026-09-12 live-testing session): the real trigger condition for the nav-away warning
+  // — see the beforeunload listener's own header (mountResolveOrToken area) for the full "too early"
+  // finding this replaces. Mirrors showUpgradeFlow's own "mid-upgrade" definition (tierSelection
+  // committed to 'paid' while still genuinely on the free tier) rather than only the brief
+  // checkoutPending redirect window, plus changePlanOpen for an already-paid candidate switching
+  // plans — same category of "mid-payment-decision, don't lose it" risk.
+  checkoutGuardActive() {
+    const s = this.state;
+    return s.checkoutPending || (s.tierSelection === 'paid' && s.accountTier === 'free') || s.changePlanOpen;
+  }
   async startRealCheckout(opts) {
     const s = this.state;
     if (!s.resumeCandidateId || s.checkoutPending) return;
