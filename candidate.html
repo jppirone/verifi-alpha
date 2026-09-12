@@ -8222,7 +8222,12 @@ class Component extends DCLogic {
         if (val && s.accountTier === 'free') { e.target.value = ''; this.setState({ upgradeModalOpen: true, upgradeModalContext: 'customization', upgradeReturnTab: 'customization', upgradeReturnTarget: val }); return; }
         this.setState({ customizeTarget: val, czFlashField: null, czResetFlash: false });
       },
-      freeCategoryRows: this.getCzCategories().map(c => ({
+      // Item 17 (2026-09-12 live-testing session): an itemized category with zero real items (e.g.
+      // a document with no work history at all) is filtered out here too — same reasoning as
+      // categoryRows just below (see its own header): nothing real to preview, and showing an empty,
+      // permanently-checked row for a category that doesn't exist on this candidate's resume is
+      // misleading regardless of whether the checkbox itself is interactive.
+      freeCategoryRows: this.getCzCategories().filter(c => !c.items || c.items.length > 0).map(c => ({
         label: c.label,
         items: c.items ? c.items.map(it => ({ label: it.label })) : [],
       })),
@@ -8231,7 +8236,19 @@ class Component extends DCLogic {
       goUpgradeFromModal: () => this.setState({ upgradeModalOpen: false, accountTab: 'subscription' }),
       hasCustomizeTarget: !!s.customizeTarget,
       customizeTargetLabel: (this.PARTNERS.find(p => p.key === s.customizeTarget) || {}).label || '',
-      categoryRows: s.customizeTarget ? this.getCzCategories().map(c => {
+      // Item 3/17 (2026-09-12 live-testing session): real, confirmed bug — reproduced by reasoning
+      // through the actual code, not assumption. `Object.values(val).every(Boolean)` on an itemized
+      // category with ZERO real items (val = {}, e.g. a document with no work history/education at
+      // all) is VACUOUSLY true — JS's own .every() returns true on an empty array unconditionally.
+      // That made the category checkbox render as permanently checked for exactly this case, and
+      // toggleCzCategory's own matching logic (Object.fromEntries(Object.keys({}).map(...))) always
+      // maps an empty object back to another empty object no matter what "next" computes to — so
+      // clicking it was a genuine no-op, not just a rendering glitch: "stuck checked and
+      // un-uncheckable" was real. Filtering out itemized categories with zero items here (mirroring
+      // resumeConfirm's own resumeHasWorkHistory-style gating, and freeCategoryRows just above) fixes
+      // both symptoms at once — nothing real to toggle means no row renders, rather than a fake one
+      // that can't reflect a real state.
+      categoryRows: s.customizeTarget ? this.getCzCategories().filter(c => !c.items || c.items.length > 0).map(c => {
         const val = s.customization[s.customizeTarget][c.key];
         const isItemized = !!c.items;
         return {
