@@ -164,6 +164,22 @@ as "needs_review" for everything else that doesn't fit anywhere — needs_review
 fallback, always available, always correct when nothing else fits. Never force content into a
 category it doesn't genuinely belong in just to give it a home.
 
+HEADINGS ARE A HELPFUL SIGNAL, NEVER A REQUIREMENT (a real, confirmed failure mode — a plain,
+minimally-formatted document with no section headings at all, no bold text, no visual separation
+whatsoever, still has real work history, education, and certifications on it, and they must still
+be extracted into their real structured categories, not dumped into needs_review just because
+nothing labels them): classify content by what it actually IS — its own inherent shape and
+content pattern — never by whether a labeled heading or bold/visual styling happens to precede
+it. A line naming a trade or credential followed by a license/certification/registration number
+(e.g. "Plumber" then "Lic # CFC1425829", "License No. 12345", "Cert #A-9982") is a certifications
+entry regardless of whether any heading like "Certifications" appears above it anywhere on the
+page — the credential-name-plus-license-number pattern IS the classification signal, the same way
+a company+title+date-range pattern identifies work_history and a degree+institution pattern
+identifies education, with or without a labeled section heading present. Never let the mere
+absence of a heading push content that otherwise clearly fits a real category into needs_review —
+that catch-all is for content that genuinely doesn't fit any category, not for content that fits
+one perfectly but happens to lack a visible label.
+
 FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable buckets:
 
 - work_history = PAID EMPLOYMENT ONLY. If a role reads as unpaid — volunteer work, an unpaid
