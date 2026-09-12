@@ -2813,10 +2813,13 @@ a:hover{color:var(--color-accent)}
         <div class="card-kicker">Your uploaded document</div>
         <sc-if value="{{ resumeIsPdf }}" hint-placeholder-val="{{ false }}">
           <div style="display:flex;align-items:center;gap:4px">
-            <button type="button" class="btn btn-ghost" style="font-size:13px;padding:2px 9px;line-height:1.4" sc-camel-on-click="{{ zoomOutPdf }}">−</button>
+            <button type="button" class="btn btn-ghost" style="font-size:13px;padding:2px 9px;line-height:1.4" disabled="{{ zoomButtonsDisabled }}" sc-camel-on-click="{{ zoomOutPdf }}">−</button>
             <span style="font-size:11px;color:var(--color-neutral-500);min-width:38px;text-align:center">{{ pdfZoomLabel }}</span>
-            <button type="button" class="btn btn-ghost" style="font-size:13px;padding:2px 9px;line-height:1.4" sc-camel-on-click="{{ zoomInPdf }}">+</button>
-            <button type="button" class="btn btn-ghost" style="font-size:11px;padding:2px 8px" sc-camel-on-click="{{ resetPdfZoom }}">Reset</button>
+            <button type="button" class="btn btn-ghost" style="font-size:13px;padding:2px 9px;line-height:1.4" disabled="{{ zoomButtonsDisabled }}" sc-camel-on-click="{{ zoomInPdf }}">+</button>
+            <button type="button" class="btn btn-ghost" style="font-size:11px;padding:2px 8px" disabled="{{ zoomButtonsDisabled }}" sc-camel-on-click="{{ resetPdfZoom }}">Reset</button>
+            <!-- Item 9 (2026-09-12 live-testing session): real anchor link, target="_blank" — not a
+                 window.open() popup — for a genuine full-screen/pop-out view of the original. -->
+            <a href="{{ resumeOriginalUrl }}" target="_blank" rel="noopener" class="btn btn-ghost" style="font-size:11px;padding:2px 8px">Full screen</a>
           </div>
         </sc-if>
       </div>
@@ -3867,6 +3870,29 @@ a:hover{color:var(--color-accent)}
         <div id="pdf-preview-container" style="width:100%;min-height:70vh;max-height:80vh;overflow:auto;background:var(--color-neutral-900);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:16px;display:flex;flex-direction:column;align-items:center;gap:16px"></div>
         <button type="button" class="btn btn-secondary" style="align-self:flex-start" sc-camel-on-click="{{ downloadPdf }}">Download PDF</button>
       </div>
+
+      <!-- Item 2 (2026-09-12 live-testing session): additive original-document viewer, collapsed by
+           default — see renderViewsOriginalPdfViewer's own header for why this doesn't replace the
+           ATS-rebuild preview above it. Same in-page PDF.js viewer resumeConfirm uses, real anchor
+           full-screen link, no window.open() popup. -->
+      <sc-if value="{{ viewsOriginalDocIsPdf }}" hint-placeholder-val="{{ false }}">
+        <div style="margin-top:var(--space-4);border-top:1px solid var(--color-divider);padding-top:var(--space-4)">
+          <button type="button" class="btn btn-ghost" style="font-size:12px" sc-camel-on-click="{{ toggleViewsOriginalDoc }}">{{ viewsOriginalDocToggleLabel }}</button>
+          <sc-if value="{{ viewsOriginalDocOpen }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-direction:column;gap:var(--space-3);margin-top:var(--space-3)">
+              <div style="display:flex;align-items:center;gap:4px">
+                <button type="button" class="btn btn-ghost" style="font-size:13px;padding:2px 9px;line-height:1.4" disabled="{{ viewsOriginalZoomButtonsDisabled }}" sc-camel-on-click="{{ zoomOutViewsOriginalPdf }}">−</button>
+                <span style="font-size:11px;color:var(--color-neutral-500);min-width:38px;text-align:center">{{ viewsOriginalPdfZoomLabel }}</span>
+                <button type="button" class="btn btn-ghost" style="font-size:13px;padding:2px 9px;line-height:1.4" disabled="{{ viewsOriginalZoomButtonsDisabled }}" sc-camel-on-click="{{ zoomInViewsOriginalPdf }}">+</button>
+                <button type="button" class="btn btn-ghost" style="font-size:11px;padding:2px 8px" disabled="{{ viewsOriginalZoomButtonsDisabled }}" sc-camel-on-click="{{ resetViewsOriginalPdfZoom }}">Reset</button>
+                <a href="{{ viewsOriginalDocUrl }}" target="_blank" rel="noopener" class="btn btn-ghost" style="font-size:11px;padding:2px 8px">Full screen</a>
+              </div>
+              <div id="views-original-pdf-viewer-container" style="width:100%;max-height:70vh;overflow:auto;overscroll-behavior:contain;background:#525659;border-radius:2px;padding:12px;display:flex;flex-direction:column;align-items:safe center;gap:10px"></div>
+              <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">This is exactly what you uploaded, unmodified.</div>
+            </div>
+          </sc-if>
+        </div>
+      </sc-if>
     </sc-if>
 
     <sc-if value="{{ tabIsSharing }}" hint-placeholder-val="{{ false }}">
@@ -5475,80 +5501,100 @@ class Component extends DCLogic {
     }
   }
 
-  // Item 14 (2026-09-07 wiring audit): the resumeConfirm screen's "Your uploaded document" panel,
-  // for a PDF upload — renders the REAL original file (resumeOriginalUrl, a signed storage URL),
-  // not the ATS-rebuild renderPdfPreview above renders for Views. Deliberately mirrors that
-  // function's own retry-until-container-exists / lazy-pdfjsLib-load pattern rather than
-  // introducing a second one, but loads via getDocument({ url }) instead of building bytes locally,
-  // and re-renders at this.state.pdfViewerScale (the new real zoom control) instead of a fixed 1.3.
-  renderOriginalPdfViewer() {
+  // Item 2/9 (2026-09-12 live-testing session): generalized from the resumeConfirm-only version
+  // this replaces — same retry-until-container-exists / lazy-pdfjsLib-load pattern, same
+  // getDocument({ url }) load, same "no max-width clamp" canvas-sizing fix (see below), but now
+  // parameterized by container id and a pair of state keys so ONE function backs every original-
+  // document viewer in this file (resumeConfirm's own panel, and the new Views-tab panel — see
+  // renderOriginalPdfViewer/renderViewsOriginalPdfViewer, the two thin wrappers below) instead of
+  // a second, drifting copy-paste. staff.html needs its own copy (a separate, non-module HTML file
+  // with no shared script include — same reuse-by-porting convention already used for the
+  // extraction prompt logic duplicated across upload-resume/extract-resume-fields/
+  // rasterize-pdf-page), kept behaviorally identical on purpose.
+  //
+  // Item 9: real fit-to-width on first load, not a hardcoded baseline. scaleKey starts null; the
+  // first successful page-1 load measures this PANEL's own actual clientWidth against the page's
+  // own native (scale:1) width and computes the real fit scale from that — never a guessed number,
+  // never dependent on what any other panel elsewhere in the app happens to use. Reuses the
+  // already-fetched pdf/page1 objects for the real render immediately after, rather than a second
+  // fetch just to re-render at the computed scale.
+  renderOriginalPdfViewerInto(containerId, url, scaleKey, fitScaleKey) {
     const s = this.state;
-    // Same source resumeIsPdf/resumeOriginalUrl (renderVals) derive from — no separate cached
-    // field, so this can never drift out of sync with what the screen is actually showing.
-    const doc = s.resumeExtraction && s.resumeExtraction.resume_document;
-    // extraction_status === 'extracted' matches resumeReadyToConfirm's own gate exactly — the
-    // container this method looks for below only exists in the DOM once that's true (still-polling
-    // states render a different screen entirely), so checking it here up front avoids an indefinite
-    // requestAnimationFrame retry loop for as long as a resume is still mid-processing.
-    if (!doc || doc.mime_type !== 'application/pdf' || !doc.original_signed_url || doc.extraction_status !== 'extracted') return;
-    const container = document.getElementById('original-pdf-viewer-container');
-    if (!container) { requestAnimationFrame(() => this.renderOriginalPdfViewer()); return; }
-    const url = doc.original_signed_url;
-    const scale = s.pdfViewerScale;
-    // Re-entrancy guard: zoom clicks can fire faster than a render completes, and this container
-    // is also re-checked on every resumeConfirm re-render (setState from typing in an unrelated
-    // field) — without this, overlapping renders would both append canvases into the same
-    // container, doubling the page count visually.
-    if (this._pdfViewerRenderKey === url + '|' + scale) return;
-    this._pdfViewerRenderKey = url + '|' + scale;
+    const container = document.getElementById(containerId);
+    if (!container) { requestAnimationFrame(() => this.renderOriginalPdfViewerInto(containerId, url, scaleKey, fitScaleKey)); return; }
+    const fieldKey = '_pdfViewerRenderKey_' + containerId;
+    // Re-entrancy guard: zoom clicks can fire faster than a render completes, and this container is
+    // also re-checked on every re-render (setState from typing in an unrelated field) — without
+    // this, overlapping renders would both append canvases into the same container, doubling the
+    // page count visually. 'measuring' is a real, distinct key state (scale not yet computed) so a
+    // fresh call during that window doesn't race a second document fetch.
+    let renderKey = url + '|' + (s[scaleKey] == null ? 'measuring' : s[scaleKey]);
+    if (this[fieldKey] === renderKey) return;
+    this[fieldKey] = renderKey;
     try {
-      container.innerHTML = '';
       if (!window.pdfjsLib) {
+        container.innerHTML = '';
         const msg = document.createElement('div');
         msg.style.cssText = 'color:#ccc;font-size:12px;padding:24px;text-align:center';
         msg.textContent = 'Loading document…';
         container.appendChild(msg);
-        setTimeout(() => { this._pdfViewerRenderKey = null; this.renderOriginalPdfViewer(); }, 300);
+        setTimeout(() => { this[fieldKey] = null; this.renderOriginalPdfViewerInto(containerId, url, scaleKey, fitScaleKey); }, 300);
         return;
       }
       if (window.pdfjsLib.GlobalWorkerOptions && !window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
         window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
       }
       window.pdfjsLib.getDocument({ url }).promise.then(pdf => {
-        // Stale response guard — the candidate may have zoomed again (or navigated away) while this
-        // fetch/parse was in flight.
-        if (this._pdfViewerRenderKey !== url + '|' + scale) return;
-        const renderPage = (pageNum) => {
-          pdf.getPage(pageNum).then(page => {
-            if (this._pdfViewerRenderKey !== url + '|' + scale) return;
-            const viewport = page.getViewport({ scale });
-            const canvas = document.createElement('canvas');
-            canvas.width = viewport.width;
-            canvas.height = viewport.height;
-            // Item 14 (2026-09-08 regression session): reproduced live via computed styles at
-            // multiple zoom levels before touching this — max-width:100% here was unconditionally
-            // clamping the canvas's ON-SCREEN width to its scroll container's width, regardless of
-            // canvas.width/height (the actual pixel size the scale above already sets correctly).
-            // A Letter-width page is wider than this panel at essentially every scale this control
-            // offers, so the clamp was active immediately and stayed active through every zoom level
-            // — confirmed: canvas.width grew from 795 to 1392px across three zoom-in clicks while
-            // getBoundingClientRect().width stayed pinned at exactly 368px throughout, and the scroll
-            // container's scrollWidth never exceeded its clientWidth. The container already has its
-            // own overflow:auto (see its own comment) specifically so a zoomed-in canvas can be
-            // scrolled into — removing the clamp is what actually lets that happen; the previous
-            // "Item 14" fix (2026-09-07) built the real scale control but this line silently
-            // neutralized it the whole time.
-            canvas.style.cssText = 'box-shadow:0 0 0 1px rgba(0,0,0,0.2);background:#fff';
-            container.appendChild(canvas);
-            const ctx = canvas.getContext('2d');
-            page.render({ canvasContext: ctx, viewport });
-            if (pageNum < pdf.numPages) renderPage(pageNum + 1);
-          }).catch(e2 => { console.error('original pdf page render error', String(e2)); });
-        };
-        renderPage(1);
+        if (this[fieldKey] !== renderKey) return;
+        pdf.getPage(1).then(page1 => {
+          if (this[fieldKey] !== renderKey) return;
+          let scale = s[scaleKey];
+          if (scale == null) {
+            const native = page1.getViewport({ scale: 1 });
+            const available = Math.max(container.clientWidth - 4, 100);
+            scale = +(available / native.width).toFixed(3);
+            // Claim the real, final key BEFORE setState so a re-render this triggers (any state
+            // change re-renders the whole tree) finds a matching key and no-ops instead of racing
+            // this in-flight render with a redundant second document fetch.
+            renderKey = url + '|' + scale;
+            this[fieldKey] = renderKey;
+            this.setState({ [scaleKey]: scale, [fitScaleKey]: scale });
+          }
+          container.innerHTML = '';
+          const renderPage = (pageNum, pageObj) => {
+            const go = (page) => {
+              if (this[fieldKey] !== renderKey) return;
+              const viewport = page.getViewport({ scale });
+              const canvas = document.createElement('canvas');
+              canvas.width = viewport.width;
+              canvas.height = viewport.height;
+              // Item 14 (2026-09-08 regression session): reproduced live via computed styles at
+              // multiple zoom levels before touching this — max-width:100% here was unconditionally
+              // clamping the canvas's ON-SCREEN width to its scroll container's width, regardless of
+              // canvas.width/height (the actual pixel size the scale above already sets correctly).
+              // The container already has its own overflow:auto specifically so a zoomed-in canvas
+              // can be scrolled into — removing the clamp is what actually lets that happen.
+              canvas.style.cssText = 'box-shadow:0 0 0 1px rgba(0,0,0,0.2);background:#fff';
+              container.appendChild(canvas);
+              const ctx = canvas.getContext('2d');
+              page.render({ canvasContext: ctx, viewport });
+              if (pageNum < pdf.numPages) pdf.getPage(pageNum + 1).then(next => renderPage(pageNum + 1, next)).catch(e2 => console.error('original pdf page render error', String(e2)));
+            };
+            if (pageObj) go(pageObj); else pdf.getPage(pageNum).then(go).catch(e2 => console.error('original pdf page render error', String(e2)));
+          };
+          renderPage(1, page1);
+        }).catch(e => {
+          console.error('original pdf page1 error', String(e));
+          if (this[fieldKey] !== renderKey) return;
+          container.innerHTML = '';
+          const err = document.createElement('div');
+          err.style.cssText = 'color:#ccc;font-size:12px;padding:24px;text-align:center';
+          err.textContent = 'Preview unavailable.';
+          container.appendChild(err);
+        });
       }).catch(e => {
         console.error('original pdf getDocument error', String(e));
-        if (this._pdfViewerRenderKey !== url + '|' + scale) return;
+        if (this[fieldKey] !== renderKey) return;
         container.innerHTML = '';
         const err = document.createElement('div');
         err.style.cssText = 'color:#ccc;font-size:12px;padding:24px;text-align:center';
@@ -5556,8 +5602,34 @@ class Component extends DCLogic {
         container.appendChild(err);
       });
     } catch (e) {
-      console.error('renderOriginalPdfViewer sync error', String(e), e && e.stack);
+      console.error('renderOriginalPdfViewerInto sync error', String(e), e && e.stack);
     }
+  }
+
+  // resumeConfirm's own "Your uploaded document" panel — see renderOriginalPdfViewerInto's own
+  // header for the shared mechanics. extraction_status === 'extracted' matches resumeReadyToConfirm's
+  // own gate exactly — the container this looks for only exists in the DOM once that's true.
+  renderOriginalPdfViewer() {
+    const s = this.state;
+    const doc = s.resumeExtraction && s.resumeExtraction.resume_document;
+    if (!doc || doc.mime_type !== 'application/pdf' || !doc.original_signed_url || doc.extraction_status !== 'extracted') return;
+    this.renderOriginalPdfViewerInto('original-pdf-viewer-container', doc.original_signed_url, 'pdfViewerScale', 'pdfViewerFitScale');
+  }
+
+  // Item 2 (2026-09-12 live-testing session): the new original-document viewer on the Views tab —
+  // additive to (never replacing) the existing ATS-rebuild PDF preview just above it, which stays
+  // exactly what it's always been (a crafted document built from verified data, deliberately never
+  // the original upload — see that panel's own copy). This is the third of the three places Item 2
+  // asked for an original-document viewer (staff queue, resumeConfirm, Views), reusing the exact
+  // same renderOriginalPdfViewerInto mechanics as resumeConfirm's own panel, just against its own
+  // container and its own separate zoom state so opening/zooming one never disturbs the other.
+  // Gated on viewsOriginalDocOpen (collapsed by default) since Views already shows a full document
+  // preview by default — this is an opt-in second view, not force-rendered on every tab visit.
+  renderViewsOriginalPdfViewer() {
+    const s = this.state;
+    const doc = s.resumeExtraction && s.resumeExtraction.resume_document;
+    if (!s.viewsOriginalDocOpen || !doc || doc.mime_type !== 'application/pdf' || !doc.original_signed_url) return;
+    this.renderOriginalPdfViewerInto('views-original-pdf-viewer-container', doc.original_signed_url, 'viewsOriginalPdfViewerScale', 'viewsOriginalPdfViewerFitScale');
   }
 
   startVerificationGate(context) {
@@ -5670,7 +5742,16 @@ class Component extends DCLogic {
     resumeFileStaged: null, resumeFileError: null,
     resumeEmailVerificationId: null, resumeDocumentId: null,
     resumeCandidateId: null, resumeExtraction: null, resumeExtractionLoading: false,
-    pdfViewerScale: 1.3,
+    // Item 9 (2026-09-12 live-testing session): pdfViewerScale/pdfViewerFitScale replace the old
+    // hardcoded pdfViewerScale:1.3 default — see renderOriginalPdfViewerInto's own header for why a
+    // fixed initial scale was never genuinely "100%" of anything real. Both null until the first
+    // real page loads and the actual fit-to-width scale for THIS document, in THIS panel, at
+    // whatever width it happens to be, gets computed and set. viewsOriginal* are the same two
+    // controls for the new Item 2 original-document viewer on the Views tab — kept fully separate
+    // from resumeConfirm's own so zooming one panel never affects the other.
+    pdfViewerScale: null, pdfViewerFitScale: null,
+    viewsOriginalPdfViewerScale: null, viewsOriginalPdfViewerFitScale: null,
+    viewsOriginalDocOpen: false,
     resumeConfirmPending: false, resumeConfirmError: null,
     // Item 1 (2026-09-11 status-check session, CRITICAL): see discardResumeDocument's own header.
     rejectResumeModalOpen: false, rejectResumePending: false, rejectResumeError: null,
@@ -8306,6 +8387,26 @@ class Component extends DCLogic {
         if (val && s.accountTier === 'free') { e.target.value = ''; this.setState({ upgradeModalOpen: true, upgradeReturnTab: 'views', upgradeReturnTarget: val }); return; }
         this.setState({ viewsTabPartner: val }, () => this.renderPdfPreview());
       },
+      // Item 2 (2026-09-12 live-testing session): the new, additive original-document viewer on
+      // Views — see renderViewsOriginalPdfViewer's own header for why this doesn't replace the
+      // ATS-rebuild preview above it. Only offered when the uploaded document is actually a PDF
+      // (same original file the resumeConfirm panel and staff queue view, not the ATS rebuild).
+      viewsOriginalDocIsPdf: !!(s.resumeExtraction && s.resumeExtraction.resume_document && s.resumeExtraction.resume_document.mime_type === 'application/pdf' && s.resumeExtraction.resume_document.original_signed_url),
+      viewsOriginalDocUrl: (s.resumeExtraction && s.resumeExtraction.resume_document && s.resumeExtraction.resume_document.original_signed_url) || '',
+      viewsOriginalDocOpen: s.viewsOriginalDocOpen,
+      viewsOriginalDocToggleLabel: s.viewsOriginalDocOpen ? 'Hide original document' : 'View my originally uploaded document',
+      toggleViewsOriginalDoc: () => this.setState(st => ({ viewsOriginalDocOpen: !st.viewsOriginalDocOpen }), () => this.renderViewsOriginalPdfViewer()),
+      viewsOriginalZoomButtonsDisabled: !(s.viewsOriginalPdfViewerScale != null && s.viewsOriginalPdfViewerFitScale != null),
+      viewsOriginalPdfZoomLabel: (s.viewsOriginalPdfViewerScale != null && s.viewsOriginalPdfViewerFitScale) ? Math.round(s.viewsOriginalPdfViewerScale / s.viewsOriginalPdfViewerFitScale * 100) + '%' : 'Fit…',
+      zoomInViewsOriginalPdf: () => this.setState(st => {
+        const fit = st.viewsOriginalPdfViewerFitScale || st.viewsOriginalPdfViewerScale || 1;
+        return { viewsOriginalPdfViewerScale: Math.min(fit * 2.5, +((st.viewsOriginalPdfViewerScale || fit) + fit * 0.25).toFixed(3)) };
+      }, () => this.renderViewsOriginalPdfViewer()),
+      zoomOutViewsOriginalPdf: () => this.setState(st => {
+        const fit = st.viewsOriginalPdfViewerFitScale || st.viewsOriginalPdfViewerScale || 1;
+        return { viewsOriginalPdfViewerScale: Math.max(fit * 0.35, +((st.viewsOriginalPdfViewerScale || fit) - fit * 0.25).toFixed(3)) };
+      }, () => this.renderViewsOriginalPdfViewer()),
+      resetViewsOriginalPdfZoom: () => this.setState(st => ({ viewsOriginalPdfViewerScale: st.viewsOriginalPdfViewerFitScale }), () => this.renderViewsOriginalPdfViewer()),
       tabIsVerification: s.accountTab === 'verification',
       filterIsActive: s.verificationFilter === 'active',
       filterIsAll: s.verificationFilter === 'all',
@@ -8488,10 +8589,24 @@ class Component extends DCLogic {
       // than always assuming an image the way it did before PDF uploads existed.
       resumeIsPdf: !!(s.resumeExtraction && s.resumeExtraction.resume_document && s.resumeExtraction.resume_document.mime_type === 'application/pdf'),
       resumeIsImage: !!(s.resumeExtraction && s.resumeExtraction.resume_document && s.resumeExtraction.resume_document.mime_type !== 'application/pdf'),
-      pdfZoomLabel: Math.round(s.pdfViewerScale / 1.3 * 100) + '%',
-      zoomInPdf: () => this.setState(st => ({ pdfViewerScale: Math.min(3.25, +(st.pdfViewerScale + 0.325).toFixed(3)) }), () => this.renderOriginalPdfViewer()),
-      zoomOutPdf: () => this.setState(st => ({ pdfViewerScale: Math.max(0.455, +(st.pdfViewerScale - 0.325).toFixed(3)) }), () => this.renderOriginalPdfViewer()),
-      resetPdfZoom: () => this.setState({ pdfViewerScale: 1.3 }, () => this.renderOriginalPdfViewer()),
+      // Item 9 (2026-09-12 live-testing session): genuine fit-to-width on load, not a hardcoded
+      // baseline — see renderOriginalPdfViewerInto's own header. pdfViewerScale/pdfViewerFitScale
+      // are both null until the first real page finishes loading and computes the actual fit scale
+      // for this panel's own real width; +/- and Reset all move relative to THAT computed baseline,
+      // not a fixed absolute number. pdfZoomControlsReady gates the controls so a click can't fire
+      // against a still-null scale before that first computation lands.
+      pdfZoomControlsReady: s.pdfViewerScale != null && s.pdfViewerFitScale != null,
+      zoomButtonsDisabled: !(s.pdfViewerScale != null && s.pdfViewerFitScale != null),
+      pdfZoomLabel: (s.pdfViewerScale != null && s.pdfViewerFitScale) ? Math.round(s.pdfViewerScale / s.pdfViewerFitScale * 100) + '%' : 'Fit…',
+      zoomInPdf: () => this.setState(st => {
+        const fit = st.pdfViewerFitScale || st.pdfViewerScale || 1;
+        return { pdfViewerScale: Math.min(fit * 2.5, +((st.pdfViewerScale || fit) + fit * 0.25).toFixed(3)) };
+      }, () => this.renderOriginalPdfViewer()),
+      zoomOutPdf: () => this.setState(st => {
+        const fit = st.pdfViewerFitScale || st.pdfViewerScale || 1;
+        return { pdfViewerScale: Math.max(fit * 0.35, +((st.pdfViewerScale || fit) - fit * 0.25).toFixed(3)) };
+      }, () => this.renderOriginalPdfViewer()),
+      resetPdfZoom: () => this.setState(st => ({ pdfViewerScale: st.pdfViewerFitScale }), () => this.renderOriginalPdfViewer()),
       // Item 19 (2026-09-12 live-testing session): candidate_location lives on resume_document
       // itself (see updateResumeDocument), not in one of the array categories — same edit-in-place
       // pattern as resumeSummaryContent/onResumeSummaryChange just below, just against the singular

@@ -2239,6 +2239,9 @@ a:hover{color:var(--color-accent)}
 .btn{white-space:nowrap;flex-shrink:0}
 th.sortable{cursor:pointer;user-select:none}
 </style>
+<!-- Item 2 (2026-09-12 live-testing session): same PDF.js build candidate.html already loads, for
+     the new in-page document-viewer modal replacing viewSourceDocument's own window.open() popup. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 </helmet>
 
 
@@ -2767,6 +2770,39 @@ th.sortable{cursor:pointer;user-select:none}
   </div>
 </sc-if>
 
+<!-- Item 2 (2026-09-12 live-testing session): in-page document viewer, replacing viewSourceDocument's
+     old window.open() popup — real modal, real anchor "Full screen" link, no JS popup window. Wider
+     than the standard .dialog (needs real room for a document), so styled inline rather than reusing
+     that class's own 440px cap. -->
+<sc-if value="{{ docViewerOpen }}" hint-placeholder-val="{{ false }}">
+  <div class="dialog-backdrop">
+    <div role="dialog" aria-modal="true" aria-labelledby="doc-viewer-title" style="width:min(900px,95vw);max-height:90vh;display:flex;flex-direction:column;gap:var(--space-3);padding:var(--space-4);border-radius:var(--radius-lg);background:var(--color-surface);box-shadow:var(--shadow-lg)">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div class="dialog-title" id="doc-viewer-title">Original document</div>
+        <button type="button" class="btn btn-ghost" onClick="{{ closeDocViewer }}">Close</button>
+      </div>
+      <sc-if value="{{ docViewerIsPdf }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;align-items:center;gap:4px">
+          <button type="button" class="btn btn-ghost" style="font-size:13px;padding:2px 9px;line-height:1.4" disabled="{{ docViewerZoomButtonsDisabled }}" onClick="{{ zoomOutDocViewer }}">−</button>
+          <span style="font-size:11px;color:var(--color-neutral-500);min-width:38px;text-align:center">{{ docViewerZoomLabel }}</span>
+          <button type="button" class="btn btn-ghost" style="font-size:13px;padding:2px 9px;line-height:1.4" disabled="{{ docViewerZoomButtonsDisabled }}" onClick="{{ zoomInDocViewer }}">+</button>
+          <button type="button" class="btn btn-ghost" style="font-size:11px;padding:2px 8px" disabled="{{ docViewerZoomButtonsDisabled }}" onClick="{{ resetDocViewerZoom }}">Reset</button>
+          <a href="{{ docViewerUrl }}" target="_blank" rel="noopener" class="btn btn-ghost" style="font-size:11px;padding:2px 8px">Full screen</a>
+        </div>
+        <div id="staff-doc-viewer-container" style="flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;background:#525659;border-radius:2px;padding:12px;display:flex;flex-direction:column;align-items:safe center;gap:10px"></div>
+      </sc-if>
+      <sc-if value="{{ docViewerIsImage }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;justify-content:flex-end">
+          <a href="{{ docViewerUrl }}" target="_blank" rel="noopener" class="btn btn-ghost" style="font-size:11px;padding:2px 8px">Full screen</a>
+        </div>
+        <div style="flex:1;min-height:0;overflow:auto;background:#525659;border-radius:2px;padding:12px;display:flex;justify-content:center">
+          <img src="{{ docViewerUrl }}" style="max-width:100%;display:block;background:#fff">
+        </div>
+      </sc-if>
+    </div>
+  </div>
+</sc-if>
+
 </div>
 
 
@@ -2855,6 +2891,11 @@ class Component extends DCLogic {
     // it. Transient, per-item-view state (reset alongside automatedCheck* on selectedId change) —
     // not persisted, since the signed URL itself is short-lived (1hr, see get-resume-extraction).
     sourceDocLoading: false, sourceDocError: null,
+    // Item 2 (2026-09-12 live-testing session): replaces window.open() — same in-page PDF.js viewer
+    // mechanics as candidate.html's own (see renderDocViewer's own header). docViewerScale/
+    // docViewerFitScale null until the first page loads and computes the real fit-to-width scale.
+    docViewerOpen: false, docViewerUrl: null, docViewerIsPdf: false,
+    docViewerScale: null, docViewerFitScale: null,
     // Reporting tab: candidates whose resume extraction failed and who never reached the
     // verification queue any other way (see list-resume-extraction-failures) — confirmed to be a
     // real, current, silent dead end (two real candidates found in exactly this state) with zero
@@ -3164,8 +3205,12 @@ class Component extends DCLogic {
   // this pipeline) and already returns a signed URL to the original file for exactly this purpose on
   // the candidate side (see its own header) — a verification_items row's candidateId is all this
   // needs. Fetched on demand rather than alongside the item itself since the signed URL is only
-  // valid for 1hr; opened in a new tab rather than embedded, since the original can be an image or a
-  // PDF and this queue has no viewer for either.
+  // valid for 1hr.
+  //
+  // Item 2 (2026-09-12 live-testing session): opens the real in-page modal (docViewerOpen) instead
+  // of window.open() — a JS popup was explicitly ruled out. mime_type now read off the response too
+  // (needed to decide PDF.js canvas render vs a plain <img>, see renderDocViewer/the modal's own
+  // template).
   async viewSourceDocument(candidateId) {
     if (!candidateId) { this.setState({ sourceDocError: 'No candidate on this item.' }); return; }
     this.setState({ sourceDocLoading: true, sourceDocError: null });
@@ -3182,8 +3227,98 @@ class Component extends DCLogic {
     }
     const url = data && data.ok && data.resume_document ? data.resume_document.original_signed_url : null;
     if (!url) { this.setState({ sourceDocLoading: false, sourceDocError: "Couldn't load the original document." }); return; }
-    window.open(url, '_blank', 'noopener');
-    this.setState({ sourceDocLoading: false });
+    const isPdf = !!(data.resume_document.mime_type === 'application/pdf');
+    this.setState({
+      sourceDocLoading: false,
+      docViewerOpen: true, docViewerUrl: url, docViewerIsPdf: isPdf,
+      docViewerScale: null, docViewerFitScale: null,
+    }, () => { if (isPdf) this.renderDocViewer(); });
+  }
+
+  closeDocViewer() {
+    this.setState({ docViewerOpen: false, docViewerUrl: null, docViewerScale: null, docViewerFitScale: null });
+  }
+
+  // Item 2 (2026-09-12 live-testing session): ported from candidate.html's
+  // renderOriginalPdfViewerInto — same mechanics (retry-until-container-exists, lazy pdfjsLib load,
+  // genuine fit-to-width computed from THIS modal's own real width against the page's own native
+  // size, no max-width canvas clamp), kept behaviorally identical on purpose. Physically duplicated
+  // rather than shared via an import: staff.html and candidate.html are separate, non-module HTML
+  // files with no shared script include, the same reuse-by-porting convention already used for the
+  // extraction prompt logic duplicated across upload-resume/extract-resume-fields/rasterize-pdf-page.
+  renderDocViewer() {
+    const s = this.state;
+    if (!s.docViewerOpen || !s.docViewerIsPdf || !s.docViewerUrl) return;
+    const url = s.docViewerUrl;
+    const container = document.getElementById('staff-doc-viewer-container');
+    if (!container) { requestAnimationFrame(() => this.renderDocViewer()); return; }
+    let renderKey = url + '|' + (s.docViewerScale == null ? 'measuring' : s.docViewerScale);
+    if (this._docViewerRenderKey === renderKey) return;
+    this._docViewerRenderKey = renderKey;
+    try {
+      if (!window.pdfjsLib) {
+        container.innerHTML = '';
+        const msg = document.createElement('div');
+        msg.style.cssText = 'color:#ccc;font-size:12px;padding:24px;text-align:center';
+        msg.textContent = 'Loading document…';
+        container.appendChild(msg);
+        setTimeout(() => { this._docViewerRenderKey = null; this.renderDocViewer(); }, 300);
+        return;
+      }
+      if (window.pdfjsLib.GlobalWorkerOptions && !window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      }
+      window.pdfjsLib.getDocument({ url }).promise.then(pdf => {
+        if (this._docViewerRenderKey !== renderKey) return;
+        pdf.getPage(1).then(page1 => {
+          if (this._docViewerRenderKey !== renderKey) return;
+          let scale = s.docViewerScale;
+          if (scale == null) {
+            const native = page1.getViewport({ scale: 1 });
+            const available = Math.max(container.clientWidth - 4, 100);
+            scale = +(available / native.width).toFixed(3);
+            renderKey = url + '|' + scale;
+            this._docViewerRenderKey = renderKey;
+            this.setState({ docViewerScale: scale, docViewerFitScale: scale });
+          }
+          container.innerHTML = '';
+          const renderPage = (pageNum, pageObj) => {
+            const go = (page) => {
+              if (this._docViewerRenderKey !== renderKey) return;
+              const viewport = page.getViewport({ scale });
+              const canvas = document.createElement('canvas');
+              canvas.width = viewport.width;
+              canvas.height = viewport.height;
+              canvas.style.cssText = 'box-shadow:0 0 0 1px rgba(0,0,0,0.2);background:#fff';
+              container.appendChild(canvas);
+              const ctx = canvas.getContext('2d');
+              page.render({ canvasContext: ctx, viewport });
+              if (pageNum < pdf.numPages) pdf.getPage(pageNum + 1).then(next => renderPage(pageNum + 1, next)).catch(e2 => console.error('doc viewer page render error', String(e2)));
+            };
+            if (pageObj) go(pageObj); else pdf.getPage(pageNum).then(go).catch(e2 => console.error('doc viewer page render error', String(e2)));
+          };
+          renderPage(1, page1);
+        }).catch(e => {
+          console.error('doc viewer page1 error', String(e));
+          if (this._docViewerRenderKey !== renderKey) return;
+          container.innerHTML = '';
+          const err = document.createElement('div');
+          err.style.cssText = 'color:#ccc;font-size:12px;padding:24px;text-align:center';
+          err.textContent = 'Preview unavailable.';
+          container.appendChild(err);
+        });
+      }).catch(e => {
+        console.error('doc viewer getDocument error', String(e));
+        if (this._docViewerRenderKey !== renderKey) return;
+        container.innerHTML = '';
+        const err = document.createElement('div');
+        err.style.cssText = 'color:#ccc;font-size:12px;padding:24px;text-align:center';
+        err.textContent = 'Preview unavailable.';
+        container.appendChild(err);
+      });
+    } catch (e) {
+      console.error('renderDocViewer sync error', String(e), e && e.stack);
+    }
   }
 
   async loadItems() {
@@ -3738,6 +3873,24 @@ class Component extends DCLogic {
       sourceDocError: s.sourceDocError,
       sourceDocLabel: s.sourceDocLoading ? 'Loading…' : 'View original document',
       viewSourceDocument: (e) => { if (e && e.preventDefault) e.preventDefault(); if (selected) this.viewSourceDocument(selected.candidateId); },
+      // Item 2 (2026-09-12 live-testing session): the in-page document-viewer modal — see
+      // renderDocViewer's own header for the shared mechanics with candidate.html's own viewer.
+      docViewerOpen: s.docViewerOpen,
+      docViewerIsPdf: s.docViewerIsPdf,
+      docViewerIsImage: s.docViewerOpen && !s.docViewerIsPdf,
+      docViewerUrl: s.docViewerUrl || '',
+      closeDocViewer: () => this.closeDocViewer(),
+      docViewerZoomButtonsDisabled: !(s.docViewerScale != null && s.docViewerFitScale != null),
+      docViewerZoomLabel: (s.docViewerScale != null && s.docViewerFitScale) ? Math.round(s.docViewerScale / s.docViewerFitScale * 100) + '%' : 'Fit…',
+      zoomInDocViewer: () => this.setState(st => {
+        const fit = st.docViewerFitScale || st.docViewerScale || 1;
+        return { docViewerScale: Math.min(fit * 2.5, +((st.docViewerScale || fit) + fit * 0.25).toFixed(3)) };
+      }, () => this.renderDocViewer()),
+      zoomOutDocViewer: () => this.setState(st => {
+        const fit = st.docViewerFitScale || st.docViewerScale || 1;
+        return { docViewerScale: Math.max(fit * 0.35, +((st.docViewerScale || fit) - fit * 0.25).toFixed(3)) };
+      }, () => this.renderDocViewer()),
+      resetDocViewerZoom: () => this.setState(st => ({ docViewerScale: st.docViewerFitScale }), () => this.renderDocViewer()),
       // Item C (2026-09-08 regression session): candidate-stated contact hints — see
       // list-verification-items' own header for hasContactHint and where these come from.
       detailHasContactHint: !!(selected && selected.hasContactHint),
