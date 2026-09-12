@@ -16,13 +16,34 @@ const corsHeaders = {
 // there forever with zero automatic feedback (confirmed live: signed up on desktop, confirmed on
 // phone, desktop never moved).
 //
-// Deliberately never mutates anything — unlike confirm-verification (which inserts the candidate
-// and consumes the token), this only ever reads. Safe to poll on a fixed interval with zero side
-// effects. By the time confirmed_at is set on the email_verifications row, confirm-verification has
-// already inserted the candidates row with verification_id = this row's id (see its own header), so
-// that link is always present here, never a race.
+// Never inserts a candidate or consumes the email_verifications token itself — unlike
+// confirm-verification, that side of this stays entirely read-only, and by the time confirmed_at is
+// set here, confirm-verification has already inserted the candidates row with verification_id = this
+// row's id (see its own header), so that link is always present, never a race.
+//
+// Item 20 (2026-09-12 live-testing session): the one real mutation this function now performs —
+// issuing THIS device's own session once confirmed is observed — see issue_verification_requester_
+// session's own migration header for the full gap and the atomic claim-once-then-reserve mechanism
+// (identical to passwordless login's own Device A fix) that makes it safe to call on every poll
+// after confirmation, not just the first.
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+// Item 20 (2026-09-12 live-testing session): identical to confirm-login's/check-login-status's own
+// hashToken/randomToken — this function needed no session-issuing capability before now because its
+// response never carried one at all (a real, confirmed gap — see the real session-issuing block
+// below for the full story), unlike every other session-establishing path in this build.
+async function hashToken(raw: string): Promise<string> {
+  const bytes = new TextEncoder().encode(raw);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function randomToken(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 export default {
   fetch: withSupabase({ auth: "none" }, async (req, _ctx) => {
@@ -73,6 +94,49 @@ export default {
         candidateId = candRows[0]?.id ?? null;
       }
 
+      // Item 20 (2026-09-12 live-testing session): real, persisted session for THIS device — see the
+      // migration's own header for the full gap and why the atomic RPC (not a raw insert here) is
+      // what makes this safe to run on every poll after confirmation, not just the first. Gated on
+      // candidateId the same way confirm-verification gates its own session issuance — nothing to
+      // attach a session to for a non-'signup' purpose or a not-yet-linked row.
+      let sessionToken: string | null = null;
+      let candidateTier: string | null = null;
+      if (candidateId) {
+        const rawSessionToken = randomToken();
+        const tokenHash = await hashToken(rawSessionToken);
+        const newSessionId = crypto.randomUUID();
+        const sessionExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+        const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/issue_verification_requester_session`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "apikey": SUPABASE_SERVICE_ROLE_KEY,
+            "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+          },
+          body: JSON.stringify({
+            p_email_verification_id: email_verification_id,
+            p_candidate_id: candidateId,
+            p_session_id: newSessionId,
+            p_raw_token: rawSessionToken,
+            p_token_hash: tokenHash,
+            p_expires_at: sessionExpiresAt,
+          }),
+        });
+        if (rpcRes.ok) {
+          const rpcRows = await rpcRes.json();
+          sessionToken = rpcRows?.[0]?.session_token ?? null;
+          const candRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=tier`, {
+            headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
+          });
+          const candRows = candRes.ok ? await candRes.json() : [];
+          candidateTier = candRows[0]?.tier ?? null;
+        }
+        // A failed session issue does NOT fail this status check itself — same posture as
+        // confirm-verification's own resumeBackfillError/session block: the confirmation already
+        // happened (on Device B), a missing session here just means this device falls back to
+        // whatever pre-Item-20 behavior existed rather than losing the confirmed status entirely.
+      }
+
       return new Response(JSON.stringify({
         ok: true,
         confirmed: true,
@@ -89,6 +153,8 @@ export default {
         opt_in_work_history: !!record.opt_in_work_history,
         opt_in_education: !!record.opt_in_education,
         opt_in_certifications: !!record.opt_in_certifications,
+        session_token: sessionToken,
+        tier: candidateTier,
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: "unhandled", detail: String(e) }), {
