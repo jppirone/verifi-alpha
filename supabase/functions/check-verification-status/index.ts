@@ -79,6 +79,12 @@ export default {
         candidate_id: candidateId,
         email: record.email,
         phone: record.phone,
+        // Item 12/15 (2026-09-12 live-testing session): same gap, same fix as confirm-verification's
+        // own header explains — this is the "stayed on Check your email and polled" device's
+        // equivalent of that response, feeding the exact same applySignupConfirmation/applySession
+        // path, so it needs the exact same fields.
+        first_name: record.first_name,
+        last_name: record.last_name,
         purpose: record.purpose,
         opt_in_work_history: !!record.opt_in_work_history,
         opt_in_education: !!record.opt_in_education,

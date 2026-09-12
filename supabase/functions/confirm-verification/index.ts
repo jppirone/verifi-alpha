@@ -258,6 +258,20 @@ export default {
         ok: true,
         email: record.email,
         phone: record.phone,
+        // Item 12/15 (2026-09-12 live-testing session): the real gap — this response never echoed
+        // back first_name/last_name, unlike resolve-session/confirm-login/check-login-status (see
+        // resolve-session's own header: "all three session-establishing paths... uniformly" — this
+        // is really a fourth such path, applySignupConfirmation feeds this response straight into
+        // the same applySession candidate.html's other three paths use). first_name/last_name ARE
+        // correctly written into the new candidates row above (same record.first_name/last_name),
+        // but on whichever device/tab actually reaches this response without already having typed
+        // the signup form itself in its own local state (the classic cross-device magic-link
+        // shape), applySession had nothing to fall back to and profileFirst/savedFirst stayed
+        // permanently empty until some later, unrelated full session resolve — confirmed live as
+        // the root cause of both the Basic Info screen's empty name fields and the generated
+        // document's missing candidate name.
+        first_name: record.first_name,
+        last_name: record.last_name,
         purpose: record.purpose,
         candidate_id: candidateId,
         email_verification_id: record.id,
