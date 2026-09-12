@@ -3122,6 +3122,22 @@ a:hover{color:var(--color-accent)}
     <button type="button" class="btn btn-primary" disabled="{{ employerContactPending }}" sc-camel-on-click="{{ submitEmployerContact }}">{{ employerContactSubmitLabel }}</button>
     <button type="button" class="btn btn-ghost" disabled="{{ employerContactPending }}" sc-camel-on-click="{{ skipEmployerContact }}">Skip this step</button>
   </div>
+
+  <!-- Item 11 (2026-09-12 live-testing session): only reachable when employerContactHasAnyContent()
+       is true — see skipEmployerContact's own header. -->
+  <sc-if value="{{ skipEmployerContactModalOpen }}" hint-placeholder-val="{{ false }}">
+    <div class="dialog-backdrop">
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="skip-employer-contact-title">
+        <div class="dialog-title" id="skip-employer-contact-title">You've entered some details</div>
+        <div class="dialog-body">Skipping this step discards what you've typed here — nothing here gets saved unless you submit it. What would you like to do?</div>
+        <div class="dialog-actions" style="flex-wrap:wrap">
+          <button type="button" class="btn btn-ghost" disabled="{{ employerContactPending }}" sc-camel-on-click="{{ cancelSkipEmployerContact }}">Cancel, keep editing</button>
+          <button type="button" class="btn btn-secondary" disabled="{{ employerContactPending }}" sc-camel-on-click="{{ confirmDiscardAndSkip }}">Discard and skip</button>
+          <button type="button" class="btn btn-primary" disabled="{{ employerContactPending }}" sc-camel-on-click="{{ confirmSubmitEnteredInstead }}">Submit what I entered</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
 </div>
 </sc-if>
 
@@ -5767,6 +5783,10 @@ class Component extends DCLogic {
     // screen. employerContactExpanded tracks per-row "Add details" expand state for the >5-jobs
     // collapsed-by-default layout (see employerContactDefaultExpand in renderVals).
     employerContactExpanded: {}, employerContactPending: false, employerContactError: null,
+    // Item 11 (2026-09-12 live-testing session): see skipEmployerContact's own header — real gap
+    // confirmed live before this existed: "Skip this step" unconditionally called
+    // resolveEmployerContact(true), silently discarding anything typed with zero confirmation.
+    skipEmployerContactModalOpen: false,
     verificationFilter: 'active', upgradeModalOpen: false, upgradeReturnTab: null, upgradeReturnTarget: null,
     verificationItems: [], verificationItemsLoading: false, verificationItemsError: null, verificationItemsLoadedFor: null,
     correctionResponseOpenId: null, correctionValueDraft: '', correctionNoteDraft: '',
@@ -7729,6 +7749,23 @@ class Component extends DCLogic {
     });
   }
 
+  // Item 11 (2026-09-12 live-testing session): real gap, confirmed live before this existed — "Skip
+  // this step" called resolveEmployerContact(true) unconditionally, discarding any typed
+  // employer/certification contact details with zero warning, the instant the button was clicked.
+  // This is the check that decides whether that's actually safe to do silently: true only when
+  // every field on every row is genuinely empty (matching what resolveEmployerContact's own
+  // skip=true branch would have thrown away anyway).
+  employerContactHasAnyContent() {
+    const ex = this.state.resumeExtraction;
+    if (!ex) return false;
+    const workHasContent = (ex.work_history || []).some(w =>
+      (w.employer_name_override || '').trim() || (w.employer_location_override || '').trim() ||
+      (w.contact_phone || '').trim() || (w.contact_name || '').trim());
+    const certsHaveContent = (ex.certifications || []).some(c =>
+      (c.verification_link || '').trim() || (c.contact_phone || '').trim());
+    return workHasContent || certsHaveContent;
+  }
+
   // Item C: the write side of the new employer/certification contact-details screen — real
   // submission (skip=false, candidate-entered values from resumeExtraction) or explicit Skip
   // (skip=true, empty arrays). Either way this is what sets resume_documents.
@@ -8616,7 +8653,18 @@ class Component extends DCLogic {
       employerContactError: s.employerContactError,
       employerContactSubmitLabel: s.employerContactPending ? 'Saving…' : 'Continue',
       submitEmployerContact: () => this.resolveEmployerContact(false),
-      skipEmployerContact: () => this.resolveEmployerContact(true),
+      // Item 11 (2026-09-12 live-testing session): only shows the data-loss guard when there's
+      // actually something to lose — a candidate who genuinely left every field blank gets the same
+      // instant, no-dialog skip as before (that was never the gap; discarding real typed content
+      // with no warning was).
+      skipEmployerContact: () => {
+        if (this.employerContactHasAnyContent()) { this.setState({ skipEmployerContactModalOpen: true }); return; }
+        this.resolveEmployerContact(true);
+      },
+      skipEmployerContactModalOpen: s.skipEmployerContactModalOpen,
+      cancelSkipEmployerContact: () => this.setState({ skipEmployerContactModalOpen: false }),
+      confirmDiscardAndSkip: () => { this.setState({ skipEmployerContactModalOpen: false }); this.resolveEmployerContact(true); },
+      confirmSubmitEnteredInstead: () => { this.setState({ skipEmployerContactModalOpen: false }); this.resolveEmployerContact(false); },
       checkResumeAgain: () => this.checkResumeAgain(),
       skipResumeConfirm: () => this.skipResumeConfirm(),
       resumeOriginalUrl: (s.resumeExtraction && s.resumeExtraction.resume_document && s.resumeExtraction.resume_document.original_signed_url) || '',
