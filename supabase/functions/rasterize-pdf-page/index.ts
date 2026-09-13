@@ -236,6 +236,20 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   never a reason to invent a more formal name than what's printed. Use an empty string "" when no
   license/permit/registration number is printed for that credential — never guess or fabricate one.
 
+- DON'T SPLIT A SINGLE WRAPPED ITEM INTO TWO (a real, confirmed failure mode — confirmed twice against
+  the same real document): a single certification name, skill, competency, or other list item whose
+  text is long enough to visually wrap onto a second printed line — purely because it ran out of
+  column/page width, not because a new bullet started — is still ONE item, not two. Real example: a
+  certifications-list entry reading "Multimodal AI & Productivity Integration (Gemini)" came back
+  split into two separate certifications entries, one credential name broken in half. This applies
+  identically to certifications, skills, and every other category that extracts a list of individually
+  named items — it is not a skills-only rule. Judge this by whether a new bullet glyph, dash, or clear
+  left-margin/indentation reset marks the start of the second line: if it does, it's a genuine new
+  item; if the second line simply continues flush with no marker of its own (a mid-word or mid-phrase
+  continuation of the same thought), join it back onto the item it wrapped from before adding it to
+  certifications, skills, or any other array of short terms — never emit the wrapped tail as its own
+  separate entry.
+
 - skills = a FLAT LIST of individual skill, competency, or keyword terms presented as a list rather
   than prose — commonly under a heading like "Skills," "Core Competencies," "Technical Skills,"
   "Areas of Expertise," "Key Skills," or similar, but judge this by SHAPE, not by header name: if a
@@ -265,15 +279,6 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   else to classify it as — this is the "unlabeled continuation of a previous section" case described
   in the freeform heading rule below (empty "heading", section_type "needs_review"), which the
   upload pipeline merges into the correctly-headed part from the prior page.
-
-- DON'T SPLIT A SINGLE WRAPPED ITEM INTO TWO (a real, confirmed failure mode): a single skill,
-  competency, or list item whose text is long enough to visually wrap onto a second printed line —
-  purely because it ran out of column/page width, not because a new bullet started — is still ONE
-  item, not two. Judge this by whether a new bullet glyph, dash, or clear left-margin/indentation
-  reset marks the start of the second line: if it does, it's a genuine new item; if the second line
-  simply continues flush with no marker of its own (a mid-word or mid-phrase continuation of the
-  same thought), join it back onto the item it wrapped from before adding it to skills (or any other
-  array of short terms) — never emit the wrapped tail as its own separate entry.
 
 - Deduplication: if the same role, credential, or skill term appears more than once anywhere in the
   document (e.g. listed once under "Experience" and again under a separate "Leadership" or
