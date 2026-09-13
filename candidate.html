@@ -4844,6 +4844,9 @@ a:hover{color:var(--color-accent)}
       <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="phone-modal-title">
         <div class="dialog-title" id="phone-modal-title">Confirm your mobile number</div>
         <div class="dialog-body">
+          <sc-if value="{{ phoneModalPendingSave }}" hint-placeholder-val="{{ false }}">
+            <p style="margin:0 0 var(--space-3) 0;color:var(--color-neutral-500);font-size:13px">This number hasn't been confirmed yet, and it may be used on generated documents or shared with employers — we ask you to confirm it before saving so what goes out is accurate.</p>
+          </sc-if>
           Enter the code sent to {{ verifiedPhoneEntry }}.
           <div class="field" style="margin-top:var(--space-3)">
             <label for="phone-code">Verification code</label>
@@ -5857,6 +5860,35 @@ class Component extends DCLogic {
     });
   }
 
+  // Item 2 (2026-09-14 live-testing session): real, confirmed gap — buildResumeLines had no defense
+  // against a needs_review freeform row restating content that ALSO landed correctly in a
+  // structured category (certifications, in the real case this was found against: "Professional
+  // Certifications" showed up once as real certification_items entries, once more as a leftover
+  // needs_review block under its own heading). The extraction prompt already has its own
+  // "Deduplication" rule asking the model not to do this — already confirmed elsewhere this session
+  // (see the position-uniqueness fix, Item B) that asking the LLM in prose is not reliable enough to
+  // depend on alone for something a candidate would see duplicated in their own generated document.
+  // This is the deterministic backstop: if a needs_review block's own lines are themselves mostly
+  // just restating names already captured as real certifications/work-history/education entries,
+  // treat the whole block as a leftover duplicate and drop it here, at render time, regardless of
+  // whether the extraction step's own dedup succeeded or not. Deliberately majority-based (60%), not
+  // 100% — a needs_review block that duplicates most of its lines but adds one genuinely new item at
+  // the end should still get dropped rather than kept for the sake of that one line: the other
+  // needs_review rows on this same document already prove genuinely new content survives elsewhere,
+  // so erring toward dropping a near-total-duplicate is the safer default than showing the same
+  // certifications twice under two different headings.
+  freeformIsMostlyDuplicateOfCaptured(f, ex) {
+    const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const lines = (f.content || '').split('\n').map(norm).filter(Boolean);
+    if (!lines.length) return false;
+    const captured = new Set();
+    (ex.certifications || []).forEach(c => { if (c.name) captured.add(norm(c.name)); });
+    (ex.work_history || []).forEach(w => { if (w.company) captured.add(norm(w.company)); if (w.title) captured.add(norm(w.title)); });
+    (ex.education || []).forEach(e => { if (e.institution) captured.add(norm(e.institution)); if (e.degree) captured.add(norm(e.degree)); });
+    const matched = lines.filter(l => captured.has(l)).length;
+    return matched > 0 && (matched / lines.length) >= 0.6;
+  }
+
   buildResumeLines(target) {
     const s = this.state;
     const cats = this.getCzCategories();
@@ -5972,6 +6004,7 @@ class Component extends DCLogic {
         if (!f) return;
         const content = (f.content || '').trim();
         if (!content) return;
+        if (this.freeformIsMostlyDuplicateOfCaptured(f, ex)) return;
         blocks.push({ kind: 'misc', position: typeof f.position === 'number' ? f.position : Infinity, label: (f.heading || '').trim(), body: content });
       });
       if (catVal('misc')) {
@@ -6999,7 +7032,21 @@ class Component extends DCLogic {
     // redirect window, plus the equivalent changePlanOpen flow for an already-paid candidate
     // switching plans. Still disarms immediately on selecting Free again (tierSelection flips back),
     // or once checkout/switch actually completes.
+    // Item (2026-09-14 live-testing session): real, confirmed failure mode — this guard is
+    // deliberately active during checkoutPending's "fetch in flight" window (see Item 16's own
+    // comment above for why), but that SAME window ends with this component itself calling
+    // `window.location.href = data.url` in startRealCheckout — a genuine, intentional,
+    // app-initiated redirect to Stripe, not the candidate navigating away. beforeunload fires for
+    // both identically; there is no way to tell them apart from inside the event. Confirmed live:
+    // the browser's native "Leave site?" prompt was popping up at the exact moment of that
+    // redirect, actively interrupting the one action — reaching Stripe checkout — the candidate
+    // was trying to complete. _redirectingToStripe is set (a plain instance field, not React
+    // state, so it's synchronous and can't lag behind the redirect the way a setState commit
+    // could) immediately before that line, and checked here first so the guard never fires for
+    // this specific, deliberate navigation while still catching every other way of leaving
+    // mid-decision.
     window.addEventListener('beforeunload', (e) => {
+      if (this._redirectingToStripe) return;
       if (!this.checkoutGuardActive()) return;
       e.preventDefault();
       e.returnValue = '';
@@ -7902,6 +7949,7 @@ class Component extends DCLogic {
       this.setState({ checkoutPending: false, checkoutError: "Couldn't start checkout. Please try again." });
       return;
     }
+    this._redirectingToStripe = true; // see the beforeunload listener's own header for why
     window.location.href = data.url; // real navigation — nothing below this line ever runs
   }
 
@@ -8688,23 +8736,48 @@ class Component extends DCLogic {
   // personal_location specifically need this when every other field on this tab is still client-
   // state-only. A failure here surfaces headerPrefsSaveError but never reverts or blocks the local
   // copy saveActive() already made for the rest of the tab's fields.
+  // Item 3 (2026-09-14 live-testing session): real, reported failure mode — the first save attempt
+  // on this exact call fails with a generic error, and an identical retry immediately succeeds with
+  // no visible difference in what was sent. Investigated directly: neither this function's own code
+  // nor save-header-preferences' server code has any state that differs between a "first" and
+  // "second" call — no cache, no stale candidate_id, no idempotency key, nothing that a repeat call
+  // would reset. That points away from an application-level race and toward a transient failure on
+  // the call itself (a rarely-invoked Edge Function's cold start, or an ordinary one-off network
+  // blip) — exactly the shape "works immediately on retry, with no other changes" describes. Rather
+  // than chase a race that couldn't be reproduced live against the real function, this adds the
+  // standard fix for a transient-failure symptom: retry once, silently, before ever surfacing an
+  // error to the candidate. A candidate should only ever see headerPrefsSaveError if the SAME
+  // request genuinely failed twice in a row.
   async saveHeaderPreferences() {
     const s = this.state;
     if (!s.resumeCandidateId) return;
     this.setState({ headerPrefsSavePending: true, headerPrefsSaveError: null, headerPrefsSaved: false });
-    let res, data;
-    try {
-      res = await fetch(this.SUPABASE_FN_URL + '/save-header-preferences', {
+    const attempt = async () => {
+      const res = await fetch(this.SUPABASE_FN_URL + '/save-header-preferences', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
         body: JSON.stringify({ candidate_id: s.resumeCandidateId, header_display_mode: s.headerDisplayMode, personal_location: s.personalLocation }),
       });
-      data = await res.json().catch(() => ({}));
-    } catch (e) {
+      const data = await res.json().catch(() => ({}));
+      return { res, data };
+    };
+    let result = null;
+    for (let tryNum = 0; tryNum < 2 && !result; tryNum++) {
+      if (tryNum === 1) await new Promise(r => setTimeout(r, 800)); // brief pause before the silent retry
+      try {
+        const outcome = await attempt();
+        // Succeeds immediately, or (on the second/last try) whatever it got — either way, stop
+        // looping: the only remaining case (a first-try failure) falls through to try again.
+        if ((outcome.res.ok && outcome.data.ok) || tryNum === 1) result = outcome;
+      } catch (e) {
+        if (tryNum === 1) break; // out of retries; result stays null, handled as a network error below
+      }
+    }
+    if (!result) {
       this.setState({ headerPrefsSavePending: false, headerPrefsSaveError: "Couldn't reach the server to save your header preference. Your other changes here were still saved." });
       return;
     }
-    if (!res.ok || !data.ok) {
+    if (!result.res.ok || !result.data.ok) {
       this.setState({ headerPrefsSavePending: false, headerPrefsSaveError: "Couldn't save your header preference. Please try again." });
       return;
     }
@@ -9024,6 +9097,15 @@ class Component extends DCLogic {
       },
       declinePrintedPhonePrompt: () => this.setState({ printedPhonePromptOpen: false, printedPhonePromptAnswered: true }),
       phoneModalOpen: s.phoneModalOpen,
+      // Item (2026-09-14 live-testing session): real, confirmed gap — this modal's own copy never
+      // said why it was appearing, so a candidate who switched "Document header on generated files"
+      // to "Use my account information" and clicked Save saw a confirmation-code prompt pop up with
+      // no explanation, reading as a confusing, unrelated interruption. The actual trigger
+      // (saveActiveGuarded, above) is more general than just this one path — it gates ANY Profile
+      // Info save behind phone confirmation whenever the entered number doesn't match the last
+      // confirmed one — but that's still an accurate, honest reason to surface, not specific
+      // false-narrowed copy about headers alone.
+      phoneModalPendingSave: s.phoneModalPendingSave,
       phoneCodeInput: s.phoneCodeInput,
       setPhoneCodeInput: (e) => this.setState({ phoneCodeInput: e.target.value }),
       openPhoneModal: () => this.setState({ phoneModalOpen: true, phoneModalPendingSave: false, phoneCodeInput: '', verifiedPhoneEntry: s.verifiedPhoneEntry || s.parsedResumePhone }),
