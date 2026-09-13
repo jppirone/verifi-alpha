@@ -2573,6 +2573,21 @@ a:hover{color:var(--color-accent)}
 </div>
 </sc-if>
 
+<!-- Item B (2026-09-14 live-testing session): see isSessionResumeConfirm's own header (in the
+     render-vals) for why this screen exists — the opt-out for someone who wants to log in as a
+     different account than whatever session is already on this browser, reachable from the entry
+     point itself instead of only after already landing in the (possibly wrong) account. -->
+<sc-if value="{{ isSessionResumeConfirm }}" hint-placeholder-val="{{ false }}">
+<div style="max-width:420px;margin:0 auto;padding:120px 20px 40px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:var(--space-3)">
+  <div class="card elev-md" style="width:100%;padding:var(--space-8)">
+    <div style="font-size:17px;margin-bottom:8px">Welcome back, {{ sessionResumeLabel }}.</div>
+    <div style="font-size:13px;color:var(--color-neutral-500);line-height:1.5">You're already signed in on this device.</div>
+  </div>
+  <button type="button" class="btn btn-primary btn-block" sc-camel-on-click="{{ continueSessionResume }}">Continue to my account</button>
+  <button type="button" class="btn btn-ghost btn-block" sc-camel-on-click="{{ loginAsSomeoneElse }}">Log in as someone else</button>
+</div>
+</sc-if>
+
 <sc-if value="{{ isSignupDetails }}" hint-placeholder-val="{{ true }}">
 <div style="max-width:420px;margin:0 auto;padding:88px 20px 40px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:var(--space-4)">
   <sc-if value="{{ showResumeBanner }}" hint-placeholder-val="{{ false }}">
@@ -7094,7 +7109,48 @@ class Component extends DCLogic {
   async mountResolveOrToken() {
     if (this.state.verifyToken) { await this.confirmEmailToken(this.state.verifyToken); return; }
     if (this.state.loginToken) { await this.confirmLoginToken(this.state.loginToken); return; }
-    await this.resolveSession();
+    // Item B (2026-09-14 live-testing session): a real Stripe-checkout return (verifi_checkout_return
+    // present — see startRealCheckout's own header) is a genuine, deliberate, just-taken in-app action,
+    // not a bare cold entry — it must keep resolving silently and immediately, same as before. Only a
+    // bare page load with no token AND no checkout return in flight gets the new resume-confirm gate
+    // below (see isSessionResumeConfirm's own header for why).
+    let hasCheckoutReturn = false;
+    try { hasCheckoutReturn = !!localStorage.getItem('verifi_checkout_return'); } catch (e) {}
+    if (hasCheckoutReturn) { await this.resolveSession(); return; }
+    let token;
+    try { token = localStorage.getItem('verifi_session_token'); } catch (e) { token = null; }
+    if (!token) { await this.resolveSession(); return; }
+    await this.peekSessionForResumeConfirm(token);
+  }
+
+  // Item B (2026-09-14 live-testing session): resolves the stored session token just far enough to
+  // learn WHO it belongs to, without calling applySession() yet — that's what used to make this
+  // silent and un-opt-out-able. Same resolve-session call resolveSession() itself makes; deliberately
+  // NOT reusing resolveSession() here since it's also called from several other, already-correct
+  // silent-resume contexts (mid-session recovery, a used-token fallback, checkout return) that must
+  // keep applying immediately — only this bare-entry path needs the extra confirm step. On any
+  // failure (network error, dead/expired/revoked session), falls straight through to the normal
+  // signupDetails entry screen exactly like resolveSession()'s own failure path — no confirm screen
+  // shown for a session that wouldn't have resolved anyway.
+  async peekSessionForResumeConfirm(token) {
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/resolve-session', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_token: token }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      try { localStorage.removeItem('verifi_session_token'); } catch (e) {}
+      return;
+    }
+    const label = [data.first_name, data.last_name].filter(Boolean).join(' ') || data.email || 'your account';
+    this._pendingResumeSession = { token, data };
+    this.setState({ screen: 'sessionResumeConfirm', sessionResumeLabel: label });
   }
 
   // Items 9/10 (2026-09-13 live-testing session): accountType/stagedLicense are the license-only
@@ -9586,6 +9642,30 @@ class Component extends DCLogic {
         },
       })),
       isSignupDetails: s.screen === 'signupDetails',
+      // Item B (2026-09-14 live-testing session): real, confirmed gap — a bare page load with no
+      // token in the URL at all (e.g. clicking "Candidate login" from index.html) went straight from
+      // mountResolveOrToken() into resolveSession() into applySession(), silently landing in whatever
+      // account's session token happened to already be in this browser's localStorage — no opt-out,
+      // no indication it even happened. Someone who knows a different account's session is active on
+      // this device and wants to log in as someone else had no way to reach a genuine blank login
+      // form from the entry point itself — "Not you?" (see notYouClick above) only exists once
+      // already inside the (possibly wrong) dashboard, which doesn't help before that point. This
+      // screen is the opt-out: peekSessionForResumeConfirm (see its own header) resolves the session
+      // just far enough to show WHO it would sign in as, without yet calling applySession — actually
+      // entering that account only happens if they click Continue.
+      isSessionResumeConfirm: s.screen === 'sessionResumeConfirm',
+      sessionResumeLabel: s.sessionResumeLabel,
+      continueSessionResume: () => {
+        const pending = this._pendingResumeSession;
+        this._pendingResumeSession = null;
+        this.setState({ screen: 'signupDetails', sessionResumeLabel: '' });
+        if (pending) this.applySession(pending.token, pending.data);
+      },
+      loginAsSomeoneElse: () => {
+        this._pendingResumeSession = null;
+        try { localStorage.removeItem('verifi_session_token'); } catch (e) {}
+        this.setState({ screen: 'returning', sessionResumeLabel: '' });
+      },
       isDuplicateFound: s.screen === 'duplicateFound',
       // Items 9/10: the license-only signup branch's own screens.
       isPathChoice: s.screen === 'pathChoice',
