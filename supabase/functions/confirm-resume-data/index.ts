@@ -36,7 +36,10 @@ type EducationEdit = { id: string; institution?: string; degree?: string; field_
 // function only needs it to decide which certifications get the unconditional staff flag, not to
 // validate anything. See the queueInserts loop for why an unmatched cert overrides opt-in rather
 // than needing it.
-type CertificationEdit = { id: string; name?: string; issuing_body?: string; license_number?: string; issue_date?: string; expiration_date?: string; source_match?: string };
+// trade_soc_code (Item 8, 2026-09-12 live-testing session): the candidate's chosen (or auto-suggested
+// and left as-is) SOC trade/occupation code, echoed back the same way license_number already is —
+// see the queueInserts loop below for what happens when it's missing.
+type CertificationEdit = { id: string; name?: string; issuing_body?: string; license_number?: string; issue_date?: string; expiration_date?: string; source_match?: string; trade_soc_code?: string | null };
 // section_type/heading are echoed back by the client (candidate.html already has them, straight
 // from get-resume-extraction) rather than re-fetched here — this function only needs them to decide
 // which freeform rows are needs_review for the staff-queue flag below, not to validate anything.
@@ -191,6 +194,7 @@ export default {
         const { data, error } = await supabase.from("certification_items").update({
           name: c.name ?? null, issuing_body: c.issuing_body ?? null, license_number: c.license_number ?? null,
           issue_date: dateOrNull(c.issue_date), expiration_date: dateOrNull(c.expiration_date),
+          trade_soc_code: c.trade_soc_code ?? null,
           candidate_confirmed: true, updated_at: new Date().toISOString(),
         }).eq("id", c.id).eq("candidate_id", candidate_id).select("id");
         if (error || !data || data.length === 0) {
@@ -274,19 +278,43 @@ export default {
       // matched or not-independently-checkable ('matched'/'not_checked'/null) item follows the
       // ordinary opt-in rule exactly as before. Each certification contributes AT MOST one row
       // either way — never both — so opting in never double-inserts.
+      //
+      // Item 8 (2026-09-12 live-testing session): missingTrade extends the same override — the
+      // candidate is never blocked from confirming without a trade_soc_code (see resumeConfirm's
+      // own caption on this field), but a certification with no trade/occupation selected has no
+      // automated licensing-board check it could ever route to, which is exactly the same kind of
+      // silently-uncheckable state 'unmatched' already exists to surface. Deliberately evaluated
+      // AFTER the opt-in/unmatched continue above, not instead of it — a certification the candidate
+      // never opted into and that isn't independently unmatched still gets skipped entirely
+      // regardless of trade_soc_code, since no automated check would ever have been attempted for
+      // it in the first place. unmatched and missingTrade are independent and can both be true at
+      // once, in which case both reasons land in the same internal_note rather than one overwriting
+      // the other.
       for (const c of certifications) {
         const unmatched = c.source_match === "unmatched";
         if (!unmatched && !opt_in.certifications) continue;
+        const missingTrade = !c.trade_soc_code;
         const { data: idRow } = await supabase.rpc("nextval_verification_item_id");
-        queueInserts.push(unmatched ? {
-          id: idRow, candidate_id, type: "Certification", claim: claimForCertification(c), received: today,
-          status: "Needs Reconciliation",
-          internal_note: `Auto-flagged: this certification's name did not fuzzy-match anything in the candidate's own uploaded document (OCR'd text) — see certification_source_match. Not proof of fabrication (OCR coverage has real, documented gaps: vision-routed pages have no OCR text at all), but real enough to warrant a human look before treating it as verified. Name as extracted: ${JSON.stringify(c.name || "")}`,
-          source_item_id: c.id, bundle_id: resume_document_id,
-        } : {
-          id: idRow, candidate_id, type: "Certification", claim: claimForCertification(c), received: today, status: "New",
-          source_item_id: c.id, bundle_id: resume_document_id,
-        });
+        if (unmatched || missingTrade) {
+          const reasons: string[] = [];
+          if (unmatched) {
+            reasons.push(`this certification's name did not fuzzy-match anything in the candidate's own uploaded document (OCR'd text) — see certification_source_match. Not proof of fabrication (OCR coverage has real, documented gaps: vision-routed pages have no OCR text at all), but real enough to warrant a human look before treating it as verified. Name as extracted: ${JSON.stringify(c.name || "")}`);
+          }
+          if (missingTrade) {
+            reasons.push(`no trade/occupation type (SOC code) was selected for this certification — see certification_items.trade_soc_code. No automated licensing-board check can be routed without it, so this needs a human look rather than silently sitting as a normal queue item with no check that will ever fire.`);
+          }
+          queueInserts.push({
+            id: idRow, candidate_id, type: "Certification", claim: claimForCertification(c), received: today,
+            status: "Needs Reconciliation",
+            internal_note: `Auto-flagged: ${reasons.join(" Also: ")}`,
+            source_item_id: c.id, bundle_id: resume_document_id,
+          });
+        } else {
+          queueInserts.push({
+            id: idRow, candidate_id, type: "Certification", claim: claimForCertification(c), received: today, status: "New",
+            source_item_id: c.id, bundle_id: resume_document_id,
+          });
+        }
       }
 
       // needs_review → staff visibility, unconditional (NOT gated by any opt_in flag above).

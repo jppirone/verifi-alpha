@@ -1,0 +1,16 @@
+-- Item 8 (2026-09-12 live-testing session): certification_items gets a trade/occupation routing
+-- field, using the federal SOC (Standard Occupational Classification) system as the controlled list
+-- rather than free text or an invented taxonomy -- this is the field a future state-licensing-board
+-- lookup (CareerOneStop or similar, itself DOL-run and SOC-aligned) will need to know which board to
+-- check against. Schema and UI only, per this item's own explicit scope -- no vendor/API integration
+-- yet, that's a separate, deliberate decision still pending (vendor selection, credentials, cost).
+--
+-- Deliberately NOT part of insert_resume_extraction's certifications jsonb_to_recordset, unlike
+-- license_number: trade_soc_code is never extracted by the resume-parsing LLM (nothing on a resume
+-- reliably states a SOC code), it's either auto-suggested client-side from the certification's own
+-- name/issuing_body text (keyword matching, no vendor call) or picked by the candidate from a
+-- curated dropdown on resumeConfirm -- either way it's only ever written at confirm time, via the
+-- same certification_items update loop in confirm-resume-data that already writes license_number.
+-- No format check constraint at the DB level, matching license_number's own lack of one -- the
+-- client-side dropdown is the controlled vocabulary; the column just stores whatever string it sends.
+alter table certification_items add column if not exists trade_soc_code text;

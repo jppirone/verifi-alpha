@@ -2982,6 +2982,21 @@ a:hover{color:var(--color-accent)}
             <div class="field" style="flex:1;min-width:140px"><label>Issue date</label><input class="input" type="date" value="{{ section.issueDate }}" sc-camel-on-change="{{ section.onIssueDate }}"></div>
             <div class="field" style="flex:1;min-width:140px"><label>Expiration date</label><input class="input" type="date" value="{{ section.expirationDate }}" sc-camel-on-change="{{ section.onExpirationDate }}"></div>
           </div>
+          <!-- Item 8 (2026-09-12 live-testing session): trade/occupation type — the routing field a
+               future licensing-board check needs to know which board to check against. Not blocked
+               at Confirm if left blank, but a certification with no trade/occupation selected is
+               routed to manual review instead of a normal queue item (see confirm-resume-data) —
+               the caption below says so plainly rather than leaving it a silent, invisible rule. -->
+          <div class="field">
+            <label>Trade / occupation</label>
+            <sc-raw-select class="input" value="{{ section.tradeSocCode }}" sc-camel-on-change="{{ section.onTradeSocCode }}">
+              <option value="">Select trade or occupation…</option>
+              <sc-for list="{{ socTradeOptions }}" as="opt" hint-placeholder-count="3">
+                <option value="{{ opt.code }}">{{ opt.label }}</option>
+              </sc-for>
+            </sc-raw-select>
+            <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6;margin-top:var(--space-1)">Used to route this certification to the right licensing board for automated checks. If left blank, this certification is sent for manual review instead.</div>
+          </div>
         </div>
         </sc-if>
 
@@ -4827,6 +4842,84 @@ class Component extends DCLogic {
     { key: 'indeed', label: 'Indeed' },
     { key: 'glassdoor', label: 'Glassdoor' },
   ];
+
+  // Item 8 (2026-09-12 live-testing session): controlled vocabulary for certification_items.trade_soc_code,
+  // using real federal SOC (Standard Occupational Classification) codes rather than an invented
+  // taxonomy — this is what lets a future CareerOneStop/DOL-run integration (or anything else keyed to
+  // SOC) map onto this field with no translation layer. A curated subset of licensed trades/occupations
+  // likely to appear on real resumes, not the full SOC hierarchy (thousands of codes, most irrelevant
+  // here) — grouped for scanability in the dropdown, not because the grouping is itself meaningful data
+  // (only `code` is ever persisted). Plain 6-digit SOC (e.g. '47-2152'), not the finer-grained 8-digit
+  // O*NET-SOC CareerOneStop itself sometimes uses ('47-2111.00') — a well-known mechanical extension of
+  // the same system if ever needed, not a different taxonomy.
+  SOC_TRADE_OPTIONS = [
+    { group: 'Construction & trades', code: '47-2111', label: 'Electricians' },
+    { group: 'Construction & trades', code: '47-2152', label: 'Plumbers, Pipefitters, and Steamfitters' },
+    { group: 'Construction & trades', code: '49-9021', label: 'HVAC Mechanics and Installers' },
+    { group: 'Construction & trades', code: '47-2031', label: 'Carpenters' },
+    { group: 'Construction & trades', code: '47-2181', label: 'Roofers' },
+    { group: 'Construction & trades', code: '47-2211', label: 'Sheet Metal Workers' },
+    { group: 'Construction & trades', code: '47-1011', label: 'First-Line Supervisors of Construction Trades' },
+    { group: 'Construction & trades', code: '47-4011', label: 'Construction and Building Inspectors' },
+    { group: 'Personal care', code: '39-5012', label: 'Hairdressers, Hairstylists, and Cosmetologists' },
+    { group: 'Personal care', code: '39-5011', label: 'Barbers' },
+    { group: 'Personal care', code: '39-5092', label: 'Manicurists and Pedicurists' },
+    { group: 'Personal care', code: '39-5094', label: 'Skincare Specialists / Estheticians' },
+    { group: 'Real estate & insurance', code: '41-9022', label: 'Real Estate Sales Agents' },
+    { group: 'Real estate & insurance', code: '41-9021', label: 'Real Estate Brokers' },
+    { group: 'Real estate & insurance', code: '41-3021', label: 'Insurance Sales Agents' },
+    { group: 'Healthcare', code: '29-1141', label: 'Registered Nurses' },
+    { group: 'Healthcare', code: '29-2061', label: 'Licensed Practical and Licensed Vocational Nurses' },
+    { group: 'Healthcare', code: '31-1131', label: 'Nursing Assistants (CNA)' },
+    { group: 'Healthcare', code: '29-1051', label: 'Pharmacists' },
+    { group: 'Healthcare', code: '29-2052', label: 'Pharmacy Technicians' },
+    { group: 'Healthcare', code: '29-2021', label: 'Dental Hygienists' },
+    { group: 'Automotive', code: '49-3023', label: 'Automotive Service Technicians and Mechanics' },
+    { group: 'Other', code: '33-9032', label: 'Security Guards' },
+    { group: 'Other', code: '13-2011', label: 'Accountants and Auditors' },
+    { group: 'Other', code: '21-1011', label: 'Substance Abuse Counselors' },
+  ];
+
+  // Item 8: keyword-only auto-suggestion (no vendor/LLM call — that's the deliberately separate,
+  // still-pending integration decision this item's own scope excludes) for a certification's
+  // trade_soc_code, run once when a resume's extraction first loads (see loadResumeExtraction).
+  // Matches against the certification's own name/issuing_body text — e.g. a cert literally named
+  // "Plumber" or "Journeyman Plumber" suggests 47-2152. Deliberately conservative: returns '' (no
+  // suggestion) rather than guessing when nothing matches, so an unrecognized certification is left
+  // for the candidate to pick, not silently mis-routed.
+  suggestTradeSocCode(name, issuingBody) {
+    const text = `${name || ''} ${issuingBody || ''}`.toLowerCase();
+    const KEYWORDS = [
+      { code: '47-2111', keywords: ['electrician', 'electrical contractor'] },
+      { code: '47-2152', keywords: ['plumber', 'plumbing', 'pipefitter', 'steamfitter'] },
+      { code: '49-9021', keywords: ['hvac', 'heating', 'air conditioning', 'refrigeration'] },
+      { code: '47-2031', keywords: ['carpenter', 'carpentry'] },
+      { code: '47-2181', keywords: ['roofer', 'roofing'] },
+      { code: '47-2211', keywords: ['sheet metal'] },
+      { code: '47-4011', keywords: ['building inspector', 'construction inspector'] },
+      { code: '39-5012', keywords: ['cosmetologist', 'cosmetology', 'hairstylist', 'hairdresser'] },
+      { code: '39-5011', keywords: ['barber'] },
+      { code: '39-5092', keywords: ['manicurist', 'pedicurist', 'nail tech'] },
+      { code: '39-5094', keywords: ['esthetician', 'skincare specialist'] },
+      { code: '41-9022', keywords: ['real estate sales', 'real estate agent', 'realtor'] },
+      { code: '41-9021', keywords: ['real estate broker'] },
+      { code: '41-3021', keywords: ['insurance agent', 'insurance sales'] },
+      { code: '29-1141', keywords: ['registered nurse', ' rn ', 'rn license'] },
+      { code: '29-2061', keywords: ['licensed practical nurse', 'lpn', 'licensed vocational nurse', 'lvn'] },
+      { code: '31-1131', keywords: ['nursing assistant', 'cna', 'certified nursing assistant'] },
+      { code: '29-1051', keywords: ['pharmacist'] },
+      { code: '29-2052', keywords: ['pharmacy technician'] },
+      { code: '29-2021', keywords: ['dental hygienist'] },
+      { code: '49-3023', keywords: ['automotive technician', 'automotive mechanic', 'ase certified', 'ase certification'] },
+      { code: '33-9032', keywords: ['security guard'] },
+      { code: '13-2011', keywords: ['cpa', 'certified public accountant', 'accountant'] },
+      { code: '21-1011', keywords: ['substance abuse counselor', 'addiction counselor'] },
+    ];
+    for (const entry of KEYWORDS) {
+      if (entry.keywords.some(k => text.includes(k))) return entry.code;
+    }
+    return '';
+  }
 
   ACCOUNT_TABS = [
     { key: 'profile', label: 'Profile Info' },
@@ -7780,6 +7873,18 @@ class Component extends DCLogic {
       this.setState({ resumeExtractionLoading: false, resumeExtraction: null });
       return;
     }
+    // Item 8: auto-suggest trade_soc_code once, right here, before this becomes state — not as a
+    // display-time fallback computed later, which would let the dropdown show a suggestion that
+    // submitResumeConfirmation never actually sends (a real state/submission mismatch). Only fills
+    // in when the column itself came back empty — never overwrites a value the candidate already
+    // set or one carried over from a prior confirm.
+    if (Array.isArray(data.certifications)) {
+      data.certifications.forEach(c => {
+        if (!c.trade_soc_code) {
+          c.trade_soc_code = this.suggestTradeSocCode(c.name, c.issuing_body) || '';
+        }
+      });
+    }
     // Real dead end this closes (2026-09-07 wiring audit): Content Manager/Customization/Views used
     // to have literally nothing to seed from — refreshCzCategoryDefaults and seedSkillItemsIfBlank
     // are what turn a fresh resumeExtraction load into real, usable defaults for those three tabs
@@ -7910,7 +8015,7 @@ class Component extends DCLogic {
       // source_match is echoed back (not edited here) so confirm-resume-data can flag a
       // structurally-unmatched certification for staff regardless of the opt-in checkbox below —
       // see that function's own header (bug-2 defense-in-depth).
-      certifications: ex.certifications.map(c => ({ id: c.id, name: c.name, issuing_body: c.issuing_body, license_number: c.license_number, issue_date: c.issue_date, expiration_date: c.expiration_date, source_match: c.source_match })),
+      certifications: ex.certifications.map(c => ({ id: c.id, name: c.name, issuing_body: c.issuing_body, license_number: c.license_number, issue_date: c.issue_date, expiration_date: c.expiration_date, source_match: c.source_match, trade_soc_code: c.trade_soc_code || null })),
       skills: ex.skills.map(s => ({ id: s.id, skill_text: s.skill_text })),
       // section_type/heading are echoed back (not edited here) so confirm-resume-data can flag
       // needs_review rows for staff without a second round-trip to look up what kind of freeform
@@ -8549,6 +8654,7 @@ class Component extends DCLogic {
         a.remove();
       },
       partnerOptions: this.PARTNERS,
+      socTradeOptions: this.SOC_TRADE_OPTIONS,
       tabIsCustomization: s.accountTab === 'customization',
       tabCustomizationClass: s.accountTab === 'customization' ? 'btn-secondary' : 'btn-ghost',
       // Item 4 (2026-09-08 regression session): same ensureSummariesLoaded gap as
@@ -9083,12 +9189,13 @@ class Component extends DCLogic {
         s.resumeExtraction.certifications.forEach(c => blocks.push({
           kind: 'certification', position: typeof c.position === 'number' ? c.position : Infinity,
           name: c.name || '', issuingBody: c.issuing_body || '', licenseNumber: c.license_number || '',
-          issueDate: c.issue_date || '', expirationDate: c.expiration_date || '',
+          issueDate: c.issue_date || '', expirationDate: c.expiration_date || '', tradeSocCode: c.trade_soc_code || '',
           onName: (e) => this.updateResumeItem('certifications', c.id, 'name', e.target.value),
           onIssuingBody: (e) => this.updateResumeItem('certifications', c.id, 'issuing_body', e.target.value),
           onLicenseNumber: (e) => this.updateResumeItem('certifications', c.id, 'license_number', e.target.value),
           onIssueDate: (e) => this.updateResumeItem('certifications', c.id, 'issue_date', e.target.value),
           onExpirationDate: (e) => this.updateResumeItem('certifications', c.id, 'expiration_date', e.target.value),
+          onTradeSocCode: (e) => this.updateResumeItem('certifications', c.id, 'trade_soc_code', e.target.value),
         }));
         // One block for ALL skills together (see the migration header on why section_position is a
         // separate column from each skill's own intra-block `position`) — takes the lowest real
