@@ -2500,8 +2500,8 @@ a:hover{color:var(--color-accent)}
 <div style="min-height:100vh;background:var(--color-bg);color:var(--color-text);font-family:var(--font-body);position:relative">
 
 <sc-if value="{{ showHelpButton }}" hint-placeholder-val="{{ false }}">
-  <div style="position:fixed;top:16px;right:20px;z-index:40;display:flex;flex-direction:column;align-items:flex-end" sc-camel-on-mouse-enter="{{ openHelpMenu }}" sc-camel-on-mouse-leave="{{ closeHelpMenu }}">
-    <button type="button" class="btn btn-icon btn-secondary" sc-camel-on-focus="{{ openHelpMenu }}" sc-camel-on-blur="{{ closeHelpMenu }}" aria-label="Menu" aria-haspopup="true" aria-expanded="{{ helpMenuOpenStr }}">
+  <div style="position:fixed;top:16px;right:20px;z-index:40;display:flex;flex-direction:column;align-items:flex-end" sc-camel-on-mouse-enter="{{ openHelpMenu }}" sc-camel-on-mouse-leave="{{ closeHelpMenuOnMouseLeave }}">
+    <button type="button" class="btn btn-icon btn-secondary" sc-camel-on-focus="{{ openHelpMenu }}" sc-camel-on-blur="{{ closeHelpMenuOnBlur }}" aria-label="Menu" aria-haspopup="true" aria-expanded="{{ helpMenuOpenStr }}">
       <svg width="18" height="18" sc-camel-view-box="0 0 18 18" fill="none"><path d="M2 4.5H16M2 9H16M2 13.5H16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path></svg>
     </button>
     <sc-if value="{{ helpMenuOpen }}" hint-placeholder-val="{{ false }}">
@@ -3365,7 +3365,18 @@ a:hover{color:var(--color-accent)}
 <sc-if value="{{ isAccount }}" hint-placeholder-val="{{ false }}">
 <div style="max-width:760px;margin:0 auto;padding:var(--space-6) 20px 60px">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-4)">
-    <span class="nav-brand" style="font-size:15px">Your account</span>
+    <div style="display:flex;flex-direction:column;gap:2px">
+      <span class="nav-brand" style="font-size:15px">Your account</span>
+      <!-- New item (2026-09-13, separate from Item 1): proactive identity indicator, persistent on
+           every authenticated screen (this row sits in the shared isAccount wrapper, above every
+           per-tab sc-if block, not duplicated per tab) — not buried in the help menu the way "Log
+           off" (below) is. The whole point is a second person on a shared device seeing this BEFORE
+           doing anything, not only after they already suspect something's wrong. loggedInAsLabel
+           reads savedFirst/savedLast (the committed session identity), never profileFirst/profileLast
+           (Profile Info's own in-progress, possibly-unsaved edit fields) — this must reflect who is
+           actually logged in, not what someone happens to be mid-typing. -->
+      <span style="font-size:12px;color:var(--color-neutral-500)">Logged in as {{ loggedInAsLabel }} · <a href="#" sc-camel-on-click="{{ notYouClick }}" style="color:var(--color-neutral-400)">Not you?</a></span>
+    </div>
     <div style="display:flex;align-items:center;gap:var(--space-3)">
       <sc-if value="{{ showPauseIndicator }}" hint-placeholder-val="{{ false }}">
         <span class="tag tag-outline">{{ pauseIndicatorLabel }}</span>
@@ -8710,6 +8721,18 @@ class Component extends DCLogic {
     };
     return {
       noop: openPlaceholder,
+      // New item (2026-09-13, separate from Item 1): the proactive "logged in as" identity
+      // indicator's own two render-vals — see the template's own comment on this same element for
+      // why savedFirst/savedLast (not profileFirst/profileLast) is the right source. Falls back to
+      // email, then to a generic label, rather than ever rendering a blank/broken-looking string.
+      loggedInAsLabel: [s.savedFirst, s.savedLast].filter(Boolean).join(' ') || s.email || 'your account',
+      notYouClick: (e) => {
+        pd(e);
+        this.guardedNav(() => {
+          this.addActivityLog('Logged off via "Not you?"');
+          this.realLogOff();
+        });
+      },
       goLogin: (e) => { pd(e); this.setState({ screen: 'returning' }); },
       reactivateAccount: () => { if (!s.reactivatePending) this.reactivateAccountReal(); },
       reactivateButtonLabel: s.reactivatePending ? 'Reactivating…' : 'Reactivate my account',
@@ -9820,13 +9843,26 @@ class Component extends DCLogic {
       helpMenuOpen: s.helpMenuOpen,
       helpMenuOpenStr: s.helpMenuOpen ? 'true' : 'false',
       openHelpMenu: () => this.setState({ helpMenuOpen: true }),
-      // The wrapping div's mouse-enter/leave already opens/closes this menu for pointer users;
-      // this onBlur exists only for keyboard users tabbing away. Without the relatedTarget guard,
+      // Real bug (2026-09-13, found live testing the "logged in as" indicator right next to this
+      // menu): closeHelpMenu used to be ONE function bound to both the wrapping div's mouse-leave
+      // AND the trigger button's blur, but its relatedTarget guard was only ever correct for blur.
+      // For mouse-leave, e.currentTarget is the WRAPPING DIV itself (the element the listener is
+      // on), not the button — so `btn.parentElement` resolved one level too high (the div's own
+      // parent, essentially the whole page), and `.contains(related)` was true for almost anything
+      // the pointer moved onto. The menu never actually closed on mouse-away; only clicking an item
+      // (which sets helpMenuOpen:false itself) ever closed it. Split into two handlers instead of
+      // one shared one: mouse-leaving the menu area is unambiguous (there's no click-target race to
+      // protect against the way there is for focus) and always closes it; the blur guard below is
+      // unchanged, still needed only for the keyboard-tab-away case.
+      closeHelpMenuOnMouseLeave: () => this.setState({ helpMenuOpen: false }),
+      // This onBlur exists only for keyboard users tabbing away. Without the relatedTarget guard,
       // clicking any item INSIDE the dropdown (System tour, Log off, the tab shortcuts) blurs the
       // trigger button first, closing the menu and unmounting those buttons before their own click
       // ever lands — the item's onClick then never fires. Only close when focus is actually moving
-      // outside the button+dropdown wrapper.
-      closeHelpMenu: (e) => {
+      // outside the button+dropdown wrapper. Here e.currentTarget genuinely IS the button (this is
+      // only ever bound to the button's own onBlur), so btn.parentElement correctly means the
+      // wrapping div.
+      closeHelpMenuOnBlur: (e) => {
         const btn = e && e.currentTarget;
         const related = e && e.relatedTarget;
         if (btn && related && btn.parentElement && btn.parentElement.contains(related)) return;
