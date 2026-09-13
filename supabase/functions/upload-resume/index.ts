@@ -137,6 +137,7 @@ Return ONLY a single JSON object, no prose before or after it, matching exactly 
 
 {
   "candidate_location": string,
+  "printed_header": string,
   "work_history": [
     { "company": string, "title": string, "location": string, "start_date": string, "end_date": string,
       "job_responsibilities": string, "extraction_confidence": "high" | "medium" | "low", "position": number }
@@ -190,6 +191,19 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   confuse the two, and never copy an employer/institution location into this field just because the
   candidate's own location wasn't printed. Use an empty string "" when no personal location is
   printed anywhere on the page — never infer or guess one.
+
+- "printed_header" (top-level, not inside any category) = the ENTIRE personal-info header block
+  exactly as printed at the top of the resume — the candidate's own name (including any middle
+  initial, suffix like "Jr." or "Sr.", or professional qualifier like "Esq." or "PE", exactly as
+  printed, in whatever order and case it appears), plus every contact/location line printed
+  alongside it (phone, email, mailing address, city/state, LinkedIn URL, etc.). Captured as ONE
+  literal block of text — never parsed into separate name/phone/email/location parts, unlike
+  candidate_location above, which stays a separate, structured field for exactly the location
+  piece. Preserve the resume's own line breaks using "\n" between them; copy every character
+  verbatim, including capitalization and punctuation — never reformat, reorder, translate, or
+  normalize anything, and never add or drop words. Use an empty string "" only if the resume
+  genuinely has no such header block at all (e.g. a bare list of qualifications with no name or
+  contact line anywhere) — never invent or reconstruct one.
 
 - work_history = PAID EMPLOYMENT ONLY. If a role reads as unpaid — volunteer work, an unpaid
   internship explicitly described as unpaid, community service — do NOT put it in work_history.
@@ -340,6 +354,7 @@ If a category has no entries, return an empty array for it — do not omit the k
 
 type ExtractionResult = {
   candidate_location?: string;
+  printed_header?: string;
   work_history: Array<{ company: string; title: string; location?: string; start_date: string; end_date: string; job_responsibilities: string; extraction_confidence: string; position?: number }>;
   education: Array<{ institution: string; degree: string; field_of_study: string; location?: string; start_date: string; end_date: string; extraction_confidence: string; position?: number }>;
   certifications: Array<{ name: string; issuing_body: string; license_number?: string; issue_date: string; expiration_date: string; extraction_confidence: string; position?: number }>;
@@ -743,6 +758,13 @@ function mergeExtractions(pages: Array<{ pageNumber: number; extraction: Extract
       const withLocation = pages.find(({ extraction }) => !!extraction.candidate_location);
       return withLocation ? withLocation.extraction.candidate_location : "";
     })(),
+    // Item 6 (2026-09-12 live-testing session, follow-up build): same "first page that actually
+    // reported one" pattern as candidate_location just above — the printed header block only ever
+    // realistically appears on page 1, but this doesn't hard-code that assumption either.
+    printed_header: (() => {
+      const withHeader = pages.find(({ extraction }) => !!extraction.printed_header);
+      return withHeader ? withHeader.extraction.printed_header : "";
+    })(),
     work_history: pages.flatMap(({ pageNumber, extraction }) =>
       extraction.work_history.map((w) => ({ ...w, position: globalizePosition(pageNumber, w.position) ?? undefined }))),
     education: pages.flatMap(({ pageNumber, extraction }) =>
@@ -973,6 +995,7 @@ export default {
           p_freeform: merged.freeform,
           p_ocr_text: combinedOcrText,
           p_candidate_location: merged.candidate_location || null,
+          p_printed_header: merged.printed_header || null,
         });
         if (pdfRpcErr) {
           await supabase.from("resume_documents").update({ extraction_status: "failed" }).eq("id", docId);
@@ -1048,6 +1071,7 @@ export default {
           // false "unmatched" — see the migration that introduced it.
           p_ocr_text: null,
           p_candidate_location: extraction.candidate_location || null,
+          p_printed_header: extraction.printed_header || null,
         });
         if (rpcErr) {
           await supabase.from("resume_documents").update({ extraction_status: "failed" }).eq("id", docId);

@@ -57,6 +57,7 @@ Return ONLY a single JSON object, no prose before or after it, matching exactly 
 
 {
   "candidate_location": string,
+  "printed_header": string,
   "work_history": [
     { "company": string, "title": string, "location": string, "start_date": string, "end_date": string,
       "job_responsibilities": string, "extraction_confidence": "high" | "medium" | "low", "position": number }
@@ -110,6 +111,19 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   confuse the two, and never copy an employer/institution location into this field just because the
   candidate's own location wasn't printed. Use an empty string "" when no personal location is
   printed anywhere on the page — never infer or guess one.
+
+- "printed_header" (top-level, not inside any category) = the ENTIRE personal-info header block
+  exactly as printed at the top of the resume — the candidate's own name (including any middle
+  initial, suffix like "Jr." or "Sr.", or professional qualifier like "Esq." or "PE", exactly as
+  printed, in whatever order and case it appears), plus every contact/location line printed
+  alongside it (phone, email, mailing address, city/state, LinkedIn URL, etc.). Captured as ONE
+  literal block of text — never parsed into separate name/phone/email/location parts, unlike
+  candidate_location above, which stays a separate, structured field for exactly the location
+  piece. Preserve the resume's own line breaks using "\n" between them; copy every character
+  verbatim, including capitalization and punctuation — never reformat, reorder, translate, or
+  normalize anything, and never add or drop words. Use an empty string "" only if the resume
+  genuinely has no such header block at all (e.g. a bare list of qualifications with no name or
+  contact line anywhere) — never invent or reconstruct one.
 
 - work_history = PAID EMPLOYMENT ONLY. If a role reads as unpaid — volunteer work, an unpaid
   internship explicitly described as unpaid, community service — do NOT put it in work_history.
@@ -260,6 +274,7 @@ ${ocrText}
 
 type ExtractionResult = {
   candidate_location?: string;
+  printed_header?: string;
   work_history: Array<{ company: string; title: string; location?: string; start_date: string; end_date: string; job_responsibilities: string; extraction_confidence: string; position?: number }>;
   education: Array<{ institution: string; degree: string; field_of_study: string; location?: string; start_date: string; end_date: string; extraction_confidence: string; position?: number }>;
   certifications: Array<{ name: string; issuing_body: string; license_number?: string; issue_date: string; expiration_date: string; extraction_confidence: string; position?: number }>;
@@ -407,6 +422,7 @@ export default {
         // certification_source_match for why this is being threaded through now.
         p_ocr_text: doc.ocr_raw_text,
         p_candidate_location: parsed.candidate_location || null,
+        p_printed_header: parsed.printed_header || null,
       });
       if (rpcErr) {
         await supabase.from("resume_documents").update({ extraction_status: "failed" }).eq("id", resume_document_id);

@@ -2874,14 +2874,21 @@ a:hover{color:var(--color-accent)}
       <div style="display:flex;justify-content:flex-end">
         <button type="button" class="btn btn-ghost" style="font-size:12px;color:var(--color-neutral-500)" sc-camel-on-click="{{ openRejectResumeModal }}">This isn't right — start over</button>
       </div>
-      <!-- Item 19 (2026-09-12 live-testing session): candidate_location, same trust category as
-           every other candidate-stated/document-extracted field on this screen — editable here,
-           unconditionally shown (not gated on whether the document happened to print one), the same
-           way Location fields on individual work_history/education entries always render. -->
+      <!-- Item 6 (2026-09-12 live-testing session, follow-up build): read-only confirmation of the
+           verbatim header block — same spirit as the original-document panel's own "This is exactly
+           what you uploaded, unmodified" note. Retires Item 19's editable Location card that used to
+           sit here: this verbatim blob already captures location as part of the real printed header,
+           and the "account information" header option (Personal Info) sources location from its own
+           separate, candidate-editable field there instead — an editable Location input here would
+           just be a second, redundant place to correct the same ground, on a screen this field is
+           explicitly never editable on. -->
+      <sc-if value="{{ resumeHasPrintedHeader }}" hint-placeholder-val="{{ false }}">
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
-        <div class="card-kicker">Location</div>
-        <input class="input" placeholder="City, ST" value="{{ resumeLocationValue }}" sc-camel-on-change="{{ onResumeLocationChange }}">
+        <div class="card-kicker">Header, as printed</div>
+        <div class="input" style="white-space:pre-wrap;min-height:auto;cursor:default;background:var(--color-neutral-900)">{{ resumePrintedHeaderValue }}</div>
+        <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">This is exactly what's printed at the top of your document, unmodified. Choose how it's used on generated documents in Personal Info.</div>
       </div>
+      </sc-if>
       <sc-if value="{{ resumeHasSummary }}" hint-placeholder-val="{{ false }}">
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
         <div class="card-kicker">Summary</div>
@@ -3433,6 +3440,35 @@ a:hover{color:var(--color-accent)}
           </div>
         </div>
 
+        <!-- Item 6 (2026-09-12 live-testing session, follow-up build): the one real, explicit
+             all-or-nothing choice for what header (name/contact/location) renders on generated
+             documents and downstream partner deliveries. Deliberately never partial/field-by-field —
+             see the tradeoff copy right below the radios for why. -->
+        <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+          <div class="card-kicker">Document header on generated files</div>
+          <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Choose which version of your header we use when we generate a resume or share your profile with a partner.</div>
+          <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;color:var(--color-neutral-300);cursor:pointer">
+            <input type="radio" name="header-display-mode" checked="{{ headerModeIsPrinted }}" sc-camel-on-change="{{ selectHeaderModePrinted }}" style="margin-top:2px">
+            <span>Use my document as printed<br><span style="font-size:12px;color:var(--color-neutral-500)">Reproduces your document exactly, including any suffix or middle name.</span></span>
+          </label>
+          <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;color:var(--color-neutral-300);cursor:pointer">
+            <input type="radio" name="header-display-mode" checked="{{ headerModeIsAccount }}" sc-camel-on-change="{{ selectHeaderModeAccount }}" style="margin-top:2px">
+            <span>Use my account information<br><span style="font-size:12px;color:var(--color-neutral-500)">A clean, standard version from your profile: first and last name, verified phone, verified email, and location if you've added one below. Middle names, suffixes, and qualifiers aren't included — choose "as printed" for those.</span></span>
+          </label>
+          <sc-if value="{{ headerModeIsAccount }}" hint-placeholder-val="{{ false }}">
+            <div class="field" style="max-width:280px;margin-left:26px">
+              <label for="pf-personal-location">Location</label>
+              <input class="input" id="pf-personal-location" placeholder="City, ST" value="{{ personalLocation }}" sc-camel-on-change="{{ setPersonalLocation }}">
+            </div>
+          </sc-if>
+          <sc-if value="{{ headerPrefsSaveError }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:#e2735c">{{ headerPrefsSaveError }}</div>
+          </sc-if>
+          <sc-if value="{{ headerPrefsSaved }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:var(--color-accent-300)">Header preference saved.</div>
+          </sc-if>
+        </div>
+
         <sc-if value="{{ showCrossValidationPrompt }}" hint-placeholder-val="{{ false }}">
           <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
             <div class="card-kicker">Confirm both channels</div>
@@ -3573,6 +3609,13 @@ a:hover{color:var(--color-accent)}
 
               <sc-if value="{{ row.isNeedsReview }}" hint-placeholder-val="{{ false }}">
                 <div style="font-size:12px;color:var(--color-neutral-400);border-top:1px solid var(--color-divider);padding-top:8px">{{ row.needsReviewNote }}</div>
+              </sc-if>
+
+              <!-- Item 7 (2026-09-12 live-testing session, follow-up build): durable, always-
+                   reachable access to the same optional employer/certification contact-details this
+                   item may have skipped or only partly filled in at confirmation time. -->
+              <sc-if value="{{ row.canEditContactDetails }}" hint-placeholder-val="{{ false }}">
+                <button type="button" class="btn btn-ghost" style="align-self:flex-start;font-size:12px;border-top:1px solid var(--color-divider);padding-top:8px;border-radius:0" sc-camel-on-click="{{ row.openContactDetails }}">Add or edit contact details</button>
               </sc-if>
             </div>
           </sc-for>
@@ -4392,6 +4435,69 @@ a:hover{color:var(--color-accent)}
     </div>
   </sc-if>
 
+  <!-- Item 7 (2026-09-12 live-testing session, follow-up build): the durable contact-details modal
+       — see openContactDetailsModal's own header. Reuses the exact same optional fields and
+       disclosure language as the original one-time employer/certification contact-details screen,
+       per instruction, rather than new copy. -->
+  <sc-if value="{{ contactDetailsModalOpen }}" hint-placeholder-val="{{ false }}">
+    <div class="dialog-backdrop">
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="contact-details-modal-title" style="width:min(520px,100%)">
+        <div class="dialog-title" id="contact-details-modal-title">{{ contactDetailsModalLabel }}</div>
+        <div class="dialog-body" style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Everything here is optional. Items we can't verify automatically may take longer to resolve without this information.</div>
+        <sc-if value="{{ contactDetailsModalLoading }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:13px;color:var(--color-neutral-500)">Loading your current details…</div>
+        </sc-if>
+        <sc-if value="{{ contactDetailsModalLoadError }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:#e2735c">{{ contactDetailsModalLoadError }}</div>
+        </sc-if>
+        <sc-if value="{{ contactDetailsModalReady }}" hint-placeholder-val="{{ false }}">
+          <sc-if value="{{ contactDetailsIsWorkHistory }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">If you only know a general line (HR, front desk, main number) with no specific person's name, that's still useful — leave the name blank.</div>
+            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+              <div class="field" style="flex:1;min-width:200px">
+                <label>Registered business name (if different)</label>
+                <input class="input" value="{{ contactDetailsEmployerNameOverride }}" sc-camel-on-change="{{ setContactDetailsEmployerNameOverride }}">
+              </div>
+              <div class="field" style="flex:1;min-width:200px">
+                <label>Registered business location (if different)</label>
+                <input class="input" placeholder="City, ST" value="{{ contactDetailsEmployerLocationOverride }}" sc-camel-on-change="{{ setContactDetailsEmployerLocationOverride }}">
+              </div>
+            </div>
+            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+              <div class="field" style="flex:1;min-width:200px">
+                <label>Contact phone (optional)</label>
+                <input class="input" value="{{ contactDetailsContactPhone }}" sc-camel-on-change="{{ setContactDetailsContactPhone }}">
+              </div>
+              <div class="field" style="flex:1;min-width:200px">
+                <label>Contact name (optional)</label>
+                <input class="input" value="{{ contactDetailsContactName }}" sc-camel-on-change="{{ setContactDetailsContactName }}">
+              </div>
+            </div>
+          </sc-if>
+          <sc-if value="{{ contactDetailsIsCertification }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+              <div class="field" style="flex:1;min-width:200px">
+                <label>Badge / verification link (optional)</label>
+                <input class="input" value="{{ contactDetailsVerificationLink }}" sc-camel-on-change="{{ setContactDetailsVerificationLink }}">
+              </div>
+              <div class="field" style="flex:1;min-width:200px">
+                <label>Contact phone at issuing body (optional)</label>
+                <input class="input" value="{{ contactDetailsContactPhone }}" sc-camel-on-change="{{ setContactDetailsContactPhone }}">
+              </div>
+            </div>
+          </sc-if>
+        </sc-if>
+        <sc-if value="{{ contactDetailsModalSaveError }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:#e2735c">{{ contactDetailsModalSaveError }}</div>
+        </sc-if>
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-secondary" disabled="{{ contactDetailsModalPending }}" sc-camel-on-click="{{ closeContactDetailsModal }}">Cancel</button>
+          <button type="button" class="btn btn-primary" disabled="{{ contactDetailsSaveDisabled }}" sc-camel-on-click="{{ submitContactDetailsModal }}">{{ contactDetailsSaveLabel }}</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
   <sc-if value="{{ downgradeModalOpen }}" hint-placeholder-val="{{ false }}">
     <div class="dialog-backdrop">
       <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="downgrade-modal-title">
@@ -5200,6 +5306,13 @@ class Component extends DCLogic {
           openRespond: () => this.openCorrectionResponse(it.id),
           cancelRespond: () => this.cancelCorrectionResponse(),
           submitRespond: () => this.submitCorrectionResponse(it.id),
+          // Item 7 (2026-09-12 live-testing session, follow-up build): durable, always-reachable
+          // entry point back into the same optional employer/certification contact-details fields
+          // the one-time post-confirmation screen collects — see openContactDetailsModal's own
+          // header. Only the two categories that screen ever covered (never Education, matching its
+          // own "no education section" scope) and only when a real source row is known.
+          canEditContactDetails: (it.type === 'Job Experience' || it.type === 'Certification') && !!it.sourceItemId,
+          openContactDetails: () => this.openContactDetailsModal(it.type, it.sourceItemId, it.claim),
         };
       });
   }
@@ -5254,6 +5367,99 @@ class Component extends DCLogic {
     this.loadVerificationItems(s.resumeCandidateId);
   }
 
+  // Item 7 (2026-09-12 live-testing session, follow-up build): the durable, always-reachable
+  // counterpart to the one-time employer/certification contact-details screen that used to be the
+  // only chance to fill these fields in, right after initial resume confirmation. Opened per-item
+  // from the candidate's own Verification Status tab (see getVerificationItemRows' own
+  // canEditContactDetails/openContactDetails). Reuses resolve-employer-contact-details exactly as
+  // built — it already accepts a single-item array for whichever category applies and leaves the
+  // other empty, so no backend change was needed for this reuse. Fetches fresh current values via
+  // get-resume-extraction (the same real read side confirm-resume-data/resumeConfirm already use)
+  // rather than trusting whatever resumeExtraction happens to already be in local state, since a
+  // candidate landing here straight from a fresh login may never have loaded it this session.
+  async openContactDetailsModal(type, sourceItemId, label) {
+    const s = this.state;
+    if (!s.resumeCandidateId || !sourceItemId) return;
+    this.setState({
+      contactDetailsModalOpen: true, contactDetailsModalType: type, contactDetailsModalLabel: label || '',
+      contactDetailsModalSourceItemId: sourceItemId, contactDetailsModalResumeDocumentId: null,
+      contactDetailsModalLoading: true, contactDetailsModalLoadError: null, contactDetailsModalSaveError: null,
+      contactDetailsDraft: { employerNameOverride: '', employerLocationOverride: '', contactPhone: '', contactName: '', verificationLink: '' },
+    });
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/get-resume-extraction', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate_id: s.resumeCandidateId }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ contactDetailsModalLoading: false, contactDetailsModalLoadError: "Couldn't reach the server. Check your connection and try again." });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      this.setState({ contactDetailsModalLoading: false, contactDetailsModalLoadError: "Couldn't load your current details. Please try again." });
+      return;
+    }
+    const list = type === 'Certification' ? (data.certifications || []) : (data.work_history || []);
+    const row = list.find(r => r.id === sourceItemId);
+    if (!row) {
+      this.setState({ contactDetailsModalLoading: false, contactDetailsModalLoadError: "Couldn't find this item anymore. It may have changed since you last confirmed your resume." });
+      return;
+    }
+    this.setState({
+      contactDetailsModalLoading: false,
+      contactDetailsModalResumeDocumentId: (data.resume_document && data.resume_document.id) || null,
+      contactDetailsDraft: {
+        employerNameOverride: row.employer_name_override || '',
+        employerLocationOverride: row.employer_location_override || '',
+        contactPhone: row.contact_phone || '',
+        contactName: row.contact_name || '',
+        verificationLink: row.verification_link || '',
+      },
+    });
+  }
+
+  closeContactDetailsModal() {
+    this.setState({ contactDetailsModalOpen: false, contactDetailsModalSaveError: null });
+  }
+
+  setContactDetailsDraftField(field, value) {
+    this.setState(st => ({ contactDetailsDraft: { ...st.contactDetailsDraft, [field]: value } }));
+  }
+
+  async saveContactDetailsModal() {
+    const s = this.state;
+    if (!s.resumeCandidateId || !s.contactDetailsModalSourceItemId || !s.contactDetailsModalResumeDocumentId || s.contactDetailsModalPending) return;
+    this.setState({ contactDetailsModalPending: true, contactDetailsModalSaveError: null });
+    const d = s.contactDetailsDraft;
+    const isCert = s.contactDetailsModalType === 'Certification';
+    const body = {
+      candidate_id: s.resumeCandidateId,
+      resume_document_id: s.contactDetailsModalResumeDocumentId,
+      work_history: isCert ? [] : [{ id: s.contactDetailsModalSourceItemId, employer_name_override: d.employerNameOverride, employer_location_override: d.employerLocationOverride, contact_phone: d.contactPhone, contact_name: d.contactName }],
+      certifications: isCert ? [{ id: s.contactDetailsModalSourceItemId, verification_link: d.verificationLink, contact_phone: d.contactPhone }] : [],
+    };
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/resolve-employer-contact-details', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ contactDetailsModalPending: false, contactDetailsModalSaveError: "Couldn't reach the server. Check your connection and try again." });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      this.setState({ contactDetailsModalPending: false, contactDetailsModalSaveError: "Couldn't save. Please try again." });
+      return;
+    }
+    this.setState({ contactDetailsModalPending: false, contactDetailsModalOpen: false, contactDetailsModalSaveError: null });
+  }
+
   ensureVerificationItemsLoaded() {
     const s = this.state;
     const candidateId = s.resumeCandidateId;
@@ -5300,15 +5506,25 @@ class Component extends DCLogic {
     // genuinely unset (matches contactLine's own pattern immediately below) \u2014 profileFirst/savedFirst
     // are also now seeded from the real session name in applySession, so this should be the real name
     // in practice, not a gap that needed a fallback string at all.
-    const nameLine = [s.savedFirst, s.savedLast].filter(Boolean).join(' ');
-    if (nameLine) push(nameLine);
-    // Item 19 (2026-09-12 live-testing session): candidate_location, same trust category as every
-    // other candidate-stated/document-extracted field already flowing through this function --
-    // placed between name and contact line, matching resumeConfirm's own Location field's position.
-    const locationLine = (s.resumeExtraction && s.resumeExtraction.resume_document && s.resumeExtraction.resume_document.candidate_location) || '';
-    if (locationLine) push(locationLine);
-    const contactLine = [deliveredContact.phone.value, deliveredContact.email.value].filter(Boolean).join(' \u00b7 ');
-    if (contactLine) push(contactLine);
+    // Item 6 (2026-09-12 live-testing session, follow-up build): the all-or-nothing header choice,
+    // replacing Item 19's separate name/location/contact composition (that field's own resumeConfirm
+    // UI is retired -- see that card's own comment). 'printed' reproduces the verbatim captured
+    // header exactly, including any suffix or middle name; 'account' composes a clean header from
+    // structured fields only, using personalLocation (Personal Info's own candidate-editable field,
+    // never the document-extracted candidate_location, which nothing downstream reads anymore).
+    // Falls back to the 'account' composition if 'printed' is selected but no printed_header was
+    // ever captured for this document (extraction predates Item 6, or the page genuinely had no
+    // header block) -- never renders a blank header just because the preferred source is empty.
+    const printedHeader = (s.resumeExtraction && s.resumeExtraction.resume_document && s.resumeExtraction.resume_document.printed_header) || '';
+    if (s.headerDisplayMode === 'printed' && printedHeader) {
+      printedHeader.split('\n').forEach(line => { if (line.trim()) push(line); });
+    } else {
+      const nameLine = [s.savedFirst, s.savedLast].filter(Boolean).join(' ');
+      if (nameLine) push(nameLine);
+      if (s.personalLocation) push(s.personalLocation);
+      const contactLine = [deliveredContact.phone.value, deliveredContact.email.value].filter(Boolean).join(' \u00b7 ');
+      if (contactLine) push(contactLine);
+    }
     // Item 9 (2026-09-08 regression session): this used to push the whole summary as ONE line --
     // unlike EXPERIENCE's roleDescription and SKILLS a few lines below, both already wrapped via
     // wrapText before being pushed. buildAtsPdfBytes below has no wrapping of its own (it's a raw
@@ -5762,6 +5978,12 @@ class Component extends DCLogic {
     savedLinkedinPaused: false, savedIndeedPaused: false, savedGlassdoorPaused: false,
     savedPausedGlobal: false, savedJobStatus: null, savedVisibility: 'hidden',
     accountTier: 'free', discoverable: false, discoverableSavePending: false, discoverableSaveError: null,
+    // Item 6 (2026-09-12 live-testing session, follow-up build): matches the DB default
+    // (candidates.header_display_mode default 'printed') so a not-yet-resolved session and a
+    // freshly-loaded one agree before any real session response ever lands.
+    headerDisplayMode: 'printed', personalLocation: '',
+    savedHeaderDisplayMode: 'printed', savedPersonalLocation: '',
+    headerPrefsSavePending: false, headerPrefsSaveError: null, headerPrefsSaved: false,
     optInWorkHistory: false, optInEducation: false, optInCertifications: false,
     resumeFileStaged: null, resumeFileError: null,
     resumeEmailVerificationId: null, resumeDocumentId: null,
@@ -5791,6 +6013,14 @@ class Component extends DCLogic {
     verificationItems: [], verificationItemsLoading: false, verificationItemsError: null, verificationItemsLoadedFor: null,
     correctionResponseOpenId: null, correctionValueDraft: '', correctionNoteDraft: '',
     correctionSubmitPending: false, correctionSubmitError: null,
+    // Item 7 (2026-09-12 live-testing session, follow-up build): the durable contact-details modal
+    // — see openContactDetailsModal's own header. contactDetailsDraft holds whichever field set is
+    // relevant for the open item's type (work_history's 4 fields, or certification's 2).
+    contactDetailsModalOpen: false, contactDetailsModalType: null, contactDetailsModalLabel: '',
+    contactDetailsModalSourceItemId: null, contactDetailsModalResumeDocumentId: null,
+    contactDetailsModalLoading: false, contactDetailsModalLoadError: null,
+    contactDetailsModalPending: false, contactDetailsModalSaveError: null,
+    contactDetailsDraft: { employerNameOverride: '', employerLocationOverride: '', contactPhone: '', contactName: '', verificationLink: '' },
     mobileNavOpen: false,
     kycModalOpen: false, kycModalPendingSave: false,
     connectModalOpen: false, connectModalPartner: null,
@@ -6980,6 +7210,21 @@ class Component extends DCLogic {
       // above, so a session-resolve response with nothing to say never un-completes an already-
       // locally-known-complete tour.
       tourEverShown: !!(profile && profile.tour_completed_at) || this.state.tourEverShown,
+      // Item 6 (2026-09-12 live-testing session, follow-up build): real, durable header-display
+      // preference — see save-header-preferences' own header for why this is one of the only two
+      // Profile Info fields that actually persists server-side. Same defensive "falls through to
+      // whatever's already in state" shape as accountTier/tier above — every session-establishing
+      // response now selects both fields (see resolve-session's own header), so this is never
+      // expected to fall through in practice, but a brand-new candidate's DB default ('printed')
+      // flows through here identically to any other value.
+      headerDisplayMode: (profile && profile.header_display_mode) || this.state.headerDisplayMode,
+      personalLocation: (profile && profile.personal_location) || this.state.personalLocation,
+      // Same "seed both the live and saved copy together" shape as savedFirst/savedLast above —
+      // without this, isDirty() would read this tab as having unsaved changes immediately after a
+      // fresh session load, comparing a just-loaded real value against the stale initial-state
+      // default instead of against itself.
+      savedHeaderDisplayMode: (profile && profile.header_display_mode) || this.state.savedHeaderDisplayMode,
+      savedPersonalLocation: (profile && profile.personal_location) || this.state.savedPersonalLocation,
     });
     if (reactivateNeeded) { this.setState({ screen: 'reactivate', deletionScheduled: true, deletionDate }); return; }
 
@@ -7624,16 +7869,6 @@ class Component extends DCLogic {
     });
   }
 
-  // Item 19 (2026-09-12 live-testing session): candidate_location lives on resume_document itself,
-  // not in one of the array categories updateResumeItem edits — same edit-in-place pattern, just
-  // against the singular resume_document object instead of a list entry.
-  updateResumeDocument(field, value) {
-    this.setState(st => {
-      if (!st.resumeExtraction || !st.resumeExtraction.resume_document) return {};
-      return { resumeExtraction: { ...st.resumeExtraction, resume_document: { ...st.resumeExtraction.resume_document, [field]: value } } };
-    });
-  }
-
   updateResumeFreeform(id, value) {
     this.setState(st => {
       if (!st.resumeExtraction) return {};
@@ -7876,7 +8111,8 @@ class Component extends DCLogic {
     if (s.accountTab === 'profile') {
       return s.profileFirst !== s.savedFirst || s.profileLast !== s.savedLast || s.verifiedPhoneEntry !== s.savedVerifiedPhoneEntry ||
         s.printedPhone !== s.savedPrintedPhone || s.printedEmail !== s.savedPrintedEmail ||
-        s.notifyEmail !== s.savedNotifyEmail || s.notifySms !== s.savedNotifySms;
+        s.notifyEmail !== s.savedNotifyEmail || s.notifySms !== s.savedNotifySms ||
+        s.headerDisplayMode !== s.savedHeaderDisplayMode || s.personalLocation !== s.savedPersonalLocation;
     }
     if (s.accountTab === 'sharing') {
       return s.linkedinEnabled !== s.savedLinkedinEnabled || s.indeedEnabled !== s.savedIndeedEnabled || s.glassdoorEnabled !== s.savedGlassdoorEnabled ||
@@ -7890,8 +8126,13 @@ class Component extends DCLogic {
   saveActive() {
     const s = this.state;
     if (s.accountTab === 'profile') {
-      this.setState({ savedFirst: s.profileFirst, savedLast: s.profileLast, savedVerifiedPhoneEntry: s.verifiedPhoneEntry, savedPrintedPhone: s.printedPhone, savedPrintedEmail: s.printedEmail, savedNotifyEmail: s.notifyEmail, savedNotifySms: s.notifySms });
+      this.setState({ savedFirst: s.profileFirst, savedLast: s.profileLast, savedVerifiedPhoneEntry: s.verifiedPhoneEntry, savedPrintedPhone: s.printedPhone, savedPrintedEmail: s.printedEmail, savedNotifyEmail: s.notifyEmail, savedNotifySms: s.notifySms, savedHeaderDisplayMode: s.headerDisplayMode, savedPersonalLocation: s.personalLocation });
       this.addActivityLog('Profile Info preferences saved');
+      // Item 6 (2026-09-12 live-testing session, follow-up build): the one real backend write in
+      // this whole Save flow — see save-header-preferences' own header for why. Fired alongside the
+      // same local-state copy every other field here already gets; a failure surfaces
+      // headerPrefsSaveError without blocking or reverting the rest of this save.
+      this.saveHeaderPreferences();
     } else if (s.accountTab === 'sharing') {
       this.setState({
         savedLinkedinEnabled: s.linkedinEnabled, savedIndeedEnabled: s.indeedEnabled, savedGlassdoorEnabled: s.glassdoorEnabled,
@@ -7906,7 +8147,7 @@ class Component extends DCLogic {
   revertActive() {
     const s = this.state;
     if (s.accountTab === 'profile') {
-      this.setState({ profileFirst: s.savedFirst, profileLast: s.savedLast, verifiedPhoneEntry: s.savedVerifiedPhoneEntry, printedPhone: s.savedPrintedPhone, printedEmail: s.savedPrintedEmail, notifyEmail: s.savedNotifyEmail, notifySms: s.savedNotifySms });
+      this.setState({ profileFirst: s.savedFirst, profileLast: s.savedLast, verifiedPhoneEntry: s.savedVerifiedPhoneEntry, printedPhone: s.savedPrintedPhone, printedEmail: s.savedPrintedEmail, notifyEmail: s.savedNotifyEmail, notifySms: s.savedNotifySms, headerDisplayMode: s.savedHeaderDisplayMode, personalLocation: s.savedPersonalLocation });
     } else if (s.accountTab === 'sharing') {
       this.setState({
         linkedinEnabled: s.savedLinkedinEnabled, indeedEnabled: s.savedIndeedEnabled, glassdoorEnabled: s.savedGlassdoorEnabled,
@@ -7915,6 +8156,35 @@ class Component extends DCLogic {
         pausedGlobal: s.savedPausedGlobal, jobStatus: s.savedJobStatus, visibility: s.savedVisibility,
       });
     }
+  }
+
+  // Item 6 (2026-09-12 live-testing session, follow-up build): the one real backend save in the
+  // whole Profile Info tab — see save-header-preferences' own header for why header_display_mode/
+  // personal_location specifically need this when every other field on this tab is still client-
+  // state-only. A failure here surfaces headerPrefsSaveError but never reverts or blocks the local
+  // copy saveActive() already made for the rest of the tab's fields.
+  async saveHeaderPreferences() {
+    const s = this.state;
+    if (!s.resumeCandidateId) return;
+    this.setState({ headerPrefsSavePending: true, headerPrefsSaveError: null, headerPrefsSaved: false });
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/save-header-preferences', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate_id: s.resumeCandidateId, header_display_mode: s.headerDisplayMode, personal_location: s.personalLocation }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ headerPrefsSavePending: false, headerPrefsSaveError: "Couldn't reach the server to save your header preference. Your other changes here were still saved." });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      this.setState({ headerPrefsSavePending: false, headerPrefsSaveError: "Couldn't save your header preference. Please try again." });
+      return;
+    }
+    this.setState({ headerPrefsSavePending: false, headerPrefsSaveError: null, headerPrefsSaved: true });
+    setTimeout(() => { if (this.state.headerPrefsSaved) this.setState({ headerPrefsSaved: false }); }, 2000);
   }
 
   guardedNav(action) {
@@ -7995,6 +8265,16 @@ class Component extends DCLogic {
       setProfileFirst: (e) => this.setState({ profileFirst: e.target.value }),
       setProfileLast: (e) => this.setState({ profileLast: e.target.value }),
       setVerifiedPhoneEntry: (e) => this.setState({ verifiedPhoneEntry: e.target.value }),
+      // Item 6 (2026-09-12 live-testing session, follow-up build): the header-display choice —
+      // see the template's own comment on why this is all-or-nothing, never field-by-field.
+      headerModeIsPrinted: s.headerDisplayMode === 'printed',
+      headerModeIsAccount: s.headerDisplayMode === 'account',
+      selectHeaderModePrinted: () => this.setState({ headerDisplayMode: 'printed' }),
+      selectHeaderModeAccount: () => this.setState({ headerDisplayMode: 'account' }),
+      personalLocation: s.personalLocation,
+      setPersonalLocation: (e) => this.setState({ personalLocation: e.target.value }),
+      headerPrefsSaveError: s.headerPrefsSaveError,
+      headerPrefsSaved: s.headerPrefsSaved,
       kycVerified: s.kycVerified,
       kycUnverified: !s.kycVerified,
       toggleKyc: (e) => { pd(e); this.setState(st => ({ kycVerified: !st.kycVerified })); },
@@ -8346,10 +8626,18 @@ class Component extends DCLogic {
       customizeSummaryId: s.customizeTarget && s.customization[s.customizeTarget] ? (s.customization[s.customizeTarget].summaryId || '') : '',
       setCustomizeSummaryId: (e) => this.setCustomizeSummaryId(e.target.value),
       customizeSummaryPreview: this.getSummaryText(s.customizeTarget),
-      // Item 19 (2026-09-12 live-testing session): candidate_location added between name and phone,
-      // matching buildResumeLines' own header line ordering (name, location, contact) so this
-      // preview stays truthful to what the generated PDF actually contains.
-      alwaysIncludedLine: [[s.savedFirst, s.savedLast].filter(Boolean).join(' '), (s.resumeExtraction && s.resumeExtraction.resume_document && s.resumeExtraction.resume_document.candidate_location) || '', this.resolveDeliveredContact().phone.value, this.resolveDeliveredContact().email.value].filter(Boolean).join(' \u00b7 '),
+      // Item 6 (2026-09-12 live-testing session, follow-up build): mirrors buildResumeLines' own
+      // all-or-nothing header choice (see its own comment) so this preview stays truthful to what
+      // the generated PDF actually contains -- 'printed' shows the verbatim header (joined onto one
+      // line here, since this is a compact glance summary, not the full document), 'account' composes
+      // from structured fields using personalLocation, never the retired candidate_location.
+      alwaysIncludedLine: (() => {
+        const printedHeader = (s.resumeExtraction && s.resumeExtraction.resume_document && s.resumeExtraction.resume_document.printed_header) || '';
+        if (s.headerDisplayMode === 'printed' && printedHeader) {
+          return printedHeader.split('\n').map(l => l.trim()).filter(Boolean).join(' \u00b7 ');
+        }
+        return [[s.savedFirst, s.savedLast].filter(Boolean).join(' '), s.personalLocation || '', this.resolveDeliveredContact().phone.value, this.resolveDeliveredContact().email.value].filter(Boolean).join(' \u00b7 ');
+      })(),
       showAlwaysIncludedPrivateNote: !!(this.resolveDeliveredContact().phone.statement || this.resolveDeliveredContact().email.statement),
       alwaysIncludedPrivateNote: [this.resolveDeliveredContact().phone.statement, this.resolveDeliveredContact().email.statement].filter(Boolean).join('. '),
       showSummarySaved: s.czFlashField === 'summaryId',
@@ -8509,6 +8797,30 @@ class Component extends DCLogic {
       hasVerificationItemRows: this.getVerificationItemRows().length > 0,
       showNoActiveItems: !s.verificationItemsLoading && !s.verificationItemsError && this.getVerificationItemRows().length === 0,
       verificationCategorySummaries: this.getVerificationCategorySummaries(),
+      // Item 7 (2026-09-12 live-testing session, follow-up build): the durable contact-details
+      // modal's own bindings — see openContactDetailsModal's own header.
+      contactDetailsModalOpen: s.contactDetailsModalOpen,
+      contactDetailsModalLabel: s.contactDetailsModalLabel,
+      contactDetailsModalLoading: s.contactDetailsModalLoading,
+      contactDetailsModalLoadError: s.contactDetailsModalLoadError,
+      contactDetailsModalReady: !s.contactDetailsModalLoading && !s.contactDetailsModalLoadError,
+      contactDetailsIsWorkHistory: s.contactDetailsModalType === 'Job Experience',
+      contactDetailsIsCertification: s.contactDetailsModalType === 'Certification',
+      contactDetailsEmployerNameOverride: s.contactDetailsDraft.employerNameOverride,
+      setContactDetailsEmployerNameOverride: (e) => this.setContactDetailsDraftField('employerNameOverride', e.target.value),
+      contactDetailsEmployerLocationOverride: s.contactDetailsDraft.employerLocationOverride,
+      setContactDetailsEmployerLocationOverride: (e) => this.setContactDetailsDraftField('employerLocationOverride', e.target.value),
+      contactDetailsContactPhone: s.contactDetailsDraft.contactPhone,
+      setContactDetailsContactPhone: (e) => this.setContactDetailsDraftField('contactPhone', e.target.value),
+      contactDetailsContactName: s.contactDetailsDraft.contactName,
+      setContactDetailsContactName: (e) => this.setContactDetailsDraftField('contactName', e.target.value),
+      contactDetailsVerificationLink: s.contactDetailsDraft.verificationLink,
+      setContactDetailsVerificationLink: (e) => this.setContactDetailsDraftField('verificationLink', e.target.value),
+      contactDetailsModalSaveError: s.contactDetailsModalSaveError,
+      contactDetailsSaveDisabled: s.contactDetailsModalPending || s.contactDetailsModalLoading || !!s.contactDetailsModalLoadError,
+      contactDetailsSaveLabel: s.contactDetailsModalPending ? 'Saving…' : 'Save',
+      closeContactDetailsModal: () => this.closeContactDetailsModal(),
+      submitContactDetailsModal: () => this.saveContactDetailsModal(),
       hasVerificationCategorySummaries: this.getVerificationCategorySummaries().length > 0,
       correctionValueDraft: s.correctionValueDraft,
       correctionNoteDraft: s.correctionNoteDraft,
@@ -8707,12 +9019,10 @@ class Component extends DCLogic {
         return { pdfViewerScale: Math.max(fit * 0.35, +((st.pdfViewerScale || fit) - fit * 0.25).toFixed(3)) };
       }, () => this.renderOriginalPdfViewer()),
       resetPdfZoom: () => this.setState(st => ({ pdfViewerScale: st.pdfViewerFitScale }), () => this.renderOriginalPdfViewer()),
-      // Item 19 (2026-09-12 live-testing session): candidate_location lives on resume_document
-      // itself (see updateResumeDocument), not in one of the array categories — same edit-in-place
-      // pattern as resumeSummaryContent/onResumeSummaryChange just below, just against the singular
-      // resume_document object instead of a freeform entry.
-      resumeLocationValue: (s.resumeExtraction && s.resumeExtraction.resume_document && s.resumeExtraction.resume_document.candidate_location) || '',
-      onResumeLocationChange: (e) => this.updateResumeDocument('candidate_location', e.target.value),
+      // Item 6 (2026-09-12 live-testing session, follow-up build): read-only — see the template's
+      // own comment on why Item 19's editable Location card was retired in favor of this.
+      resumeHasPrintedHeader: !!(s.resumeExtraction && s.resumeExtraction.resume_document && s.resumeExtraction.resume_document.printed_header),
+      resumePrintedHeaderValue: (s.resumeExtraction && s.resumeExtraction.resume_document && s.resumeExtraction.resume_document.printed_header) || '',
       resumeHasSummary: !!(s.resumeExtraction && s.resumeExtraction.freeform.some(f => f.section_type === 'summary')),
       resumeSummaryContent: (() => {
         const f = s.resumeExtraction && s.resumeExtraction.freeform.find(f => f.section_type === 'summary');

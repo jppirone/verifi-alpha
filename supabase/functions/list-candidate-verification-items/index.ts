@@ -66,7 +66,14 @@ export default {
       // the same short, candidate-derived preview text already used in the staff queue list
       // (claimForNeedsReview), safe to reuse here since it's built from the candidate's own resume
       // content, not staff commentary.
-      const url = SUPABASE_URL + "/rest/v1/verification_items?select=id,type,claim,status,created_at,note,correction_requested,correction_note,correction_value&candidate_id=eq."
+      // Item 7 (2026-09-12 live-testing session, follow-up build): source_item_id added —
+      // candidate.html's new durable "add/edit contact details" entry point (per-item, from this
+      // candidate's own Verification Status tab) needs to know which real work_history_items/
+      // certification_items row a given verification_items row came from, the same real back-
+      // reference confirm-resume-data has written since Item C. Not staff-only or sensitive — it's
+      // the id of the candidate's own row, same trust boundary as everything else already returned
+      // here.
+      const url = SUPABASE_URL + "/rest/v1/verification_items?select=id,type,claim,status,created_at,note,correction_requested,correction_note,correction_value,source_item_id&candidate_id=eq."
         + encodeURIComponent(candidate_id) + "&order=created_at.asc";
       const res = await fetch(url, {
         headers: {
@@ -89,6 +96,7 @@ export default {
           claim: r.claim,
           status: r.status,
           createdAt: r.created_at,
+          sourceItemId: r.source_item_id || null,
           note: isDiscrepancy ? (r.note || null) : null,
           correctionRequested: isDiscrepancy ? !!r.correction_requested : false,
           correctionNote: isDiscrepancy ? (r.correction_note || null) : null,

@@ -112,7 +112,7 @@ export default {
       }
 
       const candRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=id,email,phone,full_name,first_name,last_name,deletion_scheduled_at,tier,tour_completed_at`,
+        `${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=id,email,phone,full_name,first_name,last_name,deletion_scheduled_at,tier,tour_completed_at,header_display_mode,personal_location`,
         { headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } },
       );
       const candRows = candRes.ok ? await candRes.json() : [];
@@ -163,6 +163,10 @@ export default {
         // Item 8 (2026-09-11 status-check session): see resolve-session's own comment on this
         // same field.
         tour_completed_at: candidate.tour_completed_at,
+        // Item 6 (2026-09-12 live-testing session, follow-up build): see resolve-session's own
+        // comment on these same two fields.
+        header_display_mode: candidate.header_display_mode,
+        personal_location: candidate.personal_location,
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: "unhandled", detail: String(e) }), {

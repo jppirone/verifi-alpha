@@ -66,7 +66,7 @@ export default {
       }
 
       const candRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/candidates?id=eq.${session.candidate_id}&select=id,email,phone,full_name,first_name,last_name,deletion_scheduled_at,tier,tour_completed_at`,
+        `${SUPABASE_URL}/rest/v1/candidates?id=eq.${session.candidate_id}&select=id,email,phone,full_name,first_name,last_name,deletion_scheduled_at,tier,tour_completed_at,header_display_mode,personal_location`,
         { headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } },
       );
       const candRows = candRes.ok ? await candRes.json() : [];
@@ -116,6 +116,12 @@ export default {
         // routing lands somewhere wrong after a refresh" reports). Same "all three uniformly"
         // reasoning as tier/deletion_scheduled_at above.
         tour_completed_at: candidate.tour_completed_at,
+        // Item 6 (2026-09-12 live-testing session, follow-up build): real, durable header-display
+        // preference (candidates.header_display_mode/personal_location — see their own migration).
+        // Same "all session-establishing paths return it uniformly" reasoning as tier/
+        // deletion_scheduled_at/tour_completed_at above.
+        header_display_mode: candidate.header_display_mode,
+        personal_location: candidate.personal_location,
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: "unhandled", detail: String(e) }), {

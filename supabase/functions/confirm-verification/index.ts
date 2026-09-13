@@ -225,6 +225,8 @@ export default {
       // whether the account is in good standing, only whether one exists to attach a session to.
       let sessionToken: string | null = null;
       let candidateTier: string | null = null;
+      let candidateHeaderDisplayMode: string | null = null;
+      let candidatePersonalLocation: string | null = null;
       if (candidateId) {
         const rawSessionToken = randomToken();
         const tokenHash = await hashToken(rawSessionToken);
@@ -241,11 +243,18 @@ export default {
         });
         if (sessionRes.ok) {
           sessionToken = rawSessionToken;
-          const candRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=tier`, {
+          // Item 6 (2026-09-12 live-testing session, follow-up build): header_display_mode/
+          // personal_location added to the same select as tier — same "all session-establishing
+          // paths return it uniformly" reasoning as resolve-session's own header explains, and this
+          // is really a fourth such path (see the first_name/last_name comment on this response
+          // below). A brand-new candidate just gets the DB defaults ('printed', null).
+          const candRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=tier,header_display_mode,personal_location`, {
             headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
           });
           const candRows = candRes.ok ? await candRes.json() : [];
           candidateTier = candRows[0]?.tier ?? null;
+          candidateHeaderDisplayMode = candRows[0]?.header_display_mode ?? null;
+          candidatePersonalLocation = candRows[0]?.personal_location ?? null;
         }
         // A failed session insert does NOT fail confirmation itself — same posture as
         // resumeBackfillError above: the candidate row and resume linkage already succeeded, and a
@@ -281,6 +290,8 @@ export default {
         resume_backfill_error: resumeBackfillError,
         session_token: sessionToken,
         tier: candidateTier,
+        header_display_mode: candidateHeaderDisplayMode,
+        personal_location: candidatePersonalLocation,
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

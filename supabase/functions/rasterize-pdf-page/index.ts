@@ -155,6 +155,19 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   candidate's own location wasn't printed. Use an empty string "" when no personal location is
   printed anywhere on THIS page — never infer or guess one.
 
+- "printed_header" (top-level, not inside any category) = the ENTIRE personal-info header block
+  exactly as printed at the top of the resume — the candidate's own name (including any middle
+  initial, suffix like "Jr." or "Sr.", or professional qualifier like "Esq." or "PE", exactly as
+  printed, in whatever order and case it appears), plus every contact/location line printed
+  alongside it (phone, email, mailing address, city/state, LinkedIn URL, etc.), if THIS page is the
+  one that shows it. Captured as ONE literal block of text — never parsed into separate name/phone/
+  email/location parts, unlike candidate_location above, which stays a separate, structured field
+  for exactly the location piece. Preserve the resume's own line breaks using "\n" between them;
+  copy every character verbatim, including capitalization and punctuation — never reformat,
+  reorder, translate, or normalize anything, and never add or drop words. Use an empty string ""
+  when THIS page doesn't show that header block at all (true for every page but the one with it) —
+  never invent or reconstruct one.
+
 - work_history = PAID EMPLOYMENT ONLY. If a role reads as unpaid — volunteer work, an unpaid
   internship explicitly described as unpaid, community service — do NOT put it in work_history.
   Instead add ONE entry to "freeform" with section_type "needs_review" whose content plainly
@@ -292,6 +305,7 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
 
 const SCHEMA_SHAPE = `{
   "candidate_location": string,
+  "printed_header": string,
   "work_history": [
     { "company": string, "title": string, "location": string, "start_date": string, "end_date": string,
       "job_responsibilities": string, "extraction_confidence": "high" | "medium" | "low", "position": number }
@@ -387,6 +401,7 @@ ${ocrText}
 
 type ExtractionResult = {
   candidate_location?: string;
+  printed_header?: string;
   work_history: Array<{ company: string; title: string; location?: string; start_date: string; end_date: string; job_responsibilities: string; extraction_confidence: string; position?: number }>;
   education: Array<{ institution: string; degree: string; field_of_study: string; location?: string; start_date: string; end_date: string; extraction_confidence: string; position?: number }>;
   certifications: Array<{ name: string; issuing_body: string; license_number?: string; issue_date: string; expiration_date: string; extraction_confidence: string; position?: number }>;

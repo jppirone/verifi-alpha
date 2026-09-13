@@ -101,6 +101,8 @@ export default {
       // attach a session to for a non-'signup' purpose or a not-yet-linked row.
       let sessionToken: string | null = null;
       let candidateTier: string | null = null;
+      let candidateHeaderDisplayMode: string | null = null;
+      let candidatePersonalLocation: string | null = null;
       if (candidateId) {
         const rawSessionToken = randomToken();
         const tokenHash = await hashToken(rawSessionToken);
@@ -125,11 +127,15 @@ export default {
         if (rpcRes.ok) {
           const rpcRows = await rpcRes.json();
           sessionToken = rpcRows?.[0]?.session_token ?? null;
-          const candRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=tier`, {
+          // Item 6 (2026-09-12 live-testing session, follow-up build): see confirm-verification's
+          // own comment on this same select addition.
+          const candRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=tier,header_display_mode,personal_location`, {
             headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
           });
           const candRows = candRes.ok ? await candRes.json() : [];
           candidateTier = candRows[0]?.tier ?? null;
+          candidateHeaderDisplayMode = candRows[0]?.header_display_mode ?? null;
+          candidatePersonalLocation = candRows[0]?.personal_location ?? null;
         }
         // A failed session issue does NOT fail this status check itself — same posture as
         // confirm-verification's own resumeBackfillError/session block: the confirmation already
@@ -155,6 +161,8 @@ export default {
         opt_in_certifications: !!record.opt_in_certifications,
         session_token: sessionToken,
         tier: candidateTier,
+        header_display_mode: candidateHeaderDisplayMode,
+        personal_location: candidatePersonalLocation,
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: "unhandled", detail: String(e) }), {
