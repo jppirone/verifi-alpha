@@ -283,6 +283,28 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   actually is instead (summary, or needs_review). Don't duplicate the same term into skills and any
   other category.
 
+  NOT skills-shaped (a real, confirmed failure mode): a bulleted list where EACH item pairs a short
+  bolded/leading phrase with its OWN explanatory clause — a dash, en-dash, em-dash, or colon
+  followed by a descriptive sentence about that item (e.g. "Strategic Thinking & Analytical Problem
+  Solving — approaches challenges with a big-picture mindset while maintaining rigorous attention to
+  operational detail"). The leading phrase alone can look exactly like a skill/competency term, but
+  the presence of that per-item explanatory clause means the section is NOT a flat list of terms —
+  it's a distinct named section (commonly titled "Workplace Strengths," "Key Strengths," "Core
+  Values," or similar) and must be classified under needs_review, using its own real heading,
+  never folded into skills. This holds even when the resume ALSO has a separate, genuinely
+  skills-shaped section elsewhere (e.g. "Core Competencies") — a second bulleted list later in the
+  document is NOT automatically more of the same skills block just because its individual phrases
+  look similar; check each item for its own explanatory clause before adding anything to skills.
+
+- DON'T SPLIT A SINGLE WRAPPED ITEM INTO TWO (a real, confirmed failure mode): a single skill,
+  competency, or list item whose text is long enough to visually wrap onto a second printed line —
+  purely because it ran out of column/page width, not because a new bullet started — is still ONE
+  item, not two. Judge this by whether a new bullet glyph, dash, or clear left-margin/indentation
+  reset marks the start of the second line: if it does, it's a genuine new item; if the second line
+  simply continues flush with no marker of its own (a mid-word or mid-phrase continuation of the
+  same thought), join it back onto the item it wrapped from before adding it to skills (or any other
+  array of short terms) — never emit the wrapped tail as its own separate entry.
+
 - Deduplication: if the same role, credential, or skill term appears more than once anywhere in the
   document (e.g. listed once under "Experience" and again under a separate "Leadership" or
   "Highlights" section), extract it ONCE. Do not create duplicate entries for repeated mentions of
@@ -742,15 +764,47 @@ function mergeBoundaryContinuations(extraction: ExtractionResult): ExtractionRes
 
   const freeform = [...extraction.freeform].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
   const mergedFreeform: typeof freeform = [];
+  // Real bug fixed here (found investigating the missing "Workplace Strengths" section, same
+  // session as the position-collision and line-break fixes): this used to require BOTH headings to
+  // be non-empty and equal, which can never match an unlabeled continuation — exactly the case the
+  // freeform-heading rule's own prompt text documents ("Use an empty string '' only when the content
+  // genuinely has no visible heading of its own, e.g. an unlabeled continuation of a previous
+  // section"). A page-N+1 item with heading "" following a page-N item with a real heading is that
+  // exact documented case, and needs to merge into it — not fall through and stay a separate,
+  // headless second row.
+  //
+  // A first version of this fix (deployed, then re-tested against the same source document) merged
+  // ANY page-adjacent empty-heading item into whatever freeform entry happened to be last, with no
+  // further check — confirmed live to be unsafe: a SECOND, unrelated empty-heading fragment later on
+  // the SAME page (the source document's trailing "Continuing Education..." line, which should have
+  // been its own "EDUCATION" entry but came back unlabeled) got silently glued onto the already-
+  // merged section instead of staying separate, because prevPage was derived from prev's ORIGINAL
+  // page and never updated after a merge — a second same-page item still read as "adjacent." Fixed
+  // by tracking each merged entry's own true last-absorbed page (mutable, updated on every merge,
+  // not re-derived from a stale position) AND only allowing the unlabeled-continuation match for the
+  // FIRST freeform item extracted from a given page — a genuine "this page opened mid-section" case
+  // is always the first thing on that page; a later unlabeled item on the same page is much more
+  // likely a separate, independently-ambiguous fragment that just happens to also lack a heading,
+  // not a continuation of the same thing. Still conservative otherwise: page-adjacency is still
+  // required either way, and this never merges two DIFFERENT non-empty headings, only an empty one
+  // into the section it says it's continuing.
+  const seenPages = new Set<number>();
+  const lastPageOf = new Map<(typeof freeform)[number], number>();
   for (const item of freeform) {
     const prev = mergedFreeform[mergedFreeform.length - 1];
-    const prevPage = pageOf(prev?.position);
+    const prevPage = prev ? (lastPageOf.get(prev) ?? pageOf(prev.position)) : null;
     const itemPage = pageOf(item.position);
+    const isFirstOnItsPage = itemPage !== null && !seenPages.has(itemPage);
+    if (itemPage !== null) seenPages.add(itemPage);
+
+    const isMatchingHeadings = !!(prev?.heading && item.heading && norm(prev.heading) === norm(item.heading));
+    const isUnlabeledContinuation = !!(prev?.heading && !item.heading && isFirstOnItsPage);
     if (
       prev && prevPage !== null && itemPage !== null && itemPage === prevPage + 1 &&
-      prev.heading && item.heading && norm(prev.heading) === norm(item.heading)
+      (isMatchingHeadings || isUnlabeledContinuation)
     ) {
       prev.content = `${prev.content}\n\n${item.content}`.trim();
+      if (itemPage !== null) lastPageOf.set(prev, itemPage);
       continue;
     }
     mergedFreeform.push({ ...item });
@@ -774,6 +828,45 @@ function mergeBoundaryContinuations(extraction: ExtractionResult): ExtractionRes
   }
 
   return { ...extraction, freeform: mergedFreeform, work_history: mergedWorkHistory };
+}
+
+// Item B (2026-09-13 PDF-regression follow-up session): server-side, deterministic replacement for
+// the earlier prompt-only "ensure positions are genuinely unique" instruction. Confirmed via a real
+// re-test against the same source document that the prompt wording had ZERO effect: the exact same
+// 4 certifications still came back sharing one position value, identical to before that instruction
+// was added — LLM self-compliance on a positional-uniqueness constraint isn't reliable and this
+// stops relying on it. Instead, every position-bearing item across every category, PLUS the single
+// skills-block position, is collected, sorted by its extracted position (ties broken by original
+// emission order — itself the LLM's own reading-order within whatever page/category produced it,
+// so a tied group's relative order is preserved rather than randomized), and renumbered to strictly
+// increasing integers in that same relative order. This can never leave two items sharing a
+// position, and never changes the relative ordering the extraction actually produced — it only
+// removes ties. Deliberately runs AFTER mergeExtractions/mergeBoundaryContinuations, not before:
+// those still need the original page-encoded position values (see pageOf() above) to find
+// cross-page adjacency; once that's done, nothing downstream needs the page-encoded magnitude, only
+// the relative order, which this preserves exactly.
+function dedupePositions(extraction: ExtractionResult): ExtractionResult {
+  type PosRef = { get: () => number | undefined; set: (n: number) => void };
+  const refs: PosRef[] = [];
+  for (const w of extraction.work_history) refs.push({ get: () => w.position, set: (n) => { w.position = n; } });
+  for (const e of extraction.education) refs.push({ get: () => e.position, set: (n) => { e.position = n; } });
+  for (const c of extraction.certifications) refs.push({ get: () => c.position, set: (n) => { c.position = n; } });
+  for (const f of extraction.freeform) refs.push({ get: () => f.position, set: (n) => { f.position = n; } });
+  if (typeof extraction.skills_position === "number") {
+    refs.push({ get: () => extraction.skills_position ?? undefined, set: (n) => { extraction.skills_position = n; } });
+  }
+  const indexed = refs.map((r, i) => ({ r, i, pos: r.get() }));
+  // Items with no numeric position at all (shouldn't normally happen, but not asserted-on) sort
+  // after every real position, keeping their own relative order rather than colliding at 0.
+  indexed.sort((a, b) => {
+    const aHas = typeof a.pos === "number", bHas = typeof b.pos === "number";
+    if (aHas && bHas) return (a.pos! - b.pos!) || (a.i - b.i);
+    if (aHas) return -1;
+    if (bHas) return 1;
+    return a.i - b.i;
+  });
+  indexed.forEach(({ r }, seq) => r.set(seq));
+  return extraction;
 }
 
 function mergeExtractions(pages: Array<{ pageNumber: number; extraction: ExtractionResult }>): ExtractionResult {
@@ -999,7 +1092,7 @@ export default {
           }
         }
 
-        const merged = mergeExtractions(pageExtractions);
+        const merged = dedupePositions(mergeExtractions(pageExtractions));
         const combinedOcrText = pageOcrTexts.join("\n\n");
         // Item 1 (2026-09-08 regression session): race-window fix — see extract-resume-fields' own
         // header for the full mechanism, reproduced live against two real accounts. docRow.candidate_id
@@ -1069,7 +1162,7 @@ export default {
         console.log(`upload-resume: ${docId} routed to vision fallback (${w}x${h}, ratio ${aspectRatio.toFixed(2)})`);
         let extraction: ExtractionResult;
         try {
-          extraction = await runVisionExtraction(sanitized_base64);
+          extraction = dedupePositions(await runVisionExtraction(sanitized_base64));
         } catch (visionErr) {
           await supabase.from("resume_documents").update({ extraction_status: "failed" }).eq("id", docId);
           return new Response(JSON.stringify({ ok: false, error: "vision_extraction_failed", detail: String(visionErr), resume_document_id: docId }), {

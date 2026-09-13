@@ -248,6 +248,33 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   actually is instead (summary, or needs_review). Don't duplicate the same term into skills and any
   other category.
 
+  NOT skills-shaped (a real, confirmed failure mode): a bulleted list where EACH item pairs a short
+  bolded/leading phrase with its OWN explanatory clause — a dash, en-dash, em-dash, or colon
+  followed by a descriptive sentence about that item (e.g. "Strategic Thinking & Analytical Problem
+  Solving — approaches challenges with a big-picture mindset while maintaining rigorous attention to
+  operational detail"). The leading phrase alone can look exactly like a skill/competency term, but
+  the presence of that per-item explanatory clause means the section is NOT a flat list of terms —
+  it's a distinct named section (commonly titled "Workplace Strengths," "Key Strengths," "Core
+  Values," or similar) and must be classified under needs_review, using its own real heading,
+  never folded into skills. This holds even when THIS page (or an earlier page) also has a genuinely
+  skills-shaped section (e.g. "Core Competencies") — a second bulleted list elsewhere is NOT
+  automatically more of the same skills block just because its individual phrases look similar;
+  check each item for its own explanatory clause before adding anything to skills. If THIS page
+  opens with bulleted short phrases and NO section heading is visible above them on THIS page (the
+  heading was printed on a previous page), do not default to skills just because there's nothing
+  else to classify it as — this is the "unlabeled continuation of a previous section" case described
+  in the freeform heading rule below (empty "heading", section_type "needs_review"), which the
+  upload pipeline merges into the correctly-headed part from the prior page.
+
+- DON'T SPLIT A SINGLE WRAPPED ITEM INTO TWO (a real, confirmed failure mode): a single skill,
+  competency, or list item whose text is long enough to visually wrap onto a second printed line —
+  purely because it ran out of column/page width, not because a new bullet started — is still ONE
+  item, not two. Judge this by whether a new bullet glyph, dash, or clear left-margin/indentation
+  reset marks the start of the second line: if it does, it's a genuine new item; if the second line
+  simply continues flush with no marker of its own (a mid-word or mid-phrase continuation of the
+  same thought), join it back onto the item it wrapped from before adding it to skills (or any other
+  array of short terms) — never emit the wrapped tail as its own separate entry.
+
 - Deduplication: if the same role, credential, or skill term appears more than once anywhere in the
   document (e.g. listed once under "Experience" and again under a separate "Leadership" or
   "Highlights" section), extract it ONCE. Do not create duplicate entries for repeated mentions of

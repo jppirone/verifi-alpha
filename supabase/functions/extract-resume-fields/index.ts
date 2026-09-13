@@ -203,6 +203,28 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   actually is instead (summary, or needs_review). Don't duplicate the same term into skills and any
   other category.
 
+  NOT skills-shaped (a real, confirmed failure mode): a bulleted list where EACH item pairs a short
+  bolded/leading phrase with its OWN explanatory clause — a dash, en-dash, em-dash, or colon
+  followed by a descriptive sentence about that item (e.g. "Strategic Thinking & Analytical Problem
+  Solving — approaches challenges with a big-picture mindset while maintaining rigorous attention to
+  operational detail"). The leading phrase alone can look exactly like a skill/competency term, but
+  the presence of that per-item explanatory clause means the section is NOT a flat list of terms —
+  it's a distinct named section (commonly titled "Workplace Strengths," "Key Strengths," "Core
+  Values," or similar) and must be classified under needs_review, using its own real heading,
+  never folded into skills. This holds even when the resume ALSO has a separate, genuinely
+  skills-shaped section elsewhere (e.g. "Core Competencies") — a second bulleted list later in the
+  document is NOT automatically more of the same skills block just because its individual phrases
+  look similar; check each item for its own explanatory clause before adding anything to skills.
+
+- DON'T SPLIT A SINGLE WRAPPED ITEM INTO TWO (a real, confirmed failure mode): a single skill,
+  competency, or list item whose text is long enough to visually wrap onto a second printed line —
+  purely because it ran out of column/page width, not because a new bullet started — is still ONE
+  item, not two. Judge this by whether a new bullet glyph, dash, or clear left-margin/indentation
+  reset marks the start of the second line: if it does, it's a genuine new item; if the second line
+  simply continues flush with no marker of its own (a mid-word or mid-phrase continuation of the
+  same thought), join it back onto the item it wrapped from before adding it to skills (or any other
+  array of short terms) — never emit the wrapped tail as its own separate entry.
+
 - Deduplication: if the same role, credential, or skill term appears more than once anywhere in the
   document (e.g. listed once under "Experience" and again under a separate "Leadership" or
   "Highlights" section), extract it ONCE. Do not create duplicate entries for repeated mentions of
@@ -310,6 +332,42 @@ type ExtractionResult = {
   skills_position?: number | null;
   freeform: Array<{ section_type: string; heading: string; content: string; position?: number }>;
 };
+
+// Item B (2026-09-13 PDF-regression follow-up session): server-side, deterministic replacement for
+// the earlier prompt-only "ensure positions are genuinely unique" instruction. Confirmed via a real
+// re-test against the same source document that the prompt wording had ZERO effect: the exact same
+// 4 certifications still came back sharing one position value, identical to before that instruction
+// was added — LLM self-compliance on a positional-uniqueness constraint isn't reliable and this
+// stops relying on it. Instead, every position-bearing item across every category, PLUS the single
+// skills-block position, is collected, sorted by its extracted position (ties broken by original
+// emission order, preserving a tied group's relative order rather than randomizing it), and
+// renumbered to strictly increasing integers in that same relative order. This can never leave two
+// items sharing a position, and never changes the relative ordering the extraction actually
+// produced — it only removes ties. See upload-resume's own copy of this function for the fuller
+// investigation notes (this path — extract-resume-fields, single-shot OCR-text extraction — has no
+// per-page merge step to run before it, so unlike upload-resume's PDF branch this can run directly
+// on the parsed result).
+function dedupePositions(extraction: ExtractionResult): ExtractionResult {
+  type PosRef = { get: () => number | undefined; set: (n: number) => void };
+  const refs: PosRef[] = [];
+  for (const w of extraction.work_history) refs.push({ get: () => w.position, set: (n) => { w.position = n; } });
+  for (const e of extraction.education) refs.push({ get: () => e.position, set: (n) => { e.position = n; } });
+  for (const c of extraction.certifications) refs.push({ get: () => c.position, set: (n) => { c.position = n; } });
+  for (const f of extraction.freeform) refs.push({ get: () => f.position, set: (n) => { f.position = n; } });
+  if (typeof extraction.skills_position === "number") {
+    refs.push({ get: () => extraction.skills_position ?? undefined, set: (n) => { extraction.skills_position = n; } });
+  }
+  const indexed = refs.map((r, i) => ({ r, i, pos: r.get() }));
+  indexed.sort((a, b) => {
+    const aHas = typeof a.pos === "number", bHas = typeof b.pos === "number";
+    if (aHas && bHas) return (a.pos! - b.pos!) || (a.i - b.i);
+    if (aHas) return -1;
+    if (bHas) return 1;
+    return a.i - b.i;
+  });
+  indexed.forEach(({ r }, seq) => r.set(seq));
+  return extraction;
+}
 
 function isValidExtraction(x: unknown): x is ExtractionResult {
   if (!x || typeof x !== "object") return false;
@@ -434,6 +492,7 @@ export default {
         .from("resume_documents").select("candidate_id").eq("id", resume_document_id).maybeSingle();
       const currentCandidateId = freshDoc?.candidate_id ?? doc.candidate_id;
 
+      dedupePositions(parsed);
       const { error: rpcErr } = await supabase.rpc("insert_resume_extraction", {
         p_resume_document_id: resume_document_id,
         p_candidate_id: currentCandidateId,
