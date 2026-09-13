@@ -5943,7 +5943,17 @@ class Component extends DCLogic {
         blocks.push({ kind: 'certifications', position: typeof c.position === 'number' ? c.position : Infinity, label: it.label, body: '' });
       });
       if (catVal('skills') && ex.skills && ex.skills.length > 0) {
-        const skillLine = this.deliveredSkills().join(', ');
+        // Real regression found live testing a genuinely complex document (16-item Core
+        // Competencies list): joining every skill onto ONE comma-separated line, then word-wrapping
+        // that single giant string, produced a dense run-on block with no visual separation between
+        // skills at all -- readable as prose, not as a scannable list, which is what every other
+        // section in this generated document (certifications, experience bullets) already gets via
+        // wrapText's own line-per-item behavior. Joining with "\n" instead means each skill lands on
+        // its own line once wrapText renders it (wrapText already preserves embedded "\n" -- see its
+        // own header) -- one line per skill, matching how the source document itself presents them,
+        // without claiming the source's specific two-column visual LAYOUT (a design choice this
+        // plain-text PDF was never going to reproduce either way).
+        const skillLine = this.deliveredSkills().join('\n');
         if (skillLine) {
           const positions = ex.skills.map(sk => sk.section_position).filter(p => typeof p === 'number');
           blocks.push({ kind: 'skills', position: positions.length ? Math.min(...positions) : Infinity, label: '', body: skillLine });

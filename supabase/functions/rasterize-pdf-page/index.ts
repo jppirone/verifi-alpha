@@ -168,6 +168,23 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   when THIS page doesn't show that header block at all (true for every page but the one with it) —
   never invent or reconstruct one.
 
+- LINE-BREAK PRESERVATION (real, confirmed failure mode — a real source document with bulleted
+  content came back as one dense, run-on paragraph with every bullet's line break silently
+  discarded): this applies to "job_responsibilities" (work_history) and "content" (freeform) alike.
+  Whenever THIS page presents this field's content as distinct bullets, dashes, or separate lines —
+  not as flowing prose — reproduce that structure verbatim using "\n" between each item. Judge this
+  the same way as everywhere else in this prompt: by the source's own SHAPE, not by whether a bullet
+  character is literally present — a "Selected Career Highlights" or "Workplace Strengths" section
+  printed as one item per line is a real line-separated list even without a visible bullet glyph,
+  and job_responsibilities under a role is virtually always this shape (each responsibility its own
+  line/bullet in the source). The one genuine exception is content that is actually continuous prose
+  on THIS page (a paragraph-style professional summary, a single unbulleted sentence) — that stays
+  as normal wrapped prose, no "\n" inserted where the source never had one. Never collapse a real
+  bulleted list into a single comma- or period-joined sentence, and never invent a line break the
+  source doesn't actually have. (Note: this page's own extraction is later merged with adjacent
+  pages' extractions of the same continuing entry — see upload-resume's own merge logic — so getting
+  THIS page's own line breaks right matters even when the full entry spans more than one page.)
+
 - work_history = PAID EMPLOYMENT ONLY. If a role reads as unpaid — volunteer work, an unpaid
   internship explicitly described as unpaid, community service — do NOT put it in work_history.
   Instead add ONE entry to "freeform" with section_type "needs_review" whose content plainly
@@ -241,7 +258,12 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   uncaptured content. Only the uncaptured remainder of that section (content that doesn't name any
   already-extracted item) belongs in needs_review — a section heading is not dropped just because
   part of its content was already extracted elsewhere, only the part restating an already-extracted
-  item is.
+  item is. Perform this silently: a real, confirmed failure mode had a needs_review "content" field
+  come back containing a parenthetical note explaining WHICH items were left out and why they were
+  considered duplicates — that meta-commentary is not resume content and must never appear inside
+  any field's value. "content" (and every other field) holds only what's actually printed on the
+  page, verbatim; your own reasoning about deduplication, classification, or anything else belongs
+  nowhere in the output.
 
 - NEVER FABRICATE A STRUCTURED ENTRY FROM A HEADER OR A SUMMARY SENTENCE (hard rule — a real,
   confirmed failure mode, not a hypothetical): a structured entry's identifying field (a
@@ -301,7 +323,15 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   meaning for where the Skills block itself sits among everything else on the page (or null if this
   page has no skills section) — skills are one visual block, not individually positioned entries, so
   they get exactly one position value for the whole block, not one per skill. If this page has
-  nothing else at all (a single section filling the whole page), position values still start at 0.`;
+  nothing else at all (a single section filling the whole page), position values still start at 0.
+  Each entry's position must be genuinely unique on THIS page (real, confirmed failure mode: four
+  separate certification bullets under one heading all came back with the identical position value
+  — harmless by coincidence that time since nothing else fell between them once sorted, but not a
+  safe pattern to rely on) — every entry has its own distinct reading-order spot, never shared with
+  a sibling entry even when several appear close together or under the same heading. If several
+  items truly sit on the exact same visual line (rare), give them consecutive integers in the order
+  a reader's eye would actually take them (e.g. left-to-right for a same-row pair), not the same
+  number.`;
 
 const SCHEMA_SHAPE = `{
   "candidate_location": string,
