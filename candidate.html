@@ -5281,15 +5281,34 @@ class Component extends DCLogic {
       .replace(/[^\x20-\x7e]/g, '');
   }
 
+  // Item 15 follow-up (2026-09-13 live-testing session): this used to split(' ') the WHOLE input as
+  // one run of words, ignoring any '\n' already in the text — confirmed live against a genuine
+  // multi-line needs_review body (three separate license lines under one "Certifications/Licenses"
+  // heading): the '\n' between lines has no space next to it, so it landed glued onto the end of one
+  // word and the start of the next (e.g. "State BoardElectrical License"), and the source's own line
+  // structure was gone by the time it reached the PDF — word-wrapped into an unrelated run-on
+  // paragraph instead. Real fix: wrap EACH original line independently (still word-wrapping a line
+  // that's itself longer than maxChars, unchanged from before) instead of treating embedded newlines
+  // as just another character. Single-line input (the overwhelming majority of call sites — labels,
+  // role descriptions, etc.) is unaffected: text.split('\n') on a string with no '\n' is a 1-element
+  // array, so behavior there is identical to the old implementation.
   wrapText(text, maxChars) {
-    const words = text.split(' ');
+    const rawLines = text.split('\n');
     const lines = [];
-    let cur = '';
-    words.forEach(w => {
-      const next = cur ? cur + ' ' + w : w;
-      if (next.length > maxChars && cur) { lines.push(cur); cur = w; } else { cur = next; }
+    rawLines.forEach(rawLine => {
+      const words = rawLine.split(' ');
+      let cur = '';
+      words.forEach(w => {
+        const next = cur ? cur + ' ' + w : w;
+        if (next.length > maxChars && cur) { lines.push(cur); cur = w; } else { cur = next; }
+      });
+      if (cur) lines.push(cur);
+      // An originally-blank line (a deliberate paragraph break within multi-line content, e.g. a
+      // blank line between two needs_review paragraphs) is preserved as its own blank output line —
+      // but only when the input actually had more than one line; a plain empty string still returns
+      // [] exactly as before, so no existing single-line call site sees a new stray blank line.
+      else if (rawLine === '' && rawLines.length > 1) lines.push('');
     });
-    if (cur) lines.push(cur);
     return lines;
   }
 
