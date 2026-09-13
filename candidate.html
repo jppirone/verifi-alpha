@@ -7002,20 +7002,31 @@ class Component extends DCLogic {
   // an existing durable session FIRST — resolveSession() is authoritative on whether this device is
   // already logged in — and only fall through to consuming a URL token when there either isn't one,
   // or the stored one turns out to be genuinely dead (real logout/expiry elsewhere, not this bug).
+  // Item 1 (2026-09-13, session-precedence investigation — real, reproduced live): the previous
+  // order here (resolveSession() unconditionally FIRST, a URL token only consumed when no session
+  // exists) was itself a deliberate fix for a real bug (933b76a, "Fix session-refresh regression"):
+  // a candidate mid-session refreshing a tab that still had an already-consumed verify_token/
+  // login_token sitting in the URL got hard-logged-out with a raw "already used" error instead of
+  // just staying on their own real session. That fix is still needed — but making an EXISTING
+  // session win unconditionally created the mirror-image bug: on a browser that already has a
+  // valid stored session for account A, a genuinely fresh, never-consumed verify_token/login_token
+  // for a DIFFERENT account B (e.g. someone else's real signup-confirmation or login link, opened
+  // on a shared/reused device) was silently discarded without ever being looked at — account A's
+  // stale session rendered instead, with zero error or indication that B's link didn't do what it
+  // was supposed to. Reproduced directly against real account data before this fix (see this
+  // session's own investigation).
+  //
+  // Fix: a URL token, when present, is now tried FIRST — it's evidence of a deliberate, current
+  // action (a real click on a real link) and must not be silently pre-empted by whatever happens to
+  // already be in localStorage. The original bug is handled at its own true source instead:
+  // confirmEmailToken/confirmLoginToken now fall back to resolveSession() specifically when the
+  // token turns out to already be used (see each function's own comment) — which is exactly the
+  // "this device already has the session that consumed it" case 933b76a fixed, without that fix
+  // requiring an untried token for someone else's account to lose to it first.
   async mountResolveOrToken() {
-    const alreadySessioned = await this.resolveSession();
-    if (alreadySessioned) {
-      // Session already answers "who is this" — a leftover URL token is now irrelevant. Clean it up
-      // so it can't cause this same confusion again on some future reload of this same tab/bookmark.
-      const url = new URL(window.location.href);
-      let changed = false;
-      if (url.searchParams.has('verify_token')) { url.searchParams.delete('verify_token'); changed = true; }
-      if (url.searchParams.has('login_token')) { url.searchParams.delete('login_token'); changed = true; }
-      if (changed) window.history.replaceState({}, '', url);
-      return;
-    }
-    if (this.state.verifyToken) this.confirmEmailToken(this.state.verifyToken);
-    else if (this.state.loginToken) this.confirmLoginToken(this.state.loginToken);
+    if (this.state.verifyToken) { await this.confirmEmailToken(this.state.verifyToken); return; }
+    if (this.state.loginToken) { await this.confirmLoginToken(this.state.loginToken); return; }
+    await this.resolveSession();
   }
 
   // Items 9/10 (2026-09-13 live-testing session): accountType/stagedLicense are the license-only
@@ -7449,6 +7460,21 @@ class Component extends DCLogic {
       this.setState({ verifyStatus: 'success' });
       return;
     }
+    // Item 1 (2026-09-13 session-precedence investigation): "already_used" is exactly the real
+    // scenario 933b76a's own header describes — this exact device, refreshing (or restoring a
+    // killed tab, or retrying after a dropped response) after already having consumed this token
+    // once. That device already has a real, durable session from the original consumption; falling
+    // back to resolveSession() recovers it silently, same as before mountResolveOrToken's own
+    // reordering — instead of showing a raw "already used" error to someone who's actually still
+    // logged in. Only a token that's used AND unrecoverable here (a genuinely different device,
+    // nothing to fall back to) falls through to the real error state below.
+    if (data && data.error === 'already_used') {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('verify_token');
+      window.history.replaceState({}, '', url);
+      const recovered = await this.resolveSession();
+      if (recovered) return;
+    }
     this.setState({ verifyStatus: 'error', verifyErrorReason: (data && data.error) || 'unknown' });
   }
 
@@ -7742,13 +7768,16 @@ class Component extends DCLogic {
     return allRows.some(r => !r.candidate_confirmed);
   }
 
-  // Called whenever there's a durable session to check — see mountResolveOrToken, which now always
-  // tries this FIRST on every mount, ahead of any verify_token/login_token in the URL (that used to
-  // be this function's only caller, back when it ran solely in the "no URL token" branch). A
+  // Called whenever there's a durable session to check. Item 1 (2026-09-13 session-precedence
+  // investigation): mountResolveOrToken no longer tries this unconditionally first — a URL token,
+  // when present, is tried first instead (see that function's own header for the real bug that
+  // ordering used to cause). This is now reached either directly (no URL token at all — the
+  // original, pre-933b76a caller) or as confirmEmailToken/confirmLoginToken's own fallback after an
+  // "already_used" token turns out to belong to a session this exact device already holds. A
   // missing, revoked, or expired session all fail the same way (see resolve-session's own header):
   // silently clear the stale local token and fall through to signupDetails, same as if no one had
-  // ever logged in on this device. Returns true/false so the caller knows whether it's safe to skip
-  // consuming a single-use URL token this mount.
+  // ever logged in on this device. Returns true/false so the caller knows whether a session was
+  // actually recovered.
   async resolveSession() {
     let token;
     try { token = localStorage.getItem('verifi_session_token'); } catch (e) { token = null; }
@@ -8149,6 +8178,15 @@ class Component extends DCLogic {
       window.history.replaceState({}, '', url);
       this.applySession(data.session_token, data);
       return;
+    }
+    // Item 1 (2026-09-13 session-precedence investigation): same fallback, same reasoning, as
+    // confirmEmailToken's own "already_used" branch — see its comment for the full explanation.
+    if (data && data.error === 'already_used') {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('login_token');
+      window.history.replaceState({}, '', url);
+      const recovered = await this.resolveSession();
+      if (recovered) return;
     }
     this.setState({ loginConfirmStatus: 'error', loginConfirmErrorReason: (data && data.error) || 'unknown' });
   }
