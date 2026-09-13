@@ -37,6 +37,26 @@ const corsHeaders = {
 // existing simulated modal: a full-page redirect to Stripe at that point would strand the candidate
 // with nothing to resolve back into on return. Real-Stripe-izing that path needs the signup session-
 // token gap fixed first — flagged, not fixed today.
+//
+// SUPERSEDED by Item C's own header just below (2026-09-08 session, redirect revision): that gap
+// was closed the same night — the signup-time paid-tier selection now calls this same function too.
+// Left here for the historical record of why the earlier pop-up-window design existed at all.
+//
+// Item 10 (2026-09-13 live-testing session): `product` distinguishes which recurring price this
+// session is for — 'resume_pro' (default, the pre-existing Verifi Pro upgrade, unchanged pricing/
+// name) vs 'license_tracking' (the new license-only signup's mandatory subscription, see
+// candidate.html's licenseBilling screen). Both still use the exact same mechanism confirmed working
+// end-to-end tonight (mode=subscription, inline price_data, no pre-created Stripe Price/Product
+// needed in the Dashboard) — this is additive branching inside the one existing function, not a
+// parallel integration. `metadata[product]` is set on the session so test-stripe-webhook can tell
+// the two apart when the payment completes and knows which candidate column to patch — see that
+// function's own header. License-tracking pricing ($9.99/mo, $99/yr) is a PLACEHOLDER, explicitly
+// flagged as such in candidate.html's own licenseBilling copy — not a validated real-world price,
+// same "simulate verification complete" honesty posture as the KYC step it follows.
+const PRODUCTS: Record<string, { monthly: string; annual: string; nameMonthly: string; nameAnnual: string }> = {
+  resume_pro: { monthly: "499", annual: "5000", nameMonthly: "Verifi Pro (monthly)", nameAnnual: "Verifi Pro (annual)" },
+  license_tracking: { monthly: "999", annual: "9900", nameMonthly: "Verifi License Tracking (monthly)", nameAnnual: "Verifi License Tracking (annual)" },
+};
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY")!;
 const RETURN_BASE_URL = "https://alpha.applitrust.com/candidate.html";
 
@@ -46,22 +66,25 @@ export default {
       return new Response(null, { headers: corsHeaders });
     }
     try {
-      const { candidate_id, billing_cycle } = await req.json();
+      const { candidate_id, billing_cycle, product } = await req.json();
       if (!candidate_id || typeof candidate_id !== "string") {
         return new Response(JSON.stringify({ ok: false, error: "candidate_id_required" }), {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
+      const productKey = product === "license_tracking" ? "license_tracking" : "resume_pro";
+      const productConfig = PRODUCTS[productKey];
       const cycle = billing_cycle === "annual" ? "annual" : "monthly";
       const interval = cycle === "annual" ? "year" : "month";
-      const unitAmount = cycle === "annual" ? "5000" : "499";
-      const productName = cycle === "annual" ? "Verifi Pro (annual)" : "Verifi Pro (monthly)";
+      const unitAmount = cycle === "annual" ? productConfig.annual : productConfig.monthly;
+      const productName = cycle === "annual" ? productConfig.nameAnnual : productConfig.nameMonthly;
 
       const body = new URLSearchParams();
       body.set("mode", "subscription");
       body.set("client_reference_id", candidate_id);
       body.set("success_url", `${RETURN_BASE_URL}?checkout=success&session_id={CHECKOUT_SESSION_ID}`);
       body.set("cancel_url", `${RETURN_BASE_URL}?checkout=cancel`);
+      body.set("metadata[product]", productKey);
       body.set("line_items[0][quantity]", "1");
       body.set("line_items[0][price_data][currency]", "usd");
       body.set("line_items[0][price_data][unit_amount]", unitAmount);

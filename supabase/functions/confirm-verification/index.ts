@@ -74,6 +74,27 @@ function randomToken(): string {
 // failing with a real unique-constraint violation because a retry landed after a previous attempt
 // already succeeded) is untouched — first_name/last_name just ride along in the same insert body,
 // same atomicity, same retry-safety.
+//
+// MODIFIED AGAIN for Items 9/10 (2026-09-13 live-testing session): account_type rides along in the
+// same candidates insert (record.account_type, staged by send-verification — null defaults to
+// 'full_resume' here, same as the column's own DB default, so an older/unrelated caller that never
+// sends account_type at all is unaffected). kyc_verified_at is set to now() at this same moment,
+// ONLY for a license_only signup — deliberately NOT a separately-staged boolean: reaching this
+// function via record.account_type === 'license_only' at all structurally required the candidate to
+// have already passed through the licenseKyc screen (send-verification, and therefore this row, is
+// only ever reached from candidate.html AFTER that step for that account type — see
+// candidate.html's licenseDetails-continue handler), so the KYC step and the email-confirmation step
+// are coupled by construction, not by a second flag that could drift out of sync with the first. A
+// license_only signup also gets one certification_items row created here from record.staged_license
+// (Item 8's exact field set: name/issuing_body/license_number/trade_soc_code/issue_date/
+// expiration_date) — resume_document_id stays null (that column has always been nullable; there is
+// no resume for a license-only account), candidate_confirmed is true immediately (the candidate
+// typed this directly on licenseDetails; there's no separate extraction-to-confirm reconciliation
+// step the way resume-derived certifications have), and status is left at its own table default,
+// 'Not Submitted for Verification' — the exact same honest, pre-existing Item-18-model vocabulary
+// used everywhere else on this axis, not a new invented status string. Best-effort, same posture as
+// resumeBackfillError just below: a failure here doesn't fail the whole confirmation (the candidate
+// row already exists), it's surfaced in the response instead of silently swallowed.
 
 export default {
   fetch: withSupabase({ auth: "none" }, async (req, _ctx) => {
@@ -140,7 +161,7 @@ export default {
             "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
             "Prefer": "return=representation",
           },
-          body: JSON.stringify({ email: record.email, phone: record.phone, first_name: record.first_name, last_name: record.last_name, verification_id: record.id }),
+          body: JSON.stringify({ email: record.email, phone: record.phone, first_name: record.first_name, last_name: record.last_name, verification_id: record.id, account_type: record.account_type === 'license_only' ? 'license_only' : 'full_resume', kyc_verified_at: record.account_type === 'license_only' ? new Date().toISOString() : null }),
         });
 
         if (!insertRes.ok) {
@@ -210,6 +231,36 @@ export default {
         }
       }
 
+      // Items 9/10: the license-only signup's certification row — see this function's own header
+      // above for why resume_document_id stays null and status is left at its table default.
+      let licenseCreationError: string | null = null;
+      if (candidateId && record.account_type === 'license_only' && record.staged_license) {
+        const lic = record.staged_license;
+        const licenseRes = await fetch(`${SUPABASE_URL}/rest/v1/certification_items`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "apikey": SUPABASE_SERVICE_ROLE_KEY,
+            "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+            "Prefer": "return=minimal",
+          },
+          body: JSON.stringify({
+            candidate_id: candidateId,
+            resume_document_id: null,
+            name: lic.name || null,
+            issuing_body: lic.issuing_body || null,
+            license_number: lic.license_number || null,
+            trade_soc_code: lic.trade_soc_code || null,
+            issue_date: lic.issue_date || null,
+            expiration_date: lic.expiration_date || null,
+            candidate_confirmed: true,
+          }),
+        });
+        if (!licenseRes.ok) {
+          licenseCreationError = await licenseRes.text().catch(() => "license_creation_failed");
+        }
+      }
+
       // Item 2 (2026-09-08 regression session): real, confirmed regression (found live — a plain F5
       // anywhere between here and enterAccount() logged the candidate all the way out, losing their
       // place in onboarding). Root cause: this function is the moment a real candidate row first
@@ -227,6 +278,8 @@ export default {
       let candidateTier: string | null = null;
       let candidateHeaderDisplayMode: string | null = null;
       let candidatePersonalLocation: string | null = null;
+      let candidateAccountType: string | null = null;
+      let candidateKycVerifiedAt: string | null = null;
       if (candidateId) {
         const rawSessionToken = randomToken();
         const tokenHash = await hashToken(rawSessionToken);
@@ -248,13 +301,18 @@ export default {
           // paths return it uniformly" reasoning as resolve-session's own header explains, and this
           // is really a fourth such path (see the first_name/last_name comment on this response
           // below). A brand-new candidate just gets the DB defaults ('printed', null).
-          const candRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=tier,header_display_mode,personal_location`, {
+          const candRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=tier,header_display_mode,personal_location,account_type,kyc_verified_at`, {
             headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
           });
           const candRows = candRes.ok ? await candRes.json() : [];
           candidateTier = candRows[0]?.tier ?? null;
           candidateHeaderDisplayMode = candRows[0]?.header_display_mode ?? null;
           candidatePersonalLocation = candRows[0]?.personal_location ?? null;
+          // Read back rather than trusted from `record` directly — the duplicate-email race-recovery
+          // path above can reach this point with candidateId set from a PRIOR insert attempt, whose
+          // account_type may not match this request's own record if the two ever disagreed.
+          candidateAccountType = candRows[0]?.account_type ?? null;
+          candidateKycVerifiedAt = candRows[0]?.kyc_verified_at ?? null;
         }
         // A failed session insert does NOT fail confirmation itself — same posture as
         // resumeBackfillError above: the candidate row and resume linkage already succeeded, and a
@@ -288,10 +346,13 @@ export default {
         opt_in_education: !!record.opt_in_education,
         opt_in_certifications: !!record.opt_in_certifications,
         resume_backfill_error: resumeBackfillError,
+        license_creation_error: licenseCreationError,
         session_token: sessionToken,
         tier: candidateTier,
         header_display_mode: candidateHeaderDisplayMode,
         personal_location: candidatePersonalLocation,
+        account_type: candidateAccountType,
+        kyc_verified_at: candidateKycVerifiedAt,
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

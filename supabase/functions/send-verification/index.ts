@@ -27,6 +27,15 @@
 // row for pre-existing rows only — this function no longer writes it at all, on purpose; new rows
 // carry first_name/last_name instead. See the migration adding these columns for the full reasoning
 // and confirm-verification's own header for the read side.
+//
+// MODIFIED AGAIN for Items 9/10 (2026-09-13 live-testing session): account_type and staged_license
+// staged the same way opt_in_work_history etc. already are — candidates rows are only ever created
+// at confirm-verification time, so a license-only signup's account_type choice and its KYC/license-
+// entry step (both completed before this call, on the licenseKyc/licenseDetails screens) have to
+// ride along on this same email_verifications row to survive the wait for email confirmation, same
+// as everything else collected pre-confirmation. Both are optional/undefined on every full-resume
+// call site — this function defaults account_type to null (confirm-verification treats that as
+// 'full_resume') and staged_license to null, so the existing call site is unaffected.
 
 // Setup type definitions for built-in Supabase Runtime APIs
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -48,7 +57,7 @@ return new Response(null, { headers: corsHeaders });
 }
 
 try {
-const { email, phone, first_name, last_name, purpose, opt_in_work_history, opt_in_education, opt_in_certifications } = await req.json();
+const { email, phone, first_name, last_name, purpose, opt_in_work_history, opt_in_education, opt_in_certifications, account_type, staged_license } = await req.json();
 if (!email || typeof email !== "string") {
 return new Response(JSON.stringify({ ok: false, error: "Email required" }), {
 status: 400,
@@ -68,7 +77,7 @@ headers: {
 "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
 "Prefer": "return=representation",
 },
-body: JSON.stringify({ email, phone, first_name, last_name, token, expires_at: expiresAt, purpose: verifyPurpose, opt_in_work_history: !!opt_in_work_history, opt_in_education: !!opt_in_education, opt_in_certifications: !!opt_in_certifications }),
+body: JSON.stringify({ email, phone, first_name, last_name, token, expires_at: expiresAt, purpose: verifyPurpose, opt_in_work_history: !!opt_in_work_history, opt_in_education: !!opt_in_education, opt_in_certifications: !!opt_in_certifications, account_type: account_type === 'license_only' ? 'license_only' : (account_type === 'full_resume' ? 'full_resume' : null), staged_license: staged_license ?? null }),
 });
 
 if (!insertRes.ok) {

@@ -66,7 +66,7 @@ export default {
       }
 
       const candRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/candidates?id=eq.${session.candidate_id}&select=id,email,phone,full_name,first_name,last_name,deletion_scheduled_at,tier,tour_completed_at,header_display_mode,personal_location`,
+        `${SUPABASE_URL}/rest/v1/candidates?id=eq.${session.candidate_id}&select=id,email,phone,full_name,first_name,last_name,deletion_scheduled_at,tier,tour_completed_at,header_display_mode,personal_location,account_type,kyc_verified_at,license_subscription_started_at`,
         { headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } },
       );
       const candRows = candRes.ok ? await candRes.json() : [];
@@ -122,6 +122,15 @@ export default {
         // deletion_scheduled_at/tour_completed_at above.
         header_display_mode: candidate.header_display_mode,
         personal_location: candidate.personal_location,
+        // Items 9/10/11 (2026-09-13 live-testing session): account_type is what candidate.html
+        // branches the whole reduced-account-experience decision on (see ACCOUNT_TABS gating) — same
+        // "all session-establishing paths return it uniformly" reasoning as everything else on this
+        // response. kyc_verified_at/license_subscription_started_at ride along for the same reason
+        // tier does: a returning license-only candidate's Profile Info/Subscription tabs need the
+        // real, persisted values, not just what this one session happened to set at signup.
+        account_type: candidate.account_type,
+        kyc_verified_at: candidate.kyc_verified_at,
+        license_subscription_started_at: candidate.license_subscription_started_at,
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: "unhandled", detail: String(e) }), {

@@ -103,6 +103,8 @@ export default {
       let candidateTier: string | null = null;
       let candidateHeaderDisplayMode: string | null = null;
       let candidatePersonalLocation: string | null = null;
+      let candidateAccountType: string | null = null;
+      let candidateKycVerifiedAt: string | null = null;
       if (candidateId) {
         const rawSessionToken = randomToken();
         const tokenHash = await hashToken(rawSessionToken);
@@ -129,13 +131,15 @@ export default {
           sessionToken = rpcRows?.[0]?.session_token ?? null;
           // Item 6 (2026-09-12 live-testing session, follow-up build): see confirm-verification's
           // own comment on this same select addition.
-          const candRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=tier,header_display_mode,personal_location`, {
+          const candRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=tier,header_display_mode,personal_location,account_type,kyc_verified_at`, {
             headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
           });
           const candRows = candRes.ok ? await candRes.json() : [];
           candidateTier = candRows[0]?.tier ?? null;
           candidateHeaderDisplayMode = candRows[0]?.header_display_mode ?? null;
           candidatePersonalLocation = candRows[0]?.personal_location ?? null;
+          candidateAccountType = candRows[0]?.account_type ?? null;
+          candidateKycVerifiedAt = candRows[0]?.kyc_verified_at ?? null;
         }
         // A failed session issue does NOT fail this status check itself — same posture as
         // confirm-verification's own resumeBackfillError/session block: the confirmation already
@@ -163,6 +167,8 @@ export default {
         tier: candidateTier,
         header_display_mode: candidateHeaderDisplayMode,
         personal_location: candidatePersonalLocation,
+        account_type: candidateAccountType,
+        kyc_verified_at: candidateKycVerifiedAt,
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: "unhandled", detail: String(e) }), {

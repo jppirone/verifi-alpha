@@ -152,9 +152,25 @@ export default {
       // mechanism for attributing a session back to an internal id without a second lookup.
       // payment_status === "paid" (not just "the session completed") is the real gate: a completed
       // subscription Checkout session is only ever "paid" once payment has actually gone through.
+      //
+      // Item 10 (2026-09-13 live-testing session): session.metadata.product (set by test-stripe-
+      // checkout) is now checked BEFORE deciding which candidate column this payment means —
+      // previously every successful checkout.session.completed unconditionally flipped `tier`,
+      // which was correct when this webhook only ever handled the one Verifi Pro product. A
+      // license-tracking payment writes license_subscription_started_at instead — `tier`'s own check
+      // constraint and meaning are specific to the free/paid resume tier, and a license-only
+      // candidate never has a free resume tier to be "upgraded" from.
       const candidateId: string | null = session.client_reference_id || null;
+      const product: string = session.metadata?.product === "license_tracking" ? "license_tracking" : "resume_pro";
       if (candidateId && session.payment_status === "paid") {
         try {
+          const patchBody: Record<string, unknown> = { stripe_checkout_session_id: session.id || null };
+          if (product === "license_tracking") {
+            patchBody.license_subscription_started_at = new Date().toISOString();
+          } else {
+            patchBody.tier = "paid";
+            patchBody.tier_updated_at = new Date().toISOString();
+          }
           const patchRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${encodeURIComponent(candidateId)}`, {
             method: "PATCH",
             headers: {
@@ -163,17 +179,14 @@ export default {
               "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
               "Prefer": "return=representation",
             },
-            body: JSON.stringify({
-              tier: "paid",
-              tier_updated_at: new Date().toISOString(),
-              stripe_checkout_session_id: session.id || null,
-            }),
+            body: JSON.stringify(patchBody),
           });
           const patchRows = patchRes.ok ? await patchRes.json().catch(() => []) : [];
           summary.tierUpdate = {
             attempted: true,
             ok: patchRes.ok && Array.isArray(patchRows) && patchRows.length > 0,
             candidateId,
+            product,
             status: patchRes.status,
           };
         } catch (e) {
@@ -181,7 +194,7 @@ export default {
           // delivery success (signature verified, event parsed) shouldn't be reported as failed to
           // Stripe's own dashboard just because the downstream write hit a transient error. The
           // failure is still visible here, in this function's own invocation log and response body.
-          summary.tierUpdate = { attempted: true, ok: false, candidateId, error: String(e) };
+          summary.tierUpdate = { attempted: true, ok: false, candidateId, product, error: String(e) };
         }
       } else if (!candidateId) {
         summary.tierUpdate = { attempted: false, reason: "no_client_reference_id" };

@@ -2618,6 +2618,26 @@ a:hover{color:var(--color-accent)}
 </div>
 </sc-if>
 
+<!-- Item 9 (2026-09-13 live-testing session): the interstitial path choice, right after basic info.
+     account_type is the single field the rest of this branch (and the whole reduced account
+     experience — see the account-tab gating below) reads from -- not a separate file or route. -->
+<sc-if value="{{ isPathChoice }}" hint-placeholder-val="{{ false }}">
+<div style="max-width:640px;margin:0 auto;padding:88px 20px 40px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:var(--space-4)">
+  <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:26px;margin:0">What do you need?</h1>
+  <p style="margin:0;color:var(--color-neutral-400);font-size:15px;line-height:1.4">Pick the path that matches what you're trying to verify. You can't switch later in this alpha.</p>
+  <div style="display:flex;gap:var(--space-3);flex-wrap:wrap;justify-content:center;width:100%">
+    <button type="button" class="card elev-sm" style="flex:1;min-width:240px;text-align:left;cursor:pointer;border:1.5px solid var(--color-divider);background:var(--color-surface)" sc-camel-on-click="{{ choosePathFullResume }}">
+      <div style="font-size:16px;margin-bottom:6px;color:var(--color-neutral-100)">Full resume verification</div>
+      <div style="font-size:13px;color:var(--color-neutral-500);line-height:1.5">Upload your resume. We verify your employment, education, and certifications, and let you share a verified profile with employers.</div>
+    </button>
+    <button type="button" class="card elev-sm" style="flex:1;min-width:240px;text-align:left;cursor:pointer;border:1.5px solid var(--color-divider);background:var(--color-surface)" sc-camel-on-click="{{ choosePathLicenseOnly }}">
+      <div style="font-size:16px;margin-bottom:6px;color:var(--color-neutral-100)">License tracking only</div>
+      <div style="font-size:13px;color:var(--color-neutral-500);line-height:1.5">No resume needed. Track a professional license or certification's status and expiration on a recurring subscription.</div>
+    </button>
+  </div>
+</div>
+</sc-if>
+
 <sc-if value="{{ isDuplicateFound }}" hint-placeholder-val="{{ false }}">
 <div style="max-width:420px;margin:0 auto;padding:120px 20px 40px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:var(--space-3)">
   <div class="card elev-md" style="width:100%;padding:var(--space-8)">
@@ -2750,6 +2770,88 @@ a:hover{color:var(--color-accent)}
   <div style="font-size:12px;color:var(--color-neutral-600)">Unconfirmed uploads and files auto-delete after 14 days.</div>
   <button type="button" class="btn btn-ghost" style="font-size:12px;opacity:0.7;margin-top:var(--space-4)" sc-camel-on-click="{{ devConfirm }}">(prototype only) simulate clicking the email link</button>
   <button type="button" class="btn btn-ghost" style="font-size:12px;opacity:0.7" sc-camel-on-click="{{ simulateLeave }}">(prototype only) simulate leaving &amp; coming back before finishing</button>
+</div>
+</sc-if>
+
+<!-- Item 10 (2026-09-13 live-testing session): license-only signup, step 1 of 3 -- KYC. Reuses the
+     exact copy/actions already live on the Profile Info tab's KYC modal (kycModalOpen elsewhere in
+     this file), as an inline mandatory screen instead of a skippable dialog -- there is no vendor
+     integration here any more than the existing modal has one; "Simulate verification complete" is
+     the same honest placeholder language, not new dishonesty. -->
+<sc-if value="{{ isLicenseKyc }}" hint-placeholder-val="{{ false }}">
+<div style="max-width:480px;margin:0 auto;padding:88px 20px 40px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:var(--space-4)">
+  <div class="tag tag-outline">Step 1 of 3</div>
+  <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:24px;margin:0">Identity verification</h1>
+  <div class="card elev-sm" style="width:100%;padding:var(--space-6);text-align:left;display:flex;flex-direction:column;gap:var(--space-3)">
+    <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.5">You're being redirected to complete identity verification with our verification partner. This is required before you can track a license on this path.</div>
+    <div style="border:1px dashed var(--color-divider);border-radius:var(--radius-md);padding:var(--space-6);text-align:center;font-size:12px;color:var(--color-neutral-500)">generic identity-verification vendor placeholder</div>
+  </div>
+  <button type="button" class="btn btn-primary btn-block" sc-camel-on-click="{{ confirmLicenseKyc }}">Simulate verification complete</button>
+  <button type="button" class="btn btn-ghost" sc-camel-on-click="{{ backToPathChoice }}">Back</button>
+</div>
+</sc-if>
+
+<!-- Item 10, step 2 of 3 -- license number + trade taxonomy, reusing Item 8's exact field set
+     (resumeConfirm's certification card: name/issuing body/license number/issue+expiration date/
+     trade-occupation dropdown) rather than inventing a new taxonomy or layout. -->
+<sc-if value="{{ isLicenseDetails }}" hint-placeholder-val="{{ false }}">
+<div style="max-width:520px;margin:0 auto;padding:88px 20px 40px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:var(--space-4)">
+  <div class="tag tag-outline">Step 2 of 3</div>
+  <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:24px;margin:0">Your license</h1>
+  <p style="margin:0;color:var(--color-neutral-400);font-size:13px;line-height:1.4">This is candidate-stated information. It's tracked, not independently verified, until a real automated check is wired up.</p>
+  <div class="card elev-sm" style="width:100%;padding:var(--space-6);display:flex;flex-direction:column;gap:var(--space-3);text-align:left">
+    <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+      <div class="field" style="flex:1;min-width:160px"><label>Name</label><input class="input" value="{{ licenseName }}" sc-camel-on-change="{{ setLicenseName }}"></div>
+      <div class="field" style="flex:1;min-width:160px"><label>Issuing body</label><input class="input" value="{{ licenseIssuingBody }}" sc-camel-on-change="{{ setLicenseIssuingBody }}"></div>
+    </div>
+    <div class="field"><label>License number</label><input class="input" value="{{ licenseNumberField }}" sc-camel-on-change="{{ setLicenseNumberField }}"></div>
+    <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+      <div class="field" style="flex:1;min-width:140px"><label>Issue date</label><input class="input" type="date" value="{{ licenseIssueDate }}" sc-camel-on-change="{{ setLicenseIssueDate }}"></div>
+      <div class="field" style="flex:1;min-width:140px"><label>Expiration date</label><input class="input" type="date" value="{{ licenseExpirationDate }}" sc-camel-on-change="{{ setLicenseExpirationDate }}"></div>
+    </div>
+    <div class="field">
+      <label>Trade / occupation</label>
+      <sc-raw-select class="input" value="{{ licenseTradeSocCode }}" sc-camel-on-change="{{ setLicenseTradeSocCode }}">
+        <option value="">Select trade or occupation…</option>
+        <sc-for list="{{ socTradeOptions }}" as="opt" hint-placeholder-count="3">
+          <option value="{{ opt.code }}">{{ opt.label }}</option>
+        </sc-for>
+      </sc-raw-select>
+    </div>
+  </div>
+  <sc-if value="{{ emailSendError }}" hint-placeholder-val="{{ false }}">
+    <div style="font-size:12px;color:#e2735c">{{ emailSendError }}</div>
+  </sc-if>
+  <button type="button" class="btn btn-primary btn-block" disabled="{{ licenseDetailsContinueDisabled }}" sc-camel-on-click="{{ continueFromLicenseDetails }}">{{ licenseDetailsContinueLabel }}</button>
+  <button type="button" class="btn btn-ghost" sc-camel-on-click="{{ backToLicenseKyc }}">Back</button>
+</div>
+</sc-if>
+
+<!-- Item 10, step 3 of 3 -- billing choice + real Stripe subscription checkout. Reached only after
+     email confirmation (confirm-verification has already created the candidate row and the
+     certification_items row from the previous screen -- see applySignupConfirmation's own license-
+     only branch), same "real candidate_id exists before checkout ever fires" precondition the
+     existing full-resume tiers screen already relies on for its own real-Stripe redirect. -->
+<sc-if value="{{ isLicenseBilling }}" hint-placeholder-val="{{ false }}">
+<div style="max-width:480px;margin:0 auto;padding:88px 20px 40px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:var(--space-4)">
+  <div class="tag tag-outline">Step 3 of 3</div>
+  <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:24px;margin:0">Start your subscription</h1>
+  <p style="margin:0;color:var(--color-neutral-400);font-size:13px;line-height:1.4">License tracking is a recurring subscription — there's no free tier for this path.</p>
+  <div class="card elev-sm" style="width:100%;padding:var(--space-6);display:flex;flex-direction:column;gap:var(--space-3)">
+    <div class="seg" style="white-space:nowrap;align-self:center">
+      <label class="seg-opt" style="white-space:nowrap"><input type="radio" name="license-billing" checked="{{ licenseBillingMonthly }}" sc-camel-on-change="{{ setLicenseBillingMonthly }}">$9.99/mo</label>
+      <label class="seg-opt" style="white-space:nowrap"><input type="radio" name="license-billing" checked="{{ licenseBillingAnnual }}" sc-camel-on-change="{{ setLicenseBillingAnnual }}">$99/yr</label>
+    </div>
+    <!-- Confirmed with the user before building: this pricing is a placeholder, not a validated
+         market price -- flagged here plainly, same honesty posture as the KYC step's own
+         "simulate verification complete" placeholder, not silently presented as final. -->
+    <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Placeholder pricing — not yet validated against the real market for this. Billing recurs for real through Stripe test mode at your selected interval.</div>
+    <div style="font-size:11px;color:var(--color-neutral-500)">Test-mode Stripe Checkout. Use a published test card, e.g. 4242 4242 4242 4242, any future expiry, any CVC.</div>
+    <sc-if value="{{ checkoutError }}" hint-placeholder-val="{{ false }}">
+      <div style="font-size:12px;color:#e2735c">{{ checkoutError }}</div>
+    </sc-if>
+  </div>
+  <button type="button" class="btn btn-primary btn-block" disabled="{{ checkoutPending }}" sc-camel-on-click="{{ continueFromLicenseBilling }}">{{ licenseBillingContinueLabel }}</button>
 </div>
 </sc-if>
 
@@ -3278,19 +3380,37 @@ a:hover{color:var(--color-accent)}
     </div>
   </div>
 
-  <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.5;margin-bottom:var(--space-4)">Identity verification: not completed. Every tab stays open; only specific actions inside require verification.</div>
+  <!-- Item 11 (2026-09-13 live-testing session): this line is static text, not a real
+       kycVerified-driven condition — pre-existing, unrelated to this item's own scope, and left as
+       every full-resume candidate already saw it (kycVerified there is still pure client state, not
+       real backend fact — see the KYC modal's own header). A license_only candidate's KYC IS a
+       real, persisted fact by construction (kycVerifiedAt, set at confirm-verification time — see
+       that function's own header), so showing this exact "not completed" line to them would be a
+       new, avoidable dishonesty this item's own honesty standard doesn't allow. -->
+  <sc-if value="{{ showKycNotCompletedBanner }}" hint-placeholder-val="{{ true }}">
+    <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.5;margin-bottom:var(--space-4)">Identity verification: not completed. Every tab stays open; only specific actions inside require verification.</div>
+  </sc-if>
+  <sc-if value="{{ showKycCompletedBanner }}" hint-placeholder-val="{{ false }}">
+    <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.5;margin-bottom:var(--space-4)">Identity verification: completed.</div>
+  </sc-if>
 
 
   <div class="tabbar-desktop" style="width:100vw;margin-left:calc(50% - 50vw);margin-bottom:var(--space-6)">
     <div style="display:flex;gap:var(--space-2);border-bottom:1px solid var(--color-divider);flex-wrap:nowrap;overflow-x:auto;max-width:1040px;margin:0 auto;padding:0 20px">
     <button type="button" id="tab-profile" class="btn {{ tabProfileClass }}" sc-camel-on-click="{{ selectTabProfile }}">Profile Info</button>
-    <button type="button" id="tab-verification" class="btn {{ tabVerificationClass }}" sc-camel-on-click="{{ selectTabVerification }}">Verification Status</button>
+    <button type="button" id="tab-verification" class="btn {{ tabVerificationClass }}" sc-camel-on-click="{{ selectTabVerification }}">{{ verificationTabLabel }}</button>
+    <!-- Item 11 (2026-09-13 live-testing session): Content Manager/Customization/Views/Sharing/
+         Activity all assume resume-derived content — see isFullResumeAccount's own comment. -->
+    <sc-if value="{{ isFullResumeAccount }}" hint-placeholder-val="{{ true }}">
     <button type="button" id="tab-contentManager" class="btn {{ tabContentManagerClass }}" sc-camel-on-click="{{ selectTabContentManager }}">Content Manager</button>
     <button type="button" id="tab-customization" class="btn {{ tabCustomizationClass }}" sc-camel-on-click="{{ selectTabCustomization }}">Customization</button>
     <button type="button" id="tab-views" class="btn {{ tabViewsClass }}" sc-camel-on-click="{{ selectTabViews }}">Views</button>
     <button type="button" id="tab-sharing" class="btn {{ tabSharingClass }}" sc-camel-on-click="{{ selectTabSharing }}">Sharing</button>
+    </sc-if>
     <button type="button" id="tab-subscription" class="btn {{ tabSubscriptionClass }}" sc-camel-on-click="{{ selectTabSubscription }}">Subscription</button>
+    <sc-if value="{{ isFullResumeAccount }}" hint-placeholder-val="{{ true }}">
     <button type="button" id="tab-activity" class="btn {{ tabActivityClass }}" sc-camel-on-click="{{ selectTabActivity }}">Activity</button>
+    </sc-if>
     <button type="button" id="tab-deactivation" class="btn {{ tabDeactivationClass }}" sc-camel-on-click="{{ selectTabDeactivation }}">Account Deactivation</button>
     </div>
   </div>
@@ -3458,7 +3578,10 @@ a:hover{color:var(--color-accent)}
         <!-- Item 6 (2026-09-12 live-testing session, follow-up build): the one real, explicit
              all-or-nothing choice for what header (name/contact/location) renders on generated
              documents and downstream partner deliveries. Deliberately never partial/field-by-field —
-             see the tradeoff copy right below the radios for why. -->
+             see the tradeoff copy right below the radios for why.
+             Item 11 (2026-09-13 live-testing session): gated to full-resume accounts only — a
+             license_only candidate never has a generated resume document for this to apply to. -->
+        <sc-if value="{{ isFullResumeAccount }}" hint-placeholder-val="{{ true }}">
         <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
           <div class="card-kicker">Document header on generated files</div>
           <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Choose which version of your header we use when we generate a resume or share your profile with a partner.</div>
@@ -3483,6 +3606,7 @@ a:hover{color:var(--color-accent)}
             <div style="font-size:12px;color:var(--color-accent-300)">Header preference saved.</div>
           </sc-if>
         </div>
+        </sc-if>
 
         <sc-if value="{{ showCrossValidationPrompt }}" hint-placeholder-val="{{ false }}">
           <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
@@ -3549,6 +3673,12 @@ a:hover{color:var(--color-accent)}
       </div>
     </sc-if>
     <sc-if value="{{ tabIsVerification }}" hint-placeholder-val="{{ false }}">
+      <!-- Item 11 (2026-09-13 live-testing session): this tab/key slot is shared by both account
+           types (see the desktop tab bar's own comment) -- everything below down to the matching
+           isLicenseOnlyAccount block is the pre-existing full-resume content, untouched, just now
+           gated so a license_only account (which has none of this: no verification_items rows, no
+           resume-derived claims) never renders it. -->
+      <sc-if value="{{ isFullResumeAccount }}" hint-placeholder-val="{{ true }}">
       <div style="display:flex;flex-direction:column;gap:var(--space-6)">
 
         <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">
@@ -3662,6 +3792,41 @@ a:hover{color:var(--color-accent)}
           <span style="font-size:11px;color:var(--color-neutral-600)">(full record, JSON Resume format, available anytime on every tier)</span>
         </div>
       </div>
+      </sc-if>
+
+      <!-- Item 11: License Status content for license_only accounts, same shared tab/key slot. -->
+      <sc-if value="{{ isLicenseOnlyAccount }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-direction:column;gap:var(--space-6)">
+        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">
+          This is candidate-stated information — tracked, not independently verified. No automated licensing-board check is wired up yet; that's a separate, deliberate integration decision still pending.
+        </div>
+
+        <sc-if value="{{ licenseItemsLoading }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:13px;color:var(--color-neutral-500)">Loading your license(s)…</div>
+        </sc-if>
+        <sc-if value="{{ licenseItemsError }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:13px;color:var(--color-neutral-500)">We couldn't load your license(s) just now. Try refreshing the page.</div>
+        </sc-if>
+        <sc-if value="{{ hasNoLicenseItems }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:13px;color:var(--color-neutral-500)">No licenses tracked yet.</div>
+        </sc-if>
+
+        <sc-for list="{{ licenseItemRows }}" as="row" hint-placeholder-count="1">
+          <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:var(--space-3)">
+              <div>
+                <div class="card-title" style="margin-bottom:2px">{{ row.name }}</div>
+                <div style="font-size:12px;color:var(--color-neutral-500)">{{ row.tradeLabel }}{{ row.issuingBodyPart }}{{ row.licenseNumberPart }}</div>
+              </div>
+              <span class="tag tag-outline">{{ row.status }}</span>
+            </div>
+            <sc-if value="{{ row.hasExpiration }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:12px;color:var(--color-neutral-500)">Expires {{ row.expirationLabel }}. No reminders are active yet — this is display only until that's built.</div>
+            </sc-if>
+          </div>
+        </sc-for>
+      </div>
+      </sc-if>
     </sc-if>
 
     <sc-if value="{{ tabIsCustomization }}" hint-placeholder-val="{{ false }}">
@@ -4110,6 +4275,9 @@ a:hover{color:var(--color-accent)}
       </div>
     </sc-if>
     <sc-if value="{{ tabIsSubscription }}" hint-placeholder-val="{{ false }}">
+      <!-- Item 11: the pre-existing free/paid Verifi Pro comparison content, gated -- none of it
+           applies to license_only (no free tier exists for that product; nothing here to compare). -->
+      <sc-if value="{{ isFullResumeAccount }}" hint-placeholder-val="{{ true }}">
       <div style="display:flex;flex-direction:column;gap:var(--space-6)">
 
         <sc-raw-table class="table">
@@ -4189,6 +4357,25 @@ a:hover{color:var(--color-accent)}
           </sc-if>
         </div>
       </div>
+      </sc-if>
+
+      <!-- Item 11: license_only's own Subscription content -- plan/price/billing/payment-method,
+           no free-tier comparison (there is no free tier for this product). -->
+      <sc-if value="{{ isLicenseOnlyAccount }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-direction:column;gap:var(--space-6)">
+        <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+          <div class="card-kicker">License Tracking subscription</div>
+          <sc-if value="{{ hasLicenseSubscription }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:13px;color:var(--color-neutral-300)">Active since {{ licenseSubscriptionStartedLabel }}.</div>
+          </sc-if>
+          <sc-if value="{{ hasNoLicenseSubscription }}" hint-placeholder-val="{{ true }}">
+            <div style="font-size:13px;color:var(--color-neutral-300)">No active subscription.</div>
+            <button type="button" class="btn btn-primary" style="align-self:flex-start" sc-camel-on-click="{{ goToLicenseBillingFromAccount }}">Start subscription</button>
+          </sc-if>
+          <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Placeholder pricing ($9.99/mo or $99/yr) — not yet validated against the real market for this. Billing recurs for real through Stripe test mode.</div>
+        </div>
+      </div>
+      </sc-if>
     </sc-if>
     <sc-if value="{{ tabIsActivity }}" hint-placeholder-val="{{ false }}">
       <div style="display:flex;flex-direction:column;gap:var(--space-4)">
@@ -4933,6 +5120,23 @@ class Component extends DCLogic {
     { key: 'deactivation', label: 'Account Deactivation' },
   ];
 
+  // Item 11 (2026-09-13 live-testing session): the mobile tab-bar's own source list, filtered by
+  // account_type the same way the desktop tab bar's individual sc-if wraps are — kept as one method
+  // rather than a second hardcoded array so the two surfaces can't drift out of sync with each
+  // other. 'verification' keeps its one shared key/slot for both account types (see the desktop
+  // tab bar's own comment) with only its label swapped.
+  getAccountTabsForType() {
+    if (this.state.accountType === 'license_only') {
+      return [
+        { key: 'profile', label: 'Profile Info' },
+        { key: 'verification', label: 'License Status' },
+        { key: 'subscription', label: 'Subscription' },
+        { key: 'deactivation', label: 'Account Deactivation' },
+      ];
+    }
+    return this.ACCOUNT_TABS;
+  }
+
   // Real dead end found live (2026-09-07 wiring audit): Content Manager, Customization, and Views
   // all read from this exact fixture (CZ_CATEGORIES was a hardcoded constant — "Acme Inc.", "Beta
   // Corp", "State University", a fake AWS cert) instead of the candidate's own real, confirmed
@@ -5605,6 +5809,43 @@ class Component extends DCLogic {
     });
   }
 
+  // Item 11 (2026-09-13 live-testing session): the License Status tab's own data load — mirrors
+  // ensureVerificationItemsLoaded/loadVerificationItems exactly, against list-candidate-licenses
+  // (see that function's own header for why it's a separate, small function rather than a reuse of
+  // get-resume-extraction, which is keyed off a resume_document a license_only candidate never has).
+  ensureLicenseItemsLoaded() {
+    const s = this.state;
+    const candidateId = s.resumeCandidateId;
+    if (!candidateId || s.licenseItemsLoadedFor === candidateId || s.licenseItemsLoading) return;
+    this.loadLicenseItems(candidateId);
+  }
+
+  async loadLicenseItems(candidateId) {
+    this.setState({ licenseItemsLoading: true, licenseItemsError: null });
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/list-candidate-licenses', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate_id: candidateId }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ licenseItemsLoading: false, licenseItemsError: 'network' });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      this.setState({ licenseItemsLoading: false, licenseItemsError: 'load_failed' });
+      return;
+    }
+    this.setState({
+      licenseItemsLoading: false,
+      licenseItemsError: null,
+      licenseItems: data.licenses || [],
+      licenseItemsLoadedFor: candidateId,
+    });
+  }
+
   buildResumeLines(target) {
     const s = this.state;
     const cats = this.getCzCategories();
@@ -6097,6 +6338,20 @@ class Component extends DCLogic {
     savedHeaderDisplayMode: 'printed', savedPersonalLocation: '',
     headerPrefsSavePending: false, headerPrefsSaveError: null, headerPrefsSaved: false,
     optInWorkHistory: false, optInEducation: false, optInCertifications: false,
+    // Items 9/10/11 (2026-09-13 live-testing session): the license-only signup branch. accountType
+    // is null until the pathChoice screen sets it (full_resume/license_only) — once a real session
+    // resolves, applySession overwrites it with the server's real value, same pattern as tier/
+    // headerDisplayMode. licenseKycConfirmed/license* fields are pre-confirmation staging state only
+    // (mirrors fileName/firstName/etc. above) — nothing here is written to the database until
+    // sendVerificationEmail stages it onto email_verifications and confirm-verification reads it
+    // back at real candidate-row-creation time (see that function's own header).
+    accountType: null,
+    licenseKycConfirmed: false,
+    licenseName: '', licenseIssuingBody: '', licenseNumber: '', licenseTradeSocCode: '',
+    licenseIssueDate: '', licenseExpirationDate: '',
+    licenseBillingCycle: 'monthly',
+    kycVerifiedAt: null, licenseSubscriptionStartedAt: null,
+    licenseItems: [], licenseItemsLoading: false, licenseItemsError: null, licenseItemsLoadedFor: null,
     resumeFileStaged: null, resumeFileError: null,
     resumeEmailVerificationId: null, resumeDocumentId: null,
     resumeCandidateId: null, resumeExtraction: null, resumeExtractionLoading: false,
@@ -6393,6 +6648,18 @@ class Component extends DCLogic {
 
   getTourSteps() {
     const paid = this.state.accountTier === 'paid';
+    // Item 11 (2026-09-13 live-testing session): license_only gets its own, much shorter tour —
+    // walking it through Content Manager/Customization/Views/Sharing/Activity would either reference
+    // tabs that aren't even in the bar for this account type, or (worse) silently render nothing
+    // useful underneath. Mirrors the reduced tab set exactly.
+    if (this.state.accountType === 'license_only') {
+      return [
+        { tab: 'profile', title: 'Profile Info', body: 'Manage your name, email, and contact info.' },
+        { tab: 'verification', title: 'License Status', body: 'Track your license(s) and their status here. This is candidate-stated information, tracked but not independently verified until a real automated check is wired up.' },
+        { tab: 'subscription', title: 'Subscription', body: 'See your license-tracking subscription and change your billing details whenever you like.' },
+        { tab: 'deactivation', title: 'Account Deactivation', body: 'End your account here, with a 30-day recovery window before anything is permanently deleted.' },
+      ];
+    }
     return [
       { tab: 'profile', title: 'Profile Info', body: 'Manage your name, email, password, and the contact info that gets printed and delivered.' },
       { tab: 'verification', title: 'Verification Status', body: 'Track identity verification (KYC) and the status of every item on your resume.' },
@@ -6417,6 +6684,11 @@ class Component extends DCLogic {
     const patch = { screen: 'account', accountTab: first ? steps[0].tab : 'profile' };
     if (first) { patch.tourActive = true; patch.tourStep = 0; }
     this.setState(patch, () => { if (first) this.measureTourTarget(); });
+    // Item 11: a license_only candidate has no resume_document, ever — Content Manager/
+    // Customization/Views (the only three consumers of resumeExtraction) are hidden entirely for
+    // this account type, so loading it here would just be a wasted round trip returning
+    // resume_document: null every time.
+    if (this.state.accountType === 'license_only') return;
     // Real dead end this closes (2026-09-07 wiring audit): resumeExtraction only ever loaded on the
     // resumeConfirm screen — a candidate who was already complete and landed straight here (the
     // normal, common case for a returning login) never had it loaded at all, so Content Manager/
@@ -6746,7 +7018,11 @@ class Component extends DCLogic {
     else if (this.state.loginToken) this.confirmLoginToken(this.state.loginToken);
   }
 
-  async sendVerificationEmail(email, phone, firstName, lastName, purpose = 'signup') {
+  // Items 9/10 (2026-09-13 live-testing session): accountType/stagedLicense are the license-only
+  // signup's own staged fields, added as optional trailing params so the existing full-resume call
+  // site (isEntry/isPreview, neither argument passed) is completely unaffected — send-verification
+  // itself already defaults both to null when omitted (see its own header).
+  async sendVerificationEmail(email, phone, firstName, lastName, purpose = 'signup', accountType = null, stagedLicense = null) {
     this.setState({ emailSendPending: true, emailSendError: null });
     let res, data;
     try {
@@ -6762,6 +7038,8 @@ class Component extends DCLogic {
           opt_in_work_history: this.state.optInWorkHistory,
           opt_in_education: this.state.optInEducation,
           opt_in_certifications: this.state.optInCertifications,
+          account_type: accountType,
+          staged_license: stagedLicense,
         }),
       });
       data = await res.json().catch(() => ({}));
@@ -7053,8 +7331,13 @@ class Component extends DCLogic {
       this.setState({ screen: 'duplicateFound' });
       return;
     }
-    this.setState({ screen: 'entry' });
-    this.saveDraft({ screen: 'entry' });
+    // Item 9 (2026-09-13 live-testing session): the new interstitial path choice, right after basic
+    // info/duplicate-check and before the (previously unconditional) jump into the resume-upload
+    // flow — full_resume continues into that same 'entry' screen unchanged; license_only branches
+    // into the new licenseKyc/licenseDetails/licenseBilling sequence instead (see pathChoice's own
+    // render-vals below).
+    this.setState({ screen: 'pathChoice' });
+    this.saveDraft({ screen: 'pathChoice' });
   }
 
   // A draft's saved `screen` is only ever a UI convenience for where to resume, never proof
@@ -7337,8 +7620,34 @@ class Component extends DCLogic {
       // default instead of against itself.
       savedHeaderDisplayMode: (profile && profile.header_display_mode) || this.state.savedHeaderDisplayMode,
       savedPersonalLocation: (profile && profile.personal_location) || this.state.savedPersonalLocation,
+      // Items 9/10/11 (2026-09-13 live-testing session): accountType is what every downstream
+      // account-tab-gating render-val branches on — same "falls through to whatever's already in
+      // state" defensive shape as accountTier/tier above, though every session-establishing response
+      // now always selects it (see resolve-session's own header), so a fall-through is never expected
+      // in practice for an existing candidate. kycVerifiedAt/licenseSubscriptionStartedAt are one-
+      // directional facts, same guard style as tourEverShown above — a session-resolve response with
+      // nothing to say never un-sets an already-locally-known value.
+      accountType: (profile && profile.account_type) || this.state.accountType,
+      kycVerifiedAt: (profile && profile.kyc_verified_at) || this.state.kycVerifiedAt,
+      licenseSubscriptionStartedAt: (profile && profile.license_subscription_started_at) || this.state.licenseSubscriptionStartedAt,
     });
     if (reactivateNeeded) { this.setState({ screen: 'reactivate', deletionScheduled: true, deletionDate }); return; }
+    // Items 9/10/11: a license_only candidate has no resume_document, ever — checkResumeFlowIncomplete
+    // and checkEmployerContactIncomplete both call get-resume-extraction and would otherwise
+    // misread "no resume_document row" (the correct, permanent state for this account type) as
+    // "resume flow not yet finished," routing every license_only candidate into resumeConfirm on
+    // every single login. Short-circuit past both checks for this account type instead — there is no
+    // resume flow for either of them to be incomplete. A license_only candidate who hasn't completed
+    // the mandatory subscription checkout yet (profile.license_subscription_started_at still null —
+    // true both for a just-confirmed fresh signup, which is how this path is normally reached, and
+    // for one who abandoned checkout earlier and is only now returning) goes back to licenseBilling
+    // rather than into the account dashboard; one who has already paid goes straight to enterAccount()
+    // like any other returning session.
+    if ((profile && profile.account_type) === 'license_only') {
+      if (!(profile && profile.license_subscription_started_at)) { this.setState({ screen: 'licenseBilling' }); return; }
+      this.enterAccount();
+      return;
+    }
 
     // Real dead end found live (2026-09-07), confirmed against two real candidates before this was
     // written, not theorized: screen only ever becomes 'resumeConfirm' in ONE place in this whole
@@ -7509,13 +7818,22 @@ class Component extends DCLogic {
     const s = this.state;
     if (!s.resumeCandidateId || s.checkoutPending) return;
     const fromSignupTiers = !!(opts && opts.fromSignupTiers);
+    // Item 10 (2026-09-13 live-testing session): product distinguishes the license-tracking
+    // subscription from the pre-existing Verifi Pro upgrade — see test-stripe-checkout's own
+    // header. billingCycle is read from opts when the caller passes one (licenseBilling has its own
+    // licenseBillingCycle field, kept deliberately separate from the Subscription tab's own
+    // billingCycle so the two flows can never cross-contaminate each other's selection) and falls
+    // back to s.billingCycle otherwise, unchanged for every existing call site.
+    const product = (opts && opts.product) || 'resume_pro';
+    const billingCycle = (opts && opts.billingCycle) || s.billingCycle;
     this.setState({ checkoutPending: true, checkoutError: null, checkoutCancelledNotice: false });
     try {
       localStorage.setItem('verifi_checkout_return', JSON.stringify({
         upgradeReturnTab: s.upgradeReturnTab || null,
         upgradeReturnTarget: s.upgradeReturnTarget || null,
-        billingCycle: s.billingCycle,
+        billingCycle,
         fromSignupTiers,
+        product,
       }));
     } catch (e) {}
     let res, data;
@@ -7523,7 +7841,7 @@ class Component extends DCLogic {
       res = await fetch(this.SUPABASE_FN_URL + '/test-stripe-checkout', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_id: s.resumeCandidateId, billing_cycle: s.billingCycle }),
+        body: JSON.stringify({ candidate_id: s.resumeCandidateId, billing_cycle: billingCycle, product }),
       });
       data = await res.json().catch(() => ({}));
     } catch (e) {
@@ -7566,9 +7884,16 @@ class Component extends DCLogic {
     try { returnCtx = JSON.parse(localStorage.getItem('verifi_checkout_return') || 'null'); } catch (e) {}
     try { localStorage.removeItem('verifi_checkout_return'); } catch (e) {}
     const fromSignupTiers = !!(returnCtx && returnCtx.fromSignupTiers);
+    // Item 10 (2026-09-13 live-testing session): the license-tracking subscription reuses this exact
+    // return handler (see startRealCheckout's own header) rather than a parallel one — isLicenseFlow
+    // is the one branch point that separates its landing screens/activity copy/success signal from
+    // the pre-existing Verifi Pro upgrade's, everything else below is shared.
+    const isLicenseFlow = !!(returnCtx && returnCtx.product === 'license_tracking');
 
     if (checkout === 'cancel') {
-      if (fromSignupTiers) {
+      if (isLicenseFlow) {
+        this.setState({ screen: 'licenseBilling', checkoutError: null });
+      } else if (fromSignupTiers) {
         // Land back on the tiers screen itself, still showing Pro selected, rather than the
         // Subscription tab's own cancelled-notice banner (which nothing renders on this screen).
         this.setState({ screen: 'tiers', tier: 'paid', checkoutError: null });
@@ -7581,29 +7906,46 @@ class Component extends DCLogic {
 
     // The real webhook write (test-stripe-webhook) can race this redirect — Stripe fires it
     // independently of the browser, no ordering guarantee either way. Re-resolving the session
-    // (rather than trusting the redirect alone) is what actually confirms tier flipped, with a few
-    // spaced retries before giving up and telling the candidate honestly that it may still be
-    // processing, rather than either lying that it succeeded or leaving them on a stale Free view.
+    // (rather than trusting the redirect alone) is what actually confirms the payment landed, with a
+    // few spaced retries before giving up and telling the candidate honestly that it may still be
+    // processing, rather than either lying that it succeeded or leaving them on a stale view. Which
+    // column proves success differs by product — license_subscription_started_at for license
+    // tracking, accountTier for the resume Pro upgrade — see test-stripe-webhook's own header on why
+    // those are two separate columns, not one repurposed for both.
     this.setState({ checkoutPending: true });
-    let confirmedPaid = this.state.accountTier === 'paid';
-    for (let i = 0; !confirmedPaid && i < 8; i++) {
+    const alreadyConfirmed = () => isLicenseFlow ? !!this.state.licenseSubscriptionStartedAt : this.state.accountTier === 'paid';
+    let confirmed = alreadyConfirmed();
+    for (let i = 0; !confirmed && i < 8; i++) {
       if (i > 0) await new Promise((r) => setTimeout(r, 1500));
       const ok = await this.resolveSession();
-      confirmedPaid = ok && this.state.accountTier === 'paid';
+      confirmed = ok && alreadyConfirmed();
+    }
+    if (isLicenseFlow) {
+      this.setState({
+        checkoutPending: false,
+        checkoutError: confirmed ? null : "Payment may still be processing — check back in a moment, or contact support if this persists.",
+        screen: confirmed ? 'account' : 'licenseBilling',
+        accountTab: confirmed ? 'verification' : this.state.accountTab,
+      }, () => {
+        if (!confirmed) return;
+        this.addActivityLog('License-tracking subscription started at signup');
+        this.ensureLicenseItemsLoaded();
+      });
+      return;
     }
     const patch = {
       checkoutPending: false,
       changePlanOpen: false,
-      tierSelection: confirmedPaid ? 'paid' : this.state.tierSelection,
-      checkoutSuccessNotice: confirmedPaid && !fromSignupTiers,
-      checkoutError: confirmedPaid ? null : "Payment may still be processing — check back in a moment, or contact support if this persists.",
+      tierSelection: confirmed ? 'paid' : this.state.tierSelection,
+      checkoutSuccessNotice: confirmed && !fromSignupTiers,
+      checkoutError: confirmed ? null : "Payment may still be processing — check back in a moment, or contact support if this persists.",
     };
     if (returnCtx && returnCtx.billingCycle) patch.billingCycle = returnCtx.billingCycle;
     if (fromSignupTiers) {
       patch.tier = 'paid';
-      patch.screen = confirmedPaid ? 'interstitial' : 'tiers';
-      if (confirmedPaid) this.addActivityLog('Paid plan selected at signup');
-    } else if (confirmedPaid && returnCtx && returnCtx.upgradeReturnTab) {
+      patch.screen = confirmed ? 'interstitial' : 'tiers';
+      if (confirmed) this.addActivityLog('Paid plan selected at signup');
+    } else if (confirmed && returnCtx && returnCtx.upgradeReturnTab) {
       patch.accountTab = returnCtx.upgradeReturnTab;
       if (returnCtx.upgradeReturnTab === 'customization') patch.customizeTarget = returnCtx.upgradeReturnTarget;
       if (returnCtx.upgradeReturnTab === 'views') patch.viewsTabPartner = returnCtx.upgradeReturnTarget;
@@ -8379,6 +8721,16 @@ class Component extends DCLogic {
         window.history.replaceState({}, '', url);
         this.setState({ screen: 'returning', loginConfirmStatus: null, loginConfirmErrorReason: null, loginToken: null });
       },
+      // Item 11 (2026-09-13 live-testing session): the single account_type gate every tab-bar
+      // button/tab-content section/tour step below branches on. Content Manager, Customization,
+      // Views, Sharing, and Activity all assume resume-derived content that structurally doesn't
+      // exist for a license_only account (confirmed by reading each one's actual content before
+      // this — none of them have a non-resume fallback path today) — reduced tab set proposed to
+      // and confirmed with the user before building, not assumed.
+      isFullResumeAccount: s.accountType !== 'license_only',
+      isLicenseOnlyAccount: s.accountType === 'license_only',
+      showKycCompletedBanner: s.accountType === 'license_only' && !!s.kycVerifiedAt,
+      showKycNotCompletedBanner: !(s.accountType === 'license_only' && !!s.kycVerifiedAt),
       tabIsProfile: s.accountTab === 'profile',
       tabProfileClass: s.accountTab === 'profile' ? 'btn-secondary' : 'btn-ghost',
       selectTabProfile: () => this.guardedNav(() => this.setState({ accountTab: 'profile' })),
@@ -8456,6 +8808,21 @@ class Component extends DCLogic {
       selectTierFree: () => { if (s.accountTier === 'paid') return; this.setState({ tierSelection: 'free' }); },
       selectTierPaid: () => { if (s.accountTier === 'paid') return; this.setState({ tierSelection: 'paid' }); },
       isCurrentlyPaid: s.accountTier === 'paid',
+      // Item 11: license_only's own Subscription-tab facts — licenseSubscriptionStartedAt is real,
+      // persisted state (candidates.license_subscription_started_at, written by test-stripe-webhook —
+      // see that function's own header), not client-only.
+      hasLicenseSubscription: !!s.licenseSubscriptionStartedAt,
+      hasNoLicenseSubscription: !s.licenseSubscriptionStartedAt,
+      // Confirmed live: monthYearLabel appends 'T00:00:00' to its input, which is correct for the
+      // plain `date` columns it was written for (issue_date/expiration_date) but produces an
+      // unparseable string — and a silently blank label ("Active since .") — for this column, a real
+      // `timestamptz` already carrying its own time and offset. Parsed directly instead.
+      licenseSubscriptionStartedLabel: (() => {
+        if (!s.licenseSubscriptionStartedAt) return '';
+        const d = new Date(s.licenseSubscriptionStartedAt);
+        return isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+      })(),
+      goToLicenseBillingFromAccount: () => this.setState({ screen: 'licenseBilling' }),
       showUpgradeFlow: (s.tierSelection === 'paid' && s.accountTier === 'free') || s.changePlanOpen,
       // Item 10 (2026-09-08 regression session): reproduced live via code trace — this was the one
       // paid-gate entry point into startRealCheckout that never set upgradeReturnTab, unlike
@@ -8910,6 +9277,28 @@ class Component extends DCLogic {
       }, () => this.renderViewsOriginalPdfViewer()),
       resetViewsOriginalPdfZoom: () => this.setState(st => ({ viewsOriginalPdfViewerScale: st.viewsOriginalPdfViewerFitScale }), () => this.renderViewsOriginalPdfViewer()),
       tabIsVerification: s.accountTab === 'verification',
+      // Item 11: the same tab key/slot is reused for both account types rather than adding a
+      // parallel 'licenseStatus' tab — only the label and the content rendered inside it (see
+      // tabIsVerification's own template block) differ.
+      verificationTabLabel: s.accountType === 'license_only' ? 'License Status' : 'Verification Status',
+      // Item 11: License Status tab rows — reads directly off s.licenseItems (loaded via
+      // list-candidate-licenses, see ensureLicenseItemsLoaded). status is rendered VERBATIM from the
+      // real Item-18-model column (e.g. 'Not Submitted for Verification') — this is candidate-facing
+      // but license_only has no separate staff-facing/candidate-facing status split the way
+      // verification_items does yet, so there's nothing to translate through.
+      hasNoLicenseItems: !s.licenseItemsLoading && !s.licenseItemsError && s.licenseItems.length === 0,
+      licenseItemRows: s.licenseItems.map(lic => {
+        const trade = this.SOC_TRADE_OPTIONS.find(opt => opt.code === lic.trade_soc_code);
+        return {
+          name: lic.name || '(unnamed license)',
+          tradeLabel: trade ? trade.label : 'Trade/occupation not selected',
+          issuingBodyPart: lic.issuing_body ? ' · ' + lic.issuing_body : '',
+          licenseNumberPart: lic.license_number ? ' · Lic #' + lic.license_number : '',
+          status: lic.status,
+          hasExpiration: !!lic.expiration_date,
+          expirationLabel: lic.expiration_date ? this.monthYearLabel(lic.expiration_date) : '',
+        };
+      }),
       filterIsActive: s.verificationFilter === 'active',
       filterIsAll: s.verificationFilter === 'all',
       filterIsCompleted: s.verificationFilter === 'completed',
@@ -9019,7 +9408,10 @@ class Component extends DCLogic {
       tabSubscriptionClass: s.accountTab === 'subscription' ? 'btn-secondary' : 'btn-ghost',
       tabActivityClass: s.accountTab === 'activity' ? 'btn-secondary' : 'btn-ghost',
       tabDeactivationClass: s.accountTab === 'deactivation' ? 'btn-secondary' : 'btn-ghost',
-      selectTabVerification: () => this.guardedNav(() => { this.setState({ accountTab: 'verification' }); this.ensureVerificationItemsLoaded(); }),
+      selectTabVerification: () => this.guardedNav(() => {
+        this.setState({ accountTab: 'verification' });
+        if (s.accountType === 'license_only') this.ensureLicenseItemsLoaded(); else this.ensureVerificationItemsLoaded();
+      }),
       selectTabSharing: () => this.guardedNav(() => this.setState({ accountTab: 'sharing' })),
       selectTabSubscription: () => this.guardedNav(() => this.setState({ accountTab: 'subscription' })),
       selectTabActivity: () => this.guardedNav(() => this.setState({ accountTab: 'activity' })),
@@ -9028,18 +9420,57 @@ class Component extends DCLogic {
       mobileNavOpenStr: s.mobileNavOpen ? 'true' : 'false',
       toggleMobileNav: () => this.setState(st => ({ mobileNavOpen: !st.mobileNavOpen })),
       closeMobileNav: () => this.setState({ mobileNavOpen: false }),
-      currentTabLabel: (this.ACCOUNT_TABS.find(t => t.key === s.accountTab) || {}).label || 'Menu',
-      mobileTabRows: this.ACCOUNT_TABS.map(t => ({
+      currentTabLabel: (this.getAccountTabsForType().find(t => t.key === s.accountTab) || {}).label || 'Menu',
+      mobileTabRows: this.getAccountTabsForType().map(t => ({
         label: t.label,
         activeStyle: s.accountTab === t.key ? 'color:var(--color-accent)' : '',
         onSelect: () => {
           this.setState({ mobileNavOpen: false });
           this.guardedNav(() => this.setState({ accountTab: t.key }));
-          if (t.key === 'verification') this.ensureVerificationItemsLoaded();
+          if (t.key === 'verification') {
+            if (s.accountType === 'license_only') this.ensureLicenseItemsLoaded(); else this.ensureVerificationItemsLoaded();
+          }
         },
       })),
       isSignupDetails: s.screen === 'signupDetails',
       isDuplicateFound: s.screen === 'duplicateFound',
+      // Items 9/10: the license-only signup branch's own screens.
+      isPathChoice: s.screen === 'pathChoice',
+      choosePathFullResume: () => { this.setState({ accountType: 'full_resume', screen: 'entry' }); this.saveDraft({ screen: 'entry' }); },
+      choosePathLicenseOnly: () => this.setState({ accountType: 'license_only', screen: 'licenseKyc' }),
+      isLicenseKyc: s.screen === 'licenseKyc',
+      confirmLicenseKyc: () => this.setState({ licenseKycConfirmed: true, screen: 'licenseDetails' }),
+      backToPathChoice: () => this.setState({ screen: 'pathChoice' }),
+      isLicenseDetails: s.screen === 'licenseDetails',
+      licenseName: s.licenseName,
+      setLicenseName: (e) => this.setState({ licenseName: e.target.value }),
+      licenseIssuingBody: s.licenseIssuingBody,
+      setLicenseIssuingBody: (e) => this.setState({ licenseIssuingBody: e.target.value }),
+      licenseNumberField: s.licenseNumber,
+      setLicenseNumberField: (e) => this.setState({ licenseNumber: e.target.value }),
+      licenseIssueDate: s.licenseIssueDate,
+      setLicenseIssueDate: (e) => this.setState({ licenseIssueDate: e.target.value }),
+      licenseExpirationDate: s.licenseExpirationDate,
+      setLicenseExpirationDate: (e) => this.setState({ licenseExpirationDate: e.target.value }),
+      licenseTradeSocCode: s.licenseTradeSocCode,
+      setLicenseTradeSocCode: (e) => this.setState({ licenseTradeSocCode: e.target.value }),
+      backToLicenseKyc: () => this.setState({ screen: 'licenseKyc' }),
+      licenseDetailsContinueDisabled: s.emailSendPending || !s.licenseName.trim(),
+      licenseDetailsContinueLabel: s.emailSendPending ? 'Sending…' : 'Continue',
+      continueFromLicenseDetails: () => {
+        if (s.emailSendPending || !s.licenseName.trim()) return;
+        this.sendVerificationEmail(s.email, s.phone, s.firstName, s.lastName, 'signup', 'license_only', {
+          name: s.licenseName, issuing_body: s.licenseIssuingBody, license_number: s.licenseNumber,
+          trade_soc_code: s.licenseTradeSocCode, issue_date: s.licenseIssueDate, expiration_date: s.licenseExpirationDate,
+        });
+      },
+      isLicenseBilling: s.screen === 'licenseBilling',
+      licenseBillingMonthly: s.licenseBillingCycle === 'monthly',
+      licenseBillingAnnual: s.licenseBillingCycle === 'annual',
+      setLicenseBillingMonthly: () => this.setState({ licenseBillingCycle: 'monthly' }),
+      setLicenseBillingAnnual: () => this.setState({ licenseBillingCycle: 'annual' }),
+      licenseBillingContinueLabel: s.checkoutPending ? 'Redirecting to checkout…' : 'Continue to payment',
+      continueFromLicenseBilling: () => this.startRealCheckout({ fromSignupTiers: true, product: 'license_tracking', billingCycle: s.licenseBillingCycle }),
       isEntry: s.screen === 'entry',
       isReturning: s.screen === 'returning',
       isReactivate: s.screen === 'reactivate',
