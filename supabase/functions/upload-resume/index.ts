@@ -446,6 +446,73 @@ function isValidExtraction(x: unknown): x is ExtractionResult {
     Array.isArray(o.certifications) && Array.isArray(o.skills) && Array.isArray(o.freeform);
 }
 
+// STRUCTURAL QA CHECK (2026-09-14 live-testing session): a deterministic, cheap net for the two
+// specific extraction-corruption SHAPES confirmed live today via a real 4-run spot check against
+// the exact same source document, on the exact same currently-deployed prompts — see
+// verifi-extraction-nondeterminism-open-item memory for the full finding. This does NOT solve
+// non-determinism (that stays a standing, tracked, unsolved problem) and does NOT try to judge
+// whether content is semantically correct — it only catches the specific structural fingerprints
+// two real, observed bad runs left behind, cheaply enough to run on every page of every upload.
+//
+// 1. Mid-line terminal punctuation (interleaving signal): a genuine, complete bullet's sentence-
+//    ending punctuation is the LAST non-whitespace character of its own line. The real corrupted
+//    run found today ("...strategic workflow redesign. goal") had a period buried mid-line with
+//    more (unrelated, spliced-in) text trailing after it — two bullets woven together leave
+//    exactly this shape. A clean bullet never has this.
+// 2. Anomalously short certification entries (wrapped-item-split signal): a real credential name
+//    is virtually always a multi-word phrase. The real split found today turned one entry
+//    ("Multimodal AI & Productivity Integration (Gemini)") into two short fragments
+//    ("Multimodal Productivity (Gemini)" + "AI & Integration") — one of the two lands far shorter
+//    than its siblings on the same page. Certifications only, deliberately not skills: a skill
+//    entry is often legitimately this short ("SQL", "Python") and would make this pure noise.
+//
+// Neither check can prove content is RIGHT, only flag a shape matching a confirmed-real WRONG —
+// false negatives (a bad run this doesn't happen to match) are expected and are exactly why this
+// is a mitigation, not a fix. Thresholds (20 chars, 0.5x median) are first-pass judgment calls
+// from the two real examples in hand, not tuned against a larger sample — a genuine follow-up
+// study, not something to over-fit further today.
+function findStructuralIssues(extraction: ExtractionResult): string[] {
+  const issues: string[] = [];
+
+  const checkLinesForMidLinePunctuation = (text: string | undefined | null, label: string) => {
+    if (!text) return;
+    const lines = text.split("\n");
+    // Real false positive caught live (2026-09-14): a "PROFESSIONAL SUMMARY"-style freeform entry
+    // is genuine continuous prose stored as ONE line (see the LINE-BREAK PRESERVATION rule this
+    // pipeline's own prompts already follow) — a single line legitimately containing several full
+    // sentences, each with its own mid-line period, is completely normal there and isn't the
+    // splice/interleaving shape this check exists for. That shape only makes sense for content that
+    // is ALREADY structured one-bullet-per-line (2+ lines) — restricting to that shape is what
+    // actually distinguishes "normal multi-sentence prose" from "one bullet with another bullet's
+    // text spliced into it."
+    if (lines.length < 2) return;
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.length < 20) continue; // too short for a mid-line-punctuation signal to mean anything
+      const bodyWithoutFinalChar = trimmed.slice(0, -1);
+      if (/[.!?]/.test(bodyWithoutFinalChar)) {
+        issues.push(`${label}: terminal punctuation mid-line, not at the end — possible spliced/interleaved content: "${trimmed.slice(0, 80)}"`);
+      }
+    }
+  };
+  (extraction.freeform || []).forEach((f, i) => checkLinesForMidLinePunctuation(f.content, `freeform[${i}]`));
+  (extraction.work_history || []).forEach((w, i) => checkLinesForMidLinePunctuation(w.job_responsibilities, `work_history[${i}].job_responsibilities`));
+
+  const certs = extraction.certifications || [];
+  if (certs.length >= 3) {
+    const lengths = certs.map((c) => (c.name || "").length).sort((a, b) => a - b);
+    const median = lengths[Math.floor(lengths.length / 2)];
+    certs.forEach((c, i) => {
+      const len = (c.name || "").length;
+      if (len > 0 && len < 20 && len < median * 0.5) {
+        issues.push(`certifications[${i}]: "${c.name}" unusually short next to its siblings (median ${median} chars) — possible wrapped-item split`);
+      }
+    });
+  }
+
+  return issues;
+}
+
 // Sends the sanitized JPEG bytes already in hand straight to vision — no Storage round-trip
 // needed, unlike test-vision-extract which had to fetch by path. Throws on any failure; caller is
 // responsible for marking the document 'failed'. max_tokens=16000 and no `temperature` param are
@@ -1110,9 +1177,36 @@ export default {
               resume_document_id: docId, page: pageNumber,
             }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
           }
-          pageExtractions.push({ pageNumber, extraction: pageData.extraction });
-          pageOcrTexts.push(`--- page ${pageNumber} ---\n` + (pageData.ocr_raw_text ?? "(vision-routed page, no OCR text)"));
-          previousPageContext = describeTrailingItem(pageData.extraction);
+          // STRUCTURAL QA CHECK (see findStructuralIssues' own header): one bounded, silent
+          // re-extraction of THIS page when its own output shows one of the two confirmed
+          // corruption shapes — never surfaced to the candidate, never blocks the upload either
+          // way. Keeps whichever of the two attempts has fewer flagged issues; a tie (including
+          // "retry didn't help") keeps the first attempt rather than trusting a second roll of
+          // the same non-deterministic dice to be better by assumption.
+          let pageExtraction = pageData.extraction as ExtractionResult;
+          let pageOcrText = pageData.ocr_raw_text;
+          let pageIssues = findStructuralIssues(pageExtraction);
+          if (pageIssues.length > 0) {
+            console.log(`upload-resume: ${docId} page ${pageNumber} flagged ${pageIssues.length} structural issue(s), retrying once — ${pageIssues.join(" | ")}`);
+            try {
+              const retryResult = await rasterizePageWithRetry(originalPath, pageNumber, previousPageContext);
+              if (retryResult.ok && retryResult.data.ok && isValidExtraction(retryResult.data.extraction)) {
+                const retryExtraction = retryResult.data.extraction as ExtractionResult;
+                const retryIssues = findStructuralIssues(retryExtraction);
+                console.log(`upload-resume: ${docId} page ${pageNumber} retry produced ${retryIssues.length} issue(s) (was ${pageIssues.length})`);
+                if (retryIssues.length < pageIssues.length) {
+                  pageExtraction = retryExtraction;
+                  pageOcrText = retryResult.data.ocr_raw_text;
+                  pageIssues = retryIssues;
+                }
+              }
+            } catch (retryErr) {
+              console.log(`upload-resume: ${docId} page ${pageNumber} structural-QA retry failed, keeping original — ${String(retryErr)}`);
+            }
+          }
+          pageExtractions.push({ pageNumber, extraction: pageExtraction });
+          pageOcrTexts.push(`--- page ${pageNumber} ---\n` + (pageOcrText ?? "(vision-routed page, no OCR text)"));
+          previousPageContext = describeTrailingItem(pageExtraction);
           if (pageNumber === 1 && typeof pageData.page_count === "number" && pageData.page_count > 0) {
             pageCount = pageData.page_count;
           }

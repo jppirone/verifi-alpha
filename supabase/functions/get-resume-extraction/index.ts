@@ -80,10 +80,30 @@ export default {
       // later in the flow — see checkEmployerContactIncomplete's own header in candidate.html.
       const RESUME_DOC_SELECT = "id, original_storage_path, original_filename, mime_type, extraction_status, uploaded_at, continued_without_data_at, employer_contact_resolved_at, candidate_location, printed_header";
 
+      // Item (2026-09-14 live-testing session, real bug found in production data): this used to
+      // order by uploaded_at alone — the single most recent row, full stop, with no regard for
+      // whether an OLDER row was already confirmed. "Try a different file" on the resumeConfirm
+      // screen (retryResumeUpload/onPickRetryResumeFile in candidate.html) uploads directly against
+      // the candidate's real candidate_id, the same shape as every other upload here — so ANY
+      // trigger that lets that screen fire again after a candidate has already confirmed once (a
+      // stale second tab left open on resumeConfirm from before the confirm, a browser back button
+      // landing on a cached pre-confirm render — the exact mechanism wasn't pinned down, but the
+      // resulting row shape is unambiguous) creates a second, permanently-unconfirmed
+      // resume_documents row on top of an already-complete candidate. Every future session then read
+      // THAT row here, checkResumeFlowIncomplete (candidate.html) saw unconfirmed items, and routed
+      // the candidate straight back to resumeConfirm forever — despite their real, original,
+      // already-confirmed data sitting untouched one row underneath. Confirmed live against real
+      // production data: two real candidates found in exactly this state. Fix: prefer a CONFIRMED
+      // row (confirmed_at set by confirm-resume-data's own atomic claim) over an unconfirmed one,
+      // regardless of which is more recent — only falls back to pure recency when confirmed_at ties
+      // (both null, the ordinary still-reviewing-my-first-upload case; or, in principle, both set,
+      // which confirm-resume-data's own once-only conditional PATCH should make effectively
+      // impossible in practice).
       const { data: doc, error: docErr } = await supabase
         .from("resume_documents")
         .select(RESUME_DOC_SELECT)
         .eq("candidate_id", candidate_id)
+        .order("confirmed_at", { ascending: false, nullsFirst: false })
         .order("uploaded_at", { ascending: false })
         .limit(1)
         .maybeSingle();
