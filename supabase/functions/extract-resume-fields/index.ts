@@ -140,6 +140,27 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   had one. Never collapse a real bulleted list into a single comma- or period-joined sentence, and
   never invent a line break the source doesn't actually have.
 
+- MULTI-COLUMN TABLE READING ORDER (real, confirmed failure mode — a section laid out as a 2- or
+  3-column grid of short bullet cells, e.g. "Selected Career Highlights" or similar, got its cells
+  read left-to-right across the grid as one continuous stream instead of down each column
+  separately. Two symptoms of the same root cause were both observed on the same real document:
+  unrelated cells' sentences spliced together mid-sentence, and single words split across a column
+  boundary with a stray fragment left dangling on each side, e.g. "_satisfaction" and "_delivery" as
+  the broken halves of "customer satisfaction" and "on-time project delivery"). DO NOT attempt to
+  preserve the grid's row-by-row layout in your reading order at all — flatten it instead: read one
+  column completely, top to bottom, start to finish, before reading the next column at all (the
+  leftmost visual column first, then the column to its right, and so on) — never read across a row
+  from one column's cell into another column's cell, and never let a row boundary decide reading
+  order. Each cell is a separate, complete bullet; extract the whole grid as ONE flat, linear,
+  sequential list of complete bullets in that column-by-column order, never merging two cells' text
+  into one bullet and never leaving a word or clause fragment from one cell joined onto another's.
+  This applies to ANY section laid out as a multi-column table or grid of short bullet cells, not
+  just a section named "Selected Career Highlights" — judge by the source's own visual SHAPE (a grid
+  of short items in aligned columns), not by section heading. There is no requirement to preserve
+  the original column layout in your output — the generated result only ever shows this content as
+  a single linear list regardless, so when in doubt, prefer keeping each cell's own sentence fully
+  intact and separate over guessing at a merged reading order.
+
 - work_history = PAID EMPLOYMENT ONLY. If a role reads as unpaid — volunteer work, an unpaid
   internship explicitly described as unpaid, community service — do NOT put it in work_history.
   Instead add ONE entry to "freeform" with section_type "needs_review" whose content plainly
