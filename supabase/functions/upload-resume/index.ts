@@ -742,7 +742,7 @@ type RasterizePageResult = {
   status: number;
 };
 
-async function callRasterizePage(storagePath: string, pageNumber: number, opts?: { targetDpi?: number; forceVision?: boolean; previousPageContext?: string }): Promise<RasterizePageResult> {
+async function callRasterizePage(storagePath: string, pageNumber: number, opts?: { targetDpi?: number; forceVision?: boolean; previousPageContext?: TrailingItemContext }): Promise<RasterizePageResult> {
   const body: Record<string, unknown> = { storage_path: storagePath, page_number: pageNumber };
   if (opts?.targetDpi) body.target_dpi = opts.targetDpi;
   if (opts?.forceVision) body.force_vision = true;
@@ -771,7 +771,7 @@ async function callRasterizePage(storagePath: string, pageNumber: number, opts?:
 // heavier WASM memory use entirely rather than just shrinking what it has to process, the
 // strongest lever actually available against a resource ceiling neither this page's content nor
 // its own request can predict or control.
-async function rasterizePageWithRetry(storagePath: string, pageNumber: number, previousPageContext?: string): Promise<RasterizePageResult> {
+async function rasterizePageWithRetry(storagePath: string, pageNumber: number, previousPageContext?: TrailingItemContext): Promise<RasterizePageResult> {
   const attempt1 = await callRasterizePage(storagePath, pageNumber, { previousPageContext });
   if (attempt1.data?.code !== RESOURCE_LIMIT_CODE) return attempt1;
   console.log(`upload-resume: page ${pageNumber} hit ${RESOURCE_LIMIT_CODE} at default DPI, retrying at ${RASTERIZE_RETRY_DPI} DPI`);
@@ -813,39 +813,58 @@ function globalizePosition(pageNumber: number, localPosition: number | undefined
 // completely independent model call (see rasterize-pdf-page's own per-page prompt) with zero
 // knowledge of what was still open at the end of the previous one.
 //
+// Structured continuation state handed to the NEXT page's rasterize-pdf-page call as
+// previous_page_context — kept in sync by hand with the identical type in rasterize-pdf-page/index.ts
+// (same convention as ExtractionResult/FIELD_DEFINITIONS already used across these functions).
+// Replaced a plain one-line English description on 2026-09-14 after a structured N=9 same-document
+// repro study (see verifi-extraction-nondeterminism-open-item memory) found page-boundary-spanning
+// content fails 11-44% of the time — mostly vanishing outright, not just landing unlabeled — while
+// single-page content was 100% reliable across all 9 runs. Explicit fields let the next page's own
+// prompt give a directive, kind-specific instruction instead of asking the model to parse a sentence.
+type TrailingItemContext = {
+  kind: "work_history" | "certifications_list" | "freeform";
+  company?: string;
+  title?: string;
+  name?: string;
+  heading?: string;
+  sectionType?: string;
+  issuingBody?: string;
+  snippet: string;
+};
+
 // describeTrailingItem is half the fix: after each page's OWN extraction, this summarizes whatever
 // was position-last on THAT page (the most plausible thing a following page might continue), so it
 // can be threaded into the NEXT page's rasterize-pdf-page call as previous_page_context — see that
 // function's own buildContinuationContext for how it's used. Deliberately excludes education: a
 // degree entry is one complete fact, not an open-ended list a following page would plausibly
 // continue, so including it would just be noise the model has to read past.
-function describeTrailingItem(extraction: ExtractionResult): string | undefined {
-  type Candidate = { position: number; describe: () => string };
+function describeTrailingItem(extraction: ExtractionResult): TrailingItemContext | undefined {
+  type Candidate = { position: number; build: () => TrailingItemContext };
   const candidates: Candidate[] = [];
   for (const w of extraction.work_history) {
     if (typeof w.position !== "number") continue;
     candidates.push({
       position: w.position,
-      describe: () => `a work-history entry at "${w.company || "(unnamed company)"}" as "${w.title || "(unnamed title)"}", whose visible responsibilities on that page ended with: "...${(w.job_responsibilities || "").slice(-220)}"`,
+      build: () => ({ kind: "work_history", company: w.company || "", title: w.title || "", snippet: (w.job_responsibilities || "").slice(-220) }),
     });
   }
   for (const c of extraction.certifications) {
     if (typeof c.position !== "number") continue;
     candidates.push({
       position: c.position,
-      describe: () => `a certifications list, whose last visible entry on that page was "${c.name || "(unnamed)"}"${c.issuing_body ? ` (${c.issuing_body})` : ""}`,
+      build: () => ({ kind: "certifications_list", name: c.name || "", issuingBody: c.issuing_body || "", snippet: c.name || "" }),
     });
   }
   for (const f of extraction.freeform) {
     if (typeof f.position !== "number") continue;
     candidates.push({
       position: f.position,
-      describe: () => `a freeform section${f.heading ? ` titled "${f.heading}"` : " with no visible heading"} (type: ${f.section_type}), whose visible content on that page ended with: "...${(f.content || "").slice(-220)}"`,
+      build: () => ({ kind: "freeform", heading: f.heading || "", sectionType: f.section_type || "needs_review", snippet: (f.content || "").slice(-220) }),
     });
   }
   if (candidates.length === 0) return undefined;
   candidates.sort((a, b) => b.position - a.position);
-  return candidates[0].describe();
+  return candidates[0].build();
 }
 
 // The other half of the fix: even when the previous-page context above works exactly as intended,
@@ -925,16 +944,35 @@ function mergeBoundaryContinuations(extraction: ExtractionResult): ExtractionRes
 
   const workHistory = [...extraction.work_history].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
   const mergedWorkHistory: typeof workHistory = [];
+  // Audit finding, 2026-09-14 (non-determinism study follow-up): prevPage used to be re-derived from
+  // prev.position on every iteration, which never changes once an entry is pushed — so a job
+  // spanning 3+ consecutive pages (page N opens it, page N+1 continues it, page N+2 continues it
+  // again) would correctly merge the N+1 continuation, but then fail the N+2 merge: prevPage still
+  // reads as page N, so itemPage (N+2) !== prevPage+1 (N+1). Same bug class the freeform loop above
+  // was already fixed for (see its own comment); mirrored here with the same lastPageOf tracking.
+  const lastWorkHistoryPageOf = new Map<(typeof workHistory)[number], number>();
   for (const item of workHistory) {
     const prev = mergedWorkHistory[mergedWorkHistory.length - 1];
-    const prevPage = pageOf(prev?.position);
+    const prevPage = prev ? (lastWorkHistoryPageOf.get(prev) ?? pageOf(prev.position)) : null;
     const itemPage = pageOf(item.position);
-    if (
-      prev && prevPage !== null && itemPage !== null && itemPage === prevPage + 1 &&
-      prev.company && item.company && norm(prev.company) === norm(item.company) &&
-      prev.title && item.title && norm(prev.title) === norm(item.title)
-    ) {
+    const isPageAdjacent = !!(prev && prevPage !== null && itemPage !== null && itemPage === prevPage + 1);
+    const isMatchingHeader = isPageAdjacent &&
+      !!prev!.company && !!item.company && norm(prev!.company) === norm(item.company) &&
+      !!prev!.title && !!item.title && norm(prev!.title) === norm(item.title);
+    // Audit finding, 2026-09-14 (non-determinism study, fix iteration 2): the prompt-side fix asks
+    // the model to copy the previous job's company/title verbatim onto a continuation row so the
+    // exact-match check above fires — confirmed live this doesn't always happen: a real run
+    // extracted the continuation bullets correctly as their own work_history entry but left
+    // company AND title blank, so the match above silently failed and it sat as an unmerged orphan
+    // row instead of merging. A genuinely NEW, separate job can never have both company and title
+    // blank (see FIELD_DEFINITIONS — both are expected whenever a real role is being described), so
+    // a page-adjacent row with both fields empty is unambiguously a continuation of whatever came
+    // immediately before it, not a coincidence — this doesn't depend on the model reliably copying
+    // anything, it's a deterministic property of the row itself.
+    const isBlankContinuation = isPageAdjacent && !item.company && !item.title;
+    if (prev && (isMatchingHeader || isBlankContinuation)) {
       prev.job_responsibilities = `${prev.job_responsibilities}\n\n${item.job_responsibilities}`.trim();
+      if (itemPage !== null) lastWorkHistoryPageOf.set(prev, itemPage);
       continue;
     }
     mergedWorkHistory.push({ ...item });
@@ -1172,7 +1210,7 @@ export default {
         // the page we just finished end with" carried into the next call. undefined on page 1 (there
         // is no previous page) — buildContinuationContext treats that as "say nothing," unchanged
         // prompt behavior for a single-page resume or the first page of any resume.
-        let previousPageContext: string | undefined;
+        let previousPageContext: TrailingItemContext | undefined;
         for (let pageNumber = 1; pageNumber <= pageCount && pageNumber <= MAX_PDF_PAGES; pageNumber++) {
           let pageData: { ok?: boolean; page_count?: number; extraction?: unknown; ocr_raw_text?: string; code?: string; error?: string; message?: string };
           let pageOk: boolean;

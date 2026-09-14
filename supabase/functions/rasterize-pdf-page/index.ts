@@ -438,24 +438,73 @@ If a category has no entries, return an empty array for it — do not omit the k
 // actually part of. This context block is the fix: the caller (upload-resume) threads forward a
 // short, factual summary of whatever was last on the PREVIOUS page, and this page's own model
 // (which can actually see whether ITS content plainly continues that) decides whether to reuse it.
-function buildContinuationContext(previousPageContext?: string | null): string {
-  if (!previousPageContext) return "";
-  return `
+function buildContinuationContext(ctx?: TrailingItemContext | null): string {
+  if (!ctx) return "";
+
+  const preamble = `
 
 CONTEXT FROM THE PREVIOUS PAGE (informational only — you are still extracting ONLY what's visible on
 THIS page's image/text; use this only to correctly attribute genuine continuations, never to invent
-content that isn't actually here): the previous page ended with ${previousPageContext}
-If THIS page's own content plainly begins as a direct continuation of that — e.g. one or more more
-bullet points in the same list with the same tone/topic, appearing before any new heading — extract
-it using the EXACT SAME heading/company/title given above (copied verbatim, not reworded) rather
-than leaving it unlabeled or inventing a new needs_review entry for it. If a certifications list was
-still open and this page's first item(s) match that same short "Name (issuer)" pattern with no new
-section header first, extract them as normal certifications entries, not freeform. If this page's
-opening content is clearly unrelated, or introduces its own new visible heading, treat it as
-entirely separate, exactly as you would any other content on the page.`;
+content that isn't actually here). The previous page ended mid-way through the item described below,
+and its status as "finished" or "still open" was NOT resolvable from that page alone — only THIS
+page's own content can tell you which it was. A continuation legitimately never repeats its header —
+do not require a repeated company/title/heading before treating this page's opening content as
+belonging to it.`;
+
+  // Kind-specific directive: each branch names the exact failure this is meant to close (see the
+  // TrailingItemContext comment above for the study this is grounded in) rather than one generic
+  // instruction covering all three shapes.
+  let directive: string;
+  if (ctx.kind === "work_history") {
+    directive = `
+The open item was a work-history entry at company "${ctx.company || "(unnamed)"}", title "${ctx.title || "(unnamed)"}", whose visible responsibilities ended with: "...${ctx.snippet}"
+If THIS page's content opens with bullet points that read as job responsibilities — not preceded by
+a new job title, company name, or section heading — those bullets belong to THIS SAME job. Extract
+them as a work_history entry with company="${ctx.company || ""}" and title="${ctx.title || ""}" (copied
+verbatim, not reworded) so they can be merged with the previous page's entry automatically. Do NOT
+place them in freeform/needs_review, do NOT leave company/title blank, and do NOT drop them because
+the job's own header isn't repeated on this page — that header is never expected to repeat.`;
+  } else if (ctx.kind === "certifications_list") {
+    directive = `
+The open item was a certifications list, whose last visible entry on the previous page was "${ctx.name || "(unnamed)"}"${ctx.issuingBody ? ` (issuing_body: "${ctx.issuingBody}")` : ""}.
+If THIS page's opening content matches that same short "name (issuer)" list-item pattern, with
+literally no heading of any kind between the previous item and this one, extract those as normal
+certifications entries, not freeform — a list continuing across a page break is still one list.
+Unless this page's own content plainly states a DIFFERENT issuing body for one of those specific
+items, set issuing_body="${ctx.issuingBody || ""}" for them too: a shared issuing body printed once
+governs every item in the list it belongs to, not just the entries nearest to where it happens to be
+printed.
+HARD STOP CONDITION (a real, confirmed failure mode — read this carefully): the instant ANY new
+heading appears on this page — including one that also names certifications, credentials, or a
+similar-sounding concept, e.g. a "Professional Certifications" heading following a "Coursiv" list —
+that heading starts a brand-new, separate list. Do NOT carry the previous list's issuing_body onto
+items under a new heading, and do NOT keep treating items under a new heading as more of the
+previous list. A shared heading two lists happen to both fall under (e.g. both being certifications)
+is never a reason to merge them into one continuing list — only a page break with NO heading at all
+in between is. Reproduced live: a real run treated a page's second, separately-headed certifications
+list as an unbroken continuation of the first, wrongly inheriting its issuing_body AND corrupting
+that second list's own item count in the process — judge every item strictly by whether a heading
+appeared before it on THIS page, never by whether that heading is topically similar to the previous
+list's.`;
+  } else {
+    directive = `
+The open item was a freeform section${ctx.heading ? ` titled "${ctx.heading}"` : " with no visible heading"} (type: ${ctx.sectionType || "unknown"}), whose visible content ended with: "...${ctx.snippet}"
+If THIS page's opening content plainly continues that — same tone/topic, appearing before any new
+heading — extract it as a continuation of that same section: heading="${ctx.heading || ""}",
+section_type="${ctx.sectionType || "needs_review"}" (copied verbatim, not reworded), rather than
+inventing a new, separately-headed needs_review entry for it.`;
+  }
+
+  return `${preamble}
+${directive}
+If this page's opening content is clearly unrelated, or introduces its own new visible heading,
+treat it as entirely separate, exactly as you would any other content on the page. But if you are
+genuinely unsure whether it's a continuation or something new, prefer extracting it as the
+continuation described above over silently omitting it or leaving it ambiguously classified — losing
+real content is worse than a borderline attribution call.`;
 }
 
-function buildVisionExtractionPrompt(previousPageContext?: string | null): string {
+function buildVisionExtractionPrompt(previousPageContext?: TrailingItemContext | null): string {
   return `You are extracting structured data directly from the attached image of one page of a resume. Read the document as printed — do not invent information that is not actually present in the image in some recognizable form. This may be one page of a multi-page resume; only extract what is actually visible on this page.
 
 Return ONLY a single JSON object, no prose before or after it, matching exactly this shape:
@@ -472,7 +521,7 @@ ${FIELD_DEFINITIONS}
 ${DATE_RULES}${buildContinuationContext(previousPageContext)}`;
 }
 
-function buildOcrExtractionPrompt(ocrText: string, previousPageContext?: string | null): string {
+function buildOcrExtractionPrompt(ocrText: string, previousPageContext?: TrailingItemContext | null): string {
   return `You are extracting structured data from the raw OCR text of one page of a resume. The OCR
 text below may contain recognition errors (misread characters, words glued together, minor
 garbling) — do your best to read through that, but do not invent information that is not actually
@@ -491,6 +540,25 @@ ${DATE_RULES}${buildContinuationContext(previousPageContext)}
 ${ocrText}
 --- END RESUME OCR TEXT ---`;
 }
+
+// Structured continuation state threaded from the PREVIOUS page's own extraction (built by
+// upload-resume's describeTrailingItem, kept in sync by hand here same as ExtractionResult itself).
+// Replaces an earlier plain-English one-line description: 2026-09-14's N=9 same-document repro study
+// found page-boundary-spanning content fails 11-44% of the time (either mis-landing in a headingless
+// freeform block, or — in the majority of failures — vanishing entirely, not even reaching
+// needs_review) while single-page content was 100% reliable across all 9 runs. A free-text blurb left
+// too much interpretation up to this page's own model call; explicit fields + a kind-specific,
+// directive instruction (below) is the fix actually being tried, not a further prose tweak.
+type TrailingItemContext = {
+  kind: "work_history" | "certifications_list" | "freeform";
+  company?: string;
+  title?: string;
+  name?: string;
+  heading?: string;
+  sectionType?: string;
+  issuingBody?: string;
+  snippet: string;
+};
 
 type ExtractionResult = {
   candidate_location?: string;
@@ -523,7 +591,7 @@ function extractJsonFromClaudeResponse(claudeData: any): { parsed: unknown; pars
   }
 }
 
-async function runVisionExtraction(pngBase64: string, previousPageContext?: string | null): Promise<ExtractionResult> {
+async function runVisionExtraction(pngBase64: string, previousPageContext?: TrailingItemContext | null): Promise<ExtractionResult> {
   if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not configured");
   const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -551,7 +619,7 @@ async function runVisionExtraction(pngBase64: string, previousPageContext?: stri
   return parsed;
 }
 
-async function runHaikuExtraction(ocrText: string, previousPageContext?: string | null): Promise<ExtractionResult> {
+async function runHaikuExtraction(ocrText: string, previousPageContext?: TrailingItemContext | null): Promise<ExtractionResult> {
   if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not configured");
   const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -698,6 +766,15 @@ export default {
       }
       const pageNum = Number(page_number) || 1; // 1-indexed
       const dpi = Number(target_dpi) || 150;
+      // Wire format is now a structured object (see TrailingItemContext) rather than a plain string —
+      // validate defensively rather than trust the caller, same posture as storage_path/page_number
+      // above; a malformed value is simply treated as "no continuation context" rather than a 400,
+      // since it's optional and this page's own extraction can still proceed correctly without it.
+      const trailingContext: TrailingItemContext | null =
+        previous_page_context && typeof previous_page_context === "object" &&
+        typeof previous_page_context.kind === "string" && typeof previous_page_context.snippet === "string"
+          ? previous_page_context as TrailingItemContext
+          : null;
 
       const fetchStart = Date.now();
       const fileRes = await fetch(
@@ -845,7 +922,7 @@ export default {
 
       if (useVision) {
         const visionStart = Date.now();
-        extraction = await runVisionExtraction(bytesToB64(pngBytes), previous_page_context);
+        extraction = await runVisionExtraction(bytesToB64(pngBytes), trailingContext);
         extractionMs = Date.now() - visionStart;
       } else {
         const ocrStart = Date.now();
@@ -854,7 +931,7 @@ export default {
         ocrText = await runTesseract(rgba, renderedWidth, renderedHeight);
         ocrMs = Date.now() - ocrStart;
         const haikuStart = Date.now();
-        extraction = await runHaikuExtraction(ocrText, previous_page_context);
+        extraction = await runHaikuExtraction(ocrText, trailingContext);
         extractionMs = Date.now() - haikuStart;
       }
 
