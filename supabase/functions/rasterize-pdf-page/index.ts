@@ -247,6 +247,26 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   never a reason to invent a more formal name than what's printed. Use an empty string "" when no
   license/permit/registration number is printed for that credential — never guess or fabricate one.
 
+- certifications' "issuing_body" field = the organization, platform, or provider that issued,
+  administers, or hosts the credential, when the resume actually identifies one. SHARED-CONTEXT
+  INHERITANCE (a real, confirmed gap, 2026-09-14): when a SINGLE provider name is printed ONCE as a
+  shared label governing a whole itemized list of credentials — e.g. a heading reading "AI &
+  Emerging Technology Certifications — Coursiv," or a provider name printed once above or beside a
+  bulleted list, never repeated next to each individual bullet — that same issuing_body applies to
+  EVERY item in that list. Determine this by which list an item genuinely belongs to (same heading,
+  same bulleted group), never by how visually close the shared label happens to sit to that specific
+  item's own position on the page. Reproduced live: a real 9-item list under one shared "Coursiv"
+  label had items 1-8 (a single column) correctly get issuing_body "Coursiv" — but item 9, the same
+  list, just wrapped into a second column sharing a printed row with item 8, came back with
+  issuing_body empty, even though its own "name" field extracted correctly (this was not a general
+  extraction-quality problem for that item, only the inherited field failed to carry over). The
+  column an item happens to sit in is never a reason to withhold a shared value every other item in
+  its own list already receives — if items 1-8 of a list get a shared issuing_body, item 9 of the
+  SAME list gets it too, regardless of which column, row, or page position it prints in. Use an
+  empty string "" only when the resume genuinely never identifies any issuing body for that list at
+  all, never because one particular item's own position made the shared label harder to visually
+  associate with it.
+
 - DON'T SPLIT A SINGLE WRAPPED ITEM INTO TWO (a real, confirmed failure mode — confirmed twice against
   the same real document): a single certification name, skill, competency, or other list item whose
   text is long enough to visually wrap onto a second printed line — purely because it ran out of
