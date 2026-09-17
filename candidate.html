@@ -8669,8 +8669,19 @@ class Component extends DCLogic {
   // aren't actually adjacent in the source (something else sits between them) correctly stay separate
   // groups — this only ever compares against the immediately preceding group, never merges non-
   // adjacent runs just because they share the same (empty) heading text.
+  //
+  // Real, confirmed failure mode (2026-09-17 N=10 post-deploy study, run 1): a 9-item certifications
+  // list fragmented into two groups (8+1) at item 9's own heading, which the vision model transcribed
+  // as "Al & EMERGING..." (capital A, lowercase L) instead of "AI & EMERGING..." (capital I) — the
+  // exact same I/l vision-transcription ambiguity upload-resume's mergeBoundaryContinuations already
+  // works around for merge-boundary comparisons (see that function's own norm(), which this mirrors).
+  // That fix only covers page-boundary merges; this grouping step needed the identical fold since it
+  // compares heading strings for a different purpose (render grouping, not cross-page merging) but
+  // hits the exact same OCR ambiguity. Scoped to exact whole-heading equality after folding, same as
+  // the precedent — can't cause a false merge between two otherwise-different headings the way a
+  // substring or fuzzy match could.
   groupByLiteralHeading(items) {
-    const norm = (h) => (h || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const norm = (h) => (h || '').trim().toLowerCase().replace(/\s+/g, ' ').replace(/l/g, 'i');
     const groups = [];
     items.forEach(item => {
       const h = norm(item.heading);
