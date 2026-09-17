@@ -5347,12 +5347,27 @@ class Component extends DCLogic {
       this.setState({ savedSummariesLoading: false, savedSummariesError: 'load_failed' });
       return;
     }
+    // Real, confirmed failure mode (2026-09-17 live demo): renderPdfPreview reads this.state
+    // synchronously, once, at the moment it's called -- it never re-runs on its own when async
+    // state arrives later. selectTabViews already calls ensureSummariesLoaded() right before
+    // rendering, but that's a fire-and-forget call: the setState below lands whenever this fetch
+    // resolves, independent of whatever renderPdfPreview already did with the (still-empty)
+    // savedSummaries a moment earlier. On a slow or cold connection the Summary section would
+    // therefore render as present or silently missing purely depending on network timing, with the
+    // exact same account and source document either way -- no error, nothing to catch, because
+    // nothing was actually wrong with the data, only with who read it and when. Re-rendering here,
+    // once the real data is in hand, if the candidate is still looking at Views, mirrors the same
+    // pattern already used for the post-upgrade-return flow a few hundred lines down
+    // (`if (patch.accountTab === 'views') this.renderPdfPreview();`).
     this.setState({
       savedSummariesLoading: false,
       savedSummariesError: null,
       savedSummaries: data.summaries || [],
       savedSummariesLoadedFor: candidateId,
-    }, () => this.seedCzSummaryDefaults());
+    }, () => {
+      this.seedCzSummaryDefaults();
+      if (this.state.accountTab === 'views') this.renderPdfPreview();
+    });
   }
 
   roleDescription(key) {
@@ -6032,17 +6047,60 @@ class Component extends DCLogic {
     }
     blocks.sort((a, b) => a.position - b.position);
 
+    // Real, confirmed failure mode (2026-09-17 live demo, two separate runs): each certification
+    // used to become its own independently-positioned block above, so the render loop below (which
+    // starts a fresh heading whenever the immediately-preceding block's kind differs) created a new
+    // "CERTIFICATIONS" heading every time one cert item's own position number happened to fall on
+    // the far side of a work_history item's position -- the model's own per-item position
+    // assignment isn't reliable enough to keep one logical list contiguous (same class of gap as
+    // the position-uniqueness fix elsewhere in this pipeline), so a single 4-item certifications
+    // list got torn into 3 separate CERTIFICATIONS blocks scattered between job entries in the real
+    // demo output -- no items lost or duplicated, just misplaced. Grouping every item of a
+    // single-heading structured category into ONE run before the render loop removes the
+    // possibility structurally: it no longer matters whether the model's raw per-item positions are
+    // contiguous, only their relative order among themselves (which the sort above already
+    // preserves), since each category can now only ever print its heading once. 'skills' already
+    // gets this same one-block-per-category treatment above; 'misc' (needs_review/hobbies_other) is
+    // deliberately excluded -- each of those rows carries its own real, distinct heading and can
+    // legitimately recur at different points in true document order.
+    const GROUPED_KINDS = ['experience', 'education', 'certifications'];
+    const grouped = [];
+    const groupByKind = {};
+    blocks.forEach(b => {
+      if (GROUPED_KINDS.includes(b.kind)) {
+        if (!groupByKind[b.kind]) {
+          groupByKind[b.kind] = { kind: b.kind, position: b.position, items: [] };
+          grouped.push(groupByKind[b.kind]);
+        }
+        groupByKind[b.kind].items.push(b);
+      } else {
+        grouped.push(b);
+      }
+    });
+    grouped.sort((a, b) => a.position - b.position);
+
     const sectionHeader = { experience: 'EXPERIENCE', education: 'EDUCATION', skills: 'SKILLS', certifications: 'CERTIFICATIONS' };
     let lastHeading = null;
-    blocks.forEach(b => {
-      const heading = b.kind === 'misc' ? (b.label || 'ADDITIONAL INFORMATION').toUpperCase() : sectionHeader[b.kind];
+    grouped.forEach(g => {
+      if (g.items) {
+        const heading = sectionHeader[g.kind];
+        if (heading !== lastHeading) push(heading, true);
+        lastHeading = heading;
+        g.items.forEach(b => {
+          this.wrapText(b.label, 90).forEach(w => push(w));
+          if (b.body) this.wrapText(b.body, 90).forEach(w => push(w));
+          push('');
+        });
+        return;
+      }
+      const heading = g.kind === 'misc' ? (g.label || 'ADDITIONAL INFORMATION').toUpperCase() : sectionHeader[g.kind];
       if (heading !== lastHeading) push(heading, true);
       lastHeading = heading;
-      if (b.kind === 'skills' || b.kind === 'misc') {
-        this.wrapText(b.body, 90).forEach(w => push(w));
+      if (g.kind === 'skills' || g.kind === 'misc') {
+        this.wrapText(g.body, 90).forEach(w => push(w));
       } else {
-        this.wrapText(b.label, 90).forEach(w => push(w));
-        if (b.body) this.wrapText(b.body, 90).forEach(w => push(w));
+        this.wrapText(g.label, 90).forEach(w => push(w));
+        if (g.body) this.wrapText(g.body, 90).forEach(w => push(w));
       }
       push('');
     });
