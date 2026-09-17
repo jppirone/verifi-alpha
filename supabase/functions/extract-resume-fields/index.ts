@@ -60,15 +60,15 @@ Return ONLY a single JSON object, no prose before or after it, matching exactly 
   "printed_header": string,
   "work_history": [
     { "company": string, "title": string, "location": string, "start_date": string, "end_date": string,
-      "job_responsibilities": string, "extraction_confidence": "high" | "medium" | "low", "position": number }
+      "job_responsibilities": string, "extraction_confidence": "high" | "medium" | "low", "position": number, "heading": string }
   ],
   "education": [
     { "institution": string, "degree": string, "field_of_study": string, "location": string,
-      "start_date": string, "end_date": string, "extraction_confidence": "high" | "medium" | "low", "position": number }
+      "start_date": string, "end_date": string, "extraction_confidence": "high" | "medium" | "low", "position": number, "heading": string }
   ],
   "certifications": [
     { "name": string, "issuing_body": string, "license_number": string, "issue_date": string, "expiration_date": string,
-      "extraction_confidence": "high" | "medium" | "low", "position": number }
+      "extraction_confidence": "high" | "medium" | "low", "position": number, "heading": string }
   ],
   "skills": [ string ],
   "skills_position": number | null,
@@ -178,6 +178,15 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   whatever form it appears; use an empty string "" when no location is given for that role — never
   infer or guess one from the employer's real-world location.
 
+- work_history's "heading" field = the literal heading/label text of the section this entry sits
+  under, exactly as printed (e.g. "PROFESSIONAL EXPERIENCE", "Employment History"), copied verbatim —
+  not reworded, not invented, not guessed. When two or more consecutive entries share the same visible
+  heading, every one of them gets that same literal heading string, not just the first. Use an empty
+  string "" only when the resume genuinely has no visible heading above this entry (e.g. a minimally-
+  formatted document with no section labels at all, per the HEADINGS ARE A HELPFUL SIGNAL rule above).
+  This is additive only, like freeform's own "heading" field below — it does not change how content
+  gets classified, only what section title the output can reproduce.
+
 - education = DEGREE-GRANTING PROGRAMS ONLY (e.g. B.A., B.S., M.S., MBA, Ph.D., Associate's).
 
 - education's "location" field = the institution's city/state (or city/country outside the US) as
@@ -185,6 +194,11 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   whatever form it appears — do not reformat, abbreviate, or expand it. Use an empty string "" when
   no location is given for that institution — never infer or guess one from the institution's real-
   world location; only what's actually printed counts.
+
+- education's "heading" field = the same concept as work_history's "heading" above, for whatever
+  section this program sits under (e.g. "EDUCATION", "Academic Background") — literal text, verbatim,
+  the same shared string across every entry under one visible heading, empty string "" only when the
+  resume genuinely has none.
 
 - certifications = standalone credentials: certifications, licenses, bootcamps, and similar
   short-form credentials that are NOT part of a degree program. A coding bootcamp goes in
@@ -231,6 +245,37 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   empty string "" only when the resume genuinely never identifies any issuing body for that list at
   all, never because one particular item's own position made the shared label harder to visually
   associate with it.
+
+- certifications' "heading" field = the section's own literal heading/label text, copied verbatim IN
+  FULL, including any trailing parenthetical or annotation that's part of the same heading line (e.g.
+  a heading printed as "AI & Emerging Technology Certifications — Coursiv (55+ Hours)" is captured as
+  that ENTIRE string, parenthetical and all — never split off, never dropped, and never turned into a
+  separate needs_review entry of its own). Extracting "issuing_body" (e.g. "Coursiv") out of that same
+  heading line is a SEPARATE, ADDITIONAL operation, not an alternative to capturing "heading" — do
+  both. Shared the same way issuing_body is shared: every item under one visible heading gets that
+  same literal heading string. A trailing annotation inside a heading (an hours figure, a date range,
+  a parenthetical note) is part of that heading text, never a standalone fact needing its own home
+  elsewhere in the output. Use an empty string "" only when the resume genuinely has no visible
+  heading for that list at all.
+
+- CERT/LICENSE VS. SKILL DISAMBIGUATION WITHIN A MIXED SECTION (a targeted rule, not a universal
+  requirement — most certifications and skills are unambiguous by shape per their own definitions
+  above and need none of this): this applies ONLY when a single section contains a genuine MIX — some
+  items with a clearly discernible trailing certification/license number or identifier (a distinct
+  number, code, or alphanumeric string following the item's name, whether or not it carries a
+  conventional marker like "#", "No.", or "Lic. No." in front of it) and other items in that same
+  section with no such identifier at all. When that specific mix occurs, use the presence or absence
+  of a discernible trailing identifier as the signal to split the section: items with one are
+  certifications (the identifier captured in "license_number"), items without one are skills. Do NOT
+  apply this as a blanket requirement for every certification — most legitimately have no license
+  number (see the license_number field above) and are still certifications, classified normally. A
+  trailing identifier can be genuinely hard to tell apart from ordinary text (a website address, a
+  plain string of letters and numbers) with no conventional marker present — when a specific item's
+  status is still ambiguous after applying this rule (you can't confidently tell whether a trailing
+  string is really an identifier, or whether that item belongs with the certifications or the skills
+  in this same mixed section), do not guess: classify that one item as "needs_review" instead, with
+  its "heading" set to the section's real literal heading text and its "content" holding that item's
+  own text verbatim — rather than forcing an ambiguous item into either certifications or skills.
 
 - DON'T SPLIT A SINGLE WRAPPED ITEM INTO TWO (a real, confirmed failure mode — confirmed twice against
   the same real document): a single certification name, skill, competency, or other list item whose
@@ -371,9 +416,9 @@ ${ocrText}
 type ExtractionResult = {
   candidate_location?: string;
   printed_header?: string;
-  work_history: Array<{ company: string; title: string; location?: string; start_date: string; end_date: string; job_responsibilities: string; extraction_confidence: string; position?: number }>;
-  education: Array<{ institution: string; degree: string; field_of_study: string; location?: string; start_date: string; end_date: string; extraction_confidence: string; position?: number }>;
-  certifications: Array<{ name: string; issuing_body: string; license_number?: string; issue_date: string; expiration_date: string; extraction_confidence: string; position?: number }>;
+  work_history: Array<{ company: string; title: string; location?: string; start_date: string; end_date: string; job_responsibilities: string; extraction_confidence: string; position?: number; heading?: string }>;
+  education: Array<{ institution: string; degree: string; field_of_study: string; location?: string; start_date: string; end_date: string; extraction_confidence: string; position?: number; heading?: string }>;
+  certifications: Array<{ name: string; issuing_body: string; license_number?: string; issue_date: string; expiration_date: string; extraction_confidence: string; position?: number; heading?: string }>;
   skills: Array<string>;
   skills_position?: number | null;
   freeform: Array<{ section_type: string; heading: string; content: string; position?: number }>;

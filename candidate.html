@@ -3008,7 +3008,16 @@ a:hover{color:var(--color-accent)}
       </sc-if>
       <sc-if value="{{ resumeHasSummary }}" hint-placeholder-val="{{ false }}">
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
-        <div class="card-kicker">Summary</div>
+        <!-- Bug 1 / Item #3 point 7 (2026-09-17): no generic "Summary" label stacked above the real
+             one — the literal source heading (or nothing, if the document genuinely has none) is the
+             only heading this section ever shows. -->
+        <div class="field">
+          <label>Section heading, as printed on your resume</label>
+          <input class="input" placeholder="(no heading on your resume)" value="{{ resumeSummaryHeading }}" sc-camel-on-change="{{ onResumeSummaryHeadingChange }}">
+          <sc-if value="{{ resumeSummaryHeadingEdited }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:11px;color:var(--color-warning,#c77d1e);margin-top:var(--space-1)">Edited from what your resume shows.</div>
+          </sc-if>
+        </div>
         <textarea class="input" rows="3" value="{{ resumeSummaryContent }}" sc-camel-on-change="{{ onResumeSummaryChange }}"></textarea>
       </div>
       </sc-if>
@@ -3049,71 +3058,104 @@ a:hover{color:var(--color-accent)}
 
       <sc-for list="{{ resumeSectionsOrdered }}" as="section" hint-placeholder-count="3">
         <sc-if value="{{ section.isWorkHistory }}" hint-placeholder-val="{{ false }}">
-        <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
-          <div class="card-kicker">Work history</div>
-          <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
-            <div class="field" style="flex:1;min-width:160px"><label>Title</label><input class="input" value="{{ section.title }}" sc-camel-on-change="{{ section.onTitle }}"></div>
-            <div class="field" style="flex:1;min-width:160px"><label>Company</label><input class="input" value="{{ section.company }}" sc-camel-on-change="{{ section.onCompany }}"></div>
+        <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+          <div class="field">
+            <label>Section heading, as printed on your resume</label>
+            <input class="input" placeholder="(no heading on your resume)" value="{{ section.heading }}" sc-camel-on-change="{{ section.onHeadingChange }}">
+            <!-- Item #3 (2026-09-17): literal headings are candidate-supplied, unverified text (same
+                 trust tier as printed phone/email) — editable, never blocked, but flagged once edited
+                 so it's clear this no longer matches what the document itself says. -->
+            <sc-if value="{{ section.headingEdited }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:11px;color:var(--color-warning,#c77d1e);margin-top:var(--space-1)">Edited from what your resume shows.</div>
+            </sc-if>
           </div>
-          <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
-            <div class="field" style="flex:1;min-width:160px"><label>Location</label><input class="input" placeholder="City, ST" value="{{ section.location }}" sc-camel-on-change="{{ section.onLocation }}"></div>
+          <sc-for list="{{ section.items }}" as="item" hint-placeholder-count="1">
+          <div style="display:flex;flex-direction:column;gap:var(--space-2);padding-top:var(--space-2);border-top:1px solid var(--color-divider)">
+            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+              <div class="field" style="flex:1;min-width:160px"><label>Title</label><input class="input" value="{{ item.title }}" sc-camel-on-change="{{ item.onTitle }}"></div>
+              <div class="field" style="flex:1;min-width:160px"><label>Company</label><input class="input" value="{{ item.company }}" sc-camel-on-change="{{ item.onCompany }}"></div>
+            </div>
+            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+              <div class="field" style="flex:1;min-width:160px"><label>Location</label><input class="input" placeholder="City, ST" value="{{ item.location }}" sc-camel-on-change="{{ item.onLocation }}"></div>
+            </div>
+            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+              <div class="field" style="flex:1;min-width:140px"><label>Start date</label><input class="input" type="date" value="{{ item.startDate }}" sc-camel-on-change="{{ item.onStartDate }}"></div>
+              <div class="field" style="flex:1;min-width:140px"><label>End date (blank = present)</label><input class="input" type="date" value="{{ item.endDate }}" sc-camel-on-change="{{ item.onEndDate }}"></div>
+            </div>
+            <div class="field"><label>Job responsibilities</label><textarea class="input" rows="3" value="{{ item.jobResponsibilities }}" sc-camel-on-change="{{ item.onResponsibilities }}"></textarea></div>
           </div>
-          <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
-            <div class="field" style="flex:1;min-width:140px"><label>Start date</label><input class="input" type="date" value="{{ section.startDate }}" sc-camel-on-change="{{ section.onStartDate }}"></div>
-            <div class="field" style="flex:1;min-width:140px"><label>End date (blank = present)</label><input class="input" type="date" value="{{ section.endDate }}" sc-camel-on-change="{{ section.onEndDate }}"></div>
-          </div>
-          <div class="field"><label>Job responsibilities</label><textarea class="input" rows="3" value="{{ section.jobResponsibilities }}" sc-camel-on-change="{{ section.onResponsibilities }}"></textarea></div>
+          </sc-for>
         </div>
         </sc-if>
 
         <sc-if value="{{ section.isEducation }}" hint-placeholder-val="{{ false }}">
-        <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
-          <div class="card-kicker">Education</div>
-          <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
-            <div class="field" style="flex:1;min-width:160px"><label>Degree</label><input class="input" value="{{ section.degree }}" sc-camel-on-change="{{ section.onDegree }}"></div>
-            <div class="field" style="flex:1;min-width:160px"><label>Field of study</label><input class="input" value="{{ section.fieldOfStudy }}" sc-camel-on-change="{{ section.onFieldOfStudy }}"></div>
+        <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+          <div class="field">
+            <label>Section heading, as printed on your resume</label>
+            <input class="input" placeholder="(no heading on your resume)" value="{{ section.heading }}" sc-camel-on-change="{{ section.onHeadingChange }}">
+            <sc-if value="{{ section.headingEdited }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:11px;color:var(--color-warning,#c77d1e);margin-top:var(--space-1)">Edited from what your resume shows.</div>
+            </sc-if>
           </div>
-          <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
-            <div class="field" style="flex:1;min-width:160px"><label>Institution</label><input class="input" value="{{ section.institution }}" sc-camel-on-change="{{ section.onInstitution }}"></div>
-            <div class="field" style="flex:1;min-width:160px"><label>Location</label><input class="input" placeholder="City, ST" value="{{ section.location }}" sc-camel-on-change="{{ section.onLocation }}"></div>
+          <sc-for list="{{ section.items }}" as="item" hint-placeholder-count="1">
+          <div style="display:flex;flex-direction:column;gap:var(--space-2);padding-top:var(--space-2);border-top:1px solid var(--color-divider)">
+            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+              <div class="field" style="flex:1;min-width:160px"><label>Degree</label><input class="input" value="{{ item.degree }}" sc-camel-on-change="{{ item.onDegree }}"></div>
+              <div class="field" style="flex:1;min-width:160px"><label>Field of study</label><input class="input" value="{{ item.fieldOfStudy }}" sc-camel-on-change="{{ item.onFieldOfStudy }}"></div>
+            </div>
+            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+              <div class="field" style="flex:1;min-width:160px"><label>Institution</label><input class="input" value="{{ item.institution }}" sc-camel-on-change="{{ item.onInstitution }}"></div>
+              <div class="field" style="flex:1;min-width:160px"><label>Location</label><input class="input" placeholder="City, ST" value="{{ item.location }}" sc-camel-on-change="{{ item.onLocation }}"></div>
+            </div>
+            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+              <div class="field" style="flex:1;min-width:140px"><label>Start date</label><input class="input" type="date" value="{{ item.startDate }}" sc-camel-on-change="{{ item.onStartDate }}"></div>
+              <div class="field" style="flex:1;min-width:140px"><label>End date</label><input class="input" type="date" value="{{ item.endDate }}" sc-camel-on-change="{{ item.onEndDate }}"></div>
+            </div>
           </div>
-          <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
-            <div class="field" style="flex:1;min-width:140px"><label>Start date</label><input class="input" type="date" value="{{ section.startDate }}" sc-camel-on-change="{{ section.onStartDate }}"></div>
-            <div class="field" style="flex:1;min-width:140px"><label>End date</label><input class="input" type="date" value="{{ section.endDate }}" sc-camel-on-change="{{ section.onEndDate }}"></div>
-          </div>
+          </sc-for>
         </div>
         </sc-if>
 
         <sc-if value="{{ section.isCertification }}" hint-placeholder-val="{{ false }}">
-        <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
-          <div class="card-kicker">Certification</div>
-          <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
-            <div class="field" style="flex:1;min-width:160px"><label>Name</label><input class="input" value="{{ section.name }}" sc-camel-on-change="{{ section.onName }}"></div>
-            <div class="field" style="flex:1;min-width:160px"><label>Issuing body</label><input class="input" value="{{ section.issuingBody }}" sc-camel-on-change="{{ section.onIssuingBody }}"></div>
-          </div>
-          <!-- Item 7 (2026-09-12 live-testing session): a sibling field to Name, not a replacement —
-               a real license/permit/registration number when the resume prints one, separate from
-               whatever informal or formal name the candidate's own document uses. -->
-          <div class="field"><label>License number</label><input class="input" value="{{ section.licenseNumber }}" sc-camel-on-change="{{ section.onLicenseNumber }}"></div>
-          <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
-            <div class="field" style="flex:1;min-width:140px"><label>Issue date</label><input class="input" type="date" value="{{ section.issueDate }}" sc-camel-on-change="{{ section.onIssueDate }}"></div>
-            <div class="field" style="flex:1;min-width:140px"><label>Expiration date</label><input class="input" type="date" value="{{ section.expirationDate }}" sc-camel-on-change="{{ section.onExpirationDate }}"></div>
-          </div>
-          <!-- Item 8 (2026-09-12 live-testing session): trade/occupation type — the routing field a
-               future licensing-board check needs to know which board to check against. Not blocked
-               at Confirm if left blank, but a certification with no trade/occupation selected is
-               routed to manual review instead of a normal queue item (see confirm-resume-data) —
-               the caption below says so plainly rather than leaving it a silent, invisible rule. -->
+        <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
           <div class="field">
-            <label>Trade / occupation</label>
-            <sc-raw-select class="input" value="{{ section.tradeSocCode }}" sc-camel-on-change="{{ section.onTradeSocCode }}">
-              <option value="">Select trade or occupation…</option>
-              <sc-for list="{{ socTradeOptions }}" as="opt" hint-placeholder-count="3">
-                <option value="{{ opt.code }}">{{ opt.label }}</option>
-              </sc-for>
-            </sc-raw-select>
-            <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6;margin-top:var(--space-1)">Used to route this certification to the right licensing board for automated checks. If left blank, this certification is sent for manual review instead.</div>
+            <label>Section heading, as printed on your resume</label>
+            <input class="input" placeholder="(no heading on your resume)" value="{{ section.heading }}" sc-camel-on-change="{{ section.onHeadingChange }}">
+            <sc-if value="{{ section.headingEdited }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:11px;color:var(--color-warning,#c77d1e);margin-top:var(--space-1)">Edited from what your resume shows.</div>
+            </sc-if>
           </div>
+          <sc-for list="{{ section.items }}" as="item" hint-placeholder-count="1">
+          <div style="display:flex;flex-direction:column;gap:var(--space-2);padding-top:var(--space-2);border-top:1px solid var(--color-divider)">
+            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+              <div class="field" style="flex:1;min-width:160px"><label>Name</label><input class="input" value="{{ item.name }}" sc-camel-on-change="{{ item.onName }}"></div>
+              <div class="field" style="flex:1;min-width:160px"><label>Issuing body</label><input class="input" value="{{ item.issuingBody }}" sc-camel-on-change="{{ item.onIssuingBody }}"></div>
+            </div>
+            <!-- Item 7 (2026-09-12 live-testing session): a sibling field to Name, not a replacement —
+                 a real license/permit/registration number when the resume prints one, separate from
+                 whatever informal or formal name the candidate's own document uses. -->
+            <div class="field"><label>License number</label><input class="input" value="{{ item.licenseNumber }}" sc-camel-on-change="{{ item.onLicenseNumber }}"></div>
+            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+              <div class="field" style="flex:1;min-width:140px"><label>Issue date</label><input class="input" type="date" value="{{ item.issueDate }}" sc-camel-on-change="{{ item.onIssueDate }}"></div>
+              <div class="field" style="flex:1;min-width:140px"><label>Expiration date</label><input class="input" type="date" value="{{ item.expirationDate }}" sc-camel-on-change="{{ item.onExpirationDate }}"></div>
+            </div>
+            <!-- Item 8 (2026-09-12 live-testing session): trade/occupation type — the routing field a
+                 future licensing-board check needs to know which board to check against. Not blocked
+                 at Confirm if left blank, but a certification with no trade/occupation selected is
+                 routed to manual review instead of a normal queue item (see confirm-resume-data) —
+                 the caption below says so plainly rather than leaving it a silent, invisible rule. -->
+            <div class="field">
+              <label>Trade / occupation</label>
+              <sc-raw-select class="input" value="{{ item.tradeSocCode }}" sc-camel-on-change="{{ item.onTradeSocCode }}">
+                <option value="">Select trade or occupation…</option>
+                <sc-for list="{{ socTradeOptions }}" as="opt" hint-placeholder-count="3">
+                  <option value="{{ opt.code }}">{{ opt.label }}</option>
+                </sc-for>
+              </sc-raw-select>
+              <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6;margin-top:var(--space-1)">Used to route this certification to the right licensing board for automated checks. If left blank, this certification is sent for manual review instead.</div>
+            </div>
+          </div>
+          </sc-for>
         </div>
         </sc-if>
 
@@ -3130,11 +3172,19 @@ a:hover{color:var(--color-accent)}
         </sc-if>
 
         <sc-if value="{{ section.isNeedsReview }}" hint-placeholder-val="{{ false }}">
-        <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2);border-color:var(--color-accent)">
-          <div class="card-kicker">Flagged for your review</div>
-          <sc-if value="{{ section.hasHeading }}" hint-placeholder-val="{{ false }}">
-            <div style="font-size:11px;letter-spacing:0.04em;text-transform:uppercase;color:var(--color-neutral-500)">{{ section.heading }}</div>
-          </sc-if>
+        <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2);border:2px solid var(--color-accent);background:color-mix(in srgb, var(--color-accent) 6%, transparent)">
+          <!-- Item #3 point 5 (2026-09-17): "unmissable," not just accent-bordered — a real
+               attention-getting badge, not only a colored border easy to skim past. -->
+          <div style="display:flex;align-items:center;gap:6px">
+            <span class="tag" style="background:var(--color-accent);color:var(--color-neutral-950);font-weight:600">⚠ Needs your review</span>
+          </div>
+          <div class="field">
+            <label>Section heading, as printed on your resume</label>
+            <input class="input" placeholder="(no heading on your resume)" value="{{ section.heading }}" sc-camel-on-change="{{ section.onHeadingChange }}">
+            <sc-if value="{{ section.headingEdited }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:11px;color:var(--color-warning,#c77d1e);margin-top:var(--space-1)">Edited from what your resume shows.</div>
+            </sc-if>
+          </div>
           <textarea class="input" rows="3" value="{{ section.content }}" sc-camel-on-change="{{ section.onChange }}"></textarea>
           <div style="font-size:11px;color:var(--color-neutral-500)">Unresolved content from your resume. You can edit it above. Nothing here is submitted for verification.</div>
         </div>
@@ -3143,7 +3193,13 @@ a:hover{color:var(--color-accent)}
 
       <sc-if value="{{ resumeHasHobbies }}" hint-placeholder-val="{{ false }}">
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
-        <div class="card-kicker">Hobbies / other</div>
+        <div class="field">
+          <label>Section heading, as printed on your resume</label>
+          <input class="input" placeholder="(no heading on your resume)" value="{{ resumeHobbiesHeading }}" sc-camel-on-change="{{ onResumeHobbiesHeadingChange }}">
+          <sc-if value="{{ resumeHobbiesHeadingEdited }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:11px;color:var(--color-warning,#c77d1e);margin-top:var(--space-1)">Edited from what your resume shows.</div>
+          </sc-if>
+        </div>
         <textarea class="input" rows="2" value="{{ resumeHobbiesContent }}" sc-camel-on-change="{{ onResumeHobbiesChange }}"></textarea>
       </div>
       </sc-if>
@@ -5926,6 +5982,7 @@ class Component extends DCLogic {
     const lines = [];
     const push = (text, bold) => lines.push({ text: this.sanitizeAts(text), bold: !!bold });
     const deliveredContact = this.resolveDeliveredContact();
+    const ex = s.resumeExtraction;
     // Real dead end this replaces (2026-09-07 wiring audit): fell back to the literal placeholder
     // "Alex Rivera" whenever savedFirst/savedLast were unset \u2014 confirmed live, a candidate previewing
     // "what employers see" could see a fake person's name. Now omitted entirely rather than faked if
@@ -5957,53 +6014,68 @@ class Component extends DCLogic {
     // per-line PDF text-show operator at a fixed x position, one push() call = one literal line at
     // one y position) -- an unwrapped line longer than the page's usable width just runs off the
     // right edge instead of continuing on a new line, confirmed live against a real long summary.
+    // Bug 1 (2026-09-17 live-demo report) / Item #3 point 7: Summary's own literal heading, printed
+    // only when it's actually the extracted document's own summary being shown verbatim (content
+    // equality check against the freeform row) -- a candidate-authored alternate summary version for
+    // this delivery target is no longer the document's own words, so it correctly gets no heading
+    // either. Never a generic "Summary" label, and never both a generic label and the real one
+    // stacked together (point 7's own concrete example).
+    const freeformSummary = ex && ex.freeform.find(f => f.section_type === 'summary');
     const summaryText = this.getSummaryText(target);
-    if (summaryText) this.wrapText(summaryText, 90).forEach(w => push(w));
+    const summaryHeading = (freeformSummary && summaryText && freeformSummary.content === summaryText) ? (freeformSummary.heading || '').trim() : '';
+    if (summaryText) {
+      if (summaryHeading) push(summaryHeading, true);
+      this.wrapText(summaryText, 90).forEach(w => push(w));
+    }
     push('');
     // Item 6 (2026-09-11 status-check session): this used to render every category in a fixed
     // EXPERIENCE -> EDUCATION -> SKILLS -> CERTIFICATIONS -> ADDITIONAL INFORMATION template
     // order, unconditionally, regardless of where those sections actually appeared in the
-    // candidate's real source document -- and needs_review content (anything the extraction
-    // couldn't confidently place into a structured category) was never rendered into the
-    // generated PDF at all, under any category, ever (the old realHobbiesText() helper this
-    // replaces only ever surfaced section_type === 'hobbies_other', deliberately excluding
-    // needs_review). Real fix: reuse the exact position-sorted "blocks" pattern already proven
-    // live for the resumeConfirm screen (resumeSectionsOrdered, elsewhere in this file) -- one
-    // array spanning every work_history/education/certification/skills(one block)/freeform row,
-    // sorted by each row's own real `position` (captured at parse time from the source
-    // document's actual layout -- see upload-resume's globalizePosition), so entries interleave
-    // in their true document order instead of being bucketed into a fixed template. needs_review
-    // and hobbies_other blocks render their own real `heading` verbatim (uppercased) instead of
-    // a generic category label, in their correct position -- this is what actually closes the
-    // "content silently vanishes" gap, not just a reordering. Item labels are pulled from
-    // getCzCategories() (the same source Customization itself renders) so both surfaces always
-    // agree, and every label/body flows through wrapText -- which also resolves Item 4 (field of
-    // study, already added to getCzCategories' own label) and Item 5 (long job titles) as a
-    // natural side effect, with no separate fix needed for either.
-    const ex = s.resumeExtraction;
-    const blocks = [];
+    // candidate's real source document. Real fix: reuse the exact position-sorted pattern already
+    // proven live for the resumeConfirm screen (resumeSectionsOrdered, elsewhere in this file) --
+    // every category's items interleave in their true document order instead of a fixed template.
+    // Item #3 (2026-09-17): section boundaries and headings are now driven by the source document's
+    // own literal headings (work_history/education/certifications each now carry a real `heading`
+    // field, same as freeform always has), not by a fixed category taxonomy -- see
+    // groupByLiteralHeading (shared with resumeSectionsOrdered, so this screen and the confirm
+    // screen always agree on where one section ends and the next begins). Item labels are pulled
+    // from getCzCategories() (the same source Customization itself renders) so both surfaces always
+    // agree, and every label/body flows through wrapText.
+    const grouped = [];
     if (ex) {
       const expVal = catVal('experience');
+      const expItems = [];
       cats.find(c => c.key === 'experience').items.forEach(it => {
         if (target && !expVal[it.key]) return;
         const w = ex.work_history.find(row => row.id === it.key);
         if (!w) return;
-        blocks.push({ kind: 'experience', position: typeof w.position === 'number' ? w.position : Infinity, label: it.label, body: this.roleDescription(it.key) });
+        expItems.push({ position: typeof w.position === 'number' ? w.position : Infinity, heading: w.heading || '', label: it.label, body: this.roleDescription(it.key) });
       });
+      expItems.sort((a, b) => a.position - b.position);
+      this.groupByLiteralHeading(expItems).forEach(g => grouped.push({ kind: 'experience', position: g.position, heading: g.heading, items: g.items }));
+
       const eduVal = catVal('education');
+      const eduItems = [];
       cats.find(c => c.key === 'education').items.forEach(it => {
         if (target && !eduVal[it.key]) return;
         const x = ex.education.find(row => row.id === it.key);
         if (!x) return;
-        blocks.push({ kind: 'education', position: typeof x.position === 'number' ? x.position : Infinity, label: it.label, body: '' });
+        eduItems.push({ position: typeof x.position === 'number' ? x.position : Infinity, heading: x.heading || '', label: it.label, body: '' });
       });
+      eduItems.sort((a, b) => a.position - b.position);
+      this.groupByLiteralHeading(eduItems).forEach(g => grouped.push({ kind: 'education', position: g.position, heading: g.heading, items: g.items }));
+
       const certVal = catVal('certifications');
+      const certItems = [];
       cats.find(c => c.key === 'certifications').items.forEach(it => {
         if (target && !certVal[it.key]) return;
         const c = ex.certifications.find(row => row.id === it.key);
         if (!c) return;
-        blocks.push({ kind: 'certifications', position: typeof c.position === 'number' ? c.position : Infinity, label: it.label, body: '' });
+        certItems.push({ position: typeof c.position === 'number' ? c.position : Infinity, heading: c.heading || '', label: it.label, body: '' });
       });
+      certItems.sort((a, b) => a.position - b.position);
+      this.groupByLiteralHeading(certItems).forEach(g => grouped.push({ kind: 'certifications', position: g.position, heading: g.heading, items: g.items }));
+
       if (catVal('skills') && ex.skills && ex.skills.length > 0) {
         // Real regression found live testing a genuinely complex document (16-item Core
         // Competencies list): joining every skill onto ONE comma-separated line, then word-wrapping
@@ -6014,19 +6086,24 @@ class Component extends DCLogic {
         // its own line once wrapText renders it (wrapText already preserves embedded "\n" -- see its
         // own header) -- one line per skill, matching how the source document itself presents them,
         // without claiming the source's specific two-column visual LAYOUT (a design choice this
-        // plain-text PDF was never going to reproduce either way).
+        // plain-text PDF was never going to reproduce either way). Skills doesn't capture a literal
+        // heading in this pass (Item #3 point 1 scoped that to work_history/education/certifications
+        // only) -- keeps its existing fixed "SKILLS" label, applied in the render loop below.
         const skillLine = this.deliveredSkills().join('\n');
         if (skillLine) {
           const positions = ex.skills.map(sk => sk.section_position).filter(p => typeof p === 'number');
-          blocks.push({ kind: 'skills', position: positions.length ? Math.min(...positions) : Infinity, label: '', body: skillLine });
+          grouped.push({ kind: 'skills', position: positions.length ? Math.min(...positions) : Infinity, body: skillLine });
         }
       }
       // Item 3 (2026-09-11 status-check session): needs_review now reads per-item catVal like every
       // other real category above (see getCzCategories' own comment on why it's itemized now)
       // instead of the single misc boolean gate this used to share with hobbies_other -- a candidate
       // can now exclude one flagged section from a delivery target without losing every flagged
-      // section. hobbies_other stays under the single misc boolean below, unchanged -- that gap
-      // wasn't part of what Item 3 reported.
+      // section. hobbies_other stays under the single misc boolean below, unchanged. Neither is
+      // grouped by groupByLiteralHeading -- each freeform row already carries its own real, distinct
+      // heading and can legitimately recur at different points in true document order (unlike
+      // experience/education/certifications, several freeform rows sharing identical heading text
+      // are not necessarily one contiguous section).
       const needsReviewVal = catVal('needsReview');
       cats.find(c => c.key === 'needsReview').items.forEach(it => {
         if (target && !needsReviewVal[it.key]) return;
@@ -6035,57 +6112,30 @@ class Component extends DCLogic {
         const content = (f.content || '').trim();
         if (!content) return;
         if (this.freeformIsMostlyDuplicateOfCaptured(f, ex)) return;
-        blocks.push({ kind: 'misc', position: typeof f.position === 'number' ? f.position : Infinity, label: (f.heading || '').trim(), body: content });
+        grouped.push({ kind: 'misc', position: typeof f.position === 'number' ? f.position : Infinity, heading: (f.heading || '').trim(), body: content });
       });
       if (catVal('misc')) {
         ex.freeform.filter(f => f.section_type === 'hobbies_other').forEach(f => {
           const content = (f.content || '').trim();
           if (!content) return;
-          blocks.push({ kind: 'misc', position: typeof f.position === 'number' ? f.position : Infinity, label: (f.heading || '').trim(), body: content });
+          grouped.push({ kind: 'misc', position: typeof f.position === 'number' ? f.position : Infinity, heading: (f.heading || '').trim(), body: content });
         });
       }
     }
-    blocks.sort((a, b) => a.position - b.position);
-
-    // Real, confirmed failure mode (2026-09-17 live demo, two separate runs): each certification
-    // used to become its own independently-positioned block above, so the render loop below (which
-    // starts a fresh heading whenever the immediately-preceding block's kind differs) created a new
-    // "CERTIFICATIONS" heading every time one cert item's own position number happened to fall on
-    // the far side of a work_history item's position -- the model's own per-item position
-    // assignment isn't reliable enough to keep one logical list contiguous (same class of gap as
-    // the position-uniqueness fix elsewhere in this pipeline), so a single 4-item certifications
-    // list got torn into 3 separate CERTIFICATIONS blocks scattered between job entries in the real
-    // demo output -- no items lost or duplicated, just misplaced. Grouping every item of a
-    // single-heading structured category into ONE run before the render loop removes the
-    // possibility structurally: it no longer matters whether the model's raw per-item positions are
-    // contiguous, only their relative order among themselves (which the sort above already
-    // preserves), since each category can now only ever print its heading once. 'skills' already
-    // gets this same one-block-per-category treatment above; 'misc' (needs_review/hobbies_other) is
-    // deliberately excluded -- each of those rows carries its own real, distinct heading and can
-    // legitimately recur at different points in true document order.
-    const GROUPED_KINDS = ['experience', 'education', 'certifications'];
-    const grouped = [];
-    const groupByKind = {};
-    blocks.forEach(b => {
-      if (GROUPED_KINDS.includes(b.kind)) {
-        if (!groupByKind[b.kind]) {
-          groupByKind[b.kind] = { kind: b.kind, position: b.position, items: [] };
-          grouped.push(groupByKind[b.kind]);
-        }
-        groupByKind[b.kind].items.push(b);
-      } else {
-        grouped.push(b);
-      }
-    });
     grouped.sort((a, b) => a.position - b.position);
 
-    const sectionHeader = { experience: 'EXPERIENCE', education: 'EDUCATION', skills: 'SKILLS', certifications: 'CERTIFICATIONS' };
+    // Item #3 point 7 (2026-09-17): a section shows exactly one heading -- the literal source
+    // heading text, or nothing if the source genuinely has none. No generic label is ever
+    // substituted or stacked alongside the real one -- confirmed as a deliberate, strict reading:
+    // this replaces the old fixed EXPERIENCE/EDUCATION/CERTIFICATIONS labels AND the old
+    // 'ADDITIONAL INFORMATION' fallback for headless misc content. 'skills' is the one exception,
+    // since it doesn't capture a literal heading in this pass (see above) and keeps its fixed label.
     let lastHeading = null;
     grouped.forEach(g => {
       if (g.items) {
-        const heading = sectionHeader[g.kind];
-        if (heading !== lastHeading) push(heading, true);
-        lastHeading = heading;
+        const heading = (g.heading || '').trim();
+        if (heading && heading !== lastHeading) push(heading, true);
+        lastHeading = heading || null;
         g.items.forEach(b => {
           this.wrapText(b.label, 90).forEach(w => push(w));
           if (b.body) this.wrapText(b.body, 90).forEach(w => push(w));
@@ -6093,15 +6143,17 @@ class Component extends DCLogic {
         });
         return;
       }
-      const heading = g.kind === 'misc' ? (g.label || 'ADDITIONAL INFORMATION').toUpperCase() : sectionHeader[g.kind];
-      if (heading !== lastHeading) push(heading, true);
-      lastHeading = heading;
-      if (g.kind === 'skills' || g.kind === 'misc') {
+      if (g.kind === 'skills') {
+        if ('SKILLS' !== lastHeading) push('SKILLS', true);
+        lastHeading = 'SKILLS';
         this.wrapText(g.body, 90).forEach(w => push(w));
-      } else {
-        this.wrapText(g.label, 90).forEach(w => push(w));
-        if (g.body) this.wrapText(g.body, 90).forEach(w => push(w));
+        push('');
+        return;
       }
+      const heading = (g.heading || '').trim();
+      if (heading && heading !== lastHeading) push(heading, true);
+      lastHeading = heading || null;
+      this.wrapText(g.body, 90).forEach(w => push(w));
       push('');
     });
     return lines;
@@ -8577,6 +8629,61 @@ class Component extends DCLogic {
     });
   }
 
+  // Item #3 (2026-09-17 heading-capture build): section headings are candidate-supplied, unverified
+  // text — same trust tier as printed phone/email (see the Printed Number keep/revert pattern this
+  // borrows the "edited" warning idea from, though not the keep/revert mechanic itself: unlike a
+  // printed contact field, there's no separate "account value" to revert to here, only the extracted
+  // one, so editing is allowed but never blocked, and a persistent "edited" flag is all that's needed
+  // rather than a full diff-against-original). One shared heading covers every item in a contiguous
+  // group (see groupByLiteralHeading below) — editing it writes the same value to every item id in
+  // that group at once, since the generated PDF renders them as one section either way.
+  updateResumeSectionHeading(category, ids, value) {
+    this.setState(st => {
+      if (!st.resumeExtraction) return {};
+      const idSet = new Set(ids);
+      const list = st.resumeExtraction[category].map(item => idSet.has(item.id) ? { ...item, heading: value } : item);
+      const editedHeadingGroups = new Set(st.editedHeadingGroups || []);
+      editedHeadingGroups.add(category + ':' + ids[0]);
+      return { resumeExtraction: { ...st.resumeExtraction, [category]: list }, editedHeadingGroups };
+    });
+  }
+
+  // Same idea as updateResumeSectionHeading above, for a single needs_review freeform row's own
+  // heading — freeform rows are never grouped (see groupByLiteralHeading's own comment on why misc
+  // content stays one row per entry), so this always targets exactly one id.
+  updateResumeFreeformHeading(id, value) {
+    this.setState(st => {
+      if (!st.resumeExtraction) return {};
+      const list = st.resumeExtraction.freeform.map(item => item.id === id ? { ...item, heading: value } : item);
+      const editedHeadingGroups = new Set(st.editedHeadingGroups || []);
+      editedHeadingGroups.add('freeform:' + id);
+      return { resumeExtraction: { ...st.resumeExtraction, freeform: list }, editedHeadingGroups };
+    });
+  }
+
+  // Shared by resumeSectionsOrdered (confirm screen) and buildResumeLines (generated PDF) so both
+  // surfaces group identically: contiguous runs of same-kind items sharing the same literal source
+  // heading (normalized for case/whitespace only), never by fixed category alone, and never merging
+  // across a genuinely different heading even when position noise would otherwise suggest adjacency.
+  // Items must already be position-sorted before calling this. Two headless runs (heading "") that
+  // aren't actually adjacent in the source (something else sits between them) correctly stay separate
+  // groups — this only ever compares against the immediately preceding group, never merges non-
+  // adjacent runs just because they share the same (empty) heading text.
+  groupByLiteralHeading(items) {
+    const norm = (h) => (h || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const groups = [];
+    items.forEach(item => {
+      const h = norm(item.heading);
+      const last = groups[groups.length - 1];
+      if (last && norm(last.heading) === h) {
+        last.items.push(item);
+      } else {
+        groups.push({ heading: (item.heading || '').trim(), position: item.position, items: [item] });
+      }
+    });
+    return groups;
+  }
+
   async submitResumeConfirmation() {
     if (!this.state.resumeExtraction || !this.state.resumeCandidateId || this.state.resumeConfirmPending) return;
     this.setState({ resumeConfirmPending: true, resumeConfirmError: null });
@@ -8592,12 +8699,16 @@ class Component extends DCLogic {
       // personal location, echoed from resume_document the same way resume_document_id above is —
       // confirm-resume-data writes it in the same atomic claim PATCH as confirmed_at.
       candidate_location: ex.resume_document ? ex.resume_document.candidate_location : null,
-      work_history: ex.work_history.map(w => ({ id: w.id, company: w.company, title: w.title, location: w.location, start_date: w.start_date, end_date: w.end_date, job_responsibilities: w.job_responsibilities })),
-      education: ex.education.map(x => ({ id: x.id, institution: x.institution, degree: x.degree, field_of_study: x.field_of_study, location: x.location, start_date: x.start_date, end_date: x.end_date })),
+      // Item #3 (2026-09-17): heading is now echoed for these three categories too, same as
+      // freeform always has, since resumeConfirm can now edit it (one shared value per contiguous
+      // group — see groupByLiteralHeading/updateResumeSectionHeading) and confirm-resume-data needs
+      // the edited value, not just what extraction originally captured.
+      work_history: ex.work_history.map(w => ({ id: w.id, company: w.company, title: w.title, location: w.location, start_date: w.start_date, end_date: w.end_date, job_responsibilities: w.job_responsibilities, heading: w.heading || null })),
+      education: ex.education.map(x => ({ id: x.id, institution: x.institution, degree: x.degree, field_of_study: x.field_of_study, location: x.location, start_date: x.start_date, end_date: x.end_date, heading: x.heading || null })),
       // source_match is echoed back (not edited here) so confirm-resume-data can flag a
       // structurally-unmatched certification for staff regardless of the opt-in checkbox below —
       // see that function's own header (bug-2 defense-in-depth).
-      certifications: ex.certifications.map(c => ({ id: c.id, name: c.name, issuing_body: c.issuing_body, license_number: c.license_number, issue_date: c.issue_date, expiration_date: c.expiration_date, source_match: c.source_match, trade_soc_code: c.trade_soc_code || null })),
+      certifications: ex.certifications.map(c => ({ id: c.id, name: c.name, issuing_body: c.issuing_body, license_number: c.license_number, issue_date: c.issue_date, expiration_date: c.expiration_date, source_match: c.source_match, trade_soc_code: c.trade_soc_code || null, heading: c.heading || null })),
       skills: ex.skills.map(s => ({ id: s.id, skill_text: s.skill_text })),
       // section_type/heading are echoed back (not edited here) so confirm-resume-data can flag
       // needs_review rows for staff without a second round-trip to look up what kind of freeform
@@ -9871,6 +9982,23 @@ class Component extends DCLogic {
       resumeHasPrintedHeader: !!(s.resumeExtraction && s.resumeExtraction.resume_document && s.resumeExtraction.resume_document.printed_header),
       resumePrintedHeaderValue: (s.resumeExtraction && s.resumeExtraction.resume_document && s.resumeExtraction.resume_document.printed_header) || '',
       resumeHasSummary: !!(s.resumeExtraction && s.resumeExtraction.freeform.some(f => f.section_type === 'summary')),
+      // Bug 1 (2026-09-17 live-demo report): the model already captures a literal heading for
+      // summary, same as every other freeform row (see the shared freeform.heading prompt rule) — it
+      // was only ever dropped here, at render, not upstream. Now read and shown/editable like every
+      // other category's heading in this pass; no fallback label is ever stacked above or below it
+      // (Item #3 point 7) — an empty heading shows nothing, never a generic "Summary" substitute.
+      resumeSummaryHeading: (() => {
+        const f = s.resumeExtraction && s.resumeExtraction.freeform.find(f => f.section_type === 'summary');
+        return f ? (f.heading || '') : '';
+      })(),
+      resumeSummaryHeadingEdited: (() => {
+        const f = s.resumeExtraction && s.resumeExtraction.freeform.find(f => f.section_type === 'summary');
+        return !!(f && (s.editedHeadingGroups || new Set()).has('freeform:' + f.id));
+      })(),
+      onResumeSummaryHeadingChange: (e) => {
+        const f = s.resumeExtraction && s.resumeExtraction.freeform.find(f => f.section_type === 'summary');
+        if (f) this.updateResumeFreeformHeading(f.id, e.target.value);
+      },
       resumeSummaryContent: (() => {
         const f = s.resumeExtraction && s.resumeExtraction.freeform.find(f => f.section_type === 'summary');
         return f ? f.content || '' : '';
@@ -9880,6 +10008,20 @@ class Component extends DCLogic {
         if (f) this.updateResumeFreeform(f.id, e.target.value);
       },
       resumeHasHobbies: !!(s.resumeExtraction && s.resumeExtraction.freeform.some(f => f.section_type === 'hobbies_other')),
+      // Same gap as Summary above (bonus finding, same root cause): hobbies_other's own literal
+      // heading was dropped at render too — fixed the same way, same pass.
+      resumeHobbiesHeading: (() => {
+        const f = s.resumeExtraction && s.resumeExtraction.freeform.find(f => f.section_type === 'hobbies_other');
+        return f ? (f.heading || '') : '';
+      })(),
+      resumeHobbiesHeadingEdited: (() => {
+        const f = s.resumeExtraction && s.resumeExtraction.freeform.find(f => f.section_type === 'hobbies_other');
+        return !!(f && (s.editedHeadingGroups || new Set()).has('freeform:' + f.id));
+      })(),
+      onResumeHobbiesHeadingChange: (e) => {
+        const f = s.resumeExtraction && s.resumeExtraction.freeform.find(f => f.section_type === 'hobbies_other');
+        if (f) this.updateResumeFreeformHeading(f.id, e.target.value);
+      },
       resumeHobbiesContent: (() => {
         const f = s.resumeExtraction && s.resumeExtraction.freeform.find(f => f.section_type === 'hobbies_other');
         return f ? f.content || '' : '';
@@ -9901,43 +10043,73 @@ class Component extends DCLogic {
       // old data really belongs, same convention already used for candidate_freeform_sections.heading.
       resumeSectionsOrdered: (() => {
         if (!s.resumeExtraction) return [];
+        const editedGroups = s.editedHeadingGroups || new Set();
+        const byPosition = (a, b) => (typeof a.position === 'number' ? a.position : Infinity) - (typeof b.position === 'number' ? b.position : Infinity);
         const blocks = [];
-        s.resumeExtraction.work_history.forEach(w => blocks.push({
-          kind: 'work_history', position: typeof w.position === 'number' ? w.position : Infinity,
-          title: w.title || '', company: w.company || '',
-          location: w.location || '',
-          startDate: w.start_date || '', endDate: w.end_date || '',
-          jobResponsibilities: w.job_responsibilities || '',
-          onTitle: (e) => this.updateResumeItem('work_history', w.id, 'title', e.target.value),
-          onCompany: (e) => this.updateResumeItem('work_history', w.id, 'company', e.target.value),
-          onLocation: (e) => this.updateResumeItem('work_history', w.id, 'location', e.target.value),
-          onStartDate: (e) => this.updateResumeItem('work_history', w.id, 'start_date', e.target.value),
-          onEndDate: (e) => this.updateResumeItem('work_history', w.id, 'end_date', e.target.value),
-          onResponsibilities: (e) => this.updateResumeItem('work_history', w.id, 'job_responsibilities', e.target.value),
-        }));
-        s.resumeExtraction.education.forEach(x => blocks.push({
-          kind: 'education', position: typeof x.position === 'number' ? x.position : Infinity,
-          degree: x.degree || '', fieldOfStudy: x.field_of_study || '', institution: x.institution || '',
-          location: x.location || '',
-          startDate: x.start_date || '', endDate: x.end_date || '',
-          onDegree: (e) => this.updateResumeItem('education', x.id, 'degree', e.target.value),
-          onFieldOfStudy: (e) => this.updateResumeItem('education', x.id, 'field_of_study', e.target.value),
-          onInstitution: (e) => this.updateResumeItem('education', x.id, 'institution', e.target.value),
-          onLocation: (e) => this.updateResumeItem('education', x.id, 'location', e.target.value),
-          onStartDate: (e) => this.updateResumeItem('education', x.id, 'start_date', e.target.value),
-          onEndDate: (e) => this.updateResumeItem('education', x.id, 'end_date', e.target.value),
-        }));
-        s.resumeExtraction.certifications.forEach(c => blocks.push({
-          kind: 'certification', position: typeof c.position === 'number' ? c.position : Infinity,
-          name: c.name || '', issuingBody: c.issuing_body || '', licenseNumber: c.license_number || '',
-          issueDate: c.issue_date || '', expirationDate: c.expiration_date || '', tradeSocCode: c.trade_soc_code || '',
-          onName: (e) => this.updateResumeItem('certifications', c.id, 'name', e.target.value),
-          onIssuingBody: (e) => this.updateResumeItem('certifications', c.id, 'issuing_body', e.target.value),
-          onLicenseNumber: (e) => this.updateResumeItem('certifications', c.id, 'license_number', e.target.value),
-          onIssueDate: (e) => this.updateResumeItem('certifications', c.id, 'issue_date', e.target.value),
-          onExpirationDate: (e) => this.updateResumeItem('certifications', c.id, 'expiration_date', e.target.value),
-          onTradeSocCode: (e) => this.updateResumeItem('certifications', c.id, 'trade_soc_code', e.target.value),
-        }));
+        // Item #3 (2026-09-17): grouped by literal source heading (groupByLiteralHeading, shared with
+        // buildResumeLines so this screen and the generated PDF agree on section boundaries), not one
+        // card per raw item — matches the "one shared edit per section" decision, since several items
+        // sharing a heading are one logical section a candidate would think of as having one title.
+        this.groupByLiteralHeading([...s.resumeExtraction.work_history].sort(byPosition)).forEach(g => {
+          const ids = g.items.map(w => w.id);
+          blocks.push({
+            kind: 'work_history', position: typeof g.position === 'number' ? g.position : Infinity,
+            heading: g.heading, hasHeading: !!g.heading.trim(),
+            headingEdited: editedGroups.has('work_history:' + ids[0]),
+            onHeadingChange: (e) => this.updateResumeSectionHeading('work_history', ids, e.target.value),
+            items: g.items.map(w => ({
+              title: w.title || '', company: w.company || '',
+              location: w.location || '',
+              startDate: w.start_date || '', endDate: w.end_date || '',
+              jobResponsibilities: w.job_responsibilities || '',
+              onTitle: (e) => this.updateResumeItem('work_history', w.id, 'title', e.target.value),
+              onCompany: (e) => this.updateResumeItem('work_history', w.id, 'company', e.target.value),
+              onLocation: (e) => this.updateResumeItem('work_history', w.id, 'location', e.target.value),
+              onStartDate: (e) => this.updateResumeItem('work_history', w.id, 'start_date', e.target.value),
+              onEndDate: (e) => this.updateResumeItem('work_history', w.id, 'end_date', e.target.value),
+              onResponsibilities: (e) => this.updateResumeItem('work_history', w.id, 'job_responsibilities', e.target.value),
+            })),
+          });
+        });
+        this.groupByLiteralHeading([...s.resumeExtraction.education].sort(byPosition)).forEach(g => {
+          const ids = g.items.map(x => x.id);
+          blocks.push({
+            kind: 'education', position: typeof g.position === 'number' ? g.position : Infinity,
+            heading: g.heading, hasHeading: !!g.heading.trim(),
+            headingEdited: editedGroups.has('education:' + ids[0]),
+            onHeadingChange: (e) => this.updateResumeSectionHeading('education', ids, e.target.value),
+            items: g.items.map(x => ({
+              degree: x.degree || '', fieldOfStudy: x.field_of_study || '', institution: x.institution || '',
+              location: x.location || '',
+              startDate: x.start_date || '', endDate: x.end_date || '',
+              onDegree: (e) => this.updateResumeItem('education', x.id, 'degree', e.target.value),
+              onFieldOfStudy: (e) => this.updateResumeItem('education', x.id, 'field_of_study', e.target.value),
+              onInstitution: (e) => this.updateResumeItem('education', x.id, 'institution', e.target.value),
+              onLocation: (e) => this.updateResumeItem('education', x.id, 'location', e.target.value),
+              onStartDate: (e) => this.updateResumeItem('education', x.id, 'start_date', e.target.value),
+              onEndDate: (e) => this.updateResumeItem('education', x.id, 'end_date', e.target.value),
+            })),
+          });
+        });
+        this.groupByLiteralHeading([...s.resumeExtraction.certifications].sort(byPosition)).forEach(g => {
+          const ids = g.items.map(c => c.id);
+          blocks.push({
+            kind: 'certification', position: typeof g.position === 'number' ? g.position : Infinity,
+            heading: g.heading, hasHeading: !!g.heading.trim(),
+            headingEdited: editedGroups.has('certifications:' + ids[0]),
+            onHeadingChange: (e) => this.updateResumeSectionHeading('certifications', ids, e.target.value),
+            items: g.items.map(c => ({
+              name: c.name || '', issuingBody: c.issuing_body || '', licenseNumber: c.license_number || '',
+              issueDate: c.issue_date || '', expirationDate: c.expiration_date || '', tradeSocCode: c.trade_soc_code || '',
+              onName: (e) => this.updateResumeItem('certifications', c.id, 'name', e.target.value),
+              onIssuingBody: (e) => this.updateResumeItem('certifications', c.id, 'issuing_body', e.target.value),
+              onLicenseNumber: (e) => this.updateResumeItem('certifications', c.id, 'license_number', e.target.value),
+              onIssueDate: (e) => this.updateResumeItem('certifications', c.id, 'issue_date', e.target.value),
+              onExpirationDate: (e) => this.updateResumeItem('certifications', c.id, 'expiration_date', e.target.value),
+              onTradeSocCode: (e) => this.updateResumeItem('certifications', c.id, 'trade_soc_code', e.target.value),
+            })),
+          });
+        });
         // One block for ALL skills together (see the migration header on why section_position is a
         // separate column from each skill's own intra-block `position`) — takes the lowest real
         // section_position among the candidate's skill rows, since every row from one extraction
@@ -9956,6 +10128,8 @@ class Component extends DCLogic {
         s.resumeExtraction.freeform.filter(f => f.section_type === 'needs_review').forEach(f => blocks.push({
           kind: 'needs_review', position: typeof f.position === 'number' ? f.position : Infinity,
           heading: f.heading || '', hasHeading: !!(f.heading || '').trim(),
+          headingEdited: editedGroups.has('freeform:' + f.id),
+          onHeadingChange: (e) => this.updateResumeFreeformHeading(f.id, e.target.value),
           // Display-only readability fix: "Selected Career Highlights" comes back from extraction as
           // one flat run-on string (the source is a multi-cell table; freeform content has no
           // concept of cells, so every cell's text gets concatenated) — a real reported readability

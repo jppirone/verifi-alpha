@@ -29,8 +29,8 @@ const corsHeaders = {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-type WorkHistoryEdit = { id: string; company?: string; title?: string; location?: string; start_date?: string; end_date?: string; job_responsibilities?: string };
-type EducationEdit = { id: string; institution?: string; degree?: string; field_of_study?: string; location?: string; start_date?: string; end_date?: string };
+type WorkHistoryEdit = { id: string; company?: string; title?: string; location?: string; start_date?: string; end_date?: string; job_responsibilities?: string; heading?: string | null };
+type EducationEdit = { id: string; institution?: string; degree?: string; field_of_study?: string; location?: string; start_date?: string; end_date?: string; heading?: string | null };
 // source_match is echoed back by the client (candidate.html already has it, straight from
 // get-resume-extraction) for the same reason section_type/heading are on FreeformEdit below — this
 // function only needs it to decide which certifications get the unconditional staff flag, not to
@@ -39,7 +39,7 @@ type EducationEdit = { id: string; institution?: string; degree?: string; field_
 // trade_soc_code (Item 8, 2026-09-12 live-testing session): the candidate's chosen (or auto-suggested
 // and left as-is) SOC trade/occupation code, echoed back the same way license_number already is —
 // see the queueInserts loop below for what happens when it's missing.
-type CertificationEdit = { id: string; name?: string; issuing_body?: string; license_number?: string; issue_date?: string; expiration_date?: string; source_match?: string; trade_soc_code?: string | null };
+type CertificationEdit = { id: string; name?: string; issuing_body?: string; license_number?: string; issue_date?: string; expiration_date?: string; source_match?: string; trade_soc_code?: string | null; heading?: string | null };
 // section_type/heading are echoed back by the client (candidate.html already has them, straight
 // from get-resume-extraction) rather than re-fetched here — this function only needs them to decide
 // which freeform rows are needs_review for the staff-queue flag below, not to validate anything.
@@ -169,6 +169,10 @@ export default {
           location: w.location ?? null,
           start_date: dateOrNull(w.start_date), end_date: dateOrNull(w.end_date),
           job_responsibilities: w.job_responsibilities ?? null,
+          // Item #3 (2026-09-17): heading is candidate-editable now (one shared value per
+          // contiguous resumeConfirm group — see candidate.html's updateResumeSectionHeading), so
+          // this is the first write this field has ever gotten past initial extraction.
+          heading: w.heading ?? null,
           candidate_confirmed: true, updated_at: new Date().toISOString(),
         }).eq("id", w.id).eq("candidate_id", candidate_id).select("id");
         if (error || !data || data.length === 0) {
@@ -182,6 +186,7 @@ export default {
           institution: e.institution ?? null, degree: e.degree ?? null, field_of_study: e.field_of_study ?? null,
           location: e.location ?? null,
           start_date: dateOrNull(e.start_date), end_date: dateOrNull(e.end_date),
+          heading: e.heading ?? null,
           candidate_confirmed: true, updated_at: new Date().toISOString(),
         }).eq("id", e.id).eq("candidate_id", candidate_id).select("id");
         if (error || !data || data.length === 0) {
@@ -195,6 +200,7 @@ export default {
           name: c.name ?? null, issuing_body: c.issuing_body ?? null, license_number: c.license_number ?? null,
           issue_date: dateOrNull(c.issue_date), expiration_date: dateOrNull(c.expiration_date),
           trade_soc_code: c.trade_soc_code ?? null,
+          heading: c.heading ?? null,
           candidate_confirmed: true, updated_at: new Date().toISOString(),
         }).eq("id", c.id).eq("candidate_id", candidate_id).select("id");
         if (error || !data || data.length === 0) {
@@ -219,7 +225,12 @@ export default {
       }
       for (const f of freeform) {
         const { data, error } = await supabase.from("candidate_freeform_sections").update({
-          content: f.content ?? null, candidate_confirmed: true, updated_at: new Date().toISOString(),
+          content: f.content ?? null,
+          // Item #3 (2026-09-17): heading is now candidate-editable on resumeConfirm for freeform
+          // rows too (summary/hobbies_other/needs_review) — previously echoed back read-only and
+          // never actually written here.
+          heading: f.heading ?? null,
+          candidate_confirmed: true, updated_at: new Date().toISOString(),
         }).eq("id", f.id).eq("candidate_id", candidate_id).select("id");
         if (error || !data || data.length === 0) {
           return new Response(JSON.stringify({ ok: false, error: "freeform_update_failed", detail: error ? error.message : "no matching row for this candidate", item_id: f.id }), {
