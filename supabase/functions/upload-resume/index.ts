@@ -166,21 +166,54 @@ as "needs_review" for everything else that doesn't fit anywhere — needs_review
 fallback, always available, always correct when nothing else fits. Never force content into a
 category it doesn't genuinely belong in just to give it a home.
 
-HEADINGS ARE A HELPFUL SIGNAL, NEVER A REQUIREMENT (a real, confirmed failure mode — a plain,
-minimally-formatted document with no section headings at all, no bold text, no visual separation
-whatsoever, still has real work history, education, and certifications on it, and they must still
-be extracted into their real structured categories, not dumped into needs_review just because
-nothing labels them): classify content by what it actually IS — its own inherent shape and
-content pattern — never by whether a labeled heading or bold/visual styling happens to precede
-it. A line naming a trade or credential followed by a license/certification/registration number
-(e.g. "Plumber" then "Lic # CFC1425829", "License No. 12345", "Cert #A-9982") is a certifications
-entry regardless of whether any heading like "Certifications" appears above it anywhere on the
-page — the credential-name-plus-license-number pattern IS the classification signal, the same way
-a company+title+date-range pattern identifies work_history and a degree+institution pattern
-identifies education, with or without a labeled section heading present. Never let the mere
-absence of a heading push content that otherwise clearly fits a real category into needs_review —
-that catch-all is for content that genuinely doesn't fit any category, not for content that fits
-one perfectly but happens to lack a visible label.
+CLASSIFICATION IS HEADER-DRIVEN FIRST, SHAPE-DRIVEN ONLY AS A NARROW FALLBACK (the decision
+hierarchy — read this before classifying anything, and before reading the category definitions
+below, since it governs how to apply every one of them): when a standalone, left-aligned line is
+functioning as a section header — judge this by its own visual role on the page (a short line set
+apart from body content, never itself part of a sentence or list item), never by matching it
+against an exact string — and that header SEMANTICALLY reads as one of the known categories
+(work_history, education, certifications, skills, summary, hobbies_other), every item beneath it,
+up to the next header, belongs to that category. The header's own literal wording never decides
+this: "Certifications," "Professional Certifications," "AI & Emerging Technology Certifications,"
+"Credentials," or even an unconventional label like "Clown Certifications" all semantically read as
+a certifications header and route their content to certifications the same way — judge the CONCEPT
+the header names, never its exact phrasing. Same for every other category: "Skills," "Core
+Competencies," "Technical Skills," "Areas of Expertise" all semantically mean skills; "Experience,"
+"Work History," "Employment History," "Professional Experience" all semantically mean work_history;
+"Education," "Academic Background" both semantically mean education. This header match is
+deliberately the PRIMARY signal — it overrides what the content's own shape might otherwise
+suggest. A section headed "Certifications" whose entries don't happen to include a license number,
+or a section headed "Skills" whose items read more like short phrases than single terms, still
+classify by their header, not by second-guessing the header against the content's shape. (Real,
+confirmed failure mode this closes: a real 4-item "Professional Certifications" list, correctly
+heading-labeled, was still classified entirely as skills because its items' own shape looked more
+skill-like than the certifications definition's usual "name (issuer)" pattern — the header alone
+should have settled it.)
+
+SHAPE-BASED CLASSIFICATION IS THE FALLBACK, FOR TWO SPECIFIC CASES ONLY (do not apply it more
+broadly than these two): (1) a plain, minimally-formatted document with no section headings at all,
+no bold text, no visual separation whatsoever — real work history, education, and certifications on
+a page like this must still be extracted into their real structured categories, judged by their own
+inherent shape and content pattern (a company+title+date-range pattern identifies work_history, a
+degree+institution pattern identifies education, a credential-name-plus-license-number pattern
+identifies certifications); and (2) a single section genuinely has no dividing header between two
+different kinds of content running together — see the CERT/LICENSE VS. SKILL DISAMBIGUATION rule
+below, now itself a fallback for exactly this shape of case, not a general-purpose rule. Outside
+these two cases, never let a section's content shape override or second-guess a header that already
+gave a clear semantic match — the header wins. Never let the mere absence of a heading push content
+that otherwise clearly fits a real category (by shape, case 1) into needs_review — that catch-all is
+for content that genuinely doesn't fit any category by either signal, not for content that fits one
+perfectly but happens to lack a visible label.
+
+CLASSIFICATION AND LITERAL HEADING TEXT ARE TWO INDEPENDENT OPERATIONS — never let one influence the
+other. Which internal category a chunk of content lands in (work_history, education, certifications,
+skills, or needs_review) is decided by the rules above. What gets stored in that category's own
+"heading" field (where one exists — see each category's own heading rule below) is always the
+literal source text, copied verbatim, regardless of which category the header's semantic meaning
+routed the content into. A header reading "Clown Certifications" still classifies its content as
+certifications (per the rule above) AND still gets captured as the literal heading string "Clown
+Certifications" — never normalized, retitled, or replaced with the category's own internal name
+("Certifications") just because that's the category it was classified into.
 
 FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable buckets:
 
@@ -263,7 +296,7 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   not reworded, not invented, not guessed. When two or more consecutive entries share the same visible
   heading, every one of them gets that same literal heading string, not just the first. Use an empty
   string "" only when the resume genuinely has no visible heading above this entry (e.g. a minimally-
-  formatted document with no section labels at all, per the HEADINGS ARE A HELPFUL SIGNAL rule above).
+  formatted document with no section labels at all, per the SHAPE-BASED CLASSIFICATION FALLBACK rule above).
   This is additive only, like freeform's own "heading" field below — it does not change how content
   gets classified, only what section title the output can reproduce.
 
@@ -338,13 +371,12 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   elsewhere in the output. Use an empty string "" only when the resume genuinely has no visible
   heading for that list at all.
 
-- CERT/LICENSE VS. SKILL DISAMBIGUATION WITHIN A MIXED SECTION (a targeted rule, not a universal
-  requirement — most certifications and skills are unambiguous by shape per their own definitions
-  above and need none of this): this applies ONLY when a single section contains a genuine MIX — some
-  items with a clearly discernible trailing certification/license number or identifier (a distinct
-  number, code, or alphanumeric string following the item's name, whether or not it carries a
-  conventional marker like "#", "No.", or "Lic. No." in front of it) and other items in that same
-  section with no such identifier at all. When that specific mix occurs, use the presence or absence
+- CERT/LICENSE VS. SKILL DISAMBIGUATION — A FALLBACK FOR THE HEADER RULE'S OWN BLIND SPOTS, not a
+  general-purpose rule (most certifications and skills are unambiguous by header per CLASSIFICATION
+  IS HEADER-DRIVEN above and need none of this): this applies ONLY in the two situations that rule's
+  own shape-based fallback covers — (a) a single section contains a genuine MIX of cert-shaped and
+  skill-shaped items with no dividing header separating them, or (b) the mixed content has no
+  section header at all to classify by. In either case, use the presence or absence
   of a discernible trailing identifier as the signal to split the section: items with one are
   certifications (the identifier captured in "license_number"), items without one are skills. Do NOT
   apply this as a blanket requirement for every certification — most legitimately have no license
@@ -371,28 +403,32 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   certifications, skills, or any other array of short terms — never emit the wrapped tail as its own
   separate entry.
 
-- skills = a FLAT LIST of individual skill, competency, or keyword terms presented as a list rather
-  than prose — commonly under a heading like "Skills," "Core Competencies," "Technical Skills,"
-  "Areas of Expertise," "Key Skills," or similar, but judge this by SHAPE, not by header name: if a
-  section reads as a list of short terms/phrases rather than sentences, it belongs in skills
-  regardless of what its heading is called (or even with no heading at all). Each distinct term or
-  short phrase becomes its own string in the "skills" array, copied verbatim — don't rename, merge,
-  split, or normalize wording, and don't alphabetize or reorder; keep the resume's own order. The
-  reverse also holds: if content under a "Skills"-like heading is actually written as prose/full
-  sentences rather than a list of terms, it does NOT belong in skills — classify it by what it
-  actually is instead (summary, or needs_review). Don't duplicate the same term into skills and any
-  other category.
+- skills = whatever sits under a header that semantically reads as Skills (e.g. "Skills," "Core
+  Competencies," "Technical Skills," "Areas of Expertise," "Key Skills," or similar — see
+  CLASSIFICATION IS HEADER-DRIVEN above, the header is the primary signal now). Route everything
+  beneath such a header to skills regardless of whether each item reads as a short term or a longer
+  phrase — do not second-guess a genuine Skills-type header against the content's own shape. Each
+  distinct term or short phrase becomes its own string in the "skills" array, copied verbatim — don't
+  rename, merge, split, or normalize wording, and don't alphabetize or reorder; keep the resume's own
+  order. Only fall back to judging by SHAPE (a flat list of short terms/phrases rather than sentences)
+  when there is genuinely no header at all to classify by, per the shape-based fallback rule above —
+  in that headerless case only, content under NO heading that reads as a list of short terms belongs
+  in skills, and content under no heading that's actually prose belongs elsewhere (summary, or
+  needs_review). Don't duplicate the same term into skills and any other category.
 
-  NOT skills-shaped (a real, confirmed failure mode): a bulleted list where EACH item pairs a short
-  bolded/leading phrase with its OWN explanatory clause — a dash, en-dash, em-dash, or colon
-  followed by a descriptive sentence about that item (e.g. "Strategic Thinking & Analytical Problem
-  Solving — approaches challenges with a big-picture mindset while maintaining rigorous attention to
-  operational detail"). The leading phrase alone can look exactly like a skill/competency term, but
-  the presence of that per-item explanatory clause means the section is NOT a flat list of terms —
-  it's a distinct named section (commonly titled "Workplace Strengths," "Key Strengths," "Core
-  Values," or similar) and must be classified under needs_review, using its own real heading,
-  never folded into skills. This holds even when the resume ALSO has a separate, genuinely
-  skills-shaped section elsewhere (e.g. "Core Competencies") — a second bulleted list later in the
+  NOT skills-shaped — relevant ONLY in the headerless-fallback case above, since a real Skills-type
+  header already settles this without needing to inspect shape at all: a bulleted list where EACH
+  item pairs a short bolded/leading phrase with its OWN explanatory clause — a dash, en-dash,
+  em-dash, or colon followed by a descriptive sentence about that item (e.g. "Strategic Thinking &
+  Analytical Problem Solving — approaches challenges with a big-picture mindset while maintaining
+  rigorous attention to operational detail"). The leading phrase alone can look exactly like a
+  skill/competency term, but the presence of that per-item explanatory clause means headerless
+  content like this is NOT a flat list of terms — classify it under needs_review instead, never
+  folded into skills. This almost never needs to be invoked when a real header is present: a section
+  actually headed "Workplace Strengths," "Key Strengths," "Core Values," or similar semantically
+  reads as none of the known categories and already routes to needs_review by the header rule alone.
+  This holds even when the resume ALSO has a separate, genuinely skills-shaped section elsewhere
+  (e.g. "Core Competencies") — a second bulleted list later in the
   document is NOT automatically more of the same skills block just because its individual phrases
   look similar; check each item for its own explanatory clause before adding anything to skills.
 
