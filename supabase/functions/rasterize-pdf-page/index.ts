@@ -682,6 +682,17 @@ async function runHaikuExtraction(ocrText: string, previousPageContext?: Trailin
     body: JSON.stringify({
       model: HAIKU_MODEL,
       max_tokens: 4096,
+      // Non-determinism diagnostic (2026-09-17): a direct 58-call probe (15x per page x 4 pages,
+      // identical byte-for-byte OCR input each time, confirmed via hash) found the raw OCR text
+      // stage fully deterministic, with all observed variance living in this Haiku call's own
+      // interpretation of that fixed input -- 3 of 4 pages showed stable item counts but varying
+      // wording, 1 of 4 showed genuine count-level classification variance. temperature was never
+      // set here (defaulting to the API's non-zero default), unlike extract-resume-fields' own
+      // Haiku 4.5 call (same model) which already runs at temperature: 0 without issue -- proof
+      // this model accepts it. Unlike Sonnet 5's vision call, Haiku 4.5 does not reject temperature
+      // (no adaptive-thinking-forced restriction), so this is a real, low-risk lever, not a
+      // guaranteed fix -- Claude models don't guarantee bit-identical output at temperature 0 either.
+      temperature: 0,
       messages: [{ role: "user", content: buildOcrExtractionPrompt(ocrText, previousPageContext) }],
     }),
   });
