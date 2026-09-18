@@ -9731,8 +9731,10 @@ class Component extends DCLogic {
     const d = result.data;
     const rechecks = d.license_rechecks || [];
     const nowVerified = rechecks.filter(r => r.outcome === 'verified').length;
+    const heldForReview = rechecks.filter(r => r.reason === 'recent_name_change').length;
     let notice = 'Name saved.';
-    if (nowVerified) notice = 'Name saved. We re-checked your license with the new name and it is now verified.';
+    if (heldForReview) notice = 'Name saved. Because your name was just changed, your license will be reviewed by our team before it is confirmed.';
+    else if (nowVerified) notice = 'Name saved. We re-checked your license with the new name and it is now verified.';
     else if (rechecks.length) notice = 'Name saved. We re-checked your license with the new name.';
     this.setState({
       profileNameSavePending: false, profileNameError: '', profileNameNotice: notice,

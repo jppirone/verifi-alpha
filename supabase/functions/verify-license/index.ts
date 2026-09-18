@@ -52,6 +52,9 @@ const corsHeaders = {
 };
 
 const COOLDOWN_SECONDS = 30;
+// A license that would auto-verify within this many hours of the candidate changing their account
+// name is held for staff review instead (see the name-change safeguard in the handler).
+const NAME_CHANGE_HOLD_HOURS = 48;
 
 type Outcome = "verified" | "ambiguous" | "unsupported_jurisdiction" | "not_found";
 type RequiredField = "license_number" | "first_name" | "last_name";
@@ -217,57 +220,71 @@ function outcomeText(adapter: JurisdictionAdapter, d: { outcome: Outcome; reason
 }
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
-const NOTICE_COALESCE_MINUTES = 10;
 
 function escHtml(s: unknown): string {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 }
 
-// One-time notice that a license needs the candidate's correction. Sent at most once per license
-// EVER (license_items.correction_notified_at is claimed atomically and never cleared on success), so a
-// second failed attempt, a re-check, or a re-request on the same license never emails again. Several
-// licenses that need correction in the same burst (one resume confirm) share ONE email, via a
-// candidate-level coalescing window; the email points at the tab that lists them all. A failed send
-// releases both claims so a later correction request can try again. Best-effort: never throws.
-async function notifyCorrectionOnce(
-  supabase: any,
-  args: { candidateId: string; itemId: string; email: string | null; firstName: string; accountType: string | null; certName: string | null; licenseNumber: string | null; message: string },
-): Promise<string> {
+// One-time notice that licenses need the candidate's correction. Invariant: a license is flagged
+// notified (license_items.correction_notified_at) ONLY in the same atomic step that puts it into an
+// email — never merely "covered" by some other email that didn't name it. This claims EVERY license
+// of the candidate that is currently awaiting correction and not yet notified, and sends one email
+// listing exactly those. So:
+//   - a single license failing -> one email naming it;
+//   - a burst (one resume confirm): the caller (confirm-resume-data) verifies every license with
+//     defer_notice, then sends ONE notify_corrections call once they've all persisted -> one email
+//     naming all of them;
+//   - a second failed attempt / re-check on an already-notified license -> nothing (its flag is set);
+//   - a genuinely later, different license -> its own email.
+// A failed send releases exactly the claims it made, so a later request can retry. Best-effort:
+// never throws.
+async function sendCorrectionNotices(supabase: any, candidateId: string): Promise<string> {
   try {
-    if (!args.email || !RESEND_API_KEY) return "skipped_no_email_or_key";
+    if (!RESEND_API_KEY) return "skipped_no_key";
+    const { data: cand } = await supabase.from("candidates").select("email, first_name, account_type").eq("id", candidateId).maybeSingle();
+    if (!cand?.email) return "skipped_no_email";
+
     const now = new Date().toISOString();
-    const { data: licClaim } = await supabase.from("license_items")
-      .update({ correction_notified_at: now }).eq("id", args.itemId).is("correction_notified_at", null).select("id");
-    if (!licClaim || licClaim.length === 0) return "already_notified";
+    const { data: claimed } = await supabase.from("license_items")
+      .update({ correction_notified_at: now })
+      .eq("candidate_id", candidateId).eq("correction_status", "requested").is("correction_notified_at", null)
+      .select("id, linked_certification_id, correction_message");
+    if (!claimed || claimed.length === 0) return "nothing_to_notify";
+    const claimedIds = claimed.map((c: any) => c.id);
 
-    const cutoff = new Date(Date.now() - NOTICE_COALESCE_MINUTES * 60 * 1000).toISOString();
-    const { data: candClaim } = await supabase.from("candidates")
-      .update({ last_license_notice_at: now }).eq("id", args.candidateId)
-      .or(`last_license_notice_at.is.null,last_license_notice_at.lt.${cutoff}`).select("id");
-    if (!candClaim || candClaim.length === 0) return "coalesced_into_recent_email";
+    const { data: certs } = await supabase.from("certification_items")
+      .select("id, name, license_number").in("id", claimed.map((c: any) => c.linked_certification_id));
+    const certById = new Map((certs || []).map((c: any) => [c.id, c]));
+    const entries = claimed.map((c: any) => {
+      const cert: any = certById.get(c.linked_certification_id) || {};
+      return { label: [cert.name || "your license", cert.license_number ? `Lic #${cert.license_number}` : ""].filter(Boolean).join(", "), message: c.correction_message || "" };
+    });
 
-    const tab = args.accountType === "license_only" ? "License Status" : "Verification Status";
-    const label = [args.certName || "your license", args.licenseNumber ? `Lic #${args.licenseNumber}` : ""].filter(Boolean).join(", ");
-    const html = `<p>Hi${args.firstName ? " " + escHtml(args.firstName) : ""},</p>`
-      + `<p>We couldn't verify your license <strong>${escHtml(label)}</strong>. ${escHtml(args.message)}</p>`
-      + `<p>To fix it, sign in to your Verifi account, open the <strong>${tab}</strong> tab, and choose <strong>Correct license details</strong>. You can update the state or license number and we'll check it again right away.</p>`
+    const tab = cand.account_type === "license_only" ? "License Status" : "Verification Status";
+    const intro = entries.length === 1
+      ? `<p>We couldn't verify your license <strong>${escHtml(entries[0].label)}</strong>. ${escHtml(entries[0].message)}</p>`
+      : `<p>We couldn't verify ${entries.length} of your licenses:</p><ul>${entries.map((e: any) => `<li><strong>${escHtml(e.label)}</strong> — ${escHtml(e.message)}</li>`).join("")}</ul>`;
+    const html = `<p>Hi${cand.first_name ? " " + escHtml(cand.first_name) : ""},</p>`
+      + intro
+      + `<p>To fix ${entries.length === 1 ? "it" : "them"}, sign in to your Verifi account, open the <strong>${tab}</strong> tab, and choose <strong>Correct license details</strong> on each. You can update the state or license number and we'll check again right away.</p>`
       + `<p><a href="https://alpha.applitrust.com/candidate.html">Open Verifi</a></p>`
       + `<p style="color:#666;font-size:12px">This is a one-time notice. We won't send reminders.</p>`;
+    const subject = entries.length === 1 ? "Action needed: we couldn't verify your license" : `Action needed: we couldn't verify ${entries.length} of your licenses`;
+
     let ok = false;
     try {
       const res = await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${RESEND_API_KEY}` },
-        body: JSON.stringify({ from: "Verifi <verify@applitrust.com>", to: args.email, subject: "Action needed: we couldn't verify your license", html }),
+        body: JSON.stringify({ from: "Verifi <verify@applitrust.com>", to: cand.email, subject, html }),
       });
       ok = res.ok;
     } catch (_e) { ok = false; }
     if (!ok) {
-      await supabase.from("license_items").update({ correction_notified_at: null }).eq("id", args.itemId);
-      await supabase.from("candidates").update({ last_license_notice_at: null }).eq("id", args.candidateId);
+      await supabase.from("license_items").update({ correction_notified_at: null }).in("id", claimedIds);
       return "send_failed";
     }
-    return "sent";
+    return "sent:" + entries.length;
   } catch (_e) {
     return "error";
   }
@@ -287,7 +304,15 @@ export default {
       // after_correction: set by update-license-details when the candidate changed the state or
       // number after an earlier failed check — a not_found on such a check goes to staff instead of
       // asking the candidate to correct again.
-      const { candidate_id, license_item_id, staff_rerun, after_correction } = await req.json();
+      // defer_notice: the caller verifies several licenses in one burst and will send the single
+      // bundled email itself afterwards (action "notify_corrections"), so this call must not send one.
+      const reqBody = await req.json();
+      const { candidate_id, license_item_id, staff_rerun, after_correction } = reqBody;
+      const deferNotice = reqBody.defer_notice === true;
+      if (reqBody.action === "notify_corrections") {
+        if (!candidate_id) return json({ ok: false, error: "candidate_id is required" }, 400);
+        return json({ ok: true, notice: await sendCorrectionNotices(supabase, candidate_id) });
+      }
       const staffRerun = staff_rerun === true;
       const afterCorrection = after_correction === true;
       if (!candidate_id || !license_item_id) return json({ ok: false, error: "candidate_id and license_item_id are required" }, 400);
@@ -349,6 +374,7 @@ export default {
       let lookup: Lookup | null = null;
       let matched: RegistryRecord | null = null;
       let definitiveNegative = false;
+      let nameHold: { changed_at: string; hours_ago: number; from: string; to: string } | null = null;
       let sourceTag: string;
       let label: string;
 
@@ -363,6 +389,30 @@ export default {
         outcome = d.outcome; reason = d.reason; matched = d.matched; definitiveNegative = d.definitiveNegative;
         sourceTag = adapter.source;
         label = adapter.registryLabel;
+
+        // Name-change safeguard: a clean pass is matched against the candidate's account NAME, which
+        // the candidate can edit. If that name was changed recently, a "verified" result could just be
+        // someone renaming their account to match a license that isn't theirs, so it is NOT
+        // auto-confirmed — it is held for a human exactly like a genuinely ambiguous result. No hard
+        // lock on name edits (marriage etc. must stay possible); only the auto-confirm is held, and
+        // only inside the window. A staff re-run bypasses the hold (a human is then looking).
+        if (outcome === "verified" && !staffRerun) {
+          const holdSince = new Date(Date.now() - NAME_CHANGE_HOLD_HOURS * 3600 * 1000).toISOString();
+          const { data: recent } = await supabase.from("candidate_name_changes")
+            .select("changed_at, old_first_name, old_last_name, new_first_name, new_last_name")
+            .eq("candidate_id", candidate_id).gt("changed_at", holdSince).order("changed_at", { ascending: false }).limit(1);
+          if (recent && recent.length) {
+            const r = recent[0];
+            nameHold = {
+              changed_at: r.changed_at,
+              hours_ago: Math.round((Date.now() - new Date(r.changed_at).getTime()) / 360000) / 10,
+              from: [r.old_first_name, r.old_last_name].filter(Boolean).join(" "),
+              to: [r.new_first_name, r.new_last_name].filter(Boolean).join(" "),
+            };
+            outcome = "ambiguous";
+            reason = "recent_name_change";
+          }
+        }
       }
 
       const now = new Date().toISOString();
@@ -373,6 +423,7 @@ export default {
         lookup_error: lookup && !lookup.ok ? { error: lookup.error, detail: lookup.detail || null } : null,
         matched_record: matched,
         registry_expiration: matched ? matched.expiration : null,
+        name_change_hold: nameHold,
       };
 
       // ---- routing -------------------------------------------------------------------------------
@@ -407,7 +458,14 @@ export default {
         const isDiscrepancy = staffRerun && definitiveNegative && !!matched;
         const status = outcome === "verified" ? "Confirmed" : isDiscrepancy ? "Discrepancy" : "Needs Reconciliation";
         queueStatus = status;
-        const text = outcomeText(adapter, { outcome, reason }, lookup);
+        // For the name-change hold the registry result itself was a clean pass, so describe it as one
+        // (listing the rows) and lead with why it was held.
+        const holdText = nameHold
+          ? `HELD FOR REVIEW, not auto-confirmed: the registry check was a clean match, but this account's name was changed ${nameHold.hours_ago}h ago (${nameHold.from || "(none)"} -> ${nameHold.to}), inside the ${NAME_CHANGE_HOLD_HOURS}h name-change hold. Confirm that the license genuinely belongs to this person before confirming.`
+          : null;
+        const text = holdText
+          ? holdText + "\n" + outcomeText(adapter, { outcome: "verified", reason: "exact_match_active" }, lookup)
+          : outcomeText(adapter, { outcome, reason }, lookup);
         const runLabel = staffRerun ? "re-run by staff" : afterCorrection ? "automatic, after candidate correction" : "automatic";
         const historyLine = `Automated check result (not a determination) — ${label} (${runLabel}), ${now}:\n${text}`;
         // Candidate-visible on a Discrepancy row; factual registry data only.
@@ -425,7 +483,9 @@ export default {
           const { error: qErr } = await supabase.from("verification_items").insert({
             id: idRow, candidate_id, type: "License", claim: claimFor(cert, state!), received: now.slice(0, 10),
             status, automated_check: historyLine, ...(discrepancyNote ? { note: discrepancyNote } : {}),
-            internal_note: outcome === "verified" ? null : `Auto-flagged by automatic license verification: ${reason}${afterCorrection ? " (after the candidate corrected the details)" : ""}. Not a negative determination — needs a human look.`,
+            internal_note: outcome === "verified" ? null
+              : nameHold ? `Held by the name-change safeguard: the registry match was clean, but the account name was changed ${nameHold.hours_ago}h ago (${nameHold.from || "(none)"} -> ${nameHold.to}). Not a negative determination — verify the license belongs to this person before confirming.`
+              : `Auto-flagged by automatic license verification: ${reason}${afterCorrection ? " (after the candidate corrected the details)" : ""}. Not a negative determination — needs a human look.`,
             source_item_id: item.id, bundle_id: item.resume_document_id || null,
           });
           if (qErr) return json({ ok: false, error: "queue_insert_failed", detail: qErr.message }, 500);
@@ -437,7 +497,9 @@ export default {
             ? `License check passed (${label}, ${runLabel}): confirmed.`
             : isDiscrepancy
               ? `License check found a discrepancy (${label}, ${runLabel}): registry status is not in good standing.`
-              : `License check could not confirm (${label}, ${runLabel}): flagged for reconciliation.`,
+              : nameHold
+                ? `License check matched (${label}, ${runLabel}) but was held for review: account name changed within the last ${NAME_CHANGE_HOLD_HOURS}h.`
+                : `License check could not confirm (${label}, ${runLabel}): flagged for reconciliation.`,
           note: text,
         });
       }
@@ -457,14 +519,10 @@ export default {
       }).eq("id", license_item_id);
       if (updErr) return json({ ok: false, error: "persist_failed", detail: updErr.message }, 500);
 
-      // First time this license needs the candidate's correction -> one email (see notifyCorrectionOnce).
+      // First time this license needs the candidate's correction -> it goes into the next notice email
+      // (see sendCorrectionNotices), unless the caller is batching a burst and will send it itself.
       let notice: string | null = null;
-      if (correction) {
-        notice = await notifyCorrectionOnce(supabase, {
-          candidateId: candidate_id, itemId: license_item_id, email: cand?.email ?? null, firstName,
-          accountType: cand?.account_type ?? null, certName: cert.name, licenseNumber: cert.license_number, message: correction.message,
-        });
-      }
+      if (correction && !deferNotice) notice = await sendCorrectionNotices(supabase, candidate_id);
 
       return json({ ok: true, status: "checked", outcome, reason, queue_item_id: queueId, queue_status: queueStatus, correction, notice });
     } catch (e) {

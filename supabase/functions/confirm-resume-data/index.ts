@@ -445,15 +445,34 @@ export default {
               "apikey": SUPABASE_SERVICE_ROLE_KEY,
               "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
             },
-            body: JSON.stringify({ candidate_id, license_item_id }),
+            // defer_notice: these run as one burst, so the single bundled "needs correction" email is
+            // sent once below, after every license has persisted — naming all of them.
+            body: JSON.stringify({ candidate_id, license_item_id, defer_notice: true }),
             signal: AbortSignal.timeout(45000),
           });
           const vData = await vRes.json().catch(() => ({}));
-          return { license_item_id, ok: !!vData.ok, status: vData.status ?? null, outcome: vData.outcome ?? null };
+          return { license_item_id, ok: !!vData.ok, status: vData.status ?? null, outcome: vData.outcome ?? null, correction_requested: !!vData.correction };
         } catch (e) {
           return { license_item_id, ok: false, status: "transport_error", outcome: null };
         }
       }));
+
+      // One email covering every license in this burst that now needs the candidate's correction
+      // (verify-license flags each as notified only as it puts it in the email).
+      if (licenseVerification.some((v) => v.correction_requested)) {
+        try {
+          await fetch(`${SUPABASE_URL}/functions/v1/verify-license`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "apikey": SUPABASE_SERVICE_ROLE_KEY,
+              "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+            },
+            body: JSON.stringify({ candidate_id, action: "notify_corrections" }),
+            signal: AbortSignal.timeout(20000),
+          });
+        } catch (_e) { /* best-effort; the candidate still sees each license on their Verification tab */ }
+      }
 
       return new Response(JSON.stringify({
         ok: true,
