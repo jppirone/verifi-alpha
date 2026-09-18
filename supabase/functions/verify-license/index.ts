@@ -323,7 +323,8 @@ export default {
       // check it goes back to the candidate (no queue row). Everything else that isn't a pass goes
       // to staff, as does a not_found that survives a genuine correction.
       const stateLabel = state ? STATE_LABELS[state] : "";
-      const unchangedSinceDismissed = item.correction_status === "dismissed" && item.checked_state === state && item.checked_number === licenseNumber;
+      const genericNumber = rawNumber.replace(/[\s\-‐-―]/g, "").toUpperCase();
+      const unchangedSinceDismissed = item.correction_status === "dismissed" && item.checked_state === state && item.checked_number === genericNumber;
       const askCandidate = !staffRerun && (
         outcome === "unsupported_jurisdiction" ||
         (outcome === "not_found" && !afterCorrection)
@@ -389,7 +390,9 @@ export default {
         verification_source: sourceTag, verified_at: outcome === "verified" ? now : null,
         queue_item_id: queueId, updated_at: now,
         verification_attempts: (item.verification_attempts || 0) + 1,
-        checked_state: state, checked_number: licenseNumber,
+        // Always the generic normalization (not the adapter's, which doesn't exist for an unsupported
+        // state): update-license-details compares against this to decide whether a resubmit is a change.
+        checked_state: state, checked_number: rawNumber.replace(/[\s\-‐-―]/g, "").toUpperCase(),
         correction_status: correction ? correction.status : (unchangedSinceDismissed ? "dismissed" : null),
         correction_reason: correction ? correction.reason : (unchangedSinceDismissed ? item.correction_reason : null),
         correction_message: correction ? correction.message : (unchangedSinceDismissed ? item.correction_message : null),

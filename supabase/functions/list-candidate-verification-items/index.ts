@@ -74,7 +74,7 @@ export default {
       // the id of the candidate's own row, same trust boundary as everything else already returned
       // here.
       const url = SUPABASE_URL + "/rest/v1/verification_items?select=id,type,claim,status,created_at,note,correction_requested,correction_note,correction_value,source_item_id&candidate_id=eq."
-        + encodeURIComponent(candidate_id) + "&order=created_at.asc";
+        + encodeURIComponent(candidate_id) + "&order=created_at.asc,id.asc";
       const res = await fetch(url, {
         headers: {
           "apikey": SUPABASE_SERVICE_ROLE_KEY,
@@ -110,7 +110,7 @@ export default {
       // the edit/correction surface on any license that isn't already verified. Licenses with a
       // queue row are also in `items` above (type "License"); the client matches them by id.
       const licUrl = SUPABASE_URL + "/rest/v1/license_items?select=id,state,verification_outcome,queue_item_id,correction_status,correction_reason,correction_message,certification_items(name,issuing_body,license_number)"
-        + "&candidate_confirmed=eq.true&candidate_id=eq." + encodeURIComponent(candidate_id) + "&order=created_at.asc";
+        + "&candidate_confirmed=eq.true&candidate_id=eq." + encodeURIComponent(candidate_id) + "&order=created_at.asc,id.asc";
       const licRes = await fetch(licUrl, {
         headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": "Bearer " + SUPABASE_SERVICE_ROLE_KEY },
       });
