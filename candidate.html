@@ -2865,6 +2865,14 @@ a:hover{color:var(--color-accent)}
     <sc-if value="{{ checkoutError }}" hint-placeholder-val="{{ false }}">
       <div style="font-size:12px;color:#e2735c">{{ checkoutError }}</div>
     </sc-if>
+    <!-- Subscription/plan-selection false-paid-state fix (2026-09-18): this screen only ever shows
+         when there's no real license_subscription_started_at yet, so there's no stuck-paid radio to
+         reset here — but a cancelled/declined attempt previously left with zero indication anything
+         happened. No Dismiss button, same persistence reasoning as the other two copies of this
+         notice (Subscription tab, signup tiers screen). -->
+    <sc-if value="{{ checkoutIncompleteNotice }}" hint-placeholder-val="{{ false }}">
+      <div style="font-size:12px;color:var(--color-neutral-300)">You haven't started your subscription — no charge went through.</div>
+    </sc-if>
   </div>
   <button type="button" class="btn btn-primary btn-block" disabled="{{ checkoutPending }}" sc-camel-on-click="{{ continueFromLicenseBilling }}">{{ licenseBillingContinueLabel }}</button>
 </div>
@@ -3353,6 +3361,15 @@ a:hover{color:var(--color-accent)}
       <p class="card-body">Everything in Free, plus richer sharing controls and saved profiles.</p>
     </div>
   </div>
+  <!-- Subscription/plan-selection false-paid-state fix (2026-09-18): this screen previously forced
+       tier back to 'paid' on a cancelled/unconfirmed checkout return with zero notice rendered here —
+       the Pro card looked selected with no indication nothing was actually charged. No Dismiss button,
+       same persistence reasoning as the Subscription tab's own copy of this notice. -->
+  <sc-if value="{{ checkoutIncompleteNotice }}" hint-placeholder-val="{{ false }}">
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--color-divider);border-radius:6px">
+      <span style="font-size:12px;color:var(--color-neutral-300)">You haven't completed subscribing to Pro — no charge went through. Pick again when you're ready.</span>
+    </div>
+  </sc-if>
   <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
     <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;color:var(--color-neutral-300);cursor:pointer">
       <input type="checkbox" checked="{{ discoverable }}" sc-camel-on-change="{{ toggleDiscoverable }}" style="margin-top:2px">
@@ -4427,10 +4444,13 @@ a:hover{color:var(--color-accent)}
               <div style="font-size:12px;color:#e2735c">{{ checkoutError }}</div>
             </sc-if>
           </sc-if>
-          <sc-if value="{{ checkoutCancelledNotice }}" hint-placeholder-val="{{ false }}">
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border:1px solid var(--color-divider);border-radius:6px">
-              <span style="font-size:12px;color:var(--color-neutral-400)">Checkout was cancelled. Your plan wasn't changed.</span>
-              <button type="button" class="btn btn-ghost" style="font-size:11px;padding:2px 8px" sc-camel-on-click="{{ dismissCheckoutNotice }}">Dismiss</button>
+          <!-- Subscription/plan-selection false-paid-state fix (2026-09-18): deliberately no Dismiss
+               button here, unlike the notices below — a candidate must not be able to wave this away
+               and be left believing they're on Paid when they aren't. It clears itself only when it
+               stops being true (a fresh checkout attempt starts, or one actually confirms). -->
+          <sc-if value="{{ checkoutIncompleteNotice }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--color-divider);border-radius:6px">
+              <span style="font-size:12px;color:var(--color-neutral-300)">You haven't completed subscribing — your account remains on the Free plan.</span>
             </div>
           </sc-if>
           <sc-if value="{{ checkoutSuccessNotice }}" hint-placeholder-val="{{ false }}">
@@ -6597,7 +6617,7 @@ class Component extends DCLogic {
     tierSelection: 'free', billingCycle: 'monthly', changePlanOpen: false,
     // Item B (2026-09-08 regression session): real Stripe test-mode checkout state — see
     // startRealCheckout/handleCheckoutReturn's own headers.
-    checkoutPending: false, checkoutError: null, checkoutCancelledNotice: false, checkoutSuccessNotice: false,
+    checkoutPending: false, checkoutError: null, checkoutIncompleteNotice: false, checkoutSuccessNotice: false,
     // Item 7 (2026-09-08 regression session): confirmDowngrade already made a real, checked backend
     // write (set-candidate-tier) before this fix -- the tier genuinely changed -- but nothing told
     // the candidate it worked; the modal just closed silently. Mirrors checkoutSuccessNotice's own
@@ -7193,6 +7213,37 @@ class Component extends DCLogic {
       if (!this.checkoutGuardActive()) return;
       e.preventDefault();
       e.returnValue = '';
+    });
+    // Subscription/plan-selection false-paid-state fix (2026-09-18): the belt-and-suspenders half of
+    // that fix — handleCheckoutReturn (above) only ever runs when the candidate actually lands back
+    // via Stripe's own success/cancel redirect URL. A candidate who instead abandons the Stripe tab
+    // outright, or hits the browser's Back button into a bfcache-restored copy of this exact page
+    // (no fresh mount, no ?checkout= param, handleCheckoutReturn never runs again) can still be left
+    // with a stale local 'paid' selection. Re-verifying against the real value every time this tab
+    // becomes visible again is what actually satisfies "check on every load of it" for that case.
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') this.recheckStaleTierSelection();
+    });
+  }
+
+  // See the visibilitychange listener above for why this exists. Deliberately reuses resolveSession()
+  // (the same real, webhook-backed re-fetch handleCheckoutReturn's own retry loop already trusts)
+  // rather than trusting anything already sitting in local state — applySession's own setState never
+  // touches `screen`, so this is safe to call while the candidate is mid-flow on either screen below,
+  // it won't navigate them anywhere.
+  async recheckStaleTierSelection() {
+    const s = this.state;
+    if (s.checkoutPending) return;
+    const staleSubscription = s.accountTab === 'subscription' && s.tierSelection === 'paid' && s.accountTier !== 'paid';
+    const staleSignupTier = s.screen === 'tiers' && s.tier === 'paid';
+    if (!staleSubscription && !staleSignupTier) return;
+    const resolved = await this.resolveSession();
+    if (!resolved) return;
+    if (this.state.accountTier === 'paid') return; // a real webhook landed after all — nothing stale
+    this.setState({
+      tierSelection: staleSubscription ? this.state.accountTier : this.state.tierSelection,
+      tier: staleSignupTier ? 'free' : this.state.tier,
+      checkoutIncompleteNotice: true,
     });
   }
 
@@ -8142,7 +8193,7 @@ class Component extends DCLogic {
     // back to s.billingCycle otherwise, unchanged for every existing call site.
     const product = (opts && opts.product) || 'resume_pro';
     const billingCycle = (opts && opts.billingCycle) || s.billingCycle;
-    this.setState({ checkoutPending: true, checkoutError: null, checkoutCancelledNotice: false });
+    this.setState({ checkoutPending: true, checkoutError: null, checkoutIncompleteNotice: false });
     try {
       localStorage.setItem('verifi_checkout_return', JSON.stringify({
         upgradeReturnTab: s.upgradeReturnTab || null,
@@ -8207,15 +8258,29 @@ class Component extends DCLogic {
     // the pre-existing Verifi Pro upgrade's, everything else below is shared.
     const isLicenseFlow = !!(returnCtx && returnCtx.product === 'license_tracking');
 
+    // Subscription/plan-selection false-paid-state fix (2026-09-18): a candidate who selects a paid
+    // tier locally (tierSelection on the Subscription tab, tier on the signup tiers screen) but never
+    // completes real Stripe checkout must never be left with that local selection still showing as
+    // Paid — that's a false belief with nothing behind it (no charge, no webhook, no real
+    // candidates.tier/license_subscription_started_at write). Every branch below now resets the local
+    // selection back to the real, webhook-backed value and surfaces an explicit, persistent (not
+    // silently dismissible) notice — checkoutIncompleteNotice, rendered on whichever screen the
+    // candidate lands on — rather than either flag alone (as it was before this fix).
     if (checkout === 'cancel') {
       if (isLicenseFlow) {
-        this.setState({ screen: 'licenseBilling', checkoutError: null });
+        this.setState({ screen: 'licenseBilling', checkoutError: null, checkoutIncompleteNotice: true });
       } else if (fromSignupTiers) {
-        // Land back on the tiers screen itself, still showing Pro selected, rather than the
-        // Subscription tab's own cancelled-notice banner (which nothing renders on this screen).
-        this.setState({ screen: 'tiers', tier: 'paid', checkoutError: null });
+        // Real fix (was: 'paid', unconditionally, with no cancelled-notice rendered on this screen at
+        // all — the exact bug this pass fixes): no real subscription can exist yet this early in
+        // signup, so the only honest local value here is 'free'. Landing back on this same screen
+        // still lets the candidate retry immediately (chooseFree/choosePaid/advanceFromTiers are
+        // unaffected by this reset), it just no longer misrepresents that retry as already decided.
+        this.setState({ screen: 'tiers', tier: 'free', checkoutError: null, checkoutIncompleteNotice: true });
       } else {
-        this.setState({ checkoutCancelledNotice: true });
+        // Real fix (was: tierSelection left untouched, stuck at 'paid' from before the redirect).
+        // Resets to the real accountTier, not a hardcoded 'free' — an already-paid candidate whose
+        // billing-cycle-change attempt gets cancelled stays correctly on their existing real plan.
+        this.setState(st => ({ tierSelection: st.accountTier, checkoutIncompleteNotice: true }));
       }
       return;
     }
@@ -8241,6 +8306,7 @@ class Component extends DCLogic {
       this.setState({
         checkoutPending: false,
         checkoutError: confirmed ? null : "Payment may still be processing — check back in a moment, or contact support if this persists.",
+        checkoutIncompleteNotice: !confirmed,
         screen: confirmed ? 'account' : 'licenseBilling',
         accountTab: confirmed ? 'verification' : this.state.accountTab,
       }, () => {
@@ -8253,13 +8319,22 @@ class Component extends DCLogic {
     const patch = {
       checkoutPending: false,
       changePlanOpen: false,
-      tierSelection: confirmed ? 'paid' : this.state.tierSelection,
+      // Real fix (was: this.state.tierSelection, i.e. left untouched when a checkout=success redirect
+      // still failed to confirm after all 8 retries — e.g. a decline that somehow still bounced through
+      // the success URL, or a webhook that never arrives). Same accountTier-not-hardcoded-'free'
+      // reasoning as the cancel branch above.
+      tierSelection: confirmed ? 'paid' : this.state.accountTier,
       checkoutSuccessNotice: confirmed && !fromSignupTiers,
+      checkoutIncompleteNotice: !confirmed,
       checkoutError: confirmed ? null : "Payment may still be processing — check back in a moment, or contact support if this persists.",
     };
     if (returnCtx && returnCtx.billingCycle) patch.billingCycle = returnCtx.billingCycle;
     if (fromSignupTiers) {
-      patch.tier = 'paid';
+      // Real fix (was: 'paid' unconditionally, even when !confirmed — a second, separate instance of
+      // the same bug, found while fixing the cancel branch above: a checkout=success redirect whose
+      // payment still isn't confirmed after retrying must not force the signup tiers screen to show
+      // Pro selected either).
+      patch.tier = confirmed ? 'paid' : 'free';
       patch.screen = confirmed ? 'interstitial' : 'tiers';
       if (confirmed) this.addActivityLog('Paid plan selected at signup');
     } else if (confirmed && returnCtx && returnCtx.upgradeReturnTab) {
@@ -9323,10 +9398,15 @@ class Component extends DCLogic {
       checkoutButtonLabelPaypal: s.checkoutPending ? 'Redirecting…' : 'PayPal / Venmo',
       checkoutPending: s.checkoutPending,
       checkoutError: s.checkoutError,
-      checkoutCancelledNotice: s.checkoutCancelledNotice,
+      checkoutIncompleteNotice: s.checkoutIncompleteNotice,
       checkoutSuccessNotice: s.checkoutSuccessNotice,
       downgradeSuccessNotice: s.downgradeSuccessNotice,
-      dismissCheckoutNotice: () => this.setState({ checkoutCancelledNotice: false, checkoutSuccessNotice: false, checkoutError: null, downgradeSuccessNotice: false }),
+      // checkoutIncompleteNotice is deliberately NOT reset here — the whole point of this fix is that
+      // "you haven't completed subscribing" must be persistent, not a small dismissible bar a candidate
+      // can wave away and then genuinely forget. It only clears when a real event makes it stop being
+      // true: starting a fresh checkout attempt (startRealCheckout) or handleCheckoutReturn confirming
+      // success.
+      dismissCheckoutNotice: () => this.setState({ checkoutSuccessNotice: false, checkoutError: null, downgradeSuccessNotice: false }),
       downgradeModalOpen: s.downgradeModalOpen,
       openDowngradeModal: () => this.setState({ downgradeModalOpen: true }),
       closeDowngradeModal: () => this.setState({ downgradeModalOpen: false }),
