@@ -3931,6 +3931,10 @@ a:hover{color:var(--color-accent)}
                 <div style="font-size:12px;color:var(--color-neutral-400);border-top:1px solid var(--color-divider);padding-top:8px">{{ row.needsReviewNote }}</div>
               </sc-if>
 
+              <sc-if value="{{ row.isUnverifiedLicense }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:12px;color:var(--color-neutral-400);border-top:1px solid var(--color-divider);padding-top:8px">{{ row.unverifiedLicenseNote }}</div>
+              </sc-if>
+
               <!-- Item 7 (2026-09-12 live-testing session, follow-up build): durable, always-
                    reachable access to the same optional employer/certification contact-details this
                    item may have skipped or only partly filled in at confirmation time. -->
@@ -5798,8 +5802,8 @@ class Component extends DCLogic {
   // Deliberately NOT added to VERIFICATION_CATEGORY_ORDER below: the category-summary cards are
   // "parts of your record" (job history, education, certifications), and a flagged freeform blurb
   // isn't one of those — it gets its own distinct rendering in getVerificationItemRows instead.
-  VERIFICATION_CATEGORY_LABELS = { 'Job Experience': 'Job Experience', 'Education': 'Education', 'Certification': 'Certifications', 'Needs Review': 'Flagged content' };
-  VERIFICATION_CATEGORY_ORDER = ['Job Experience', 'Education', 'Certification'];
+  VERIFICATION_CATEGORY_LABELS = { 'Job Experience': 'Job Experience', 'Education': 'Education', 'Certification': 'Certifications', 'License': 'Licenses', 'Needs Review': 'Flagged content' };
+  VERIFICATION_CATEGORY_ORDER = ['Job Experience', 'Education', 'Certification', 'License'];
 
   // The P133 verification floor: a category only ever shows as having a confirmed status if at
   // least one real item in it is genuinely Verified (Confirmed) — never merely submitted or
@@ -5817,6 +5821,33 @@ class Component extends DCLogic {
         hasVerifiedNot: !hasVerified,
       };
     }).filter(Boolean);
+  }
+
+  // Confirmed licenses with no automatic check (no state given, or a state with no registry adapter
+  // yet) have no queue row by design. Shown here with the same "Candidate-stated / not independently
+  // verified" tier the printed phone/email get, never as a pending/under-review item — nothing is
+  // reviewing them and nothing follows up.
+  getUnverifiedLicenseRows() {
+    const s = this.state;
+    if (s.verificationFilter === 'completed') return [];
+    return (s.verificationUnverifiedLicenses || []).map(l => {
+      const reason = !l.state
+        ? "No issuing state was provided, so it couldn't be checked automatically."
+        : "Automatic checks aren't available for this state yet.";
+      return {
+        id: 'LIC-' + String(l.id).slice(0, 6).toUpperCase(),
+        categoryLabel: this.VERIFICATION_CATEGORY_LABELS['License'],
+        claim: [l.name || 'License', l.licenseNumber ? `Lic #${l.licenseNumber}` : '', l.state || ''].filter(Boolean).join(', '),
+        safeLabel: 'Candidate-stated',
+        tagClass: 'tag-outline',
+        isUnverifiedLicense: true,
+        unverifiedLicenseNote: 'Sent as you stated it, not independently verified. ' + reason,
+        isDiscrepancy: false, isNeedsReview: false, needsReviewNote: '', discrepancyNote: '',
+        hasResponded: false, canRespond: false, showRespondButton: false, responseFormOpen: false,
+        openRespond: () => {}, cancelRespond: () => {}, submitRespond: () => {},
+        canEditContactDetails: false, openContactDetails: () => {},
+      };
+    });
   }
 
   getVerificationItemRows() {
@@ -5864,7 +5895,8 @@ class Component extends DCLogic {
           canEditContactDetails: (it.type === 'Job Experience' || it.type === 'Certification') && !!it.sourceItemId,
           openContactDetails: () => this.openContactDetailsModal(it.type, it.sourceItemId, it.claim),
         };
-      });
+      })
+      .concat(this.getUnverifiedLicenseRows());
   }
 
   openCorrectionResponse(itemId) {
@@ -6039,6 +6071,7 @@ class Component extends DCLogic {
       verificationItemsLoading: false,
       verificationItemsError: null,
       verificationItems: data.items || [],
+      verificationUnverifiedLicenses: data.unverified_licenses || [],
       verificationItemsLoadedFor: candidateId,
     });
   }
@@ -6695,7 +6728,7 @@ class Component extends DCLogic {
     // resolveEmployerContact(true), silently discarding anything typed with zero confirmation.
     skipEmployerContactModalOpen: false,
     verificationFilter: 'active', upgradeModalOpen: false, upgradeReturnTab: null, upgradeReturnTarget: null,
-    verificationItems: [], verificationItemsLoading: false, verificationItemsError: null, verificationItemsLoadedFor: null,
+    verificationItems: [], verificationUnverifiedLicenses: [], verificationItemsLoading: false, verificationItemsError: null, verificationItemsLoadedFor: null,
     correctionResponseOpenId: null, correctionValueDraft: '', correctionNoteDraft: '',
     correctionSubmitPending: false, correctionSubmitError: null,
     // Item 7 (2026-09-12 live-testing session, follow-up build): the durable contact-details modal

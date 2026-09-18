@@ -104,7 +104,23 @@ export default {
         };
       });
 
-      return new Response(JSON.stringify({ ok: true, items }), {
+      // Licenses the candidate confirmed that never got an automatic check (no state supplied, or a
+      // state with no registry adapter yet) have no verification_items row by design — nothing is
+      // queued or chased. They're surfaced here so the candidate sees them as candidate-stated /
+      // not independently verified rather than not at all. Anything with a queue row is already
+      // in `items` above.
+      const licUrl = SUPABASE_URL + "/rest/v1/license_items?select=id,license_name,license_number,state,verification_outcome"
+        + "&candidate_confirmed=eq.true&queue_item_id=is.null&candidate_id=eq." + encodeURIComponent(candidate_id) + "&order=created_at.asc";
+      const licRes = await fetch(licUrl, {
+        headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": "Bearer " + SUPABASE_SERVICE_ROLE_KEY },
+      });
+      const licRows = licRes.ok ? await licRes.json() : [];
+      const unverified_licenses = licRows.map((l: any) => ({
+        id: l.id, name: l.license_name || null, licenseNumber: l.license_number || null, state: l.state || null,
+        outcome: l.verification_outcome || null,
+      }));
+
+      return new Response(JSON.stringify({ ok: true, items, unverified_licenses }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     } catch (e) {
