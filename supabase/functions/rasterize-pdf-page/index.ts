@@ -228,8 +228,8 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   copied verbatim — not reworded, not invented, not guessed. When two or more consecutive entries on
   this page share the same visible heading, every one of them gets that same literal heading string,
   not just the first. Use an empty string "" only when this page genuinely shows no visible heading
-  above this entry (e.g. a minimally-formatted page with no section labels at all, per the HEADINGS
-  ARE A HELPFUL SIGNAL rule above, or a continuation entry whose heading was only printed on a
+  above this entry (e.g. a minimally-formatted page with no section labels at all, per THE ONE
+  EXCEPTION rule above, or a continuation entry whose heading was only printed on a
   previous page). This is additive only, like freeform's own "heading" field below — it does not
   change how content gets classified, only what section title the output can reproduce.
 

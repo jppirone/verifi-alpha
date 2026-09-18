@@ -47,7 +47,167 @@ const CLAUDE_MODEL = "claude-haiku-4-5";
 // entirely before this fix — only rasterize-pdf-page's PDF path had it (added in an earlier,
 // narrower fix verified against a different document). Applied here too so the same bug can't
 // resurface via the image-upload path, which is the one that actually calls this function.
-function buildExtractionPrompt(ocrText: string): string {
+// STEP 1 OF 2: SECTION-BOUNDARY DETECTION — Decision 38 (2026-09-18), mirrored here from
+// rasterize-pdf-page/index.ts (see that file's own header comment for the full root-cause story —
+// this is the same fix, not a fresh design, applied to this function's single-call, single-document
+// shape). No continuation-context concept exists in this function (one call, one already-complete
+// OCR text, no page boundaries) — that's the one structural difference from rasterize-pdf-page's
+// copy of this same mechanism, everything else is identical in spirit.
+const KNOWN_CATEGORIES_GUIDE = `KNOWN INTERNAL CATEGORIES — match a section's header by its MEANING, not by exact wording. Common
+real-world header phrasings for each (not exhaustive — judge by meaning; any header that clearly names
+the same concept counts, however it's actually worded):
+- work_history: "Experience", "Work History", "Professional Experience", "Employment History", "Job
+  Description", "Career History", or similar — paid employment.
+- education: "Education", "Academic Background", "Degrees", or similar — degree-granting programs.
+- certifications: "Certifications", "Licenses", "Professional Certifications", "Credentials",
+  "Licenses & Certifications", or similar — licenses and certifications are the SAME internal category
+  here, never split into two different categories.
+- skills: "Skills", "Core Competencies", "Technical Skills", "Areas of Expertise", "Key Skills", or
+  similar — a flat list of individual skill/competency terms.
+- summary: "Summary", "Professional Summary", "Objective", "About Me", or similar — an intro blurb
+  near the top of the resume.
+- hobbies_other: "Interests", "Hobbies", "Volunteer Work", "Community Involvement", or similar.
+If a section's header doesn't semantically match ANY of the above — a real header exists, but names
+something else entirely (e.g. "Career Highlights," "Workplace Strengths," "Achievements") — its
+category is "unknown". This is not a failure state: "unknown" content is real, gets captured in full,
+and is unconditionally flagged for a human to review (never silently dropped, never forced into a
+category it doesn't belong in just to avoid "unknown") — this is the anti-gaming design: a candidate
+cannot route real content around verification by mislabeling its own section header.`;
+
+type BoundaryCategory = "work_history" | "education" | "certifications" | "skills" | "summary" | "hobbies_other" | "unknown";
+
+type BoundarySection = { heading: string; category: BoundaryCategory };
+
+type BoundaryResult = { sections: BoundarySection[] };
+
+const BOUNDARY_SCHEMA_SHAPE = `{
+  "sections": [
+    { "heading": string, "category": "work_history" | "education" | "certifications" | "skills" | "summary" | "hobbies_other" | "unknown" }
+  ]
+}`;
+
+function buildBoundaryDetectionPrompt(ocrText: string): string {
+  return `You are analyzing the raw OCR text of a resume to identify its section boundaries only — not
+to extract any data yet. The OCR text below may contain recognition errors (misread characters, words
+glued together, minor garbling); read through that when identifying headings.
+
+Identify every distinct SECTION in this document and assign each one a category — nothing else, at
+this step. A section is a heading plus everything under it up to the next heading (or the end of the
+document). If the document (or its opening portion, before any first heading) has real content with NO
+heading at all governing it, that is still one section — heading="" — do not guess a category for it
+based on its content's shape; give it category "unknown" here (step 2 of this pipeline has its own,
+separate shape-based fallback for genuinely headerless content — resolving that is not this step's job).
+
+Do NOT read, extract, or judge individual items inside any section at this step — you are drawing
+boundaries and matching header MEANING only. Nothing about what's inside a section (its shape, its item
+count, whether individual items look like one category or another) should influence its category here.
+Two sections can share the same broad topic (e.g. two different certifications-style headings) and
+still be two separate sections if they have two separate, distinct heading strings — never merge them
+into one just because they're topically similar; a genuinely different heading string always starts a
+new section.
+
+${KNOWN_CATEGORIES_GUIDE}
+
+Return ONLY a single JSON object, no prose before or after it, matching exactly this shape:
+
+${BOUNDARY_SCHEMA_SHAPE}
+
+--- BEGIN RESUME OCR TEXT ---
+${ocrText}
+--- END RESUME OCR TEXT ---`;
+}
+
+function isValidBoundaryResult(x: unknown): x is BoundaryResult {
+  if (!x || typeof x !== "object") return false;
+  const o = x as Record<string, unknown>;
+  return Array.isArray(o.sections) && o.sections.every((s) =>
+    s && typeof s === "object" && typeof (s as Record<string, unknown>).heading === "string" &&
+    typeof (s as Record<string, unknown>).category === "string"
+  );
+}
+
+// STEP 2 OF 2 support: renders step 1's already-decided boundaries into the block step 2's prompt
+// includes — this is what actually enforces "do not independently re-judge category". Mirrors
+// rasterize-pdf-page's buildSectionBoundaryBlock exactly, minus the continuation-context branch,
+// which doesn't apply to this function's single-call shape.
+function buildSectionBoundaryBlock(boundaries?: BoundaryResult | null): string {
+  if (!boundaries) {
+    return `
+
+SECTION BOUNDARIES: none available (the boundary-detection step failed or was skipped). Fall back to
+judging each section's category by its own heading, matched semantically (not by exact wording)
+against the known internal categories — "Experience"/"Work History"/"Professional Experience"/
+"Employment History" and similar = work_history; "Education"/"Academic Background" and similar =
+education; "Certifications"/"Licenses"/"Credentials" and similar = certifications (licenses and
+certifications are the SAME internal category, never split into two); "Skills"/"Core Competencies"/
+"Technical Skills"/"Areas of Expertise" and similar = skills; "Summary"/"Objective"/"About Me" and
+similar = summary; "Interests"/"Hobbies"/"Volunteer Work" and similar = hobbies_other. For genuinely
+headerless content, fall back further to judging by its own shape — the same fallback described in
+"THE ONE EXCEPTION" above, just applied to the whole document rather than one flagged section, since
+no per-section decision exists this time. A header that matches none of the above goes to
+needs_review, same as always.`;
+  }
+  if (boundaries.sections.length === 0) return "";
+  const known = boundaries.sections.filter((s) => s.category !== "unknown");
+  const unknown = boundaries.sections.filter((s) => s.category === "unknown");
+  const knownList = known.length
+    ? known.map((s) => `  - "${s.heading || "(no heading)"}" -> ${s.category}`).join("\n")
+    : "  (none)";
+  const unknownList = unknown.length
+    ? unknown.map((s) => `  - "${s.heading || "(no heading at all)"}"`).join("\n")
+    : "  (none)";
+
+  return `
+
+SECTION BOUNDARIES FOR THIS DOCUMENT (already decided in a separate step — do not independently
+re-judge any section's category by its content's shape, wording, or item count; the category below is
+final):
+${knownList}
+Every item under one of the sections above gets that section's category, no exceptions and no
+re-litigating it against the category definitions below by shape — those definitions now describe how
+to extract fields correctly WITHIN an already-assigned category (heading capture, line breaks, license
+numbers, and so on), not how to decide the category itself.
+
+SECTIONS WITH NO MATCHING KNOWN CATEGORY ("unknown" — real content, not a failure):
+${unknownList}
+Extract each of these as one or more "needs_review" freeform entries, heading set to that section's own
+literal text verbatim, content holding everything under it. One narrow exception — see the CERT/LICENSE
+VS. SKILL DISAMBIGUATION rule below: an "unknown" section that itself shows a genuine mix of items
+with/without a discernible trailing certification/license number may still split some of its items into
+certifications vs. skills using that signal. This is the ONLY place that item-level heuristic is allowed
+to fire — never inside a section already assigned a real category above.`;
+}
+
+async function runBoundaryDetection(ocrText: string): Promise<BoundaryResult> {
+  if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not configured");
+  const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: CLAUDE_MODEL,
+      max_tokens: 1024,
+      temperature: 0,
+      messages: [{ role: "user", content: buildBoundaryDetectionPrompt(ocrText) }],
+    }),
+  });
+  if (!claudeRes.ok) {
+    const detail = await claudeRes.text().catch(() => "");
+    throw new Error(`claude_call_failed (${claudeRes.status}): ${detail.slice(0, 500)}`);
+  }
+  const claudeData = await claudeRes.json();
+  const rawText: string = claudeData?.content?.find((b: { type?: string }) => b.type === "text")?.text ?? "";
+  const cleaned = rawText.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch (e) {
+    throw new Error(`malformed_boundary_response: ${String(e)}`);
+  }
+  if (!isValidBoundaryResult(parsed)) throw new Error("boundary_response_wrong_shape");
+  return parsed;
+}
+
+function buildExtractionPrompt(ocrText: string, sectionBoundaries?: BoundaryResult | null): string {
   return `You are extracting structured data from the raw OCR text of a resume. The OCR text below
 may contain recognition errors (misread characters, words glued together, minor garbling) — do
 your best to read through that, but do not invent information that is not actually present in the
@@ -86,21 +246,31 @@ as "needs_review" for everything else that doesn't fit anywhere — needs_review
 fallback, always available, always correct when nothing else fits. Never force content into a
 category it doesn't genuinely belong in just to give it a home.
 
-HEADINGS ARE A HELPFUL SIGNAL, NEVER A REQUIREMENT (a real, confirmed failure mode — a plain,
-minimally-formatted document with no section headings at all, no bold text, no visual separation
-whatsoever, still has real work history, education, and certifications on it, and they must still
-be extracted into their real structured categories, not dumped into needs_review just because
-nothing labels them): classify content by what it actually IS — its own inherent shape and
-content pattern — never by whether a labeled heading or bold/visual styling happens to precede
-it. A line naming a trade or credential followed by a license/certification/registration number
-(e.g. "Plumber" then "Lic # CFC1425829", "License No. 12345", "Cert #A-9982") is a certifications
-entry regardless of whether any heading like "Certifications" appears above it anywhere on the
-page — the credential-name-plus-license-number pattern IS the classification signal, the same way
-a company+title+date-range pattern identifies work_history and a degree+institution pattern
-identifies education, with or without a labeled section heading present. Never let the mere
-absence of a heading push content that otherwise clearly fits a real category into needs_review —
-that catch-all is for content that genuinely doesn't fit any category, not for content that fits
-one perfectly but happens to lack a visible label.
+CLASSIFICATION IS SECTION-DRIVEN, DECIDED BEFORE THIS STEP — READ THIS FIRST (Decision 38, 2026-09-18):
+the category every item below belongs to is NOT something this step decides by judging an individual
+item's own shape or content pattern. It was already decided, per-SECTION, in a separate step that ran
+before this one — see "SECTION BOUNDARIES FOR THIS DOCUMENT" further down this prompt (when present)
+for the actual, final category of every section. Once a section's category is fixed, every item under
+it gets that category, full stop — do not independently re-judge a specific item against these category
+definitions by its own shape or wording once it's inside an already-assigned section. These definitions
+below describe what a category MEANS and how to extract its fields correctly once assigned (heading
+capture, line breaks, license numbers, date rules, and so on) — not how to decide category in the first
+place; that decision is upstream of this step now.
+
+THE ONE EXCEPTION — GENUINELY HEADERLESS CONTENT (a real, confirmed failure mode this exception exists
+to cover — a plain, minimally-formatted document with no section headings at all, no bold text, no
+visual separation whatsoever, still has real work history, education, and certifications on it, and
+they must still be extracted into their real structured categories, not dumped into needs_review just
+because nothing labels them): when the section-boundary step marked a section "unknown" specifically
+because it found NO heading at all governing that content (not because a real heading didn't
+semantically match a known category — see the disambiguation rule further below for that different
+case), fall back to judging that specific content by its own inherent shape and content pattern. A
+line naming a trade or credential followed by a license/certification/registration number (e.g.
+"Plumber" then "Lic # CFC1425829", "License No. 12345", "Cert #A-9982") is a certifications entry by
+that shape alone, the same way a company+title+date-range pattern identifies work_history and a
+degree+institution pattern identifies education — but ONLY reach for this fallback inside a section
+the boundary step already flagged as genuinely headerless "unknown", never as a general override for
+a section that already has a real, assigned category.
 
 FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable buckets:
 
@@ -183,7 +353,7 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   not reworded, not invented, not guessed. When two or more consecutive entries share the same visible
   heading, every one of them gets that same literal heading string, not just the first. Use an empty
   string "" only when the resume genuinely has no visible heading above this entry (e.g. a minimally-
-  formatted document with no section labels at all, per the HEADINGS ARE A HELPFUL SIGNAL rule above).
+  formatted document with no section labels at all, per THE ONE EXCEPTION rule above).
   This is additive only, like freeform's own "heading" field below — it does not change how content
   gets classified, only what section title the output can reproduce.
 
@@ -260,11 +430,14 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
 
 - CERT/LICENSE VS. SKILL DISAMBIGUATION WITHIN A MIXED SECTION (a targeted rule, not a universal
   requirement — most certifications and skills are unambiguous by shape per their own definitions
-  above and need none of this): this applies ONLY when a single section contains a genuine MIX — some
-  items with a clearly discernible trailing certification/license number or identifier (a distinct
+  above and need none of this, and per the section-driven classification rule above, this NEVER fires
+  inside a section the boundary step already assigned a real category to): this applies ONLY inside a
+  section the boundary step marked "unknown" — either genuinely headerless, or a real header that
+  didn't semantically match any known category — AND that section's own content shows a genuine MIX —
+  some items with a clearly discernible trailing certification/license number or identifier (a distinct
   number, code, or alphanumeric string following the item's name, whether or not it carries a
   conventional marker like "#", "No.", or "Lic. No." in front of it) and other items in that same
-  section with no such identifier at all. When that specific mix occurs, use the presence or absence
+  section with no such identifier at all. When that specific mix occurs inside such a section, use the
   of a discernible trailing identifier as the signal to split the section: items with one are
   certifications (the identifier captured in "license_number"), items without one are skills. Do NOT
   apply this as a blanket requirement for every certification — most legitimately have no license
@@ -424,7 +597,7 @@ month and year, YYYY-01-01 when it gives only a year. If a role/program is curre
 end date. If a date is entirely absent or unrecoverable, use an empty string "" for that field, not
 a guess.
 
-If a category has no entries, return an empty array for it — do not omit the key.
+If a category has no entries, return an empty array for it — do not omit the key.${buildSectionBoundaryBlock(sectionBoundaries)}
 
 --- BEGIN RESUME OCR TEXT ---
 ${ocrText}
@@ -533,7 +706,19 @@ export default {
         });
       }
 
-      const prompt = buildExtractionPrompt(doc.ocr_raw_text);
+      // STEP 1 OF 2 (Decision 38): section-boundary detection, one extra call before the real
+      // extraction call below. Never allowed to fail the request — it's a genuine accuracy
+      // improvement over the old one-call design, not a new hard dependency; on failure,
+      // buildSectionBoundaryBlock's own null-boundaries branch hands step 2 the old,
+      // pre-Decision-38 shape-based fallback instead.
+      let sectionBoundaries: BoundaryResult | null = null;
+      try {
+        sectionBoundaries = await runBoundaryDetection(doc.ocr_raw_text);
+      } catch (boundaryErr) {
+        console.log(`extract-resume-fields: boundary detection failed, falling back to shape-based classification — ${String(boundaryErr)}`);
+      }
+
+      const prompt = buildExtractionPrompt(doc.ocr_raw_text, sectionBoundaries);
 
       const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
