@@ -3445,6 +3445,20 @@ a:hover{color:var(--color-accent)}
     <div style="font-size:17px;text-align:center">Your account has been deactivated.</div>
     <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">Your access ended immediately. Data already shared with linked downstream partners will be removed there too. Partners have 10 business days to acknowledge the deletion instruction and 45 days to complete it.</div>
     <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">Your account and verified data are fully retained until {{ deletionDateLabel }}, in case you change your mind, then permanently deleted on that date. To reactivate, log in again from the entry screen before then.</div>
+    <!-- Subscription cancellation gap (2026-09-18), Step 3: gated on deletionWasPaid (Step 3's
+         render-vals) so a candidate who was already on Free never sees this block at all — nothing
+         paid, nothing to report. For a candidate who was paid, this is the one place they can ever
+         see whether billing was actually stopped: their session is already revoked at this point, so
+         "check back later" from inside the app isn't possible the way it is on the Subscription tab. -->
+    <sc-if value="{{ deletionBillingPending }}" hint-placeholder-val="{{ false }}">
+      <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6;border-top:1px solid var(--color-divider);padding-top:var(--space-3)">Confirming with Stripe that billing was actually stopped…</div>
+    </sc-if>
+    <sc-if value="{{ deletionBillingConfirmed }}" hint-placeholder-val="{{ false }}">
+      <div style="font-size:13px;color:var(--color-accent-300);line-height:1.6;border-top:1px solid var(--color-divider);padding-top:var(--space-3)">Billing confirmed stopped — Stripe canceled your subscription.</div>
+    </sc-if>
+    <sc-if value="{{ deletionBillingUnconfirmed }}" hint-placeholder-val="{{ false }}">
+      <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6;border-top:1px solid var(--color-divider);padding-top:var(--space-3)">We asked Stripe to stop billing but haven't gotten confirmation back yet. If you continue to be billed, contact support.</div>
+    </sc-if>
   </div>
   <button type="button" class="btn btn-primary" style="margin-top:var(--space-4)" sc-camel-on-click="{{ goToEntryAfterDeactivation }}">Return to sign-in</button>
 </div>
@@ -4466,6 +4480,27 @@ a:hover{color:var(--color-accent)}
             <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border:1px solid var(--color-divider);border-radius:6px">
               <span style="font-size:12px;color:var(--color-accent-300)">You've switched to the Free plan.</span>
               <button type="button" class="btn btn-ghost" style="font-size:11px;padding:2px 8px" sc-camel-on-click="{{ dismissCheckoutNotice }}">Dismiss</button>
+            </div>
+          </sc-if>
+          <!-- Subscription cancellation gap (2026-09-18), Step 3: a separate fact from
+               downgradeSuccessNotice above — that one is the (already real, already immediate) tier
+               flip; this is specifically whether Stripe's own webhook confirmed the real subscription
+               was cancelled. No Dismiss button on any of the three states, same persistence reasoning
+               as checkoutIncompleteNotice elsewhere on this tab — a billing confirmation, or the honest
+               absence of one, must not be waveable-away. -->
+          <sc-if value="{{ downgradeBillingPending }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:8px 10px;border:1px solid var(--color-divider);border-radius:6px">
+              <span style="font-size:12px;color:var(--color-neutral-400)">Confirming with Stripe that billing was actually stopped…</span>
+            </div>
+          </sc-if>
+          <sc-if value="{{ downgradeBillingConfirmed }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:8px 10px;border:1px solid var(--color-divider);border-radius:6px">
+              <span style="font-size:12px;color:var(--color-accent-300)">Billing confirmed stopped — Stripe canceled your subscription.</span>
+            </div>
+          </sc-if>
+          <sc-if value="{{ downgradeBillingUnconfirmed }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:8px 10px;border:1px solid var(--color-divider);border-radius:6px">
+              <span style="font-size:12px;color:var(--color-neutral-300)">We asked Stripe to stop billing but haven't gotten confirmation back yet. Check back in a moment, or contact support if this persists.</span>
             </div>
           </sc-if>
         </div>
@@ -6623,8 +6658,21 @@ class Component extends DCLogic {
     // the candidate it worked; the modal just closed silently. Mirrors checkoutSuccessNotice's own
     // dismissible-banner pattern above rather than inventing a new one.
     downgradeSuccessNotice: false,
+    // Subscription cancellation gap (2026-09-18), Step 3: real, webhook-backed confirmation that
+    // billing actually stopped — see cancel-stripe-subscription/test-stripe-webhook's own headers
+    // for why this is a separate fact from downgradeSuccessNotice/accountTier above (both of those
+    // are already real and immediate; this one specifically waits on Stripe's own webhook, not an
+    // optimistic assumption the cancel request succeeded). null | 'pending' | 'confirmed' |
+    // 'unconfirmed' — see pollBillingCancellation's own header. stripeSubscriptionCancelledAt itself
+    // is hydrated in applySession, same one-directional-fact shape as kycVerifiedAt.
+    stripeSubscriptionCancelledAt: null, downgradeBillingStatus: null,
     deactStep: 'default', deactReason: '', deactNote: '', deactChoice: null, arrivedFromDeactivationPause: false,
     deletionScheduled: false, deletionDate: null,
+    // Subscription cancellation gap (2026-09-18), Step 3: same real confirmation as
+    // downgradeBillingStatus above, for the account-deletion-while-paid case — deletionWasPaid is
+    // captured once, at the moment deactivateAccount runs, since accountTier itself isn't meaningful
+    // to read anymore once the candidate's session is revoked and this screen is showing.
+    deletionWasPaid: false, deletionBillingStatus: null,
     deactivatePending: false, deactivateError: null, reactivatePending: false, reactivateError: null,
     downgradeModalOpen: false,
     interstitialLearnMoreOpen: false,
@@ -7994,6 +8042,10 @@ class Component extends DCLogic {
       crossValidationCompletedAt: (profile && profile.cross_validation_completed_at) || this.state.crossValidationCompletedAt,
       crossValidationDone: !!((profile && profile.cross_validation_completed_at) || this.state.crossValidationCompletedAt),
       licenseSubscriptionStartedAt: (profile && profile.license_subscription_started_at) || this.state.licenseSubscriptionStartedAt,
+      // Subscription cancellation gap (2026-09-18), Step 3: real, webhook-written fact — see
+      // resolve-session's own comment on this same field. Same one-directional-fact guard as
+      // kycVerifiedAt/tourEverShown above.
+      stripeSubscriptionCancelledAt: (profile && profile.stripe_subscription_cancelled_at) || this.state.stripeSubscriptionCancelledAt,
     });
     if (reactivateNeeded) { this.setState({ screen: 'reactivate', deletionScheduled: true, deletionDate }); return; }
     // Items 9/10/11: a license_only candidate has no resume_document, ever — checkResumeFlowIncomplete
@@ -8345,6 +8397,46 @@ class Component extends DCLogic {
     this.setState(patch, () => { if (patch.accountTab === 'views') this.renderPdfPreview(); });
   }
 
+  // Subscription cancellation gap (2026-09-18), Step 3: shared retry-poll for the webhook-backed
+  // stripe_subscription_cancelled_at confirmation — used by both confirmDowngrade and
+  // deactivateAccount below, since both need to wait on the exact same real-world fact
+  // (test-stripe-webhook's customer.subscription.deleted branch actually landing) after asking
+  // Stripe to cancel. Same 8-retries/1500ms-apart shape as handleCheckoutReturn's own confirmation
+  // loop for the forward (subscribe) direction, same reason: the webhook can race whichever request
+  // triggered this, no ordering guarantee either way. `checkConfirmed` is an async function the
+  // caller supplies because the two call sites read the fact differently — confirmDowngrade still
+  // has a live session and reuses resolveSession()'s own applySession hydration; deactivateAccount's
+  // session is already revoked by the time this runs, so it uses the id-only, session-free
+  // checkCandidateBillingCancelled below instead. Sets `statusField` to 'pending' immediately so the
+  // UI can show a real in-progress state, not just silence until the first check resolves.
+  async pollBillingCancellation(statusField, checkConfirmed) {
+    this.setState({ [statusField]: 'pending' });
+    let confirmed = await checkConfirmed();
+    for (let i = 0; !confirmed && i < 8; i++) {
+      await new Promise((r) => setTimeout(r, 1500));
+      confirmed = await checkConfirmed();
+    }
+    this.setState({ [statusField]: confirmed ? 'confirmed' : 'unconfirmed' });
+    return confirmed;
+  }
+
+  // See pollBillingCancellation's own header for why this exists separately from resolveSession() —
+  // this is the id-only, no-session-required half, reusing get-candidate-tier (already exactly this
+  // shape — see its own header) rather than building a third near-duplicate function.
+  async checkCandidateBillingCancelled(candidateId) {
+    try {
+      const res = await fetch(this.SUPABASE_FN_URL + '/get-candidate-tier', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate_id: candidateId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      return !!(res.ok && data.ok && data.stripe_subscription_cancelled_at);
+    } catch (e) {
+      return false;
+    }
+  }
+
   // Item B: real backend write for a downgrade to Free — set-candidate-tier itself still never
   // touches Stripe (no test-mode charge to reverse; flipping the local tier is its own single
   // purpose). Subscription cancellation gap (2026-09-18): the actual Stripe cancellation
@@ -8371,21 +8463,32 @@ class Component extends DCLogic {
       this.setState({ checkoutPending: false, checkoutError: "Couldn't switch to Free. Please try again." });
       return;
     }
-    this.setState({ checkoutPending: false, checkoutError: null, downgradeModalOpen: false, accountTier: 'free', tierSelection: 'free', changePlanOpen: false, downgradeSuccessNotice: true });
+    this.setState({ checkoutPending: false, checkoutError: null, downgradeModalOpen: false, accountTier: 'free', tierSelection: 'free', changePlanOpen: false, downgradeSuccessNotice: true, downgradeBillingStatus: null });
     this.addActivityLog('Switch to Free confirmed');
-    // Fire-and-forget, same posture as markTourComplete elsewhere in this file — the tier flip
-    // above is the part the candidate is waiting on and already succeeded; a failure cancelling the
-    // real Stripe subscription shouldn't undo or block that, and cancel-stripe-subscription's own
-    // no-op-when-nothing-on-file behavior makes this safe to call even for a candidate who was never
-    // really on a Stripe-backed plan. Real confirmation this landed is test-stripe-webhook's new
-    // customer.subscription.deleted branch, not this call — nothing here claims otherwise to the
-    // candidate; the UI-facing confirmation for that is deliberately not built yet (next step, once
-    // the webhook side is proven live).
-    fetch(this.SUPABASE_FN_URL + '/cancel-stripe-subscription', {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ candidate_id: s.resumeCandidateId }),
-    }).catch(() => {});
+    // Step 3: the tier flip above is already real and already complete — this doesn't block or
+    // gate it, it's a second, separate fact (did the real Stripe subscription actually get
+    // cancelled) surfaced honestly rather than assumed. See cancel-stripe-subscription's own header:
+    // a candidate never really on a Stripe-backed plan gets cancelled:false back (no_subscription_on_file)
+    // here, correctly, with nothing to poll or confirm.
+    let cancelData = null;
+    try {
+      const cancelRes = await fetch(this.SUPABASE_FN_URL + '/cancel-stripe-subscription', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate_id: s.resumeCandidateId }),
+      });
+      cancelData = await cancelRes.json().catch(() => null);
+    } catch (e) {}
+    if (!cancelData || !cancelData.ok) {
+      this.setState({ downgradeBillingStatus: 'unconfirmed' });
+      return;
+    }
+    if (!cancelData.cancelled) return; // no_subscription_on_file — nothing real to confirm
+    const confirmed = await this.pollBillingCancellation('downgradeBillingStatus', async () => {
+      const ok = await this.resolveSession();
+      return ok && !!this.state.stripeSubscriptionCancelledAt;
+    });
+    if (confirmed) this.addActivityLog('Stripe subscription cancellation confirmed');
   }
 
   // Passwordless login, step 1 (requesting device). Deliberately mirrors sendVerificationEmail's
@@ -8427,6 +8530,11 @@ class Component extends DCLogic {
   async deactivateAccount() {
     const candidateId = this.state.resumeCandidateId;
     if (!candidateId) { this.setState({ deactivateError: 'No account is loaded — try logging in again.' }); return; }
+    // Captured before anything below changes screen/state — this is the last point accountTier
+    // still means anything for this device; once deactivate-account revokes every session, there's
+    // no more resolveSession() to re-read it from, so it has to be remembered now, not re-derived
+    // later. Same reasoning as the comment on deletionWasPaid's own initial-state declaration.
+    const wasPaid = this.state.accountTier === 'paid';
     this.setState({ deactivatePending: true, deactivateError: null });
     let res, data;
     try {
@@ -8450,21 +8558,36 @@ class Component extends DCLogic {
       deactivatePending: false, deactivateError: null,
       screen: 'deactivated', deactStep: 'default', deactReason: '', deactNote: '', deactChoice: null,
       deletionScheduled: true, deletionDate: data.deletion_date,
+      deletionWasPaid: wasPaid, deletionBillingStatus: null,
     });
+    if (!wasPaid) return; // free already — nothing paid to cancel, nothing to show on the goodbye screen
     // Subscription cancellation gap (2026-09-18): deactivate-account itself never touched Stripe or
     // tier at all — a paid candidate who deleted their account kept their real Stripe subscription
     // running indefinitely, same underlying gap confirmDowngrade had (see its own comment on this
-    // same call). Fire-and-forget for the same reason: deactivation itself already fully succeeded
-    // above (session revoked server-side, local token cleared), candidateId is still in closure scope
-    // even though this device's session token is now gone, and cancel-stripe-subscription's own
-    // no-op-when-nothing-on-file behavior makes this safe regardless of whether this candidate was
-    // ever actually on a Stripe-backed plan. Real confirmation is test-stripe-webhook's
-    // customer.subscription.deleted branch, not this call.
-    fetch(this.SUPABASE_FN_URL + '/cancel-stripe-subscription', {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ candidate_id: candidateId }),
-    }).catch(() => {});
+    // same call). candidateId is still in closure scope even though this device's session token is
+    // now gone — cancel-stripe-subscription doesn't need a session (candidate_id + anon key only,
+    // same as every function in this file). Awaited now (was fire-and-forget before Step 3) so the
+    // deactivated screen can show real progress rather than silence.
+    let cancelData = null;
+    try {
+      const cancelRes = await fetch(this.SUPABASE_FN_URL + '/cancel-stripe-subscription', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate_id: candidateId }),
+      });
+      cancelData = await cancelRes.json().catch(() => null);
+    } catch (e) {}
+    if (!cancelData || !cancelData.ok) {
+      this.setState({ deletionBillingStatus: 'unconfirmed' });
+      return;
+    }
+    if (!cancelData.cancelled) return; // no_subscription_on_file — nothing real to confirm
+    // Session-free poll (see checkCandidateBillingCancelled's own header) — resolveSession() isn't
+    // usable here, every session this candidate held was just revoked by deactivate-account itself.
+    const confirmed = await this.pollBillingCancellation('deletionBillingStatus', async () => {
+      return await this.checkCandidateBillingCancelled(candidateId);
+    });
+    if (confirmed) this.addActivityLog('Stripe subscription cancellation confirmed (account deletion)');
   }
 
   // Real dead end this closes (2026-09-07 wiring audit): reactivateAccount() used to just clear
@@ -9431,6 +9554,12 @@ class Component extends DCLogic {
       checkoutIncompleteNotice: s.checkoutIncompleteNotice,
       checkoutSuccessNotice: s.checkoutSuccessNotice,
       downgradeSuccessNotice: s.downgradeSuccessNotice,
+      // Subscription cancellation gap (2026-09-18), Step 3: same "no Dismiss, persistent until the
+      // underlying fact changes" reasoning as checkoutIncompleteNotice below — a billing-confirmation
+      // status must not be wave-away-able either way (pending, confirmed, or unconfirmed).
+      downgradeBillingPending: s.downgradeBillingStatus === 'pending',
+      downgradeBillingConfirmed: s.downgradeBillingStatus === 'confirmed',
+      downgradeBillingUnconfirmed: s.downgradeBillingStatus === 'unconfirmed',
       // checkoutIncompleteNotice is deliberately NOT reset here — the whole point of this fix is that
       // "you haven't completed subscribing" must be persistent, not a small dismissible bar a candidate
       // can wave away and then genuinely forget. It only clears when a real event makes it stop being
@@ -10006,6 +10135,13 @@ class Component extends DCLogic {
       isDeactivated: s.screen === 'deactivated',
       deletionScheduled: s.deletionScheduled,
       deletionDateLabel: s.deletionDate ? new Date(s.deletionDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : '',
+      // Subscription cancellation gap (2026-09-18), Step 3: gated on deletionWasPaid so a candidate
+      // who was already on Free sees nothing extra here — there's no billing to report on. Same
+      // three-state shape and no-Dismiss reasoning as downgradeBillingPending/Confirmed/Unconfirmed
+      // above.
+      deletionBillingPending: s.deletionWasPaid && s.deletionBillingStatus === 'pending',
+      deletionBillingConfirmed: s.deletionWasPaid && s.deletionBillingStatus === 'confirmed',
+      deletionBillingUnconfirmed: s.deletionWasPaid && s.deletionBillingStatus === 'unconfirmed',
       goToEntryAfterDeactivation: () => this.setState({ screen: 'returning' }),
       tabVerificationClass: s.accountTab === 'verification' ? 'btn-secondary' : 'btn-ghost',
       tabSharingClass: s.accountTab === 'sharing' ? 'btn-secondary' : 'btn-ghost',

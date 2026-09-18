@@ -66,7 +66,7 @@ export default {
       }
 
       const candRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/candidates?id=eq.${session.candidate_id}&select=id,email,phone,full_name,first_name,last_name,deletion_scheduled_at,tier,tour_completed_at,header_display_mode,personal_location,account_type,kyc_verified_at,license_subscription_started_at,phone_verified_at,cross_validation_completed_at,verified_phone_number`,
+        `${SUPABASE_URL}/rest/v1/candidates?id=eq.${session.candidate_id}&select=id,email,phone,full_name,first_name,last_name,deletion_scheduled_at,tier,tour_completed_at,header_display_mode,personal_location,account_type,kyc_verified_at,license_subscription_started_at,phone_verified_at,cross_validation_completed_at,verified_phone_number,stripe_subscription_cancelled_at`,
         { headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } },
       );
       const candRows = candRes.ok ? await candRes.json() : [];
@@ -138,6 +138,13 @@ export default {
         phone_verified_at: candidate.phone_verified_at,
         cross_validation_completed_at: candidate.cross_validation_completed_at,
         verified_phone_number: candidate.verified_phone_number,
+        // Subscription cancellation gap (2026-09-18), Step 3: real, webhook-written confirmation
+        // that a cancel-stripe-subscription request actually completed (see that function's and
+        // test-stripe-webhook's own headers) — this is what confirmDowngrade's own post-downgrade
+        // poll reads back via resolveSession(), the same "poll the one real session-establishing
+        // path until the webhook-backed fact shows up" shape handleCheckoutReturn already uses for
+        // the forward (subscribe) direction.
+        stripe_subscription_cancelled_at: candidate.stripe_subscription_cancelled_at,
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: "unhandled", detail: String(e) }), {
