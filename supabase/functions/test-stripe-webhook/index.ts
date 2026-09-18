@@ -174,9 +174,17 @@ export default {
           // serves both products -- account_type already keeps resume_pro and license_tracking
           // mutually exclusive per candidate (Items 9/10/11), so there's never a second live
           // subscription on the same row to disambiguate between.
+          // stripe_subscription_cancelled_at is reset to null here, in the same write that records
+          // the NEW subscription id — found live-testing Step 3: without this, a candidate who
+          // cancelled once and later re-subscribed kept the OLD subscription's cancellation
+          // timestamp, so candidate.html's next post-cancel poll (which just checks "is
+          // stripe_subscription_cancelled_at set?") saw it immediately and reported "Billing
+          // confirmed stopped" before Stripe had confirmed anything about the new subscription.
+          // That fact has to describe the CURRENT subscription_id, never a previous one.
           const patchBody: Record<string, unknown> = {
             stripe_checkout_session_id: session.id || null,
             stripe_subscription_id: session.subscription || null,
+            stripe_subscription_cancelled_at: null,
           };
           if (product === "license_tracking") {
             patchBody.license_subscription_started_at = new Date().toISOString();
