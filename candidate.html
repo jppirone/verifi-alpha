@@ -8549,7 +8549,13 @@ class Component extends DCLogic {
     // still means anything for this device; once deactivate-account revokes every session, there's
     // no more resolveSession() to re-read it from, so it has to be remembered now, not re-derived
     // later. Same reasoning as the comment on deletionWasPaid's own initial-state declaration.
-    const wasPaid = this.state.accountTier === 'paid';
+    // "Paid" here means "on a Stripe-backed subscription", which is two different facts by product:
+    // accountTier === 'paid' for the resume Pro upgrade, licenseSubscriptionStartedAt for
+    // license-tracking (see test-stripe-webhook's own header on why those are separate columns). Found
+    // in review of Step 3: this used to check accountTier alone, and a license_only candidate's
+    // accountTier is never 'paid' — so the early return below skipped cancel-stripe-subscription
+    // entirely for them, silently regressing the unconditional cancel call Step 1 had wired in.
+    const wasPaid = this.state.accountTier === 'paid' || !!this.state.licenseSubscriptionStartedAt;
     this.setState({ deactivatePending: true, deactivateError: null });
     let res, data;
     try {

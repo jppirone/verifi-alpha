@@ -264,10 +264,21 @@ export default {
               // who has since re-subscribed. Idempotent with confirmDowngrade's own earlier
               // set-candidate-tier write; a license_only candidate's tier is never 'paid' to begin
               // with, so this is a no-op for them.
+              //
+              // license_subscription_started_at is cleared by the same confirmed fact: it is the
+              // license-tracking product's equivalent of tier = 'paid' (this file's own
+              // checkout.session.completed branch writes it INSTEAD of tier for that product), and
+              // left set it makes candidate.html's Subscription tab keep saying "Active since ..." for
+              // a subscription Stripe has cancelled. Cleared (not repurposed) so the existing
+              // "No active subscription" state and applySession's licenseBilling routing — both
+              // already keyed on this column being null — take over for a returning license-only
+              // candidate. account_type keeps the two products mutually exclusive per candidate, so
+              // for a resume_pro candidate this column is already null and this is a no-op.
               body: JSON.stringify({
                 stripe_subscription_cancelled_at: new Date().toISOString(),
                 tier: "free",
                 tier_updated_at: new Date().toISOString(),
+                license_subscription_started_at: null,
               }),
             },
           );
