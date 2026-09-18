@@ -3267,7 +3267,7 @@ class Component extends DCLogic {
       setReqCompanyInput: (e) => this.setState({ reqCompanyInput: e.target.value, lookupResult: null }),
       setReqEmailInput: (e) => this.setState({ reqEmailInput: e.target.value, lookupResult: null }),
       submitLookup: () => this.submitLookup(),
-      lookupIncomplete: s.lookupSending || !((s.candNameInput || '').trim().split(/s+/).filter(Boolean).length >= 2
+      lookupIncomplete: s.lookupSending || !((s.candNameInput || '').trim().split(/\s+/).filter(Boolean).length >= 2
         && ((s.candEmailInput || '').trim() || (s.candPhoneInput || '').trim())
         && (s.reqNameInput || '').trim()
         && (s.reqEmailInput || '').trim()),
