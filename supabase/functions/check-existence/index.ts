@@ -59,7 +59,7 @@ const NICKNAME_GROUPS: string[][] = [
   ["JESSICA", "JESS", "JESSIE"], ["THEODORE", "TED", "THEO"], ["LAWRENCE", "LARRY"],
   ["RONALD", "RON", "RONNIE"], ["DONALD", "DON", "DONNIE"], ["KENNETH", "KEN", "KENNY"],
   ["GREGORY", "GREG"], ["PHILIP", "PHILLIP", "PHIL"], ["FREDERICK", "FRED", "FREDDIE"],
-  ["ABIGAIL", "ABBY"], ["AMANDA", "MANDY"], ["SAMANTHA", "SAM"],
+  ["ABIGAIL", "ABBY"], ["MARJORIE", "MARJORY", "MARGE", "MARGIE"], ["AMANDA", "MANDY"], ["SAMANTHA", "SAM"],
 ];
 const NICKNAME_INDEX = new Map<string, number[]>();
 NICKNAME_GROUPS.forEach((g, i) => g.forEach((n) => NICKNAME_INDEX.set(n, [...(NICKNAME_INDEX.get(n) || []), i])));
@@ -95,7 +95,8 @@ function firstNamesMatch(a: string, b: string): boolean {
   if (ga && gb && ga.some((g) => gb.includes(g))) return true;
   const m = Math.min(a.length, b.length);
   if (m >= 3 && (a.startsWith(b) || b.startsWith(a))) return true;
-  return m >= 4 && editDistance(a, b) <= 1;
+  // one typo for names of 4+ letters, two for 7+ (Marjorie/Marjory, Katherine/Katharine)
+  return m >= 4 && editDistance(a, b) <= (m >= 7 ? 2 : 1);
 }
 function namesMatch(typed: string, first: string | null, last: string | null, full: string | null): boolean {
   // "Last, First" ordering: a single comma flips the two halves.
