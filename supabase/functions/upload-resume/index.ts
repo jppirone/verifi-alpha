@@ -371,6 +371,24 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   certifications, skills, or any other array of short terms — never emit the wrapped tail as its own
   separate entry.
 
+- AN INTERNAL "&" (OR "AND") WITHIN ONE ITEM'S OWN NAME IS NEVER A SPLIT SIGNAL BY ITSELF (a real,
+  confirmed failure mode, distinct from the wrapped-line case above — this one happens WITHIN a
+  single printed line, no wrap involved at all): many certification, skill, and other list-item
+  names legitimately contain an internal "&" as part of ONE compound name — e.g. "Conversational AI
+  & Workflow Automation", "Diffusion Models & Creative AI", "AI Content Creation & Marketing
+  Automation" are each one item, not two, even though each names two connected concepts joined by
+  "&". The presence of an "&" never by itself means two separate items are present. Real, confirmed
+  example: "Multimodal AI & Productivity Integration (Gemini)" — one single printed line, one
+  bullet, no line break, no second bullet glyph anywhere near it — was still split into two
+  certifications entries ("Multimodal Productivity (Gemini)" and "AI & Integration"), with words
+  from the middle of the name reordered and separated in the process. Nothing in the source marked
+  a second item starting there. Only split an item at an internal "&" when there is a clear,
+  independent structural marker that a NEW item genuinely begins — its own bullet or dash, a real
+  line break in the source, or an unambiguous comma-separated list format (e.g. "A, B & C" printed
+  as one line clearly listing three distinct items). Absent one of those markers, treat the entire
+  phrase on both sides of the "&" as one single item name, copied verbatim in its original word
+  order — never reordered, never with a word dropped or moved to "belong" to only one side.
+
 - skills = a FLAT LIST of individual skill, competency, or keyword terms presented as a list rather
   than prose — commonly under a heading like "Skills," "Core Competencies," "Technical Skills,"
   "Areas of Expertise," "Key Skills," or similar, but judge this by SHAPE, not by header name: if a
