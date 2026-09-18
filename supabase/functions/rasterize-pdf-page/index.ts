@@ -118,21 +118,31 @@ as "needs_review" for everything else that doesn't fit anywhere — needs_review
 fallback, always available, always correct when nothing else fits. Never force content into a
 category it doesn't genuinely belong in just to give it a home.
 
-HEADINGS ARE A HELPFUL SIGNAL, NEVER A REQUIREMENT (a real, confirmed failure mode — a plain,
-minimally-formatted document with no section headings at all, no bold text, no visual separation
-whatsoever, still has real work history, education, and certifications on it, and they must still
-be extracted into their real structured categories, not dumped into needs_review just because
-nothing labels them): classify content by what it actually IS — its own inherent shape and
-content pattern — never by whether a labeled heading or bold/visual styling happens to precede
-it. A line naming a trade or credential followed by a license/certification/registration number
-(e.g. "Plumber" then "Lic # CFC1425829", "License No. 12345", "Cert #A-9982") is a certifications
-entry regardless of whether any heading like "Certifications" appears above it anywhere on the
-page — the credential-name-plus-license-number pattern IS the classification signal, the same way
-a company+title+date-range pattern identifies work_history and a degree+institution pattern
-identifies education, with or without a labeled section heading present. Never let the mere
-absence of a heading push content that otherwise clearly fits a real category into needs_review —
-that catch-all is for content that genuinely doesn't fit any category, not for content that fits
-one perfectly but happens to lack a visible label.
+CLASSIFICATION IS SECTION-DRIVEN, DECIDED BEFORE THIS STEP — READ THIS FIRST (Decision 38, 2026-09-18):
+the category every item below belongs to is NOT something this step decides by judging an individual
+item's own shape or content pattern. It was already decided, per-SECTION, in a separate step that ran
+before this one — see "SECTION BOUNDARIES FOR THIS PAGE" further down this prompt (when present) for
+the actual, final category of every section on this page. Once a section's category is fixed, every
+item under it gets that category, full stop — do not independently re-judge a specific item against
+these category definitions by its own shape or wording once it's inside an already-assigned section.
+These definitions below describe what a category MEANS and how to extract its fields correctly once
+assigned (heading capture, line breaks, license numbers, date rules, and so on) — not how to decide
+category in the first place; that decision is upstream of this step now.
+
+THE ONE EXCEPTION — GENUINELY HEADERLESS CONTENT (a real, confirmed failure mode this exception exists
+to cover — a plain, minimally-formatted document with no section headings at all, no bold text, no
+visual separation whatsoever, still has real work history, education, and certifications on it, and
+they must still be extracted into their real structured categories, not dumped into needs_review just
+because nothing labels them): when the section-boundary step marked a section "unknown" specifically
+because it found NO heading at all governing that content (not because a real heading didn't
+semantically match a known category — see the disambiguation rule further below for that different
+case), fall back to judging that specific content by its own inherent shape and content pattern. A
+line naming a trade or credential followed by a license/certification/registration number (e.g.
+"Plumber" then "Lic # CFC1425829", "License No. 12345", "Cert #A-9982") is a certifications entry by
+that shape alone, the same way a company+title+date-range pattern identifies work_history and a
+degree+institution pattern identifies education — but ONLY reach for this fallback inside a section
+the boundary step already flagged as genuinely headerless "unknown", never as a general override for
+a section that already has a real, assigned category.
 
 MULTI-COLUMN TABLE READING ORDER (real, confirmed failure mode, twice — once fixed for row-by-row
 reading order, then found still broken: a section laid out as a 2- or 3-column grid of short bullet
@@ -296,11 +306,15 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
 
 - CERT/LICENSE VS. SKILL DISAMBIGUATION WITHIN A MIXED SECTION (a targeted rule, not a universal
   requirement — most certifications and skills are unambiguous by shape per their own definitions
-  above and need none of this): this applies ONLY when a single section on this page contains a
-  genuine MIX — some items with a clearly discernible trailing certification/license number or
-  identifier (a distinct number, code, or alphanumeric string following the item's name, whether or
+  above and need none of this, and per the section-driven classification rule above, this NEVER fires
+  inside a section the boundary step already assigned a real category to): this applies ONLY inside a
+  section the boundary step marked "unknown" — either genuinely headerless, or a real header that
+  didn't semantically match any known category — AND that section's own content shows a genuine
+  MIX — some items with a clearly discernible trailing certification/license number or identifier (a
+  distinct number, code, or alphanumeric string following the item's name, whether or
   not it carries a conventional marker like "#", "No.", or "Lic. No." in front of it) and other items
-  in that same section with no such identifier at all. When that specific mix occurs, use the
+  in that same section with no such identifier at all. When that specific mix occurs inside such a
+  section, use the
   presence or absence of a discernible trailing identifier as the signal to split the section: items
   with one are certifications (the identifier captured in "license_number"), items without one are
   skills. Do NOT apply this as a blanket requirement for every certification — most legitimately have
@@ -491,6 +505,190 @@ a guess.
 
 If a category has no entries, return an empty array for it — do not omit the key.`;
 
+// STEP 1 OF 2: SECTION-BOUNDARY DETECTION — Decision 38 (2026-09-18), replacing item-level
+// shape-driven classification with a genuine two-step structural process, not another prompt-prose
+// patch layered on the old one-call design. Root cause, confirmed this week via direct-probe evidence
+// (see verifi-extraction-nondeterminism-open-item memory, the "phantom-duplicate" investigation): a
+// single combined call asked to BOTH capture a section's heading AND classify its items by shape
+// treated those as two independent, competing actions within one completion — producing a shape-based
+// misclassification (e.g. a "Professional Certifications" list landing in skills) AND a separate,
+// redundant needs_review echo of the heading text, in the SAME response, 19/19 times on isolated clean
+// input at temperature:0. That's one coherent (if wrong) model behavior, not two coincidental bugs —
+// and a same-call fix (asking the model to "coordinate" the two actions more carefully in prose)
+// doesn't structurally rule it out, since nothing stops it from independently deciding both things
+// again in one pass. Two literal separate calls do: this step ONLY identifies section boundaries and
+// assigns each one a category by matching its header's MEANING (semantically, not exact string)
+// against the known internal categories below — no item extraction happens here, so there is no
+// shape-classification decision for this step to compete with. Step 2 (buildOcrExtractionPrompt /
+// buildVisionExtractionPrompt below) receives this step's result as an already-decided fact and
+// extracts items strictly within it — see buildSectionBoundaryBlock below for how that's enforced.
+const KNOWN_CATEGORIES_GUIDE = `KNOWN INTERNAL CATEGORIES — match a section's header by its MEANING, not by exact wording. Common
+real-world header phrasings for each (not exhaustive — judge by meaning; any header that clearly names
+the same concept counts, however it's actually worded):
+- work_history: "Experience", "Work History", "Professional Experience", "Employment History", "Job
+  Description", "Career History", or similar — paid employment.
+- education: "Education", "Academic Background", "Degrees", or similar — degree-granting programs.
+- certifications: "Certifications", "Licenses", "Professional Certifications", "Credentials",
+  "Licenses & Certifications", or similar — licenses and certifications are the SAME internal category
+  here, never split into two different categories.
+- skills: "Skills", "Core Competencies", "Technical Skills", "Areas of Expertise", "Key Skills", or
+  similar — a flat list of individual skill/competency terms.
+- summary: "Summary", "Professional Summary", "Objective", "About Me", or similar — an intro blurb
+  near the top of the resume.
+- hobbies_other: "Interests", "Hobbies", "Volunteer Work", "Community Involvement", or similar.
+If a section's header doesn't semantically match ANY of the above — a real header exists, but names
+something else entirely (e.g. "Career Highlights," "Workplace Strengths," "Achievements") — its
+category is "unknown". This is not a failure state: "unknown" content is real, gets captured in full,
+and is unconditionally flagged for a human to review (never silently dropped, never forced into a
+category it doesn't belong in just to avoid "unknown") — this is the anti-gaming design: a candidate
+cannot route real content around verification by mislabeling its own section header.`;
+
+type BoundaryCategory = "work_history" | "education" | "certifications" | "skills" | "summary" | "hobbies_other" | "unknown";
+
+type BoundarySection = {
+  heading: string;
+  category: BoundaryCategory;
+  is_continuation_of_previous_page: boolean;
+};
+
+type BoundaryResult = { sections: BoundarySection[] };
+
+const BOUNDARY_SCHEMA_SHAPE = `{
+  "sections": [
+    { "heading": string, "category": "work_history" | "education" | "certifications" | "skills" | "summary" | "hobbies_other" | "unknown", "is_continuation_of_previous_page": boolean }
+  ]
+}`;
+
+function buildBoundaryDetectionInstructions(previousPageContext?: TrailingItemContext | null): string {
+  const continuationNote = previousPageContext
+    ? `
+
+CONTINUATION AWARENESS: the previous page ended mid-way through ${
+        previousPageContext.kind === "work_history"
+          ? `a work-history entry at "${previousPageContext.company || "(unnamed)"}"`
+          : previousPageContext.kind === "certifications_list"
+          ? `a certifications list${previousPageContext.heading ? ` under heading "${previousPageContext.heading}"` : ""}`
+          : `a freeform section${previousPageContext.heading ? ` titled "${previousPageContext.heading}"` : ""}`
+      }. If THIS page opens with content that plainly continues that — no new heading before it — mark
+that opening section's "is_continuation_of_previous_page" as true and give it the SAME category as the
+open item described above, even though this page shows no heading of its own for it (a continuation
+never repeats its header). The instant a genuinely NEW heading appears — even one that also sounds
+related (e.g. a different certifications heading following the one above) — that starts a brand-new
+section with its own independent category decision, never treated as more of the previous one just
+because it's topically similar.`
+    : "";
+
+  return `Identify every distinct SECTION on this page and assign each one a category — nothing else, at
+this step. A section is a heading plus everything under it up to the next heading (or the end of the
+page). If this page (or its opening portion, before any first heading) has real content with NO
+heading at all governing it, that is still one section — heading="" — do not guess a category for it
+based on its content's shape; give it category "unknown" here (step 2 of this pipeline has its own,
+separate shape-based fallback for genuinely headerless content — resolving that is not this step's job).
+
+Do NOT read, extract, or judge individual items inside any section at this step — you are drawing
+boundaries and matching header MEANING only. Nothing about what's inside a section (its shape, its item
+count, whether individual items look like one category or another) should influence its category here.
+Two sections can share the same broad topic (e.g. two different certifications-style headings on the
+same page) and still be two separate sections if they have two separate, distinct heading strings —
+never merge them into one just because they're topically similar; a genuinely different heading string
+always starts a new section.
+
+${KNOWN_CATEGORIES_GUIDE}${continuationNote}
+
+Return ONLY a single JSON object, no prose before or after it, matching exactly this shape:
+
+${BOUNDARY_SCHEMA_SHAPE}`;
+}
+
+function buildBoundaryDetectionPromptText(ocrText: string, previousPageContext?: TrailingItemContext | null): string {
+  return `You are analyzing the raw OCR text of one page of a resume to identify its section boundaries
+only — not to extract any data yet. The OCR text below may contain recognition errors (misread
+characters, words glued together, minor garbling); read through that when identifying headings.
+
+${buildBoundaryDetectionInstructions(previousPageContext)}
+
+--- BEGIN RESUME OCR TEXT ---
+${ocrText}
+--- END RESUME OCR TEXT ---`;
+}
+
+function buildBoundaryDetectionPromptVision(previousPageContext?: TrailingItemContext | null): string {
+  return `You are analyzing the attached image of one page of a resume to identify its section boundaries
+only — not to extract any data yet.
+
+${buildBoundaryDetectionInstructions(previousPageContext)}`;
+}
+
+function isValidBoundaryResult(x: unknown): x is BoundaryResult {
+  if (!x || typeof x !== "object") return false;
+  const o = x as Record<string, unknown>;
+  return Array.isArray(o.sections) && o.sections.every((s) =>
+    s && typeof s === "object" && typeof (s as Record<string, unknown>).heading === "string" &&
+    typeof (s as Record<string, unknown>).category === "string"
+  );
+}
+
+// STEP 2 OF 2 support: renders step 1's already-decided boundaries into the block step 2's prompt
+// includes — this is what actually enforces "do not independently re-judge category", the same way
+// buildContinuationContext's block below enforces continuation behavior. Kept separate from that
+// function (rather than merged into one mega-block) because the two are conceptually independent
+// inputs to step 2 — continuation state describes an OPEN item crossing a page boundary, section
+// boundaries describe everything on THIS page including brand-new sections with no continuation at
+// all — a page can have either, both, or neither.
+function buildSectionBoundaryBlock(boundaries?: BoundaryResult | null): string {
+  // Degraded-mode fallback: the boundary-detection step (a separate API call) failed or was never
+  // attempted — see the handler's own try/catch around it. Rather than leave this call with no
+  // classification guidance at all (the section-driven rules above are otherwise silent on what to do
+  // when no boundaries were decided), explicitly hand back the old, pre-Decision-38 shape-based
+  // per-item judgment as a whole-page fallback for THIS call only — a real degradation, not silent,
+  // logged server-side when it happens, but never a reason to fail the whole page over one optional
+  // call's failure.
+  if (!boundaries) {
+    return `
+
+SECTION BOUNDARIES FOR THIS PAGE: none available (the boundary-detection step failed or was skipped).
+Fall back to judging each section's category by its own heading, matched semantically (not by exact
+wording) against the known internal categories — "Experience"/"Work History"/"Professional
+Experience"/"Employment History" and similar = work_history; "Education"/"Academic Background" and
+similar = education; "Certifications"/"Licenses"/"Credentials" and similar = certifications (licenses
+and certifications are the SAME internal category, never split into two); "Skills"/"Core
+Competencies"/"Technical Skills"/"Areas of Expertise" and similar = skills; "Summary"/"Objective"/
+"About Me" and similar = summary; "Interests"/"Hobbies"/"Volunteer Work" and similar = hobbies_other.
+For genuinely headerless content, fall back further to judging by its own shape — the same fallback
+described in "THE ONE EXCEPTION" above, just applied to the whole page rather than one flagged
+section, since no per-section decision exists this time. A header that matches none of the above goes
+to needs_review, same as always.`;
+  }
+  if (boundaries.sections.length === 0) return "";
+  const known = boundaries.sections.filter((s) => s.category !== "unknown");
+  const unknown = boundaries.sections.filter((s) => s.category === "unknown");
+  const knownList = known.length
+    ? known.map((s) => `  - "${s.heading || "(no heading — continuation)"}" -> ${s.category}${s.is_continuation_of_previous_page ? " (continuation of the previous page's open item — see continuation context above)" : ""}`).join("\n")
+    : "  (none)";
+  const unknownList = unknown.length
+    ? unknown.map((s) => `  - "${s.heading || "(no heading at all)"}"`).join("\n")
+    : "  (none)";
+
+  return `
+
+SECTION BOUNDARIES FOR THIS PAGE (already decided in a separate step — do not independently re-judge
+any section's category by its content's shape, wording, or item count; the category below is final):
+${knownList}
+Every item under one of the sections above gets that section's category, no exceptions and no
+re-litigating it against the category definitions below by shape — those definitions now describe how
+to extract fields correctly WITHIN an already-assigned category (heading capture, line breaks, license
+numbers, and so on), not how to decide the category itself.
+
+SECTIONS WITH NO MATCHING KNOWN CATEGORY ("unknown" — real content, not a failure):
+${unknownList}
+Extract each of these as one or more "needs_review" freeform entries, heading set to that section's own
+literal text verbatim, content holding everything under it. One narrow exception — see the CERT/LICENSE
+VS. SKILL DISAMBIGUATION rule below: an "unknown" section that itself shows a genuine mix of items
+with/without a discernible trailing certification/license number may still split some of its items into
+certifications vs. skills using that signal. This is the ONLY place that item-level heuristic is allowed
+to fire — never inside a section already assigned a real category above.`;
+}
+
 // Page-boundary continuation context — real bug, confirmed against a real document (john.pirone's
 // resume, 2026-09-07 investigation, priority 3 of a real bug report): every page is extracted by a
 // completely independent call with zero knowledge of what came immediately before it. Confirmed
@@ -577,7 +775,7 @@ continuation described above over silently omitting it or leaving it ambiguously
 real content is worse than a borderline attribution call.`;
 }
 
-function buildVisionExtractionPrompt(previousPageContext?: TrailingItemContext | null): string {
+function buildVisionExtractionPrompt(previousPageContext?: TrailingItemContext | null, sectionBoundaries?: BoundaryResult | null): string {
   return `You are extracting structured data directly from the attached image of one page of a resume. Read the document as printed — do not invent information that is not actually present in the image in some recognizable form. This may be one page of a multi-page resume; only extract what is actually visible on this page.
 
 Return ONLY a single JSON object, no prose before or after it, matching exactly this shape:
@@ -591,10 +789,10 @@ ${FIELD_DEFINITIONS}
   level) in a "summary" or "hobbies_other" freeform entry — do not silently drop it, and do not
   invent a precision level the graphic doesn't actually convey.
 
-${DATE_RULES}${buildContinuationContext(previousPageContext)}`;
+${DATE_RULES}${buildContinuationContext(previousPageContext)}${buildSectionBoundaryBlock(sectionBoundaries)}`;
 }
 
-function buildOcrExtractionPrompt(ocrText: string, previousPageContext?: TrailingItemContext | null): string {
+function buildOcrExtractionPrompt(ocrText: string, previousPageContext?: TrailingItemContext | null, sectionBoundaries?: BoundaryResult | null): string {
   return `You are extracting structured data from the raw OCR text of one page of a resume. The OCR
 text below may contain recognition errors (misread characters, words glued together, minor
 garbling) — do your best to read through that, but do not invent information that is not actually
@@ -607,7 +805,7 @@ ${SCHEMA_SHAPE}
 
 ${FIELD_DEFINITIONS}
 
-${DATE_RULES}${buildContinuationContext(previousPageContext)}
+${DATE_RULES}${buildContinuationContext(previousPageContext)}${buildSectionBoundaryBlock(sectionBoundaries)}
 
 --- BEGIN RESUME OCR TEXT ---
 ${ocrText}
@@ -664,7 +862,63 @@ function extractJsonFromClaudeResponse(claudeData: any): { parsed: unknown; pars
   }
 }
 
-async function runVisionExtraction(pngBase64: string, previousPageContext?: TrailingItemContext | null): Promise<ExtractionResult> {
+// STEP 1 OF 2 execution: cheap, small-output call — no item extraction happens here, so max_tokens
+// stays far below the full-extraction calls below. Same model per modality as step 2 (Sonnet for
+// vision, Haiku for OCR text) for consistency; temperature:0 on the Haiku variant for the same reason
+// step 2's Haiku call already runs at temperature:0 (see that function's own comment) — Sonnet still
+// rejects the parameter outright under adaptive thinking, unchanged from step 2's existing constraint.
+async function runBoundaryDetectionVision(pngBase64: string, previousPageContext?: TrailingItemContext | null): Promise<BoundaryResult> {
+  if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not configured");
+  const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: VISION_MODEL,
+      max_tokens: 2048,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "image", source: { type: "base64", media_type: "image/png", data: pngBase64 } },
+          { type: "text", text: buildBoundaryDetectionPromptVision(previousPageContext) },
+        ],
+      }],
+    }),
+  });
+  if (!claudeRes.ok) {
+    const detail = await claudeRes.text().catch(() => "");
+    throw new Error(`claude_call_failed (${claudeRes.status}): ${detail.slice(0, 500)}`);
+  }
+  const claudeData = await claudeRes.json();
+  const { parsed, parseError, rawText } = extractJsonFromClaudeResponse(claudeData);
+  if (parseError) throw new Error(`malformed_boundary_vision_response: ${rawText.slice(0, 500)}`);
+  if (!isValidBoundaryResult(parsed)) throw new Error("boundary_vision_response_wrong_shape");
+  return parsed;
+}
+
+async function runBoundaryDetectionHaiku(ocrText: string, previousPageContext?: TrailingItemContext | null): Promise<BoundaryResult> {
+  if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not configured");
+  const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: HAIKU_MODEL,
+      max_tokens: 1024,
+      temperature: 0,
+      messages: [{ role: "user", content: buildBoundaryDetectionPromptText(ocrText, previousPageContext) }],
+    }),
+  });
+  if (!claudeRes.ok) {
+    const detail = await claudeRes.text().catch(() => "");
+    throw new Error(`claude_call_failed (${claudeRes.status}): ${detail.slice(0, 500)}`);
+  }
+  const claudeData = await claudeRes.json();
+  const { parsed, parseError, rawText } = extractJsonFromClaudeResponse(claudeData);
+  if (parseError) throw new Error(`malformed_boundary_haiku_response: ${rawText.slice(0, 500)}`);
+  if (!isValidBoundaryResult(parsed)) throw new Error("boundary_haiku_response_wrong_shape");
+  return parsed;
+}
+
+async function runVisionExtraction(pngBase64: string, previousPageContext?: TrailingItemContext | null, sectionBoundaries?: BoundaryResult | null): Promise<ExtractionResult> {
   if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not configured");
   const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -676,7 +930,7 @@ async function runVisionExtraction(pngBase64: string, previousPageContext?: Trai
         role: "user",
         content: [
           { type: "image", source: { type: "base64", media_type: "image/png", data: pngBase64 } },
-          { type: "text", text: buildVisionExtractionPrompt(previousPageContext) },
+          { type: "text", text: buildVisionExtractionPrompt(previousPageContext, sectionBoundaries) },
         ],
       }],
     }),
@@ -692,7 +946,7 @@ async function runVisionExtraction(pngBase64: string, previousPageContext?: Trai
   return parsed;
 }
 
-async function runHaikuExtraction(ocrText: string, previousPageContext?: TrailingItemContext | null): Promise<ExtractionResult> {
+async function runHaikuExtraction(ocrText: string, previousPageContext?: TrailingItemContext | null, sectionBoundaries?: BoundaryResult | null): Promise<ExtractionResult> {
   if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not configured");
   const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -711,7 +965,7 @@ async function runHaikuExtraction(ocrText: string, previousPageContext?: Trailin
       // (no adaptive-thinking-forced restriction), so this is a real, low-risk lever, not a
       // guaranteed fix -- Claude models don't guarantee bit-identical output at temperature 0 either.
       temperature: 0,
-      messages: [{ role: "user", content: buildOcrExtractionPrompt(ocrText, previousPageContext) }],
+      messages: [{ role: "user", content: buildOcrExtractionPrompt(ocrText, previousPageContext, sectionBoundaries) }],
     }),
   });
   if (!claudeRes.ok) {
@@ -1004,9 +1258,28 @@ export default {
       let ocrText: string | undefined;
       let ocrMs: number | undefined;
 
+      // STEP 1 OF 2 (Decision 38): section-boundary detection, one extra call before the real
+      // extraction call below, on whichever input this page's routing already picked (image for
+      // vision, OCR text for tesseract — tesseract has to run first on that path, so boundary
+      // detection sits after it and before extraction there, not before both branches). Wrapped in
+      // its own try/catch and never allowed to fail the page — a genuine accuracy improvement over
+      // the old one-call design, not a new hard dependency; on failure, buildSectionBoundaryBlock's
+      // own null-boundaries branch hands step 2 the old, pre-Decision-38 shape-based fallback
+      // instead, so a transient failure here degrades to yesterday's behavior for this one page
+      // rather than failing the whole upload.
+      let sectionBoundaries: BoundaryResult | null = null;
+      let boundaryMs: number | undefined;
+
       if (useVision) {
+        try {
+          const boundaryStart = Date.now();
+          sectionBoundaries = await runBoundaryDetectionVision(bytesToB64(pngBytes), trailingContext);
+          boundaryMs = Date.now() - boundaryStart;
+        } catch (boundaryErr) {
+          console.log(`rasterize-pdf-page: boundary detection failed, falling back to shape-based classification for this page — ${String(boundaryErr)}`);
+        }
         const visionStart = Date.now();
-        extraction = await runVisionExtraction(bytesToB64(pngBytes), trailingContext);
+        extraction = await runVisionExtraction(bytesToB64(pngBytes), trailingContext, sectionBoundaries);
         extractionMs = Date.now() - visionStart;
       } else {
         const ocrStart = Date.now();
@@ -1014,8 +1287,15 @@ export default {
         const rgba = rgbToRgba(rgb);
         ocrText = await runTesseract(rgba, renderedWidth, renderedHeight);
         ocrMs = Date.now() - ocrStart;
+        try {
+          const boundaryStart = Date.now();
+          sectionBoundaries = await runBoundaryDetectionHaiku(ocrText, trailingContext);
+          boundaryMs = Date.now() - boundaryStart;
+        } catch (boundaryErr) {
+          console.log(`rasterize-pdf-page: boundary detection failed, falling back to shape-based classification for this page — ${String(boundaryErr)}`);
+        }
         const haikuStart = Date.now();
-        extraction = await runHaikuExtraction(ocrText, trailingContext);
+        extraction = await runHaikuExtraction(ocrText, trailingContext, sectionBoundaries);
         extractionMs = Date.now() - haikuStart;
       }
 
@@ -1037,8 +1317,9 @@ export default {
         },
         routing: { method: useVision ? "vision" : "tesseract", reasons },
         extraction,
+        section_boundaries: sectionBoundaries,
         ocr_raw_text: ocrText,
-        timing_ms: { fetch: fetchMs, import: importMs, open: openMs, render: renderMs, ocr: ocrMs, extraction: extractionMs },
+        timing_ms: { fetch: fetchMs, import: importMs, open: openMs, render: renderMs, ocr: ocrMs, boundary: boundaryMs, extraction: extractionMs },
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: "unhandled", detail: String(e) }), {
