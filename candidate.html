@@ -8484,9 +8484,17 @@ class Component extends DCLogic {
       return;
     }
     if (!cancelData.cancelled) return; // no_subscription_on_file — nothing real to confirm
+    // Real bug found live-testing this exact fix: resolveSession() doesn't just re-hydrate state —
+    // it's the same call mountResolveOrToken() uses, and applySession() (which it calls) always
+    // finishes by routing through enterAccount() when nothing else claims the screen first (see
+    // applySession's own header). Polling with resolveSession() here was re-running that full
+    // routing chain every 1.5s, which resets accountTab back to 'profile' — visibly yanking a
+    // candidate who is watching this confirm right here on the Subscription tab. Switched to
+    // checkCandidateBillingCancelled (the same session-free, side-effect-free read
+    // deactivateAccount's own poll below already needed for a different reason) so this stays
+    // exactly where the candidate is watching it.
     const confirmed = await this.pollBillingCancellation('downgradeBillingStatus', async () => {
-      const ok = await this.resolveSession();
-      return ok && !!this.state.stripeSubscriptionCancelledAt;
+      return await this.checkCandidateBillingCancelled(s.resumeCandidateId);
     });
     if (confirmed) this.addActivityLog('Stripe subscription cancellation confirmed');
   }
