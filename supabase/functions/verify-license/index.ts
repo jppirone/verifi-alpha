@@ -216,6 +216,63 @@ function outcomeText(adapter: JurisdictionAdapter, d: { outcome: Outcome; reason
   return [head[d.outcome] || d.outcome, ...lines].join("\n");
 }
 
+const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+const NOTICE_COALESCE_MINUTES = 10;
+
+function escHtml(s: unknown): string {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+}
+
+// One-time notice that a license needs the candidate's correction. Sent at most once per license
+// EVER (license_items.correction_notified_at is claimed atomically and never cleared on success), so a
+// second failed attempt, a re-check, or a re-request on the same license never emails again. Several
+// licenses that need correction in the same burst (one resume confirm) share ONE email, via a
+// candidate-level coalescing window; the email points at the tab that lists them all. A failed send
+// releases both claims so a later correction request can try again. Best-effort: never throws.
+async function notifyCorrectionOnce(
+  supabase: any,
+  args: { candidateId: string; itemId: string; email: string | null; firstName: string; accountType: string | null; certName: string | null; licenseNumber: string | null; message: string },
+): Promise<string> {
+  try {
+    if (!args.email || !RESEND_API_KEY) return "skipped_no_email_or_key";
+    const now = new Date().toISOString();
+    const { data: licClaim } = await supabase.from("license_items")
+      .update({ correction_notified_at: now }).eq("id", args.itemId).is("correction_notified_at", null).select("id");
+    if (!licClaim || licClaim.length === 0) return "already_notified";
+
+    const cutoff = new Date(Date.now() - NOTICE_COALESCE_MINUTES * 60 * 1000).toISOString();
+    const { data: candClaim } = await supabase.from("candidates")
+      .update({ last_license_notice_at: now }).eq("id", args.candidateId)
+      .or(`last_license_notice_at.is.null,last_license_notice_at.lt.${cutoff}`).select("id");
+    if (!candClaim || candClaim.length === 0) return "coalesced_into_recent_email";
+
+    const tab = args.accountType === "license_only" ? "License Status" : "Verification Status";
+    const label = [args.certName || "your license", args.licenseNumber ? `Lic #${args.licenseNumber}` : ""].filter(Boolean).join(", ");
+    const html = `<p>Hi${args.firstName ? " " + escHtml(args.firstName) : ""},</p>`
+      + `<p>We couldn't verify your license <strong>${escHtml(label)}</strong>. ${escHtml(args.message)}</p>`
+      + `<p>To fix it, sign in to your Verifi account, open the <strong>${tab}</strong> tab, and choose <strong>Correct license details</strong>. You can update the state or license number and we'll check it again right away.</p>`
+      + `<p><a href="https://alpha.applitrust.com/candidate.html">Open Verifi</a></p>`
+      + `<p style="color:#666;font-size:12px">This is a one-time notice. We won't send reminders.</p>`;
+    let ok = false;
+    try {
+      const res = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${RESEND_API_KEY}` },
+        body: JSON.stringify({ from: "Verifi <verify@applitrust.com>", to: args.email, subject: "Action needed: we couldn't verify your license", html }),
+      });
+      ok = res.ok;
+    } catch (_e) { ok = false; }
+    if (!ok) {
+      await supabase.from("license_items").update({ correction_notified_at: null }).eq("id", args.itemId);
+      await supabase.from("candidates").update({ last_license_notice_at: null }).eq("id", args.candidateId);
+      return "send_failed";
+    }
+    return "sent";
+  } catch (_e) {
+    return "error";
+  }
+}
+
 export default {
   fetch: withSupabase({ auth: "none" }, async (req, _ctx) => {
     if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -251,7 +308,7 @@ export default {
       }
 
       const { data: cand } = await supabase
-        .from("candidates").select("first_name, last_name, full_name").eq("id", candidate_id).maybeSingle();
+        .from("candidates").select("first_name, last_name, full_name, email, account_type").eq("id", candidate_id).maybeSingle();
       let firstName = (cand?.first_name || "").trim();
       let lastName = (cand?.last_name || "").trim();
       if (!lastName && cand?.full_name) {
@@ -400,7 +457,16 @@ export default {
       }).eq("id", license_item_id);
       if (updErr) return json({ ok: false, error: "persist_failed", detail: updErr.message }, 500);
 
-      return json({ ok: true, status: "checked", outcome, reason, queue_item_id: queueId, queue_status: queueStatus, correction });
+      // First time this license needs the candidate's correction -> one email (see notifyCorrectionOnce).
+      let notice: string | null = null;
+      if (correction) {
+        notice = await notifyCorrectionOnce(supabase, {
+          candidateId: candidate_id, itemId: license_item_id, email: cand?.email ?? null, firstName,
+          accountType: cand?.account_type ?? null, certName: cert.name, licenseNumber: cert.license_number, message: correction.message,
+        });
+      }
+
+      return json({ ok: true, status: "checked", outcome, reason, queue_item_id: queueId, queue_status: queueStatus, correction, notice });
     } catch (e) {
       return json({ ok: false, error: "unhandled", detail: String(e) }, 500);
     }

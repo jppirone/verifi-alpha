@@ -3605,6 +3605,12 @@ a:hover{color:var(--color-accent)}
               <input class="input" id="pf-last" value="{{ profileLast }}" sc-camel-on-change="{{ setProfileLast }}">
             </div>
           </div>
+          <sc-if value="{{ hasProfileNameError }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:#e2735c">{{ profileNameError }}</div>
+          </sc-if>
+          <sc-if value="{{ hasProfileNameNotice }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:var(--color-neutral-400)">{{ profileNameNotice }}</div>
+          </sc-if>
         </div>
 
         <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
@@ -6841,6 +6847,7 @@ class Component extends DCLogic {
     headerDisplayMode: 'printed', personalLocation: '',
     savedHeaderDisplayMode: 'printed', savedPersonalLocation: '',
     headerPrefsSavePending: false, headerPrefsSaveError: null, headerPrefsSaved: false,
+    profileNameSavePending: false, profileNameError: '', profileNameNotice: '',
     optInWorkHistory: false, optInEducation: false, optInCertifications: false,
     // Items 9/10/11 (2026-09-13 live-testing session): the license-only signup branch. accountType
     // is null until the pathChoice screen sets it (full_resume/license_only) — once a real session
@@ -9598,13 +9605,19 @@ class Component extends DCLogic {
   saveActive() {
     const s = this.state;
     if (s.accountTab === 'profile') {
-      this.setState({ savedFirst: s.profileFirst, savedLast: s.profileLast, savedVerifiedPhoneEntry: s.verifiedPhoneEntry, savedPrintedPhone: s.printedPhone, savedPrintedEmail: s.printedEmail, savedNotifyEmail: s.notifyEmail, savedNotifySms: s.notifySms, savedHeaderDisplayMode: s.headerDisplayMode, savedPersonalLocation: s.personalLocation });
+      // The name is a real server-side field (it feeds license verification): it is only copied into
+      // the "saved" state after update-profile-name confirms it. Before this, Save just copied it
+      // locally, so it looked saved and silently reverted on the next session load.
+      const first = (s.profileFirst || '').trim(), last = (s.profileLast || '').trim();
+      const nameChanged = first !== (s.savedFirst || '') || last !== (s.savedLast || '');
+      this.setState({ savedFirst: nameChanged ? s.savedFirst : first, savedLast: nameChanged ? s.savedLast : last, savedVerifiedPhoneEntry: s.verifiedPhoneEntry, savedPrintedPhone: s.printedPhone, savedPrintedEmail: s.printedEmail, savedNotifyEmail: s.notifyEmail, savedNotifySms: s.notifySms, savedHeaderDisplayMode: s.headerDisplayMode, savedPersonalLocation: s.personalLocation });
       this.addActivityLog('Profile Info preferences saved');
       // Item 6 (2026-09-12 live-testing session, follow-up build): the one real backend write in
       // this whole Save flow — see save-header-preferences' own header for why. Fired alongside the
       // same local-state copy every other field here already gets; a failure surfaces
       // headerPrefsSaveError without blocking or reverting the rest of this save.
       this.saveHeaderPreferences();
+      if (nameChanged) this.saveProfileName(first, last);
     } else if (s.accountTab === 'sharing') {
       this.setState({
         savedLinkedinEnabled: s.linkedinEnabled, savedIndeedEnabled: s.indeedEnabled, savedGlassdoorEnabled: s.glassdoorEnabled,
@@ -9682,6 +9695,53 @@ class Component extends DCLogic {
     }
     this.setState({ headerPrefsSavePending: false, headerPrefsSaveError: null, headerPrefsSaved: true });
     setTimeout(() => { if (this.state.headerPrefsSaved) this.setState({ headerPrefsSaved: false }); }, 2000);
+  }
+
+  // Real persistence for Profile Info's name fields (update-profile-name; see its header). One silent
+  // retry on a network-level failure, then an honest error — and the name stays "unsaved" (dirty)
+  // until the server actually confirms it, instead of looking saved and reverting on reload.
+  async saveProfileName(first, last) {
+    const candidateId = this.state.resumeCandidateId;
+    if (!candidateId) return;
+    if (!first || !last) {
+      this.setState({ profileNameError: 'Enter both a first and a last name.', profileNameNotice: '' });
+      return;
+    }
+    this.setState({ profileNameSavePending: true, profileNameError: '', profileNameNotice: '' });
+    let result = null;
+    for (let tryNum = 0; tryNum < 2 && !result; tryNum++) {
+      if (tryNum === 1) await new Promise(r => setTimeout(r, 800));
+      try {
+        const res = await fetch(this.SUPABASE_FN_URL + '/update-profile-name', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ candidate_id: candidateId, first_name: first, last_name: last }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if ((res.ok && data.ok) || tryNum === 1 || (res.status >= 400 && res.status < 500)) result = { res, data };
+      } catch (e) {
+        if (tryNum === 1) break;
+      }
+    }
+    if (!result || !result.res.ok || !result.data.ok) {
+      const tooLong = result && result.data && result.data.error === 'name_too_long';
+      this.setState({ profileNameSavePending: false, profileNameError: tooLong ? 'That name is too long.' : "Couldn't save your name. Please try again." });
+      return;
+    }
+    const d = result.data;
+    const rechecks = d.license_rechecks || [];
+    const nowVerified = rechecks.filter(r => r.outcome === 'verified').length;
+    let notice = 'Name saved.';
+    if (nowVerified) notice = 'Name saved. We re-checked your license with the new name and it is now verified.';
+    else if (rechecks.length) notice = 'Name saved. We re-checked your license with the new name.';
+    this.setState({
+      profileNameSavePending: false, profileNameError: '', profileNameNotice: notice,
+      savedFirst: d.first_name, savedLast: d.last_name, profileFirst: d.first_name, profileLast: d.last_name,
+      firstName: d.first_name, lastName: d.last_name,
+      verificationItemsLoadedFor: null, licenseItemsLoadedFor: null,
+    });
+    this.addActivityLog('Profile name updated');
+    setTimeout(() => { if (this.state.profileNameNotice === notice) this.setState({ profileNameNotice: '' }); }, 6000);
   }
 
   // Verification-status persistence fix (2026-09-18): the real backend write path for phone/KYC/
@@ -9828,6 +9888,10 @@ class Component extends DCLogic {
       personalLocation: s.personalLocation,
       setPersonalLocation: (e) => this.setState({ personalLocation: e.target.value }),
       headerPrefsSaveError: s.headerPrefsSaveError,
+      hasProfileNameError: !!s.profileNameError,
+      profileNameError: s.profileNameError,
+      hasProfileNameNotice: !!s.profileNameNotice,
+      profileNameNotice: s.profileNameNotice,
       headerPrefsSaved: s.headerPrefsSaved,
       kycVerified: s.kycVerified,
       kycUnverified: !s.kycVerified,
