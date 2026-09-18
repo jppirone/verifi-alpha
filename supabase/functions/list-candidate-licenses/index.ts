@@ -44,6 +44,26 @@ export default {
       }
       const licenses = await res.json();
 
+      // Automatic license verification: each certification row created by the license-only signup has
+      // a linked license_items row (see confirm-verification). Joined here so the License Status tab
+      // can show a real outcome instead of the never-written certification_items.status.
+      const restHeaders = { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` };
+      const liRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/license_items?candidate_id=eq.${encodeURIComponent(candidate_id)}&linked_certification_id=not.is.null&select=linked_certification_id,state,verification_outcome,queue_item_id`,
+        { headers: restHeaders },
+      );
+      const liRows: any[] = liRes.ok ? await liRes.json() : [];
+      const queueIds = liRows.map((l) => l.queue_item_id).filter(Boolean);
+      const queueRows: any[] = queueIds.length
+        ? await fetch(`${SUPABASE_URL}/rest/v1/verification_items?id=in.(${queueIds.map(encodeURIComponent).join(",")})&select=id,status`, { headers: restHeaders }).then((r) => r.ok ? r.json() : [])
+        : [];
+      const queueStatusById = new Map(queueRows.map((q) => [q.id, q.status]));
+      const verificationByCert = new Map(liRows.map((l) => [l.linked_certification_id, {
+        state: l.state || null, outcome: l.verification_outcome || null,
+        verified: l.queue_item_id ? queueStatusById.get(l.queue_item_id) === "Confirmed" : false,
+      }]));
+      for (const lic of licenses) lic.verification = verificationByCert.get(lic.id) || null;
+
       return new Response(JSON.stringify({ ok: true, licenses }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

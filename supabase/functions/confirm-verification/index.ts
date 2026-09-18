@@ -242,7 +242,7 @@ export default {
             "Content-Type": "application/json",
             "apikey": SUPABASE_SERVICE_ROLE_KEY,
             "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-            "Prefer": "return=minimal",
+            "Prefer": "return=representation",
           },
           body: JSON.stringify({
             candidate_id: candidateId,
@@ -258,6 +258,52 @@ export default {
         });
         if (!licenseRes.ok) {
           licenseCreationError = await licenseRes.text().catch(() => "license_creation_failed");
+        } else {
+          // Automatic license verification (license-only path): the same license_items row + shared
+          // verify-license module the resume path uses. The certification row above stays the
+          // License Status tab's source and is linked, not replaced. Nothing here can fail signup:
+          // any error just leaves the license candidate-stated / unverified.
+          try {
+            const certRows = await licenseRes.json();
+            const certId = Array.isArray(certRows) && certRows[0] ? certRows[0].id : null;
+            const stateCode = typeof lic.state === "string" ? lic.state.trim().toUpperCase() : "";
+            const liRes = await fetch(`${SUPABASE_URL}/rest/v1/license_items`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "apikey": SUPABASE_SERVICE_ROLE_KEY,
+                "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+                "Prefer": "return=representation",
+              },
+              body: JSON.stringify({
+                candidate_id: candidateId, resume_document_id: null, source: "license_only",
+                linked_certification_id: certId,
+                license_number: lic.license_number || null,
+                state: /^[A-Z]{2}$/.test(stateCode) ? stateCode : null,
+                state_source: /^[A-Z]{2}$/.test(stateCode) ? "candidate" : null,
+                license_name: lic.name || null, issuing_body: lic.issuing_body || null,
+                trade_soc_code: lic.trade_soc_code || null,
+                issue_date: lic.issue_date || null, expiration_date: lic.expiration_date || null,
+                candidate_confirmed: true,
+              }),
+            });
+            if (liRes.ok) {
+              const liRows = await liRes.json();
+              const licenseItemId = Array.isArray(liRows) && liRows[0] ? liRows[0].id : null;
+              if (licenseItemId && /^[A-Z]{2}$/.test(stateCode) && lic.license_number) {
+                await fetch(`${SUPABASE_URL}/functions/v1/verify-license`, {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    "apikey": SUPABASE_SERVICE_ROLE_KEY,
+                    "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+                  },
+                  body: JSON.stringify({ candidate_id: candidateId, license_item_id: licenseItemId }),
+                  signal: AbortSignal.timeout(30000),
+                }).catch(() => {});
+              }
+            }
+          } catch (_e) { /* leave the license unverified; never fail signup over it */ }
         }
       }
 

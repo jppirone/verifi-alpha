@@ -2813,13 +2813,23 @@ a:hover{color:var(--color-accent)}
 <div style="max-width:520px;margin:0 auto;padding:88px 20px 40px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:var(--space-4)">
   <div class="tag tag-outline">Step 2 of 3</div>
   <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:24px;margin:0">Your license</h1>
-  <p style="margin:0;color:var(--color-neutral-400);font-size:13px;line-height:1.4">This is candidate-stated information. It's tracked, not independently verified, until a real automated check is wired up.</p>
+  <p style="margin:0;color:var(--color-neutral-400);font-size:13px;line-height:1.4">Licenses issued in supported states are checked automatically against the state's licensing registry. Anything we can't check is tracked as candidate-stated information, not independently verified.</p>
   <div class="card elev-sm" style="width:100%;padding:var(--space-6);display:flex;flex-direction:column;gap:var(--space-3);text-align:left">
     <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
       <div class="field" style="flex:1;min-width:160px"><label>Name</label><input class="input" value="{{ licenseName }}" sc-camel-on-change="{{ setLicenseName }}"></div>
       <div class="field" style="flex:1;min-width:160px"><label>Issuing body</label><input class="input" value="{{ licenseIssuingBody }}" sc-camel-on-change="{{ setLicenseIssuingBody }}"></div>
     </div>
     <div class="field"><label>License number</label><input class="input" value="{{ licenseNumberField }}" sc-camel-on-change="{{ setLicenseNumberField }}"></div>
+    <div class="field">
+      <label>Issuing state</label>
+      <sc-raw-select class="input" value="{{ licenseState }}" sc-camel-on-change="{{ setLicenseState }}">
+        <option value="">Select the issuing state…</option>
+        <sc-for list="{{ usStateOptions }}" as="st" hint-placeholder-count="3">
+          <option value="{{ st.code }}">{{ st.name }}</option>
+        </sc-for>
+      </sc-raw-select>
+      <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6;margin-top:var(--space-1)">Required so we can check this license against the right state registry.</div>
+    </div>
     <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
       <div class="field" style="flex:1;min-width:140px"><label>Issue date</label><input class="input" type="date" value="{{ licenseIssueDate }}" sc-camel-on-change="{{ setLicenseIssueDate }}"></div>
       <div class="field" style="flex:1;min-width:140px"><label>Expiration date</label><input class="input" type="date" value="{{ licenseExpirationDate }}" sc-camel-on-change="{{ setLicenseExpirationDate }}"></div>
@@ -3977,7 +3987,7 @@ a:hover{color:var(--color-accent)}
       <sc-if value="{{ isLicenseOnlyAccount }}" hint-placeholder-val="{{ false }}">
       <div style="display:flex;flex-direction:column;gap:var(--space-6)">
         <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">
-          This is candidate-stated information — tracked, not independently verified. No automated licensing-board check is wired up yet; that's a separate, deliberate integration decision still pending.
+          Licenses issued in supported states are checked automatically against the state's licensing registry and shown as Verified. Anything we can't check is candidate-stated information — tracked, not independently verified.
         </div>
 
         <sc-if value="{{ licenseItemsLoading }}" hint-placeholder-val="{{ false }}">
@@ -6697,7 +6707,7 @@ class Component extends DCLogic {
     // back at real candidate-row-creation time (see that function's own header).
     accountType: null,
     licenseKycConfirmed: false,
-    licenseName: '', licenseIssuingBody: '', licenseNumber: '', licenseTradeSocCode: '',
+    licenseName: '', licenseIssuingBody: '', licenseNumber: '', licenseTradeSocCode: '', licenseState: '',
     licenseIssueDate: '', licenseExpirationDate: '',
     licenseBillingCycle: 'monthly',
     kycVerifiedAt: null, licenseSubscriptionStartedAt: null,
@@ -7022,7 +7032,7 @@ class Component extends DCLogic {
     if (this.state.accountType === 'license_only') {
       return [
         { tab: 'profile', title: 'Profile Info', body: 'Manage your name, email, and contact info.' },
-        { tab: 'verification', title: 'License Status', body: 'Track your license(s) and their status here. This is candidate-stated information, tracked but not independently verified until a real automated check is wired up.' },
+        { tab: 'verification', title: 'License Status', body: 'Track your license(s) and their status here. Licenses issued in supported states are checked automatically against the state registry; anything else is candidate-stated, tracked but not independently verified.' },
         { tab: 'subscription', title: 'Subscription', body: 'See your license-tracking subscription and change your billing details whenever you like.' },
         { tab: 'deactivation', title: 'Account Deactivation', body: 'End your account here, with a 30-day recovery window before anything is permanently deleted.' },
       ];
@@ -10259,7 +10269,10 @@ class Component extends DCLogic {
           tradeLabel: trade ? trade.label : 'Trade/occupation not selected',
           issuingBodyPart: lic.issuing_body ? ' · ' + lic.issuing_body : '',
           licenseNumberPart: lic.license_number ? ' · Lic #' + lic.license_number : '',
-          status: lic.status,
+          // Automatic license verification: Verified only when the linked queue item is Confirmed;
+          // everything else is candidate-stated (same tier as printed phone/email), never a pending or
+          // negative label — nothing follows up on an unverified license.
+          status: lic.verification && lic.verification.verified ? 'Verified' : 'Candidate-stated, not independently verified',
           hasExpiration: !!lic.expiration_date,
           expirationLabel: lic.expiration_date ? this.monthYearLabel(lic.expiration_date) : '',
         };
@@ -10451,12 +10464,16 @@ class Component extends DCLogic {
       licenseTradeSocCode: s.licenseTradeSocCode,
       setLicenseTradeSocCode: (e) => this.setState({ licenseTradeSocCode: e.target.value }),
       backToLicenseKyc: () => this.setState({ screen: 'licenseKyc' }),
-      licenseDetailsContinueDisabled: s.emailSendPending || !s.licenseName.trim(),
+      licenseState: s.licenseState,
+      setLicenseState: (e) => this.setState({ licenseState: e.target.value }),
+      // Automatic license verification needs a number and a state, and this path exists to track
+      // exactly one license, so both are part of the gate (previously only the name was required).
+      licenseDetailsContinueDisabled: s.emailSendPending || !s.licenseName.trim() || !s.licenseNumber.trim() || !s.licenseState,
       licenseDetailsContinueLabel: s.emailSendPending ? 'Sending…' : 'Continue',
       continueFromLicenseDetails: () => {
-        if (s.emailSendPending || !s.licenseName.trim()) return;
+        if (s.emailSendPending || !s.licenseName.trim() || !s.licenseNumber.trim() || !s.licenseState) return;
         this.sendVerificationEmail(s.email, s.phone, s.firstName, s.lastName, 'signup', 'license_only', {
-          name: s.licenseName, issuing_body: s.licenseIssuingBody, license_number: s.licenseNumber,
+          name: s.licenseName, issuing_body: s.licenseIssuingBody, license_number: s.licenseNumber, state: s.licenseState,
           trade_soc_code: s.licenseTradeSocCode, issue_date: s.licenseIssueDate, expiration_date: s.licenseExpirationDate,
         });
       },
