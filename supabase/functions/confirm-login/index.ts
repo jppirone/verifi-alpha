@@ -112,7 +112,7 @@ export default {
       }
 
       const candRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=id,email,phone,full_name,first_name,last_name,deletion_scheduled_at,tier,tour_completed_at,header_display_mode,personal_location,account_type,kyc_verified_at,license_subscription_started_at`,
+        `${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=id,email,phone,full_name,first_name,last_name,deletion_scheduled_at,tier,tour_completed_at,header_display_mode,personal_location,account_type,kyc_verified_at,license_subscription_started_at,phone_verified_at,cross_validation_completed_at,verified_phone_number`,
         { headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } },
       );
       const candRows = candRes.ok ? await candRes.json() : [];
@@ -171,6 +171,11 @@ export default {
         account_type: candidate.account_type,
         kyc_verified_at: candidate.kyc_verified_at,
         license_subscription_started_at: candidate.license_subscription_started_at,
+        // Verification-status persistence fix (2026-09-18): see resolve-session's own comment on
+        // these same two fields.
+        phone_verified_at: candidate.phone_verified_at,
+        cross_validation_completed_at: candidate.cross_validation_completed_at,
+        verified_phone_number: candidate.verified_phone_number,
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: "unhandled", detail: String(e) }), {

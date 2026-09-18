@@ -3593,6 +3593,9 @@ a:hover{color:var(--color-accent)}
                 <span class="tag tag-outline">Not yet verified</span>
               </sc-if>
             </div>
+            <sc-if value="{{ phoneVerifySaveError }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:12px;color:#e2735c">{{ phoneVerifySaveError }}</div>
+            </sc-if>
             <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Pre-filled from your account, if a number is on file. Typing a number here never makes it verified: send a code and confirm it first.</div>
 
             <div style="display:flex;flex-direction:column;gap:6px;padding:var(--space-3);border:1px solid var(--color-neutral-800);border-radius:var(--radius-md)">
@@ -3740,6 +3743,9 @@ a:hover{color:var(--color-accent)}
           <sc-if value="{{ kycUnverified }}" hint-placeholder-val="{{ true }}">
             <div style="font-size:12px;color:var(--color-neutral-500)">Purely informational here. Viewing this tab or completing verification never blocks anything else in your account. The only place it becomes required is authorizing a share to a downstream recipient on the Sharing tab. Upon saving your sharing preferences you will be prompted to complete verification, and that will automatically be reflected on this tab once completed.</div>
           </sc-if>
+          <sc-if value="{{ kycSaveError }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:#e2735c">{{ kycSaveError }}</div>
+          </sc-if>
         </div>
 
         <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
@@ -3749,6 +3755,9 @@ a:hover{color:var(--color-accent)}
           </sc-if>
           <sc-if value="{{ crossValidationNotDone }}" hint-placeholder-val="{{ true }}">
             <div style="display:flex;align-items:center;gap:var(--space-2)"><span class="tag tag-neutral">Not completed</span></div>
+          </sc-if>
+          <sc-if value="{{ crossValidationSaveError }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:#e2735c">{{ crossValidationSaveError }}</div>
           </sc-if>
         </div>
 
@@ -6416,13 +6425,17 @@ class Component extends DCLogic {
   maybeCompleteCrossValidation() {
     const s = this.state;
     if (s.cvEmailConfirmed && s.cvSmsConfirmed && !s.crossValidationDone) {
-      const patch = { crossValidationDone: true, crossValidationModalOpen: false };
+      const patch = { crossValidationDone: true, crossValidationModalOpen: false, crossValidationSavePending: true, crossValidationSaveError: null };
       if (s.crossValidationContext === 'linkedin') patch.linkedinEnabled = true;
       if (s.crossValidationContext === 'indeed') patch.indeedEnabled = true;
       if (s.crossValidationContext === 'glassdoor') patch.glassdoorEnabled = true;
       patch.crossValidationContext = null;
       this.setState(patch);
       this.addActivityLog('Email/SMS cross-validation completed');
+      this.recordVerificationEvent('cross_validation', {}).then(data => {
+        if (data) this.setState({ crossValidationCompletedAt: data.cross_validation_completed_at, crossValidationSavePending: false });
+        else this.setState({ crossValidationSavePending: false, crossValidationSaveError: "Couldn't save your cross-validation — it's confirmed for this session but may not persist." });
+      });
     }
   }
 
@@ -6572,7 +6585,10 @@ class Component extends DCLogic {
     connectModalOpen: false, connectModalPartner: null,
     viewsTabPartner: '',
     phoneConfirmed: false, confirmedPhoneNumber: '', phoneModalOpen: false, phoneModalPendingSave: false, phoneCodeInput: '',
+    phoneVerifiedAt: null, phoneVerifySavePending: false, phoneVerifySaveError: null,
     crossValidationDone: false, crossValidationModalOpen: false, crossValidationContext: null, crossValidationPromptDismissed: false,
+    crossValidationCompletedAt: null, crossValidationSavePending: false, crossValidationSaveError: null,
+    kycSavePending: false, kycSaveError: null,
     cvOverviewOpen: false,
     cvEmailCodeInput: '', cvSmsCodeInput: '', cvEmailConfirmed: false, cvSmsConfirmed: false,
     cvPhoneEntry: '', cvPhoneCodeInput: '', cvPhoneCodeSentFlag: false,
@@ -7889,6 +7905,28 @@ class Component extends DCLogic {
       // nothing to say never un-sets an already-locally-known value.
       accountType: (profile && profile.account_type) || this.state.accountType,
       kycVerifiedAt: (profile && profile.kyc_verified_at) || this.state.kycVerifiedAt,
+      // Verification-status persistence fix (2026-09-18): confirmed live, kycVerified/
+      // confirmedPhoneNumber/phoneVerifiedAt/crossValidationDone/crossValidationCompletedAt were
+      // ALL pure client state before this — confirmKycModal/confirmPhoneModal/confirmCvPhoneEntry/
+      // confirmCvEmailCode/confirmCvSmsCode only ever called this.setState(...), no server call
+      // anywhere, resetting to false/'' on every fresh mount (this exact gap was already confirmed
+      // once before for KYC specifically, Item 10/11, and left unfixed for full-resume accounts
+      // because it was "purely informational" at the time — no longer true, Sharing's feed-enable
+      // toggles gate on it today). record-verification-event (see its own header) is the new real
+      // write path; this merge is the read-back half, same one-directional-fact shape as
+      // kycVerifiedAt/tourEverShown above — a session-resolve response with nothing to say never
+      // un-sets an already-locally-known value. kycVerified/phoneConfirmed/crossValidationDone stay
+      // as the SAME render-val names every existing screen already reads (Personal Info, Sharing,
+      // Verification Status, the global KYC banner, both modals — six surfaces, mapped before this
+      // was built) — only what DRIVES them changed, from an independent local flag to a derived
+      // truthiness check on the real, persisted timestamp, so no downstream render-val consumer
+      // needed to change.
+      kycVerified: !!((profile && profile.kyc_verified_at) || this.state.kycVerifiedAt),
+      phoneVerifiedAt: (profile && profile.phone_verified_at) || this.state.phoneVerifiedAt,
+      confirmedPhoneNumber: (profile && profile.verified_phone_number) || this.state.confirmedPhoneNumber,
+      phoneConfirmed: !!((profile && profile.phone_verified_at) || this.state.phoneVerifiedAt),
+      crossValidationCompletedAt: (profile && profile.cross_validation_completed_at) || this.state.crossValidationCompletedAt,
+      crossValidationDone: !!((profile && profile.cross_validation_completed_at) || this.state.crossValidationCompletedAt),
       licenseSubscriptionStartedAt: (profile && profile.license_subscription_started_at) || this.state.licenseSubscriptionStartedAt,
     });
     if (reactivateNeeded) { this.setState({ screen: 'reactivate', deletionScheduled: true, deletionDate }); return; }
@@ -9021,6 +9059,41 @@ class Component extends DCLogic {
     setTimeout(() => { if (this.state.headerPrefsSaved) this.setState({ headerPrefsSaved: false }); }, 2000);
   }
 
+  // Verification-status persistence fix (2026-09-18): the real backend write path for phone/KYC/
+  // cross-validation confirmation — see record-verification-event's own header for the full gap
+  // this closes (confirmPhoneModal/confirmCvPhoneEntry/confirmKycModal/confirmCvEmailCode/
+  // confirmCvSmsCode used to only ever call this.setState(...), nothing server-side, ever). One
+  // shared helper for all three event kinds, same retry-once-silently shape as saveHeaderPreferences
+  // just above (Item 3's own finding — a rarely-invoked Edge Function's first call occasionally
+  // fails transiently with an identical retry immediately succeeding — applies equally here, same
+  // rarely-invoked shape). Returns the parsed response data on success, null on failure; callers
+  // decide their own pending/error state and how to react, since phone/KYC/cross-validation each
+  // have their own separate render-vals for that.
+  async recordVerificationEvent(verificationType, extra) {
+    const s = this.state;
+    if (!s.resumeCandidateId) return null;
+    const attempt = async () => {
+      const res = await fetch(this.SUPABASE_FN_URL + '/record-verification-event', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate_id: s.resumeCandidateId, verification_type: verificationType, ...extra }),
+      });
+      const data = await res.json().catch(() => ({}));
+      return { res, data };
+    };
+    let result = null;
+    for (let tryNum = 0; tryNum < 2 && !result; tryNum++) {
+      if (tryNum === 1) await new Promise(r => setTimeout(r, 800)); // brief pause before the silent retry
+      try {
+        const outcome = await attempt();
+        if ((outcome.res.ok && outcome.data.ok) || tryNum === 1) result = outcome;
+      } catch (e) {
+        if (tryNum === 1) break;
+      }
+    }
+    return (result && result.res.ok && result.data.ok) ? result.data : null;
+  }
+
   guardedNav(action) {
     if (this.isDirty() && !window.confirm('You have unsaved changes on this tab. Leave without saving?')) return;
     const prevTab = this.state.accountTab;
@@ -9272,11 +9345,17 @@ class Component extends DCLogic {
       sendCvPhoneCode: () => this.setState({ cvPhoneCodeSentFlag: true }),
       confirmCvPhoneEntry: () => {
         const offerPrinted = !(s.printedPhone || '').trim() && !s.printedPhonePromptAnswered;
-        this.setState({ confirmedPhoneNumber: s.cvPhoneEntry, verifiedPhoneEntry: s.verifiedPhoneEntry || s.cvPhoneEntry, savedVerifiedPhoneEntry: s.savedVerifiedPhoneEntry || s.cvPhoneEntry, cvPhoneCodeSentFlag: false, cvPhoneCodeInput: '', phoneConfirmed: true, printedPhonePromptOpen: offerPrinted });
+        const verifiedNumber = s.cvPhoneEntry;
+        this.setState({ confirmedPhoneNumber: verifiedNumber, verifiedPhoneEntry: s.verifiedPhoneEntry || verifiedNumber, savedVerifiedPhoneEntry: s.savedVerifiedPhoneEntry || verifiedNumber, cvPhoneCodeSentFlag: false, cvPhoneCodeInput: '', phoneConfirmed: true, printedPhonePromptOpen: offerPrinted, phoneVerifySavePending: true, phoneVerifySaveError: null });
         this.addActivityLog('Mobile number confirmed via cross-validation');
+        this.recordVerificationEvent('phone', { verified_phone_number: verifiedNumber }).then(data => {
+          if (data) this.setState({ phoneVerifiedAt: data.phone_verified_at, phoneVerifySavePending: false });
+          else this.setState({ phoneVerifySavePending: false, phoneVerifySaveError: "Couldn't save your phone verification — it's confirmed for this session but may not persist." });
+        });
       },
       crossValidationNotDone: !s.crossValidationDone,
       crossValidationDone: s.crossValidationDone,
+      crossValidationSaveError: s.crossValidationSaveError,
       crossValidationPromptDismissed: s.crossValidationPromptDismissed,
       cvEmailCodeInput: s.cvEmailCodeInput,
       cvSmsCodeInput: s.cvSmsCodeInput,
@@ -9356,18 +9435,29 @@ class Component extends DCLogic {
       confirmPhoneModal: () => {
         const wasPending = s.phoneModalPendingSave;
         const offerPrinted = !(s.printedPhone || '').trim() && !s.printedPhonePromptAnswered;
-        this.setState({ confirmedPhoneNumber: s.verifiedPhoneEntry, phoneModalOpen: false, phoneModalPendingSave: false, phoneConfirmed: true, printedPhonePromptOpen: offerPrinted });
+        const verifiedNumber = s.verifiedPhoneEntry;
+        this.setState({ confirmedPhoneNumber: verifiedNumber, phoneModalOpen: false, phoneModalPendingSave: false, phoneConfirmed: true, printedPhonePromptOpen: offerPrinted, phoneVerifySavePending: true, phoneVerifySaveError: null });
+        this.recordVerificationEvent('phone', { verified_phone_number: verifiedNumber }).then(data => {
+          if (data) this.setState({ phoneVerifiedAt: data.phone_verified_at, phoneVerifySavePending: false });
+          else this.setState({ phoneVerifySavePending: false, phoneVerifySaveError: "Couldn't save your phone verification — it's confirmed for this session but may not persist." });
+        });
         if (wasPending) this.saveActive();
       },
+      phoneVerifySaveError: s.phoneVerifySaveError,
       kycModalOpen: s.kycModalOpen,
       openKycModal: (e) => { pd(e); this.setState({ kycModalOpen: true, kycModalPendingSave: false }); },
       closeKycModal: () => this.setState({ kycModalOpen: false, kycModalPendingSave: false }),
       confirmKycModal: () => {
         const wasPending = s.kycModalPendingSave;
-        this.setState({ kycVerified: true, kycModalOpen: false, kycModalPendingSave: false });
+        this.setState({ kycVerified: true, kycModalOpen: false, kycModalPendingSave: false, kycSavePending: true, kycSaveError: null });
         this.addActivityLog('Identity verification completed');
+        this.recordVerificationEvent('kyc', {}).then(data => {
+          if (data) this.setState({ kycVerifiedAt: data.kyc_verified_at, kycSavePending: false });
+          else this.setState({ kycSavePending: false, kycSaveError: "Couldn't save your identity verification — it's confirmed for this session but may not persist." });
+        });
         if (wasPending) this.saveActive();
       },
+      kycSaveError: s.kycSaveError,
       saveActiveGuarded: () => {
         if (s.accountTab === 'sharing') {
           const anyEnabledLinked = (s.linkedinEnabled && s.linkedinLinked) || (s.indeedEnabled && s.indeedLinked) || (s.glassdoorEnabled && s.glassdoorLinked);

@@ -280,6 +280,9 @@ export default {
       let candidatePersonalLocation: string | null = null;
       let candidateAccountType: string | null = null;
       let candidateKycVerifiedAt: string | null = null;
+      let candidatePhoneVerifiedAt: string | null = null;
+      let candidateCrossValidationCompletedAt: string | null = null;
+      let candidateVerifiedPhoneNumber: string | null = null;
       if (candidateId) {
         const rawSessionToken = randomToken();
         const tokenHash = await hashToken(rawSessionToken);
@@ -301,7 +304,7 @@ export default {
           // paths return it uniformly" reasoning as resolve-session's own header explains, and this
           // is really a fourth such path (see the first_name/last_name comment on this response
           // below). A brand-new candidate just gets the DB defaults ('printed', null).
-          const candRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=tier,header_display_mode,personal_location,account_type,kyc_verified_at`, {
+          const candRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=tier,header_display_mode,personal_location,account_type,kyc_verified_at,phone_verified_at,cross_validation_completed_at,verified_phone_number`, {
             headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
           });
           const candRows = candRes.ok ? await candRes.json() : [];
@@ -313,6 +316,9 @@ export default {
           // account_type may not match this request's own record if the two ever disagreed.
           candidateAccountType = candRows[0]?.account_type ?? null;
           candidateKycVerifiedAt = candRows[0]?.kyc_verified_at ?? null;
+          candidatePhoneVerifiedAt = candRows[0]?.phone_verified_at ?? null;
+          candidateCrossValidationCompletedAt = candRows[0]?.cross_validation_completed_at ?? null;
+          candidateVerifiedPhoneNumber = candRows[0]?.verified_phone_number ?? null;
         }
         // A failed session insert does NOT fail confirmation itself — same posture as
         // resumeBackfillError above: the candidate row and resume linkage already succeeded, and a
@@ -353,6 +359,9 @@ export default {
         personal_location: candidatePersonalLocation,
         account_type: candidateAccountType,
         kyc_verified_at: candidateKycVerifiedAt,
+        phone_verified_at: candidatePhoneVerifiedAt,
+        cross_validation_completed_at: candidateCrossValidationCompletedAt,
+        verified_phone_number: candidateVerifiedPhoneNumber,
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

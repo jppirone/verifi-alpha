@@ -105,6 +105,9 @@ export default {
       let candidatePersonalLocation: string | null = null;
       let candidateAccountType: string | null = null;
       let candidateKycVerifiedAt: string | null = null;
+      let candidatePhoneVerifiedAt: string | null = null;
+      let candidateCrossValidationCompletedAt: string | null = null;
+      let candidateVerifiedPhoneNumber: string | null = null;
       if (candidateId) {
         const rawSessionToken = randomToken();
         const tokenHash = await hashToken(rawSessionToken);
@@ -131,7 +134,7 @@ export default {
           sessionToken = rpcRows?.[0]?.session_token ?? null;
           // Item 6 (2026-09-12 live-testing session, follow-up build): see confirm-verification's
           // own comment on this same select addition.
-          const candRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=tier,header_display_mode,personal_location,account_type,kyc_verified_at`, {
+          const candRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=tier,header_display_mode,personal_location,account_type,kyc_verified_at,phone_verified_at,cross_validation_completed_at,verified_phone_number`, {
             headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
           });
           const candRows = candRes.ok ? await candRes.json() : [];
@@ -140,6 +143,9 @@ export default {
           candidatePersonalLocation = candRows[0]?.personal_location ?? null;
           candidateAccountType = candRows[0]?.account_type ?? null;
           candidateKycVerifiedAt = candRows[0]?.kyc_verified_at ?? null;
+          candidatePhoneVerifiedAt = candRows[0]?.phone_verified_at ?? null;
+          candidateCrossValidationCompletedAt = candRows[0]?.cross_validation_completed_at ?? null;
+          candidateVerifiedPhoneNumber = candRows[0]?.verified_phone_number ?? null;
         }
         // A failed session issue does NOT fail this status check itself — same posture as
         // confirm-verification's own resumeBackfillError/session block: the confirmation already
@@ -169,6 +175,9 @@ export default {
         personal_location: candidatePersonalLocation,
         account_type: candidateAccountType,
         kyc_verified_at: candidateKycVerifiedAt,
+        phone_verified_at: candidatePhoneVerifiedAt,
+        cross_validation_completed_at: candidateCrossValidationCompletedAt,
+        verified_phone_number: candidateVerifiedPhoneNumber,
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: "unhandled", detail: String(e) }), {
