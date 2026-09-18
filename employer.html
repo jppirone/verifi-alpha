@@ -2279,7 +2279,7 @@ const __ds_scope = {};
         <label for="el-phone">Candidate's phone number</label>
         <input class="input" id="el-phone" value="{{ candPhoneInput }}" sc-camel-on-change="{{ setCandPhoneInput }}" placeholder="(555) 000-0000">
       </div>
-      <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Give at least one of the two. Both is better: either one can produce a match.</div>
+      <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Give at least one of the two. If you give both, they must belong to the same record. The name is matched too, allowing for common variations (nicknames, middle names or initials, minor typos).</div>
     </div>
 
     <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-4)">
@@ -2299,7 +2299,10 @@ const __ds_scope = {};
       <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Required. We send a confirmation link to this address, and the lookup only runs after you click it.</div>
     </div>
 
-    <button type="button" class="btn btn-primary btn-block" disabled="{{ lookupIncomplete }}" sc-camel-on-click="{{ submitLookup }}">Check for verified record</button>
+    <sc-if value="{{ lookupFormError }}" hint-placeholder-val="{{ false }}">
+      <div style="font-size:12px;color:#e2735c;line-height:1.6">{{ lookupFormError }}</div>
+    </sc-if>
+    <button type="button" class="btn btn-primary btn-block" disabled="{{ lookupIncomplete }}" sc-camel-on-click="{{ submitLookup }}">{{ submitLookupLabel }}</button>
   </div>
   </sc-if>
 
@@ -2341,19 +2344,41 @@ const __ds_scope = {};
       <div class="card-kicker">Confirm your email to continue</div>
       <div style="font-size:17px;line-height:1.5">Check your email to continue.</div>
       <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">We sent a confirmation link to {{ pendingRequesterEmail }}. Click it and the lookup runs. Until then there is no result to show.</div>
-      <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">The link works once and expires {{ linkWindowLabel }} after it is sent, whichever comes first. If you never confirm, this attempt leaves no trace: no lookup runs, no record is created, and nothing appears in the candidate's activity log.</div>
-      <div style="display:flex;flex-direction:column;gap:var(--space-2);border-top:1px dashed var(--color-divider);padding-top:var(--space-3);margin-top:var(--space-2)">
-        <div style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--color-neutral-500)">Prototype only</div>
-        <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">No message is actually sent. The button below stands in for clicking the link in your inbox.</div>
-        <sc-if value="{{ existenceCheckError }}" hint-placeholder-val="{{ false }}">
-          <div style="font-size:12px;color:#e2735c">{{ existenceCheckError }}</div>
-        </sc-if>
-        <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;margin-top:4px">
-          <button type="button" class="btn btn-primary" disabled="{{ existenceCheckPending }}" sc-camel-on-click="{{ confirmRequesterEmail }}">{{ confirmRequesterEmailLabel }}</button>
-          <button type="button" class="btn btn-ghost" sc-camel-on-click="{{ simulateLinkTimeout }}">Simulate the window elapsing</button>
-          <button type="button" class="btn btn-ghost" sc-camel-on-click="{{ abandonConfirmation }}">Abandon without confirming</button>
-        </div>
+      <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">The link works once and expires {{ linkWindowLabel }} after it is sent, whichever comes first. If you never confirm, no lookup runs and nothing is shown to you or sent to the candidate. You can open the link in any browser and close this page.</div>
+      <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;margin-top:4px">
+        <button type="button" class="btn btn-ghost" sc-camel-on-click="{{ abandonConfirmation }}">Use a different address</button>
       </div>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isChecking }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:460px;margin:0 auto;padding-top:72px;display:flex;flex-direction:column;gap:var(--space-4)">
+    <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3)">
+      <div class="card-kicker">Running your lookup</div>
+      <div style="font-size:17px;line-height:1.5">Checking…</div>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isLinkInvalid }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:460px;margin:0 auto;padding-top:72px;display:flex;flex-direction:column;gap:var(--space-4)">
+    <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3)">
+      <div class="card-kicker">Link not recognized</div>
+      <div style="font-size:17px;line-height:1.5">That confirmation link isn't valid.</div>
+      <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">It may have been copied incompletely. Open the link exactly as it appears in the email, or start a new lookup. No result is shown here.</div>
+      <button type="button" class="btn btn-primary" style="align-self:flex-start;margin-top:var(--space-2)" sc-camel-on-click="{{ startOver }}">Start a new lookup</button>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isLookupError }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:460px;margin:0 auto;padding-top:72px;display:flex;flex-direction:column;gap:var(--space-4)">
+    <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3)">
+      <div class="card-kicker">Lookup didn't complete</div>
+      <div style="font-size:17px;line-height:1.5">We couldn't complete this lookup.</div>
+      <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">This is a problem on our side, not a result. Your confirmation link has not been used up, so you can try again.</div>
+      <button type="button" class="btn btn-primary" style="align-self:flex-start;margin-top:var(--space-2)" sc-camel-on-click="{{ retryLookup }}">Try again</button>
     </div>
   </div>
   </sc-if>
@@ -2632,12 +2657,6 @@ const __ds_scope = {};
       <button type="button" class="btn btn-primary" style="align-self:flex-start" disabled="{{ accessRequestBlocked }}" sc-camel-on-click="{{ requestAccess }}">Request full comparison access</button>
     </div>
 
-    <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2);border:1px dashed var(--color-divider)">
-      <div class="card-kicker">Prototype only: reuse the confirmation link</div>
-      <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Stands in for someone opening the same emailed link a second time, or forwarding it on.</div>
-      <button type="button" class="btn btn-ghost" style="align-self:flex-start;font-size:12px" sc-camel-on-click="{{ replayLink }}">Simulate clicking the link again</button>
-    </div>
-
     <div style="text-align:center;font-size:12px;color:var(--color-neutral-500)">
       <a href="#" sc-camel-on-click="{{ startOver }}">Start another lookup</a>
     </div>
@@ -2781,7 +2800,7 @@ const __ds_scope = {};
 </div>
 
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props="{&quot;hasPaidAccess&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Prototype&quot;},&quot;confirmLinkMinutes&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:75,&quot;min&quot;:15,&quot;max&quot;:120,&quot;step&quot;:15,&quot;unit&quot;:&quot;min&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Policy&quot;},&quot;pricePerCheck&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:10,&quot;min&quot;:9,&quot;max&quot;:99,&quot;step&quot;:5,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Policy&quot;},&quot;responseWindowHours&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:72,&quot;min&quot;:24,&quot;max&quot;:168,&quot;step&quot;:24,&quot;unit&quot;:&quot;h&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Policy&quot;}}">
+<script type="text/x-dc" data-dc-script data-props="{&quot;hasPaidAccess&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Prototype&quot;},&quot;pricePerCheck&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:10,&quot;min&quot;:9,&quot;max&quot;:99,&quot;step&quot;:5,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Policy&quot;},&quot;responseWindowHours&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:72,&quot;min&quot;:24,&quot;max&quot;:168,&quot;step&quot;:24,&quot;unit&quot;:&quot;h&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Policy&quot;}}">
 class Component extends DCLogic {
   SUPABASE_FN_URL = 'https://ihmypoduvrzymasgactc.supabase.co/functions/v1';
   SUPABASE_ANON_KEY = 'sb_publishable_o3S1LP0utVvxTXPRb2aZxg_Fz2FWwBj';
@@ -2802,7 +2821,7 @@ class Component extends DCLogic {
       reqNameInput: '', reqCompanyInput: '', reqEmailInput: '',
       lookupResult: null,
       pendingEmail: '',
-      linkToken: null,
+      lookupToken: null,
       lookup: null,
       request: null,
       response: 'pending',
@@ -2819,7 +2838,7 @@ class Component extends DCLogic {
       docName: '', docType: '', docUrl: null,
       attestation: '',
       check: null,
-      existenceCheckPending: false, existenceCheckError: null,
+      lookupSending: false, lookupFormError: null,
     };
   }
 
@@ -3054,6 +3073,10 @@ class Component extends DCLogic {
     this._onResize = () => this.setState({ vw: this.measureWidth() });
     window.addEventListener('resize', this._onResize);
     this._onResize();
+    // Landing from the emailed confirmation link: the lookup runs now, on the server, gated by the token.
+    let token = '';
+    try { token = new URLSearchParams(window.location.search).get('lookup_token') || ''; } catch (e) { token = ''; }
+    if (token) this.runTokenLookup(token);
   }
 
   componentWillUnmount() {
@@ -3071,14 +3094,46 @@ class Component extends DCLogic {
   norm(v) { return (v || '').trim().toLowerCase(); }
   digits(v) { return (v || '').replace(/\D/g, ''); }
 
-  submitLookup() {
-    const email = (this.state.reqEmailInput || '').trim();
+  // Step 1: ask the server to email a confirmation link to the requester's address. Nothing is looked up
+  // here; the candidate details are staged server-side and the lookup only runs when the link is used.
+  async submitLookup() {
+    const s = this.state;
+    if (s.lookupSending) return;
+    const email = (s.reqEmailInput || '').trim();
     if (!email) return;
-    // Nothing is looked up, recorded, or sent to the candidate until this address is confirmed.
-    this.setState({
-      screen: 'confirmEmail', pendingEmail: email, lookupResult: null, lookup: null, request: null,
-      linkToken: { email: email, issuedAt: Date.now(), used: false },
-    });
+    this.setState({ lookupSending: true, lookupFormError: null });
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/send-lookup-confirmation', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requester_email: email,
+          requester_name: (s.reqNameInput || '').trim(),
+          requester_company: (s.reqCompanyInput || '').trim(),
+          candidate_name: (s.candNameInput || '').trim(),
+          candidate_email: (s.candEmailInput || '').trim(),
+          candidate_phone: (s.candPhoneInput || '').trim(),
+        }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ lookupSending: false, lookupFormError: "We couldn't send the confirmation email. Check your connection and try again." });
+      return;
+    }
+    if (res.ok && data && data.ok) {
+      this.setState({ lookupSending: false, screen: 'confirmEmail', pendingEmail: email, lookupResult: null, lookup: null, request: null });
+      return;
+    }
+    const code = data && data.error;
+    const msg = code === 'rate_limited' ? 'Too many confirmation emails have been requested for this address. Please try again in an hour.'
+      : code === 'requester_email_invalid' ? 'That email address doesn’t look right. Please check it.'
+      : code === 'candidate_email_invalid' ? 'The candidate’s email address doesn’t look right. Please check it.'
+      : code === 'candidate_name_required' ? 'Please enter the candidate’s first and last name.'
+      : code === 'requester_name_required' ? 'Please enter your name.'
+      : code === 'candidate_contact_required' ? 'Please give the candidate’s email address or a 10-digit phone number.'
+      : "We couldn't send the confirmation email. Please try again.";
+    this.setState({ lookupSending: false, lookupFormError: msg });
   }
 
   domainTypeFor(email) {
@@ -3088,69 +3143,57 @@ class Component extends DCLogic {
       : 'appears to be a company domain';
   }
 
-  linkWindowMs() { return (this.props.confirmLinkMinutes ?? 45) * 60 * 1000; }
-
-  linkState() {
-    const t = this.state.linkToken;
-    if (!t) return 'none';
-    if (t.used) return 'used';
-    if (Date.now() - t.issuedAt > this.linkWindowMs()) return 'expired';
-    return 'valid';
+  clearTokenFromUrl() {
+    try {
+      if (new URLSearchParams(window.location.search).has('lookup_token')) window.history.replaceState(null, '', window.location.pathname);
+    } catch (e) { /* not critical */ }
   }
 
-  async confirmRequesterEmail() {
-    const s = this.state;
-    const st = this.linkState();
-    if (st === 'none') { this.setState({ screen: 'lookup' }); return; }
-    if (st === 'used') { this.setState({ screen: 'linkUsed' }); return; }
-    if (st === 'expired') { this.setState({ screen: 'linkExpired', linkToken: null }); return; }
-    if (s.existenceCheckPending) return;
-
-    const email = (s.candEmailInput || '').trim();
-    const phone = (s.candPhoneInput || '').trim();
-    this.setState({ existenceCheckPending: true, existenceCheckError: null });
-    let exists;
+  // Step 2: the emailed link brings the requester here with ?lookup_token=. The server enforces
+  // single use, expiry and the requester-email confirmation; this page holds no gate of its own.
+  async runTokenLookup(token) {
+    this.setState({ screen: 'checking', lookupToken: token, lookup: null, request: null });
+    let res, data;
     try {
-      const res = await fetch(this.SUPABASE_FN_URL + '/check-existence', {
+      res = await fetch(this.SUPABASE_FN_URL + '/check-existence', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, phone }),
+        body: JSON.stringify({ token }),
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error((data && data.error) || 'lookup failed');
-      exists = !!data.exists;
+      data = await res.json().catch(() => ({}));
     } catch (e) {
-      // The lookup itself didn't complete (network/server issue) -- this is not the same as
-      // a real "no record" result, so it does not burn the one-time link or show noMatch.
-      this.setState({ existenceCheckPending: false, existenceCheckError: "We couldn't complete this lookup. Please try again." });
+      // Network failure: not a result, and the server never saw a completed lookup, so the link is intact.
+      this.setState({ screen: 'lookupError' });
       return;
     }
-    this.setState({ existenceCheckPending: false });
-
-    const burnt = Object.assign({}, s.linkToken, { used: true });
-    if (!exists) { this.setState({ screen: 'noMatch', lookupResult: 'none', lookup: null, request: null, linkToken: burnt }); return; }
+    if (res.status === 409) { this.setState({ screen: 'linkUsed' }); return; }
+    if (res.status === 410) { this.setState({ screen: 'linkExpired' }); return; }
+    if (res.status === 400 || res.status === 404) { this.setState({ screen: 'linkInvalid' }); return; }
+    if (!res.ok || !data || !data.ok) { this.setState({ screen: 'lookupError' }); return; }
+    if (!data.exists) { this.setState({ screen: 'noMatch', lookupResult: 'none', lookup: null, request: null }); return; }
+    const reqEmail = data.requester_email || '';
     this.setState({
-      linkToken: burnt,
       screen: 'result',
       lookupResult: 'match',
       response: 'pending',
+      pendingEmail: reqEmail,
       lookup: {
-        id: 'LKP-' + String(Date.now()).slice(-6),
-        // check-existence is existence-only by design and never returns candidate details, so
-        // the name shown back here is what the requester themselves typed in, not a confirmed
-        // record from our system.
-        candidateName: (s.candNameInput || '').trim(),
+        id: 'LKP-' + String(data.lookup_id || '').replace(/-/g, '').slice(0, 6).toUpperCase(),
+        // check-existence never returns candidate details; the name shown back is what the requester
+        // typed, which the server has just matched against the record.
+        candidateName: data.candidate_name || '',
         candidateStatus: '',
         candidate: null,
-        contactUsed: (s.candEmailInput || '').trim() || (s.candPhoneInput || '').trim(),
-        requesterName: (s.reqNameInput || '').trim() || 'Unnamed requester',
-        requesterCompany: (s.reqCompanyInput || '').trim(),
-        requesterEmail: s.pendingEmail,
-        domainType: this.domainTypeFor(s.pendingEmail),
-        timestamp: new Date().toISOString(),
+        contactUsed: data.contact_used || '',
+        requesterName: data.requester_name || 'Unnamed requester',
+        requesterCompany: data.requester_company || '',
+        requesterEmail: reqEmail,
+        domainType: this.domainTypeFor(reqEmail),
+        timestamp: data.completed_at || new Date().toISOString(),
       },
     });
   }
+
 
   requestAccess() {
     const lk = this.state.lookup;
@@ -3201,7 +3244,13 @@ class Component extends DCLogic {
       isNoMatch: s.screen === 'noMatch',
       isLinkUsed: s.screen === 'linkUsed',
       isLinkExpired: s.screen === 'linkExpired',
-      linkWindowLabel: (this.props.confirmLinkMinutes ?? 45) + ' minutes',
+      isChecking: s.screen === 'checking',
+      isLinkInvalid: s.screen === 'linkInvalid',
+      isLookupError: s.screen === 'lookupError',
+      retryLookup: () => { if (s.lookupToken) this.runTokenLookup(s.lookupToken); },
+      linkWindowLabel: '60 minutes',
+      lookupFormError: s.lookupFormError,
+      submitLookupLabel: s.lookupSending ? 'Sending confirmation email…' : 'Check for verified record',
       isResult: s.screen === 'result',
       isAccess: s.screen === 'access',
 
@@ -3218,25 +3267,18 @@ class Component extends DCLogic {
       setReqCompanyInput: (e) => this.setState({ reqCompanyInput: e.target.value, lookupResult: null }),
       setReqEmailInput: (e) => this.setState({ reqEmailInput: e.target.value, lookupResult: null }),
       submitLookup: () => this.submitLookup(),
-      lookupIncomplete: !((s.candNameInput || '').trim()
+      lookupIncomplete: s.lookupSending || !((s.candNameInput || '').trim().split(/s+/).filter(Boolean).length >= 2
         && ((s.candEmailInput || '').trim() || (s.candPhoneInput || '').trim())
+        && (s.reqNameInput || '').trim()
         && (s.reqEmailInput || '').trim()),
       pendingRequesterEmail: s.pendingEmail || '',
-      confirmRequesterEmail: () => this.confirmRequesterEmail(),
-      existenceCheckPending: s.existenceCheckPending,
-      existenceCheckError: s.existenceCheckError,
-      confirmRequesterEmailLabel: s.existenceCheckPending ? 'Checking…' : 'Simulate clicking the confirmation link',
-      simulateLinkTimeout: () => this.setState({
-        linkToken: s.linkToken ? Object.assign({}, s.linkToken, { issuedAt: s.linkToken.issuedAt - this.linkWindowMs() - 1000 }) : null,
-        screen: 'linkExpired',
-      }),
-      replayLink: () => this.setState({ screen: 'linkUsed' }),
       noop: (e) => { if (e && e.preventDefault) e.preventDefault(); },
       startOver: (e) => {
         if (e && e.preventDefault) e.preventDefault();
+        this.clearTokenFromUrl();
         this.setState(Object.assign(this.blank(), { account: s.account, history: s.history || [] }));
       },
-      abandonConfirmation: () => this.setState({ screen: 'lookup', pendingEmail: '', lookupResult: null, lookup: null, request: null, linkToken: null }),
+      abandonConfirmation: () => { this.clearTokenFromUrl(); this.setState({ screen: 'lookup', pendingEmail: '', lookupResult: null, lookup: null, request: null, lookupToken: null }); },
       requestAccess: () => this.requestAccess(),
       lookupId: lk.id || '',
       lookupSentLabel: lk.timestamp ? new Date(lk.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '',
@@ -3447,7 +3489,7 @@ class Component extends DCLogic {
       simExpired: () => this.setState({ response: 'expired' }),
 
       backToLookup: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'lookup', lookupResult: null, lookup: null, request: null, pendingEmail: '' }); },
-      resetAll: () => this.setState(this.blank()),
+      resetAll: () => { this.clearTokenFromUrl(); this.setState(this.blank()); },
     };
   }
 }
