@@ -8345,9 +8345,12 @@ class Component extends DCLogic {
     this.setState(patch, () => { if (patch.accountTab === 'views') this.renderPdfPreview(); });
   }
 
-  // Item B: real backend write for a downgrade to Free — see set-candidate-tier's own header for
-  // why this never goes through Stripe (no test-mode charge to reverse; a real integration would
-  // cancel the Stripe subscription here too, out of scope for the alpha's test-mode wiring).
+  // Item B: real backend write for a downgrade to Free — set-candidate-tier itself still never
+  // touches Stripe (no test-mode charge to reverse; flipping the local tier is its own single
+  // purpose). Subscription cancellation gap (2026-09-18): the actual Stripe cancellation
+  // set-candidate-tier's own header used to flag as "out of scope" now happens too, via the new
+  // cancel-stripe-subscription (see its own header) — called right after the tier flip succeeds,
+  // same two-call shape as this fix's other new call site (deactivateAccount, below).
   async confirmDowngrade() {
     const s = this.state;
     if (!s.resumeCandidateId) { this.setState({ checkoutError: 'No account is loaded — try refreshing.' }); return; }
@@ -8370,6 +8373,19 @@ class Component extends DCLogic {
     }
     this.setState({ checkoutPending: false, checkoutError: null, downgradeModalOpen: false, accountTier: 'free', tierSelection: 'free', changePlanOpen: false, downgradeSuccessNotice: true });
     this.addActivityLog('Switch to Free confirmed');
+    // Fire-and-forget, same posture as markTourComplete elsewhere in this file — the tier flip
+    // above is the part the candidate is waiting on and already succeeded; a failure cancelling the
+    // real Stripe subscription shouldn't undo or block that, and cancel-stripe-subscription's own
+    // no-op-when-nothing-on-file behavior makes this safe to call even for a candidate who was never
+    // really on a Stripe-backed plan. Real confirmation this landed is test-stripe-webhook's new
+    // customer.subscription.deleted branch, not this call — nothing here claims otherwise to the
+    // candidate; the UI-facing confirmation for that is deliberately not built yet (next step, once
+    // the webhook side is proven live).
+    fetch(this.SUPABASE_FN_URL + '/cancel-stripe-subscription', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ candidate_id: s.resumeCandidateId }),
+    }).catch(() => {});
   }
 
   // Passwordless login, step 1 (requesting device). Deliberately mirrors sendVerificationEmail's
@@ -8435,6 +8451,20 @@ class Component extends DCLogic {
       screen: 'deactivated', deactStep: 'default', deactReason: '', deactNote: '', deactChoice: null,
       deletionScheduled: true, deletionDate: data.deletion_date,
     });
+    // Subscription cancellation gap (2026-09-18): deactivate-account itself never touched Stripe or
+    // tier at all — a paid candidate who deleted their account kept their real Stripe subscription
+    // running indefinitely, same underlying gap confirmDowngrade had (see its own comment on this
+    // same call). Fire-and-forget for the same reason: deactivation itself already fully succeeded
+    // above (session revoked server-side, local token cleared), candidateId is still in closure scope
+    // even though this device's session token is now gone, and cancel-stripe-subscription's own
+    // no-op-when-nothing-on-file behavior makes this safe regardless of whether this candidate was
+    // ever actually on a Stripe-backed plan. Real confirmation is test-stripe-webhook's
+    // customer.subscription.deleted branch, not this call.
+    fetch(this.SUPABASE_FN_URL + '/cancel-stripe-subscription', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ candidate_id: candidateId }),
+    }).catch(() => {});
   }
 
   // Real dead end this closes (2026-09-07 wiring audit): reactivateAccount() used to just clear

@@ -1,0 +1,26 @@
+-- Subscription cancellation gap (2026-09-18): confirmed live before building -- neither
+-- confirmDowngrade (set-candidate-tier) nor deactivate-account ever calls Stripe at all today.
+-- set-candidate-tier's own header already says so plainly: "a downgrade to Free doesn't involve
+-- Stripe at all... a real integration would cancel the Stripe subscription here too, out of scope
+-- for the alpha's test-mode wiring." deactivate-account never touches tier or Stripe either. The
+-- real Stripe subscription created at checkout (mode=subscription, genuinely recurring) keeps
+-- running in Stripe's own system regardless of what the app shows, in both cases.
+--
+-- Also confirmed: nothing captures the real Stripe subscription id anywhere -- test-stripe-webhook
+-- only ever stored stripe_checkout_session_id (the checkout SESSION, cs_...), never
+-- session.subscription (the actual subscription, sub_...) that Stripe's cancel-subscription API
+-- needs. Without this, there was no way to even identify which subscription to cancel.
+--
+-- stripe_subscription_id: captured at checkout-confirmation time (test-stripe-webhook, alongside
+-- the existing stripe_checkout_session_id write), read by the new cancel-stripe-subscription
+-- function. One column serves both products (resume_pro and license_tracking) -- account_type
+-- already keeps those mutually exclusive per candidate (Items 9/10/11), so a candidate never has
+-- two live subscriptions to disambiguate between.
+--
+-- stripe_subscription_cancelled_at: written ONLY by the new customer.subscription.deleted webhook
+-- handler, never by the cancel-request call itself -- same "don't trust the request, trust the
+-- webhook" discipline as tier/tier_updated_at's own checkout.session.completed write. This is the
+-- real, confirmed fact a future UI layer reads, not an optimistic assumption that a DELETE call
+-- succeeding means the subscription is actually gone.
+alter table candidates add column if not exists stripe_subscription_id text;
+alter table candidates add column if not exists stripe_subscription_cancelled_at timestamptz;

@@ -164,7 +164,20 @@ export default {
       const product: string = session.metadata?.product === "license_tracking" ? "license_tracking" : "resume_pro";
       if (candidateId && session.payment_status === "paid") {
         try {
-          const patchBody: Record<string, unknown> = { stripe_checkout_session_id: session.id || null };
+          // Subscription cancellation gap (2026-09-18): session.subscription is the real Stripe
+          // subscription id (sub_...) Stripe attaches to a completed subscription-mode Checkout
+          // session -- distinct from session.id (the checkout SESSION, cs_..., already captured
+          // below). Captured here, once, at the same moment payment is first confirmed, because
+          // this is the only place in the whole app that ever sees it: cancel-stripe-subscription
+          // needs it to know which subscription to cancel, and the new customer.subscription.deleted
+          // branch below needs it to match a cancellation event back to a candidate row. One column
+          // serves both products -- account_type already keeps resume_pro and license_tracking
+          // mutually exclusive per candidate (Items 9/10/11), so there's never a second live
+          // subscription on the same row to disambiguate between.
+          const patchBody: Record<string, unknown> = {
+            stripe_checkout_session_id: session.id || null,
+            stripe_subscription_id: session.subscription || null,
+          };
           if (product === "license_tracking") {
             patchBody.license_subscription_started_at = new Date().toISOString();
           } else {
@@ -198,6 +211,58 @@ export default {
         }
       } else if (!candidateId) {
         summary.tierUpdate = { attempted: false, reason: "no_client_reference_id" };
+      }
+    }
+
+    // Subscription cancellation gap (2026-09-18): the real confirmation half of cancel-stripe-
+    // subscription (see that function's own header) -- that function only ever ASKS Stripe to cancel
+    // (DELETE /v1/subscriptions/:id) and reports whether Stripe accepted the request, exactly the
+    // same "don't trust the request, trust the webhook" split this file already draws for
+    // checkout.session.completed/tier above. This is what actually confirms a subscription is gone,
+    // matched back to a candidate by stripe_subscription_id (captured above at checkout time) since
+    // the deleted-subscription event payload carries no candidate_id or client_reference_id of its
+    // own -- only the subscription object itself.
+    //
+    // customer.subscription.updated is deliberately NOT handled here: an immediate DELETE cancel
+    // (what cancel-stripe-subscription calls) always fires .deleted, never .updated -- .updated is
+    // for other subscription changes (price/quantity edits, cancel_at_period_end being set without
+    // an immediate cancel, etc.) this alpha's cancel flow never triggers. Handling it would mean
+    // guessing at event shapes never seen from a real delivery, the same discipline that kept this
+    // file's original signature-verification core to only what was actually proven against a real
+    // Stripe event.
+    if (event.type === "customer.subscription.deleted") {
+      const subscription = event.data?.object || {};
+      const subscriptionId: string | null = subscription.id || null;
+      summary.subscriptionCancellation = { subscriptionId };
+      if (subscriptionId) {
+        try {
+          const patchRes = await fetch(
+            `${SUPABASE_URL}/rest/v1/candidates?stripe_subscription_id=eq.${encodeURIComponent(subscriptionId)}`,
+            {
+              method: "PATCH",
+              headers: {
+                "Content-Type": "application/json",
+                "apikey": SUPABASE_SERVICE_ROLE_KEY,
+                "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+                "Prefer": "return=representation",
+              },
+              body: JSON.stringify({ stripe_subscription_cancelled_at: new Date().toISOString() }),
+            },
+          );
+          const patchRows = patchRes.ok ? await patchRes.json().catch(() => []) : [];
+          summary.subscriptionCancellation.attempted = true;
+          summary.subscriptionCancellation.ok = patchRes.ok && Array.isArray(patchRows) && patchRows.length > 0;
+          summary.subscriptionCancellation.status = patchRes.status;
+        } catch (e) {
+          // Same non-fatal posture as tierUpdate's own catch above — a real, verified delivery is
+          // never reported failed to Stripe's dashboard over a transient downstream write error.
+          summary.subscriptionCancellation.attempted = true;
+          summary.subscriptionCancellation.ok = false;
+          summary.subscriptionCancellation.error = String(e);
+        }
+      } else {
+        summary.subscriptionCancellation.attempted = false;
+        summary.subscriptionCancellation.reason = "no_subscription_id_on_event";
       }
     }
 
