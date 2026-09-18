@@ -259,9 +259,9 @@ export default {
         if (!licenseRes.ok) {
           licenseCreationError = await licenseRes.text().catch(() => "license_creation_failed");
         } else {
-          // Automatic license verification (license-only path): the same license_items row + shared
-          // verify-license module the resume path uses. The certification row above stays the
-          // License Status tab's source and is linked, not replaced. Nothing here can fail signup:
+          // Automatic license verification (license-only path): the certification row above is the
+          // license's single record (and the License Status tab's source); license_items is its 1:1
+          // verification extension, checked by the same shared verify-license module the resume path uses. Nothing here can fail signup:
           // any error just leaves the license candidate-stated / unverified.
           try {
             const certRows = await licenseRes.json();
@@ -278,12 +278,8 @@ export default {
               body: JSON.stringify({
                 candidate_id: candidateId, resume_document_id: null, source: "license_only",
                 linked_certification_id: certId,
-                license_number: lic.license_number || null,
                 state: /^[A-Z]{2}$/.test(stateCode) ? stateCode : null,
                 state_source: /^[A-Z]{2}$/.test(stateCode) ? "candidate" : null,
-                license_name: lic.name || null, issuing_body: lic.issuing_body || null,
-                trade_soc_code: lic.trade_soc_code || null,
-                issue_date: lic.issue_date || null, expiration_date: lic.expiration_date || null,
                 candidate_confirmed: true,
               }),
             });

@@ -104,23 +104,37 @@ export default {
         };
       });
 
-      // Licenses the candidate confirmed that never got an automatic check (no state supplied, or a
-      // state with no registry adapter yet) have no verification_items row by design — nothing is
-      // queued or chased. They're surfaced here so the candidate sees them as candidate-stated /
-      // not independently verified rather than not at all. Anything with a queue row is already
-      // in `items` above.
-      const licUrl = SUPABASE_URL + "/rest/v1/license_items?select=id,license_name,license_number,state,verification_outcome"
-        + "&candidate_confirmed=eq.true&queue_item_id=is.null&candidate_id=eq." + encodeURIComponent(candidate_id) + "&order=created_at.asc";
+      // Every license the candidate confirmed (a certification row + its license_items extension), so
+      // the client can (a) show licenses that never got a queue row — no state, unsupported state,
+      // or a correction being requested — as candidate-stated instead of not at all, and (b) offer
+      // the edit/correction surface on any license that isn't already verified. Licenses with a
+      // queue row are also in `items` above (type "License"); the client matches them by id.
+      const licUrl = SUPABASE_URL + "/rest/v1/license_items?select=id,state,verification_outcome,queue_item_id,correction_status,correction_reason,correction_message,certification_items(name,issuing_body,license_number)"
+        + "&candidate_confirmed=eq.true&candidate_id=eq." + encodeURIComponent(candidate_id) + "&order=created_at.asc";
       const licRes = await fetch(licUrl, {
         headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": "Bearer " + SUPABASE_SERVICE_ROLE_KEY },
       });
-      const licRows = licRes.ok ? await licRes.json() : [];
-      const unverified_licenses = licRows.map((l: any) => ({
-        id: l.id, name: l.license_name || null, licenseNumber: l.license_number || null, state: l.state || null,
-        outcome: l.verification_outcome || null,
-      }));
+      const licRows: any[] = licRes.ok ? await licRes.json() : [];
+      const queueStatusById = new Map(rows.map((r: any) => [r.id, r.status]));
+      const licenses = licRows.map((l: any) => {
+        const qStatus = l.queue_item_id ? queueStatusById.get(l.queue_item_id) : null;
+        return {
+          id: l.id,
+          name: l.certification_items?.name || null,
+          issuingBody: l.certification_items?.issuing_body || null,
+          licenseNumber: l.certification_items?.license_number || null,
+          state: l.state || null,
+          outcome: l.verification_outcome || null,
+          queueItemId: l.queue_item_id || null,
+          // Locked once verified / confirmed / a discrepancy is open (matches update-license-details).
+          editable: l.verification_outcome !== "verified" && qStatus !== "Confirmed" && qStatus !== "Discrepancy",
+          correction: l.correction_status === "requested"
+            ? { status: "requested", reason: l.correction_reason || null, message: l.correction_message || null }
+            : null,
+        };
+      });
 
-      return new Response(JSON.stringify({ ok: true, items, unverified_licenses }), {
+      return new Response(JSON.stringify({ ok: true, items, licenses }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     } catch (e) {

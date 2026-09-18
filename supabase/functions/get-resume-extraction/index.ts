@@ -218,7 +218,7 @@ export default {
       // Deliberately an explicit column list, not select("*"): verification_detail holds raw
       // registry records and never goes to the candidate client.
       const licenseItemsQuery = supabase.from("license_items")
-        .select("id, resume_document_id, linked_certification_id, source_text, license_number, holder_name_guess, state, state_evidence, state_source, license_name, issuing_body, issue_date, expiration_date, confidence, candidate_confirmed, verification_outcome")
+        .select("id, resume_document_id, linked_certification_id, source_text, state, state_evidence, state_source, confidence, candidate_confirmed, verification_outcome")
         .eq("resume_document_id", effectiveDoc.id).order("created_at", { ascending: true });
 
       const [workHistory, education, certifications, skills, freeform, signed, licenseItems] = await Promise.all([

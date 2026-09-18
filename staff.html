@@ -3110,7 +3110,12 @@ class Component extends DCLogic {
         const matchLabel = m.exactMatch === true ? 'exact name match' : m.exactMatch === false ? 'name does NOT match' : 'name not checked';
         return '• ' + m.name + ' — ' + m.licenseType + (m.licenseNumber ? (' #' + m.licenseNumber) : '') + ', ' + m.status + (m.expirationDate ? (' (expires ' + m.expirationDate + ')') : '') + ' — ' + matchLabel;
       });
-      const needsReview = data.matches.length > 1 || data.matches.some((m) => m.exactMatch === false);
+      // Ambiguity is about EXACT name matches, not total rows: DBPR legitimately returns a business
+      // row and its qualifying individual under one license number, and that is not ambiguous when
+      // exactly one of them is an exact match. (Same rule as verify-license's decide().) When no name
+      // was supplied to compare against (exactMatch null on every row), fall back to row count.
+      const nameChecked = data.matches.some((m) => m.exactMatch !== null && m.exactMatch !== undefined);
+      const needsReview = nameChecked ? data.matches.filter((m) => m.exactMatch === true).length !== 1 : data.matches.length > 1;
       return { text: data.matches.length + ' match(es) found:\n' + lines.join('\n'), needsReview };
     }
 

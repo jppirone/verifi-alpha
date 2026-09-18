@@ -3172,6 +3172,33 @@ a:hover{color:var(--color-accent)}
               </sc-raw-select>
               <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6;margin-top:var(--space-1)">Used to route this certification to the right licensing board for automated checks. If left blank, this certification is sent for manual review instead.</div>
             </div>
+            <sc-if value="{{ item.isLicense }}" hint-placeholder-val="{{ false }}">
+            <div class="field" style="padding:var(--space-2);border:1px solid var(--color-accent);border-radius:var(--radius-md,8px)">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap;margin-bottom:var(--space-1)">
+                <span class="tag tag-outline">Professional license</span>
+                <button type="button" class="btn btn-ghost" style="font-size:12px" sc-camel-on-click="{{ item.onRemoveLicense }}">This isn't a license</button>
+              </div>
+              <label>Issuing state <span style="font-weight:400;color:var(--color-neutral-500)">(optional to continue — required for automatic verification)</span></label>
+              <sc-raw-select class="input" value="{{ item.licenseState }}" sc-camel-on-change="{{ item.onLicenseState }}">
+                <option value="">Select the issuing state…</option>
+                <sc-for list="{{ usStateOptions }}" as="st" hint-placeholder-count="3">
+                  <option value="{{ st.code }}">{{ st.name }}</option>
+                </sc-for>
+              </sc-raw-select>
+              <sc-if value="{{ item.licenseHasEvidence }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:11px;color:var(--color-neutral-500);margin-top:var(--space-1)">State read from your resume: “{{ item.licenseEvidence }}”</div>
+              </sc-if>
+              <sc-if value="{{ item.licenseNoState }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:11px;color:var(--color-warning,#c77d1e);margin-top:var(--space-1)">No state selected — this license will be saved as not verified. You can add the state later from the Verification tab.</div>
+              </sc-if>
+              <sc-if value="{{ item.licenseStateSupported }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:11px;color:var(--color-neutral-500);margin-top:var(--space-1)">Licenses from this state are checked automatically after you continue.</div>
+              </sc-if>
+              <sc-if value="{{ item.licenseStateUnsupported }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:11px;color:var(--color-neutral-500);margin-top:var(--space-1)">Automatic checks aren't available for this state yet — this license will be saved as not verified.</div>
+              </sc-if>
+            </div>
+            </sc-if>
           </div>
           </sc-for>
         </div>
@@ -3209,55 +3236,12 @@ a:hover{color:var(--color-accent)}
         </sc-if>
       </sc-for>
 
-      <!-- Automatic license verification: detected licenses get their own distinct card, never the
-           certification card. State is offered prominently but is NOT required to continue — a license
-           with no state is saved as not verified and nothing follows up on it. -->
+      <!-- Automatic license verification: a detected license is NOT a second card - it is the same
+           certification card, marked as a professional license with an optional issuing-state field
+           (see the item.isLicense block inside the certification card above). This is only the
+           in-flight indicator while the separate detection pass runs. -->
       <sc-if value="{{ resumeLicenseDetecting }}" hint-placeholder-val="{{ false }}">
         <div class="card elev-sm" style="font-size:12px;color:var(--color-neutral-500)">Checking your resume for professional licenses…</div>
-      </sc-if>
-      <sc-if value="{{ resumeHasLicenseCards }}" hint-placeholder-val="{{ false }}">
-      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
-        <div style="display:flex;align-items:center;gap:6px"><span class="tag tag-outline">Professional licenses</span></div>
-        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">We found what look like professional licenses on your resume. Adding the state that issued each one is optional — you can continue without it — but automatic verification against that state's licensing registry can only run when a state is provided. A license without a state is saved as not verified.</div>
-        <sc-for list="{{ resumeLicenseCards }}" as="lic" hint-placeholder-count="1">
-        <div style="display:flex;flex-direction:column;gap:var(--space-2);padding-top:var(--space-2);border-top:1px solid var(--color-divider)">
-          <sc-if value="{{ lic.isLinked }}" hint-placeholder-val="{{ false }}">
-            <div style="font-size:11px;color:var(--color-neutral-500)">This license is also listed under your certifications above. Changes you make to its name, number, or dates here are applied to that entry too.</div>
-          </sc-if>
-          <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
-            <div class="field" style="flex:1;min-width:160px"><label>License</label><input class="input" value="{{ lic.name }}" sc-camel-on-change="{{ lic.onName }}"></div>
-            <div class="field" style="flex:1;min-width:160px"><label>Issuing body</label><input class="input" value="{{ lic.issuingBody }}" sc-camel-on-change="{{ lic.onIssuingBody }}"></div>
-          </div>
-          <div class="field"><label>License number</label><input class="input" value="{{ lic.licenseNumber }}" sc-camel-on-change="{{ lic.onLicenseNumber }}"></div>
-          <div class="field" style="padding:var(--space-2);border:1px solid var(--color-accent);border-radius:var(--radius-md,8px)">
-            <label>Issuing state <span style="font-weight:400;color:var(--color-neutral-500)">(optional to continue — required for automatic verification)</span></label>
-            <sc-raw-select class="input" value="{{ lic.state }}" sc-camel-on-change="{{ lic.onState }}">
-              <option value="">Select the issuing state…</option>
-              <sc-for list="{{ usStateOptions }}" as="st" hint-placeholder-count="3">
-                <option value="{{ st.code }}">{{ st.name }}</option>
-              </sc-for>
-            </sc-raw-select>
-            <sc-if value="{{ lic.hasStateEvidence }}" hint-placeholder-val="{{ false }}">
-              <div style="font-size:11px;color:var(--color-neutral-500);margin-top:var(--space-1)">State read from your resume: “{{ lic.stateEvidence }}”</div>
-            </sc-if>
-            <sc-if value="{{ lic.noState }}" hint-placeholder-val="{{ false }}">
-              <div style="font-size:11px;color:var(--color-warning,#c77d1e);margin-top:var(--space-1)">No state selected — this license will be saved as not verified.</div>
-            </sc-if>
-            <sc-if value="{{ lic.stateSupported }}" hint-placeholder-val="{{ false }}">
-              <div style="font-size:11px;color:var(--color-neutral-500);margin-top:var(--space-1)">Licenses from this state are checked automatically after you continue.</div>
-            </sc-if>
-            <sc-if value="{{ lic.stateUnsupported }}" hint-placeholder-val="{{ false }}">
-              <div style="font-size:11px;color:var(--color-neutral-500);margin-top:var(--space-1)">Automatic checks aren't available for this state yet — this license will be saved as not verified.</div>
-            </sc-if>
-          </div>
-          <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
-            <div class="field" style="flex:1;min-width:140px"><label>Issue date</label><input class="input" type="date" value="{{ lic.issueDate }}" sc-camel-on-change="{{ lic.onIssueDate }}"></div>
-            <div class="field" style="flex:1;min-width:140px"><label>Expiration date</label><input class="input" type="date" value="{{ lic.expirationDate }}" sc-camel-on-change="{{ lic.onExpirationDate }}"></div>
-          </div>
-          <div><button type="button" class="btn btn-ghost" sc-camel-on-click="{{ lic.onRemove }}">This isn't a license — remove</button></div>
-        </div>
-        </sc-for>
-      </div>
       </sc-if>
 
       <sc-if value="{{ resumeHasHobbies }}" hint-placeholder-val="{{ false }}">
@@ -3886,6 +3870,11 @@ a:hover{color:var(--color-accent)}
           <div style="font-size:13px;color:var(--color-neutral-500)">Loading your verification items…</div>
         </sc-if>
 
+        <sc-if value="{{ hasLicenseEditNotice }}" hint-placeholder-val="{{ false }}">
+          <div class="card elev-sm" style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">{{ licenseEditNotice }}</div>
+        </sc-if>
+
+
         <sc-if value="{{ verificationItemsError }}" hint-placeholder-val="{{ false }}">
           <div style="font-size:13px;color:var(--color-neutral-500)">We couldn't load your verification items just now. Try refreshing the page.</div>
         </sc-if>
@@ -3945,6 +3934,37 @@ a:hover{color:var(--color-accent)}
                 <div style="font-size:12px;color:var(--color-neutral-400);border-top:1px solid var(--color-divider);padding-top:8px">{{ row.unverifiedLicenseNote }}</div>
               </sc-if>
 
+              <sc-if value="{{ row.hasCorrectionMessage }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:12px;color:var(--color-warning,#c77d1e);border-top:1px solid var(--color-divider);padding-top:8px;line-height:1.6">{{ row.correctionMessage }}</div>
+              </sc-if>
+              <sc-if value="{{ row.showLicenseEditButton }}" hint-placeholder-val="{{ false }}">
+                <button type="button" class="btn btn-ghost" style="align-self:flex-start;font-size:12px" sc-camel-on-click="{{ row.onOpenLicenseEdit }}">{{ row.licenseEditButtonLabel }}</button>
+              </sc-if>
+              <sc-if value="{{ row.licenseEditOpen }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;flex-direction:column;gap:var(--space-2);border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
+                  <div class="field" style="max-width:320px">
+                    <label>Issuing state</label>
+                    <sc-raw-select class="input" value="{{ licenseEditStateValue }}" sc-camel-on-change="{{ setLicenseEditState }}">
+                      <option value="">Select the issuing state…</option>
+                      <sc-for list="{{ usStateOptions }}" as="st" hint-placeholder-count="3">
+                        <option value="{{ st.code }}">{{ st.name }}</option>
+                      </sc-for>
+                    </sc-raw-select>
+                  </div>
+                  <div class="field" style="max-width:320px"><label>License number</label><input class="input" value="{{ licenseEditNumberValue }}" sc-camel-on-change="{{ setLicenseEditNumber }}"></div>
+                  <sc-if value="{{ hasLicenseEditError }}" hint-placeholder-val="{{ false }}">
+                    <div style="font-size:11px;color:#b00020;line-height:1.5">{{ licenseEditError }}</div>
+                  </sc-if>
+                  <div style="display:flex;gap:8px;flex-wrap:wrap">
+                    <button type="button" class="btn btn-secondary" disabled="{{ licenseEditPending }}" sc-camel-on-click="{{ row.onSaveLicenseEdit }}">{{ licenseEditSaveLabel }}</button>
+                    <button type="button" class="btn btn-ghost" sc-camel-on-click="{{ row.onCancelLicenseEdit }}">Cancel</button>
+                  </div>
+                  <sc-if value="{{ row.canDismissCorrection }}" hint-placeholder-val="{{ false }}">
+                    <button type="button" class="btn btn-ghost" style="align-self:flex-start;font-size:12px" sc-camel-on-click="{{ row.onDismissLicenseCorrection }}">These details are correct — keep this as candidate-stated</button>
+                  </sc-if>
+                </div>
+              </sc-if>
+
               <!-- Item 7 (2026-09-12 live-testing session, follow-up build): durable, always-
                    reachable access to the same optional employer/certification contact-details this
                    item may have skipped or only partly filled in at confirmation time. -->
@@ -3996,6 +4016,10 @@ a:hover{color:var(--color-accent)}
         <sc-if value="{{ licenseItemsError }}" hint-placeholder-val="{{ false }}">
           <div style="font-size:13px;color:var(--color-neutral-500)">We couldn't load your license(s) just now. Try refreshing the page.</div>
         </sc-if>
+
+        <sc-if value="{{ hasLicenseEditNotice }}" hint-placeholder-val="{{ false }}">
+          <div class="card elev-sm" style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">{{ licenseEditNotice }}</div>
+        </sc-if>
         <sc-if value="{{ hasNoLicenseItems }}" hint-placeholder-val="{{ false }}">
           <div style="font-size:13px;color:var(--color-neutral-500)">No licenses tracked yet.</div>
         </sc-if>
@@ -4012,6 +4036,37 @@ a:hover{color:var(--color-accent)}
             <sc-if value="{{ row.hasExpiration }}" hint-placeholder-val="{{ false }}">
               <div style="font-size:12px;color:var(--color-neutral-500)">Expires {{ row.expirationLabel }}. No reminders are active yet — this is display only until that's built.</div>
             </sc-if>
+
+              <sc-if value="{{ row.hasCorrectionMessage }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:12px;color:var(--color-warning,#c77d1e);border-top:1px solid var(--color-divider);padding-top:8px;line-height:1.6">{{ row.correctionMessage }}</div>
+              </sc-if>
+              <sc-if value="{{ row.showLicenseEditButton }}" hint-placeholder-val="{{ false }}">
+                <button type="button" class="btn btn-ghost" style="align-self:flex-start;font-size:12px" sc-camel-on-click="{{ row.onOpenLicenseEdit }}">{{ row.licenseEditButtonLabel }}</button>
+              </sc-if>
+              <sc-if value="{{ row.licenseEditOpen }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;flex-direction:column;gap:var(--space-2);border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
+                  <div class="field" style="max-width:320px">
+                    <label>Issuing state</label>
+                    <sc-raw-select class="input" value="{{ licenseEditStateValue }}" sc-camel-on-change="{{ setLicenseEditState }}">
+                      <option value="">Select the issuing state…</option>
+                      <sc-for list="{{ usStateOptions }}" as="st" hint-placeholder-count="3">
+                        <option value="{{ st.code }}">{{ st.name }}</option>
+                      </sc-for>
+                    </sc-raw-select>
+                  </div>
+                  <div class="field" style="max-width:320px"><label>License number</label><input class="input" value="{{ licenseEditNumberValue }}" sc-camel-on-change="{{ setLicenseEditNumber }}"></div>
+                  <sc-if value="{{ hasLicenseEditError }}" hint-placeholder-val="{{ false }}">
+                    <div style="font-size:11px;color:#b00020;line-height:1.5">{{ licenseEditError }}</div>
+                  </sc-if>
+                  <div style="display:flex;gap:8px;flex-wrap:wrap">
+                    <button type="button" class="btn btn-secondary" disabled="{{ licenseEditPending }}" sc-camel-on-click="{{ row.onSaveLicenseEdit }}">{{ licenseEditSaveLabel }}</button>
+                    <button type="button" class="btn btn-ghost" sc-camel-on-click="{{ row.onCancelLicenseEdit }}">Cancel</button>
+                  </div>
+                  <sc-if value="{{ row.canDismissCorrection }}" hint-placeholder-val="{{ false }}">
+                    <button type="button" class="btn btn-ghost" style="align-self:flex-start;font-size:12px" sc-camel-on-click="{{ row.onDismissLicenseCorrection }}">These details are correct — keep this as candidate-stated</button>
+                  </sc-if>
+                </div>
+              </sc-if>
           </div>
         </sc-for>
       </div>
@@ -5833,29 +5888,116 @@ class Component extends DCLogic {
     }).filter(Boolean);
   }
 
-  // Confirmed licenses with no automatic check (no state given, or a state with no registry adapter
-  // yet) have no queue row by design. Shown here with the same "Candidate-stated / not independently
-  // verified" tier the printed phone/email get, never as a pending/under-review item — nothing is
-  // reviewing them and nothing follows up.
+  // Post-confirm edit / self-correction surface for a license (Verification tab and License Status
+  // tab). Not tier-gated: correcting the state or number a check depends on is functional, not a
+  // paid feature. lic = { id, state, licenseNumber, editable, correction }.
+  licenseRowEditProps(lic) {
+    const open = this.state.licenseEditId === lic.id;
+    return {
+      hasCorrectionMessage: !!(lic.correction && lic.correction.message),
+      correctionMessage: lic.correction ? lic.correction.message : '',
+      showLicenseEditButton: !!lic.editable && !open,
+      licenseEditButtonLabel: lic.correction ? 'Correct license details' : (lic.state ? 'Edit license details' : 'Add state / edit details'),
+      licenseEditOpen: !!lic.editable && open,
+      canDismissCorrection: !!lic.correction,
+      onOpenLicenseEdit: () => this.openLicenseEdit(lic.id, lic.state, lic.licenseNumber),
+      onSaveLicenseEdit: () => this.saveLicenseEdit(),
+      onCancelLicenseEdit: () => this.cancelLicenseEdit(),
+      onDismissLicenseCorrection: () => this.dismissLicenseCorrection(lic.id),
+    };
+  }
+
+  openLicenseEdit(id, state, number) {
+    this.setState({ licenseEditId: id, licenseEditState: state || '', licenseEditNumber: number || '', licenseEditError: '', licenseEditNotice: '' });
+  }
+
+  cancelLicenseEdit() {
+    this.setState({ licenseEditId: null, licenseEditError: '' });
+  }
+
+  async callUpdateLicenseDetails(body) {
+    const candidateId = this.state.resumeCandidateId;
+    if (!candidateId || this.state.licenseEditPending) return null;
+    this.setState({ licenseEditPending: true, licenseEditError: '', licenseEditNotice: '' });
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/update-license-details', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate_id: candidateId, ...body }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ licenseEditPending: false, licenseEditError: "Couldn't reach the server. Check your connection and try again." });
+      return null;
+    }
+    if (!res.ok || !data.ok) {
+      const msg = data.error === 'no_change' ? 'Change the state or the license number first — or choose "These details are correct" if nothing needs to change.'
+        : data.error === 'locked' ? 'This license is already verified, so it can no longer be edited.'
+        : data.error === 'invalid_state' ? 'Choose a valid state.'
+        : "Couldn't save your changes. Please try again.";
+      this.setState({ licenseEditPending: false, licenseEditError: msg });
+      return null;
+    }
+    return data;
+  }
+
+  reloadLicenseLists() {
+    const cid = this.state.resumeCandidateId;
+    if (this.state.accountType === 'license_only') this.loadLicenseItems(cid); else this.loadVerificationItems(cid);
+  }
+
+  async saveLicenseEdit() {
+    const s = this.state;
+    if (!s.licenseEditId) return;
+    const data = await this.callUpdateLicenseDetails({ license_item_id: s.licenseEditId, state: s.licenseEditState || '', license_number: s.licenseEditNumber || '' });
+    if (!data) return;
+    const r = data.result || null;
+    let notice = "Saved, but we couldn't run the automatic check just now.";
+    if (r && r.status === 'checked') {
+      notice = r.outcome === 'verified' ? 'Verified — this license matched the state registry.'
+        : (r.correction ? r.correction.message : 'Saved. This license has been sent to our team for review.');
+    } else if (r && r.status === 'incomplete') {
+      notice = 'Saved. Add the missing detail (' + (r.missing || []).map(m => ({ license_number: 'license number', state: 'state' }[m] || m)).join(', ') + ') to run the automatic check.';
+    } else if (r && (r.status === 'already_verified' || r.status === 'recently_attempted')) {
+      notice = 'Saved.';
+    }
+    this.setState({ licenseEditPending: false, licenseEditId: null, licenseEditNotice: notice }, () => this.reloadLicenseLists());
+  }
+
+  async dismissLicenseCorrection(id) {
+    const data = await this.callUpdateLicenseDetails({ license_item_id: id, action: 'dismiss' });
+    if (!data) return;
+    this.setState({ licenseEditPending: false, licenseEditId: null, licenseEditNotice: 'Got it — this license stays as candidate-stated, not independently verified.' }, () => this.reloadLicenseLists());
+  }
+
+  // Licenses with no queue row (no state given, an unsupported state, a first no-match awaiting the
+  // candidate's correction, or a correction the candidate dismissed) are shown here with the same
+  // "Candidate-stated / not independently verified" tier the printed phone/email get — never as a
+  // pending or negative item. Nothing is reviewing them and nothing follows up, except a requested
+  // correction, which asks the candidate (not staff) to fix the details.
   getUnverifiedLicenseRows() {
     const s = this.state;
     if (s.verificationFilter === 'completed') return [];
-    return (s.verificationUnverifiedLicenses || []).map(l => {
+    return (s.verificationLicenses || []).filter(l => !l.queueItemId).map(l => {
       const reason = !l.state
         ? "No issuing state was provided, so it couldn't be checked automatically."
-        : "Automatic checks aren't available for this state yet.";
+        : l.outcome === 'not_found'
+          ? "It wasn't found in the state registry under the details provided."
+          : "Automatic checks aren't available for this state yet.";
       return {
         id: 'LIC-' + String(l.id).slice(0, 6).toUpperCase(),
         categoryLabel: this.VERIFICATION_CATEGORY_LABELS['License'],
         claim: [l.name || 'License', l.licenseNumber ? `Lic #${l.licenseNumber}` : '', l.state || ''].filter(Boolean).join(', '),
-        safeLabel: 'Candidate-stated',
-        tagClass: 'tag-outline',
-        isUnverifiedLicense: true,
+        safeLabel: l.correction ? 'Action needed' : 'Candidate-stated',
+        tagClass: l.correction ? 'tag-accent' : 'tag-outline',
+        isUnverifiedLicense: !l.correction,
         unverifiedLicenseNote: 'Sent as you stated it, not independently verified. ' + reason,
         isDiscrepancy: false, isNeedsReview: false, needsReviewNote: '', discrepancyNote: '',
         hasResponded: false, canRespond: false, showRespondButton: false, responseFormOpen: false,
         openRespond: () => {}, cancelRespond: () => {}, submitRespond: () => {},
         canEditContactDetails: false, openContactDetails: () => {},
+        ...this.licenseRowEditProps(l),
       };
     });
   }
@@ -5904,6 +6046,8 @@ class Component extends DCLogic {
           // own "no education section" scope) and only when a real source row is known.
           canEditContactDetails: (it.type === 'Job Experience' || it.type === 'Certification') && !!it.sourceItemId,
           openContactDetails: () => this.openContactDetailsModal(it.type, it.sourceItemId, it.claim),
+          ...(it.type === 'License' && it.sourceItemId && (s.verificationLicenses || []).find(l => l.id === it.sourceItemId)
+            ? this.licenseRowEditProps((s.verificationLicenses || []).find(l => l.id === it.sourceItemId)) : {}),
         };
       })
       .concat(this.getUnverifiedLicenseRows());
@@ -6081,7 +6225,7 @@ class Component extends DCLogic {
       verificationItemsLoading: false,
       verificationItemsError: null,
       verificationItems: data.items || [],
-      verificationUnverifiedLicenses: data.unverified_licenses || [],
+      verificationLicenses: data.licenses || [],
       verificationItemsLoadedFor: candidateId,
     });
   }
@@ -6738,7 +6882,8 @@ class Component extends DCLogic {
     // resolveEmployerContact(true), silently discarding anything typed with zero confirmation.
     skipEmployerContactModalOpen: false,
     verificationFilter: 'active', upgradeModalOpen: false, upgradeReturnTab: null, upgradeReturnTarget: null,
-    verificationItems: [], verificationUnverifiedLicenses: [], verificationItemsLoading: false, verificationItemsError: null, verificationItemsLoadedFor: null,
+    licenseEditId: null, licenseEditState: '', licenseEditNumber: '', licenseEditPending: false, licenseEditError: '', licenseEditNotice: '',
+    verificationItems: [], verificationLicenses: [], verificationItemsLoading: false, verificationItemsError: null, verificationItemsLoadedFor: null,
     correctionResponseOpenId: null, correctionValueDraft: '', correctionNoteDraft: '',
     correctionSubmitPending: false, correctionSubmitError: null,
     // Item 7 (2026-09-12 live-testing session, follow-up build): the durable contact-details modal
@@ -9037,36 +9182,22 @@ class Component extends DCLogic {
     this.setState(st => {
       if (!st.resumeExtraction) return {};
       const list = st.resumeExtraction[category].map(item => item.id === id ? { ...item, [field]: value } : item);
-      const next = { ...st.resumeExtraction, [category]: list };
-      // A license card linked to this certification shows the same values — keep them in step.
-      if (category === 'certifications' && next.license_items) {
-        const licField = { name: 'license_name', issuing_body: 'issuing_body', license_number: 'license_number', issue_date: 'issue_date', expiration_date: 'expiration_date' }[field];
-        if (licField) next.license_items = next.license_items.map(l => l.linked_certification_id === id ? { ...l, [licField]: value } : l);
-      }
-      return { resumeExtraction: next };
+      return { resumeExtraction: { ...st.resumeExtraction, [category]: list } };
     });
   }
 
-  // Detected-license card edits (resumeConfirm). Fields shared with a linked certification are
-  // mirrored onto it so the two payloads never disagree about the same license.
-  updateLicenseItem(id, field, value) {
+  // A detected license is the certification card plus a 1:1 extension holding only the issuing
+  // state (see detect-license-mentions), so the only license-specific edit here is the state.
+  updateLicenseState(id, value) {
     this.setState(st => {
       const ex = st.resumeExtraction;
       if (!ex || !ex.license_items) return {};
-      const lic = ex.license_items.find(l => l.id === id);
-      if (!lic) return {};
-      const license_items = ex.license_items.map(l => l.id === id ? { ...l, [field]: value } : l);
-      let certifications = ex.certifications;
-      const certField = { license_name: 'name', issuing_body: 'issuing_body', license_number: 'license_number', issue_date: 'issue_date', expiration_date: 'expiration_date' }[field];
-      if (lic.linked_certification_id && certField) {
-        certifications = certifications.map(c => c.id === lic.linked_certification_id ? { ...c, [certField]: value } : c);
-      }
-      return { resumeExtraction: { ...ex, license_items, certifications } };
+      return { resumeExtraction: { ...ex, license_items: ex.license_items.map(l => l.id === id ? { ...l, state: value || null, state_source: 'candidate', state_evidence: null } : l) } };
     });
   }
 
   // Candidate's "this isn't a license" dismissal of a false detection — applied at Confirm
-  // (confirm-resume-data deletes the row); a linked certification is left exactly as it was.
+  // (confirm-resume-data deletes the license extension only); the certification is left exactly as it was.
   removeLicenseItem(id) {
     this.setState(st => {
       const ex = st.resumeExtraction;
@@ -9111,8 +9242,17 @@ class Component extends DCLogic {
       this.setState(st => {
         const ex = st.resumeExtraction;
         if (!ex || !ex.resume_document || ex.resume_document.id !== doc.id) return { licenseDetecting: false };
-        return { licenseDetecting: false, resumeExtraction: { ...ex, license_items: out.license_items || [], resume_document: { ...ex.resume_document, license_detection_status: 'done' } } };
-      });
+        // Merge, never replace: keep any edits already made to the certifications on screen, fill only
+        // blanks the detection pass found, and add certification rows it had to create.
+        const detectedCerts = out.certifications || [];
+        const known = new Set(ex.certifications.map(c => c.id));
+        const merged = ex.certifications.map(c => {
+          const d = detectedCerts.find(x => x.id === c.id);
+          return d ? { ...c, license_number: c.license_number || d.license_number, issue_date: c.issue_date || d.issue_date, expiration_date: c.expiration_date || d.expiration_date } : c;
+        });
+        const added = detectedCerts.filter(c => !known.has(c.id)).map(c => ({ ...c, trade_soc_code: c.trade_soc_code || this.suggestTradeSocCode(c.name, c.issuing_body) || '' }));
+        return { licenseDetecting: false, resumeExtraction: { ...ex, certifications: merged.concat(added), license_items: out.license_items || [], resume_document: { ...ex.resume_document, license_detection_status: 'done' } } };
+      }, () => this.refreshCzCategoryDefaults());
     } else {
       this.setState({ licenseDetecting: false });
     }
@@ -9238,7 +9378,7 @@ class Component extends DCLogic {
       // Detected licenses (automatic license verification): state is optional here — a license with
       // no state is simply saved unverified; confirm-resume-data only fires verification when both
       // a state and a license number are present.
-      licenses: (ex.license_items || []).map(l => ({ id: l.id, license_number: l.license_number || null, state: l.state || null, license_name: l.license_name || null, issuing_body: l.issuing_body || null, issue_date: l.issue_date || null, expiration_date: l.expiration_date || null, remove: !!l._remove })),
+      licenses: (ex.license_items || []).map(l => ({ id: l.id, state: l.state || null, remove: !!l._remove })),
       opt_in: { work_history: this.state.optInWorkHistory, education: this.state.optInEducation, certifications: this.state.optInCertifications },
     };
     let res, data;
@@ -10272,7 +10412,12 @@ class Component extends DCLogic {
           // Automatic license verification: Verified only when the linked queue item is Confirmed;
           // everything else is candidate-stated (same tier as printed phone/email), never a pending or
           // negative label — nothing follows up on an unverified license.
-          status: lic.verification && lic.verification.verified ? 'Verified' : 'Candidate-stated, not independently verified',
+          status: lic.verification && lic.verification.verified ? 'Verified'
+            : (lic.verification && lic.verification.correction ? 'Action needed' : 'Candidate-stated, not independently verified'),
+          ...(lic.verification ? this.licenseRowEditProps({
+            id: lic.verification.license_item_id, state: lic.verification.state, licenseNumber: lic.license_number,
+            editable: lic.verification.editable, correction: lic.verification.correction,
+          }) : {}),
           hasExpiration: !!lic.expiration_date,
           expirationLabel: lic.expiration_date ? this.monthYearLabel(lic.expiration_date) : '',
         };
@@ -10709,7 +10854,14 @@ class Component extends DCLogic {
             heading: g.heading, hasHeading: !!g.heading.trim(),
             headingEdited: editedGroups.has('certifications:' + ids[0]),
             onHeadingChange: (e) => this.updateResumeSectionHeading('certifications', ids, e.target.value),
-            items: g.items.map(c => ({
+            items: g.items.map(c => { const lic = (s.resumeExtraction.license_items || []).find(l => l.linked_certification_id === c.id && !l._remove); return {
+              isLicense: !!lic, licenseState: lic ? (lic.state || '') : '',
+              licenseHasEvidence: !!(lic && lic.state && lic.state_source === 'detected' && lic.state_evidence), licenseEvidence: lic ? (lic.state_evidence || '') : '',
+              licenseNoState: !!lic && !lic.state,
+              licenseStateSupported: !!(lic && lic.state && this.AUTO_VERIFY_STATES.indexOf(lic.state) !== -1),
+              licenseStateUnsupported: !!(lic && lic.state && this.AUTO_VERIFY_STATES.indexOf(lic.state) === -1),
+              onLicenseState: (e) => lic && this.updateLicenseState(lic.id, e.target.value),
+              onRemoveLicense: () => lic && this.removeLicenseItem(lic.id),
               name: c.name || '', issuingBody: c.issuing_body || '', licenseNumber: c.license_number || '',
               issueDate: c.issue_date || '', expirationDate: c.expiration_date || '', tradeSocCode: c.trade_soc_code || '',
               onName: (e) => this.updateResumeItem('certifications', c.id, 'name', e.target.value),
@@ -10718,7 +10870,7 @@ class Component extends DCLogic {
               onIssueDate: (e) => this.updateResumeItem('certifications', c.id, 'issue_date', e.target.value),
               onExpirationDate: (e) => this.updateResumeItem('certifications', c.id, 'expiration_date', e.target.value),
               onTradeSocCode: (e) => this.updateResumeItem('certifications', c.id, 'trade_soc_code', e.target.value),
-            })),
+            }; }),
           });
         });
         // One block for ALL skills together (see the migration header on why section_position is a
@@ -10764,32 +10916,21 @@ class Component extends DCLogic {
           isNeedsReview: b.kind === 'needs_review',
         }));
       })(),
-      // Detected licenses: their own cards, never rendered through the certification template. See
-      // maybeDetectLicenses/updateLicenseItem. Cards for items the candidate dismissed are hidden.
+      // Detected licenses ride on the certification card (see the item.isLicense fields in
+      // resumeSectionsOrdered); these are just the shared bits.
       usStateOptions: this.US_STATE_OPTIONS,
       resumeLicenseDetecting: s.licenseDetecting,
-      resumeHasLicenseCards: !!(s.resumeExtraction && (s.resumeExtraction.license_items || []).some(l => !l._remove)),
-      resumeLicenseCards: ((s.resumeExtraction && s.resumeExtraction.license_items) || []).filter(l => !l._remove).map(l => {
-        const supported = !!l.state && this.AUTO_VERIFY_STATES.indexOf(l.state) !== -1;
-        return {
-          id: l.id,
-          name: l.license_name || '', issuingBody: l.issuing_body || '', licenseNumber: l.license_number || '',
-          state: l.state || '', issueDate: l.issue_date || '', expirationDate: l.expiration_date || '',
-          isLinked: !!l.linked_certification_id,
-          hasStateEvidence: !!(l.state && l.state_source === 'detected' && l.state_evidence),
-          stateEvidence: l.state_evidence || '',
-          noState: !l.state,
-          stateSupported: supported,
-          stateUnsupported: !!l.state && !supported,
-          onName: (e) => this.updateLicenseItem(l.id, 'license_name', e.target.value),
-          onIssuingBody: (e) => this.updateLicenseItem(l.id, 'issuing_body', e.target.value),
-          onLicenseNumber: (e) => this.updateLicenseItem(l.id, 'license_number', e.target.value),
-          onState: (e) => this.updateLicenseItem(l.id, 'state', e.target.value),
-          onIssueDate: (e) => this.updateLicenseItem(l.id, 'issue_date', e.target.value),
-          onExpirationDate: (e) => this.updateLicenseItem(l.id, 'expiration_date', e.target.value),
-          onRemove: () => this.removeLicenseItem(l.id),
-        };
-      }),
+      // Post-confirm license edit / correction surface (see licenseRowEditProps).
+      licenseEditStateValue: s.licenseEditState,
+      setLicenseEditState: (e) => this.setState({ licenseEditState: e.target.value }),
+      licenseEditNumberValue: s.licenseEditNumber,
+      setLicenseEditNumber: (e) => this.setState({ licenseEditNumber: e.target.value }),
+      licenseEditPending: s.licenseEditPending,
+      licenseEditSaveLabel: s.licenseEditPending ? 'Checking…' : 'Save and re-check',
+      hasLicenseEditError: !!s.licenseEditError,
+      licenseEditError: s.licenseEditError,
+      hasLicenseEditNotice: !!s.licenseEditNotice,
+      licenseEditNotice: s.licenseEditNotice,
       resumeConfirmPending: s.resumeConfirmPending,
       resumeConfirmDisabled: s.resumeConfirmPending || s.licenseDetecting,
       resumeConfirmError: s.resumeConfirmError,

@@ -19,9 +19,12 @@ import { encodeBase64 } from "jsr:@std/encoding@1/base64";
 // (only with a real textual signal — see validateState — NEVER inferred from the candidate's
 // location), confidence. Called once per resume_document from resumeConfirm; idempotent.
 //
-// A mention that duplicates an existing certification_items row (same license number) is LINKED to
-// it via linked_certification_id rather than dropped: dropping it would leave a real license that
-// extraction filed under Certifications permanently unverifiable.
+// Single-record model: a license is ONE certification_items row plus a 1:1 license_items extension
+// (state + verification). The model is shown the certifications extraction already produced and says
+// which one (if any) each mention is; a matched cert gets the extension (and any blank number/date
+// filled in), and a mention that matches nothing gets a NEW certification_items row created here
+// (extraction_confidence 'license_detection') so every credential has exactly one row, one card, and
+// flows through Customization / the PDF / the contact screen like any other certification.
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -106,6 +109,20 @@ function strOrNull(s: unknown): string | null {
   return typeof s === "string" && s.trim() ? s.trim() : null;
 }
 
+type ExistingCert = { id: string; name: string | null; issuing_body: string | null; license_number: string | null };
+
+function buildDetectionPrompt(existing: ExistingCert[]): string {
+  const list = existing.length
+    ? existing.map((c) => JSON.stringify({ id: c.id, name: c.name, issuing_body: c.issuing_body, license_number: c.license_number })).join("\n")
+    : "(none)";
+  return DETECTION_PROMPT + `
+
+ALREADY-EXTRACTED CERTIFICATION ENTRIES (a separate step already read these off the same resume):
+${list}
+
+For each license mention, set "existing_certification_id" to the "id" of the entry above that is the SAME credential (same license, even if worded differently or missing its number there). If it is not any of those entries, set it to null. Never use an id that is not listed above, and never give two mentions the same id.`;
+}
+
 const DETECTION_PROMPT = `You are reading a resume. Find every STATE OR GOVERNMENT-ISSUED PROFESSIONAL/TRADE LICENSE mentioned anywhere in the document, no matter where it appears: its own section, inside a Certifications or Education section, in the header block at the top, or in a sentence.
 
 A license here is a credential issued by a government licensing board or regulatory agency that authorizes someone to practice a regulated trade or profession (for example contractor, plumber, electrician, HVAC, real estate agent/broker, cosmetologist, CPA, nurse, engineer, architect, insurance agent, private investigator). It is usually identified by a license number.
@@ -123,6 +140,7 @@ Return ONLY a JSON object, no prose, in exactly this shape:
   "state_evidence": "the verbatim words from the resume that name the state, or null",
   "issue_date": "YYYY-MM-DD or null",
   "expiration_date": "YYYY-MM-DD or null",
+  "existing_certification_id": "id of the already-extracted entry this is the same credential as, or null",
   "confidence": a number from 0 to 1
 }]}
 
@@ -136,10 +154,10 @@ Use dates only when printed; otherwise null. If the resume contains no licenses,
 type Mention = {
   source_text: string | null; license_number: string | null; holder_name: string | null; license_name: string | null;
   issuing_body: string | null; state: string | null; state_evidence: string | null;
-  issue_date: string | null; expiration_date: string | null; confidence: number;
+  issue_date: string | null; expiration_date: string | null; existing_certification_id: string | null; confidence: number;
 };
 
-async function callModel(fileBase64: string, mime: string): Promise<{ ok: true; mentions: Mention[] } | { ok: false; error: string }> {
+async function callModel(fileBase64: string, mime: string, existing: ExistingCert[]): Promise<{ ok: true; mentions: Mention[] } | { ok: false; error: string }> {
   if (!ANTHROPIC_API_KEY) return { ok: false, error: "ANTHROPIC_API_KEY not configured" };
   const fileBlock = mime === "application/pdf"
     ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: fileBase64 } }
@@ -152,7 +170,7 @@ async function callModel(fileBase64: string, mime: string): Promise<{ ok: true; 
       body: JSON.stringify({
         model: MODEL,
         max_tokens: 8000,
-        messages: [{ role: "user", content: [fileBlock, { type: "text", text: DETECTION_PROMPT }] }],
+        messages: [{ role: "user", content: [fileBlock, { type: "text", text: buildDetectionPrompt(existing) }] }],
       }),
     });
   } catch (e) {
@@ -179,6 +197,7 @@ async function callModel(fileBase64: string, mime: string): Promise<{ ok: true; 
       license_name: strOrNull(m.license_name), issuing_body: strOrNull(m.issuing_body),
       state: strOrNull(m.state), state_evidence: strOrNull(m.state_evidence),
       issue_date: isoDateOrNull(m.issue_date), expiration_date: isoDateOrNull(m.expiration_date),
+      existing_certification_id: strOrNull(m.existing_certification_id),
       confidence: typeof m.confidence === "number" ? Math.max(0, Math.min(1, m.confidence)) : 0.5,
     }));
   return { ok: true, mentions };
@@ -191,10 +210,16 @@ export default {
       new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    const readItems = async (resumeDocumentId: string) => {
-      const { data } = await supabase.from("license_items").select("*")
-        .eq("resume_document_id", resumeDocumentId).order("created_at", { ascending: true });
-      return data || [];
+    // What the client needs after detection: the license extensions AND the (possibly newly created)
+    // certification rows they hang off, so it can merge both into one card per credential.
+    const readResult = async (resumeDocumentId: string) => {
+      const [li, certs] = await Promise.all([
+        supabase.from("license_items")
+          .select("id, resume_document_id, linked_certification_id, source_text, state, state_evidence, state_source, confidence, candidate_confirmed, verification_outcome")
+          .eq("resume_document_id", resumeDocumentId).order("created_at", { ascending: true }),
+        supabase.from("certification_items").select("*").eq("resume_document_id", resumeDocumentId).order("issue_date", { ascending: false }),
+      ]);
+      return { license_items: li.data || [], certifications: certs.data || [] };
     };
 
     let resumeDocumentId: string | null = null;
@@ -212,10 +237,10 @@ export default {
       if (!doc) return json({ ok: false, error: "resume_document_not_found" }, 404);
 
       if (doc.license_detection_status === "done") {
-        return json({ ok: true, status: "done", license_items: await readItems(doc.id) });
+        return json({ ok: true, status: "done", ...(await readResult(doc.id)) });
       }
       if (doc.extraction_status !== "extracted") {
-        return json({ ok: true, status: "not_ready", extraction_status: doc.extraction_status, license_items: [] });
+        return json({ ok: true, status: "not_ready", extraction_status: doc.extraction_status, license_items: [], certifications: [] });
       }
 
       // Atomic claim: null/failed -> running, or a stale 'running' (crashed run) is retaken.
@@ -226,9 +251,17 @@ export default {
         .or(`license_detection_status.is.null,license_detection_status.eq.failed,and(license_detection_status.eq.running,license_detected_at.lt.${staleCutoff})`)
         .select("id");
       if (!claimed || claimed.length === 0) {
-        return json({ ok: true, status: "running", license_items: [] });
+        return json({ ok: true, status: "running", license_items: [], certifications: [] });
       }
       claimedHere = true;
+
+      // A re-run after a failed/crashed run must not stack duplicates: clear this document's
+      // not-yet-confirmed detections (extensions first, then any certification rows a previous run
+      // created — never a certification the extraction pass made).
+      await supabase.from("license_items").delete()
+        .eq("resume_document_id", doc.id).eq("source", "resume").eq("candidate_confirmed", false);
+      await supabase.from("certification_items").delete()
+        .eq("resume_document_id", doc.id).eq("extraction_confidence", "license_detection").eq("candidate_confirmed", false);
 
       const isPdf = doc.mime_type === "application/pdf";
       const path = isPdf ? doc.original_storage_path : (doc.sanitized_render_path || doc.original_storage_path);
@@ -248,7 +281,11 @@ export default {
         return json({ ok: false, error: "file_too_large" }, 200);
       }
 
-      const result = await callModel(encodeBase64(bytes), mime);
+      const { data: existingCerts } = await supabase.from("certification_items")
+        .select("id, name, issuing_body, license_number, issue_date, expiration_date").eq("resume_document_id", doc.id);
+      const existing: ExistingCert[] = (existingCerts || []).map((c: any) => ({ id: c.id, name: c.name, issuing_body: c.issuing_body, license_number: c.license_number }));
+
+      const result = await callModel(encodeBase64(bytes), mime, existing);
       if (!result.ok) {
         await supabase.from("resume_documents").update({ license_detection_status: "failed" }).eq("id", doc.id);
         return json({ ok: false, error: result.error }, 200);
@@ -257,19 +294,16 @@ export default {
       const { data: cand } = await supabase.from("candidates").select("personal_location").eq("id", candidateId).maybeSingle();
       const locationTexts = [doc.candidate_location, doc.printed_header, cand?.personal_location].filter((x): x is string => typeof x === "string" && !!x.trim());
 
-      const { data: certs } = await supabase.from("certification_items")
-        .select("id, name, license_number").eq("resume_document_id", doc.id);
-      const certByNumber = new Map<string, string>();
-      const certByName = new Map<string, string>();
-      for (const c of certs || []) {
+      const certById = new Map<string, any>((existingCerts || []).map((c: any) => [c.id, c]));
+      const certIdByNumber = new Map<string, string>();
+      for (const c of existingCerts || []) {
         const n = normNumber(c.license_number);
-        if (n) certByNumber.set(n, c.id);
-        const nm = normName(c.name);
-        if (nm) certByName.set(nm, c.id);
+        if (n && !certIdByNumber.has(n)) certIdByNumber.set(n, c.id);
       }
 
       const seen = new Set<string>();
-      const rows: Record<string, unknown>[] = [];
+      const usedCertIds = new Set<string>();
+      const licenseRows: Record<string, unknown>[] = [];
       for (const m of result.mentions) {
         if (m.confidence < MIN_CONFIDENCE) continue;
         const num = normNumber(m.license_number);
@@ -277,22 +311,60 @@ export default {
         if (!key || seen.has(key)) continue;
         seen.add(key);
         const vs = validateState(m.state, m.state_evidence, locationTexts);
-        const linked = (num && certByNumber.get(num)) || (!num && m.license_name && certByName.get(normName(m.license_name))) || null;
-        rows.push({
+
+        // Which certification row is this credential? The model's answer (validated against this
+        // document's real rows), else an exact license-number match, else it's new.
+        let certId: string | null = null;
+        if (m.existing_certification_id && certById.has(m.existing_certification_id) && !usedCertIds.has(m.existing_certification_id)) {
+          certId = m.existing_certification_id;
+        } else if (num && certIdByNumber.has(num) && !usedCertIds.has(certIdByNumber.get(num)!)) {
+          certId = certIdByNumber.get(num)!;
+        }
+
+        if (certId) {
+          // Matched: the certification row stays the record; only blanks are filled in from the mention.
+          const c = certById.get(certId);
+          const fill: Record<string, unknown> = {};
+          if (!normNumber(c.license_number) && m.license_number) fill.license_number = m.license_number;
+          if (!c.issue_date && m.issue_date) fill.issue_date = m.issue_date;
+          if (!c.expiration_date && m.expiration_date) fill.expiration_date = m.expiration_date;
+          if (Object.keys(fill).length) {
+            const { error: fillErr } = await supabase.from("certification_items").update({ ...fill, updated_at: new Date().toISOString() })
+              .eq("id", certId).eq("candidate_id", candidateId);
+            if (fillErr) {
+              await supabase.from("resume_documents").update({ license_detection_status: "failed" }).eq("id", doc.id);
+              return json({ ok: false, error: "cert_update_failed", detail: fillErr.message }, 200);
+            }
+          }
+        } else {
+          // Not in what extraction produced: create the certification row here so this credential
+          // still has exactly one record and one card.
+          const { data: created, error: createErr } = await supabase.from("certification_items").insert({
+            candidate_id: candidateId, resume_document_id: doc.id,
+            name: m.license_name || m.issuing_body || "Professional license",
+            issuing_body: m.issuing_body, license_number: m.license_number,
+            issue_date: m.issue_date, expiration_date: m.expiration_date,
+            extraction_confidence: "license_detection", candidate_confirmed: false,
+          }).select("id").single();
+          if (createErr || !created) {
+            await supabase.from("resume_documents").update({ license_detection_status: "failed" }).eq("id", doc.id);
+            return json({ ok: false, error: "cert_create_failed", detail: createErr?.message }, 200);
+          }
+          certId = created.id;
+        }
+        usedCertIds.add(certId!);
+
+        licenseRows.push({
           candidate_id: candidateId, resume_document_id: doc.id, source: "resume",
-          linked_certification_id: linked,
-          source_text: m.source_text, license_number: m.license_number, holder_name_guess: m.holder_name,
-          license_name: m.license_name, issuing_body: m.issuing_body,
+          linked_certification_id: certId,
+          source_text: m.source_text, holder_name_guess: m.holder_name,
           state: vs.state, state_evidence: vs.evidence, state_source: vs.state ? "detected" : null,
-          issue_date: m.issue_date, expiration_date: m.expiration_date, confidence: m.confidence,
+          confidence: m.confidence,
         });
       }
 
-      // Re-run after a failure must not stack duplicates: clear this document's not-yet-confirmed detections first.
-      await supabase.from("license_items").delete()
-        .eq("resume_document_id", doc.id).eq("source", "resume").eq("candidate_confirmed", false);
-      if (rows.length) {
-        const { error: insErr } = await supabase.from("license_items").insert(rows);
+      if (licenseRows.length) {
+        const { error: insErr } = await supabase.from("license_items").insert(licenseRows);
         if (insErr) {
           await supabase.from("resume_documents").update({ license_detection_status: "failed" }).eq("id", doc.id);
           return json({ ok: false, error: "insert_failed", detail: insErr.message }, 200);
@@ -300,7 +372,7 @@ export default {
       }
       await supabase.from("resume_documents")
         .update({ license_detection_status: "done", license_detected_at: new Date().toISOString() }).eq("id", doc.id);
-      return json({ ok: true, status: "done", license_items: await readItems(doc.id) });
+      return json({ ok: true, status: "done", ...(await readResult(doc.id)) });
     } catch (e) {
       if (claimedHere && resumeDocumentId) {
         try {

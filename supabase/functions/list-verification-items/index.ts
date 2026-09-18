@@ -46,7 +46,7 @@ export default {
       // hand-typed search terms.
       const licenseIds = [...new Set(rows.filter((r: any) => r.type === "License" && r.source_item_id).map((r: any) => r.source_item_id))];
       const licenseRows: any[] = licenseIds.length
-        ? await fetch(`${SUPABASE_URL}/rest/v1/license_items?id=in.(${licenseIds.join(",")})&select=id,state,license_number,license_name,issuing_body,state_source,verification_outcome,verification_reason,verification_source,verified_at`, { headers: REST_HEADERS }).then((r) => r.ok ? r.json() : [])
+        ? await fetch(`${SUPABASE_URL}/rest/v1/license_items?id=in.(${licenseIds.join(",")})&select=id,state,state_source,verification_outcome,verification_reason,verification_source,verified_at,certification_items(name,issuing_body,license_number)`, { headers: REST_HEADERS }).then((r) => r.ok ? r.json() : [])
         : [];
       const licenseById = new Map(licenseRows.map((l) => [l.id, l]));
 
@@ -89,7 +89,7 @@ export default {
         licenseData: r.type === "License" && r.source_item_id ? (() => {
           const l = licenseById.get(r.source_item_id);
           return l ? {
-            id: l.id, state: l.state, licenseNumber: l.license_number, licenseName: l.license_name, issuingBody: l.issuing_body,
+            id: l.id, state: l.state, licenseNumber: l.certification_items?.license_number ?? null, licenseName: l.certification_items?.name ?? null, issuingBody: l.certification_items?.issuing_body ?? null,
             stateSource: l.state_source, outcome: l.verification_outcome, reason: l.verification_reason,
             source: l.verification_source, verifiedAt: l.verified_at,
           } : null;

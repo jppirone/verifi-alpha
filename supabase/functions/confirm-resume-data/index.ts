@@ -40,12 +40,13 @@ type EducationEdit = { id: string; institution?: string; degree?: string; field_
 // and left as-is) SOC trade/occupation code, echoed back the same way license_number already is —
 // see the queueInserts loop below for what happens when it's missing.
 type CertificationEdit = { id: string; name?: string; issuing_body?: string; license_number?: string; issue_date?: string; expiration_date?: string; source_match?: string; trade_soc_code?: string | null; heading?: string | null };
-// License edits (automatic license verification build): license_items are their own table, separate
-// from certification_items, so their edit path is separate too. state is only ever a 2-letter US
-// state/DC code (validated below) and is never required to confirm — a license with no state simply
-// stays unverified. remove:true is the candidate's "this isn't a license" dismissal of a false
-// detection.
-type LicenseEdit = { id: string; license_number?: string | null; state?: string | null; license_name?: string | null; issuing_body?: string | null; issue_date?: string | null; expiration_date?: string | null; remove?: boolean };
+// License edits (automatic license verification): a license is a certification row (edited through
+// CertificationEdit above — name, number, dates) plus a 1:1 license_items extension holding only the
+// issuing state. state is only ever a 2-letter US state/DC code (validated below) and is never
+// required to confirm — a license with no state simply stays unverified. remove:true is the
+// candidate's "this isn't a license" dismissal of a false detection: it drops the license extension
+// only, the certification row is left exactly as it was.
+type LicenseEdit = { id: string; state?: string | null; remove?: boolean };
 const VALID_STATE_CODES = new Set("AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY".split(" "));
 function stateOrNull(v: unknown): string | null {
   if (typeof v !== "string") return null;
@@ -284,13 +285,10 @@ export default {
           }
           const state = stateOrNull(l.state);
           const stateUnchanged = state !== null && state === prev.state;
-          const licenseNumber = (l.license_number ?? "").toString().trim() || null;
           const { error: updErr } = await supabase.from("license_items").update({
-            license_number: licenseNumber, state,
+            state,
             state_source: state ? (stateUnchanged ? prev.state_source : "candidate") : null,
             state_evidence: stateUnchanged ? prev.state_evidence : null,
-            license_name: l.license_name ?? null, issuing_body: l.issuing_body ?? null,
-            issue_date: dateOrNull(l.issue_date), expiration_date: dateOrNull(l.expiration_date),
             candidate_confirmed: true, updated_at: new Date().toISOString(),
           }).eq("id", l.id).eq("candidate_id", candidate_id);
           if (updErr) {
@@ -298,7 +296,9 @@ export default {
               status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
             });
           }
-          if (state && licenseNumber) licenseIdsToVerify.push(l.id);
+          // verify-license reads the number (and everything else) from the certification row that
+          // was just written above and returns "incomplete" without side effects if it's missing.
+          if (state) licenseIdsToVerify.push(l.id);
         }
       }
 
