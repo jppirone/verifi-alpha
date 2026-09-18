@@ -8643,7 +8643,19 @@ class Component extends DCLogic {
     }
     this.setState({ reactivatePending: false, reactivateError: null, deletionScheduled: false, deletionDate: null });
     this.addActivityLog('Account reactivated');
-    this.enterAccount(); this.addActivityLog('Logged in');
+    // Found reviewing the subscription-cancellation work: this used to call enterAccount() directly,
+    // which skips the routing every normal login gets from applySession — including its rule that a
+    // license_only candidate with no license_subscription_started_at goes to licenseBilling, not the
+    // dashboard. Since deleting a paid license account now (correctly) cancels its subscription and
+    // clears that column, every reactivated license account is in exactly that state, and was landing
+    // on Profile Info with no subscription until its next page load. Re-running resolveSession() here
+    // sends it through applySession's one real router with a fresh server read (deletion_scheduled_at
+    // was just cleared above, so it no longer short-circuits to the reactivate screen), rather than
+    // duplicating that routing logic in a second place to drift. enterAccount() stays as the fallback
+    // if the session can't be re-resolved (the same behavior this had before).
+    const routed = await this.resolveSession();
+    if (!routed) this.enterAccount();
+    this.addActivityLog('Logged in');
   }
 
   // Passwordless login, step 3 (requesting device, polling). Deliberately the exact
