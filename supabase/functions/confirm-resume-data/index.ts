@@ -40,6 +40,18 @@ type EducationEdit = { id: string; institution?: string; degree?: string; field_
 // and left as-is) SOC trade/occupation code, echoed back the same way license_number already is —
 // see the queueInserts loop below for what happens when it's missing.
 type CertificationEdit = { id: string; name?: string; issuing_body?: string; license_number?: string; issue_date?: string; expiration_date?: string; source_match?: string; trade_soc_code?: string | null; heading?: string | null };
+// License edits (automatic license verification build): license_items are their own table, separate
+// from certification_items, so their edit path is separate too. state is only ever a 2-letter US
+// state/DC code (validated below) and is never required to confirm — a license with no state simply
+// stays unverified. remove:true is the candidate's "this isn't a license" dismissal of a false
+// detection.
+type LicenseEdit = { id: string; license_number?: string | null; state?: string | null; license_name?: string | null; issuing_body?: string | null; issue_date?: string | null; expiration_date?: string | null; remove?: boolean };
+const VALID_STATE_CODES = new Set("AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY".split(" "));
+function stateOrNull(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const c = v.trim().toUpperCase();
+  return VALID_STATE_CODES.has(c) ? c : null;
+}
 // section_type/heading are echoed back by the client (candidate.html already has them, straight
 // from get-resume-extraction) rather than re-fetched here — this function only needs them to decide
 // which freeform rows are needs_review for the staff-queue flag below, not to validate anything.
@@ -97,7 +109,7 @@ export default {
         // atomic claim PATCH below as confirmed_at, since both belong to the same resume_document
         // row and both only ever get set once, at confirm time.
         candidate_location = null,
-        work_history = [], education = [], certifications = [], skills = [], freeform = [],
+        work_history = [], education = [], certifications = [], skills = [], freeform = [], licenses = [],
         opt_in = { work_history: false, education: false, certifications: false },
       }: {
         candidate_id: string;
@@ -108,6 +120,7 @@ export default {
         certifications: CertificationEdit[];
         skills: SkillEdit[];
         freeform: FreeformEdit[];
+        licenses?: LicenseEdit[];
         opt_in: { work_history: boolean; education: boolean; certifications: boolean };
       } = body;
 
@@ -236,6 +249,56 @@ export default {
           return new Response(JSON.stringify({ ok: false, error: "freeform_update_failed", detail: error ? error.message : "no matching row for this candidate", item_id: f.id }), {
             status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
+        }
+      }
+
+      // Detected licenses (separate from certifications above). Written here, verified further down
+      // once everything else has committed. Nothing about a license with a missing state/number
+      // creates a queue row or chases the candidate — it just stays unverified.
+      const licenseIdsToVerify: string[] = [];
+      if (licenses.length) {
+        const { data: prevRows, error: prevErr } = await supabase.from("license_items")
+          .select("id, state, state_source, state_evidence")
+          .eq("candidate_id", candidate_id).in("id", licenses.map((l) => l.id));
+        if (prevErr) {
+          return new Response(JSON.stringify({ ok: false, error: "license_lookup_failed", detail: prevErr.message }), {
+            status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        const prevById = new Map((prevRows || []).map((r: any) => [r.id, r]));
+        for (const l of licenses) {
+          const prev: any = prevById.get(l.id);
+          if (!prev) {
+            return new Response(JSON.stringify({ ok: false, error: "license_update_failed", detail: "no matching row for this candidate", item_id: l.id }), {
+              status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+          if (l.remove) {
+            const { error: delErr } = await supabase.from("license_items").delete().eq("id", l.id).eq("candidate_id", candidate_id);
+            if (delErr) {
+              return new Response(JSON.stringify({ ok: false, error: "license_update_failed", detail: delErr.message, item_id: l.id }), {
+                status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+              });
+            }
+            continue;
+          }
+          const state = stateOrNull(l.state);
+          const stateUnchanged = state !== null && state === prev.state;
+          const licenseNumber = (l.license_number ?? "").toString().trim() || null;
+          const { error: updErr } = await supabase.from("license_items").update({
+            license_number: licenseNumber, state,
+            state_source: state ? (stateUnchanged ? prev.state_source : "candidate") : null,
+            state_evidence: stateUnchanged ? prev.state_evidence : null,
+            license_name: l.license_name ?? null, issuing_body: l.issuing_body ?? null,
+            issue_date: dateOrNull(l.issue_date), expiration_date: dateOrNull(l.expiration_date),
+            candidate_confirmed: true, updated_at: new Date().toISOString(),
+          }).eq("id", l.id).eq("candidate_id", candidate_id);
+          if (updErr) {
+            return new Response(JSON.stringify({ ok: false, error: "license_update_failed", detail: updErr.message, item_id: l.id }), {
+              status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+          if (state && licenseNumber) licenseIdsToVerify.push(l.id);
         }
       }
 
@@ -368,10 +431,35 @@ export default {
         }
       }
 
+      // Automatic license verification: everything above is committed, so a slow or failing
+      // registry lookup can never lose the candidate's confirmation. Awaited (no background-task
+      // primitive is used anywhere in this project) but bounded, run in parallel, and each result is
+      // reported per item so the client can retry a transport-level failure. verify-license itself is
+      // idempotent and does its own required-field validation.
+      const licenseVerification = await Promise.all(licenseIdsToVerify.map(async (license_item_id) => {
+        try {
+          const vRes = await fetch(`${SUPABASE_URL}/functions/v1/verify-license`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "apikey": SUPABASE_SERVICE_ROLE_KEY,
+              "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+            },
+            body: JSON.stringify({ candidate_id, license_item_id }),
+            signal: AbortSignal.timeout(45000),
+          });
+          const vData = await vRes.json().catch(() => ({}));
+          return { license_item_id, ok: !!vData.ok, status: vData.status ?? null, outcome: vData.outcome ?? null };
+        } catch (e) {
+          return { license_item_id, ok: false, status: "transport_error", outcome: null };
+        }
+      }));
+
       return new Response(JSON.stringify({
         ok: true,
-        confirmed_counts: { work_history: work_history.length, education: education.length, certifications: certifications.length, skills: skills.length, freeform: freeform.length },
+        confirmed_counts: { work_history: work_history.length, education: education.length, certifications: certifications.length, skills: skills.length, freeform: freeform.length, licenses: licenses.filter((l) => !l.remove).length },
         queued_for_verification: queueInserts.length,
+        license_verification: licenseVerification,
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: "unhandled", detail: String(e) }), {

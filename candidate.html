@@ -3199,6 +3199,57 @@ a:hover{color:var(--color-accent)}
         </sc-if>
       </sc-for>
 
+      <!-- Automatic license verification: detected licenses get their own distinct card, never the
+           certification card. State is offered prominently but is NOT required to continue — a license
+           with no state is saved as not verified and nothing follows up on it. -->
+      <sc-if value="{{ resumeLicenseDetecting }}" hint-placeholder-val="{{ false }}">
+        <div class="card elev-sm" style="font-size:12px;color:var(--color-neutral-500)">Checking your resume for professional licenses…</div>
+      </sc-if>
+      <sc-if value="{{ resumeHasLicenseCards }}" hint-placeholder-val="{{ false }}">
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+        <div style="display:flex;align-items:center;gap:6px"><span class="tag tag-outline">Professional licenses</span></div>
+        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">We found what look like professional licenses on your resume. Adding the state that issued each one is optional — you can continue without it — but automatic verification against that state's licensing registry can only run when a state is provided. A license without a state is saved as not verified.</div>
+        <sc-for list="{{ resumeLicenseCards }}" as="lic" hint-placeholder-count="1">
+        <div style="display:flex;flex-direction:column;gap:var(--space-2);padding-top:var(--space-2);border-top:1px solid var(--color-divider)">
+          <sc-if value="{{ lic.isLinked }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:11px;color:var(--color-neutral-500)">This license is also listed under your certifications above. Changes you make to its name, number, or dates here are applied to that entry too.</div>
+          </sc-if>
+          <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+            <div class="field" style="flex:1;min-width:160px"><label>License</label><input class="input" value="{{ lic.name }}" sc-camel-on-change="{{ lic.onName }}"></div>
+            <div class="field" style="flex:1;min-width:160px"><label>Issuing body</label><input class="input" value="{{ lic.issuingBody }}" sc-camel-on-change="{{ lic.onIssuingBody }}"></div>
+          </div>
+          <div class="field"><label>License number</label><input class="input" value="{{ lic.licenseNumber }}" sc-camel-on-change="{{ lic.onLicenseNumber }}"></div>
+          <div class="field" style="padding:var(--space-2);border:1px solid var(--color-accent);border-radius:var(--radius-md,8px)">
+            <label>Issuing state <span style="font-weight:400;color:var(--color-neutral-500)">(optional to continue — required for automatic verification)</span></label>
+            <sc-raw-select class="input" value="{{ lic.state }}" sc-camel-on-change="{{ lic.onState }}">
+              <option value="">Select the issuing state…</option>
+              <sc-for list="{{ usStateOptions }}" as="st" hint-placeholder-count="3">
+                <option value="{{ st.code }}">{{ st.name }}</option>
+              </sc-for>
+            </sc-raw-select>
+            <sc-if value="{{ lic.hasStateEvidence }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:11px;color:var(--color-neutral-500);margin-top:var(--space-1)">State read from your resume: “{{ lic.stateEvidence }}”</div>
+            </sc-if>
+            <sc-if value="{{ lic.noState }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:11px;color:var(--color-warning,#c77d1e);margin-top:var(--space-1)">No state selected — this license will be saved as not verified.</div>
+            </sc-if>
+            <sc-if value="{{ lic.stateSupported }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:11px;color:var(--color-neutral-500);margin-top:var(--space-1)">Licenses from this state are checked automatically after you continue.</div>
+            </sc-if>
+            <sc-if value="{{ lic.stateUnsupported }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:11px;color:var(--color-neutral-500);margin-top:var(--space-1)">Automatic checks aren't available for this state yet — this license will be saved as not verified.</div>
+            </sc-if>
+          </div>
+          <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+            <div class="field" style="flex:1;min-width:140px"><label>Issue date</label><input class="input" type="date" value="{{ lic.issueDate }}" sc-camel-on-change="{{ lic.onIssueDate }}"></div>
+            <div class="field" style="flex:1;min-width:140px"><label>Expiration date</label><input class="input" type="date" value="{{ lic.expirationDate }}" sc-camel-on-change="{{ lic.onExpirationDate }}"></div>
+          </div>
+          <div><button type="button" class="btn btn-ghost" sc-camel-on-click="{{ lic.onRemove }}">This isn't a license — remove</button></div>
+        </div>
+        </sc-for>
+      </div>
+      </sc-if>
+
       <sc-if value="{{ resumeHasHobbies }}" hint-placeholder-val="{{ false }}">
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
         <div class="field">
@@ -3215,7 +3266,7 @@ a:hover{color:var(--color-accent)}
       <sc-if value="{{ resumeConfirmError }}" hint-placeholder-val="{{ false }}">
         <div style="font-size:12px;color:#e2735c">{{ resumeConfirmError }}</div>
       </sc-if>
-      <button type="button" class="btn btn-primary btn-block" disabled="{{ resumeConfirmPending }}" sc-camel-on-click="{{ confirmResumeData }}">{{ resumeConfirmLabel }}</button>
+      <button type="button" class="btn btn-primary btn-block" disabled="{{ resumeConfirmDisabled }}" sc-camel-on-click="{{ confirmResumeData }}">{{ resumeConfirmLabel }}</button>
     </div>
   </div>
   </sc-if>
@@ -5218,6 +5269,23 @@ class Component extends DCLogic {
     { group: 'Other', code: '21-1011', label: 'Substance Abuse Counselors' },
   ];
 
+  // Automatic license verification: the issuing-state selector shared by resumeConfirm's license
+  // cards (and, later, the license-only signup form). AUTO_VERIFY_STATES mirrors the adapters
+  // registered in supabase/functions/verify-license — add a state here only when its adapter ships.
+  US_STATE_OPTIONS = [
+    ['AL', 'Alabama'], ['AK', 'Alaska'], ['AZ', 'Arizona'], ['AR', 'Arkansas'], ['CA', 'California'], ['CO', 'Colorado'],
+    ['CT', 'Connecticut'], ['DE', 'Delaware'], ['DC', 'District of Columbia'], ['FL', 'Florida'], ['GA', 'Georgia'],
+    ['HI', 'Hawaii'], ['ID', 'Idaho'], ['IL', 'Illinois'], ['IN', 'Indiana'], ['IA', 'Iowa'], ['KS', 'Kansas'],
+    ['KY', 'Kentucky'], ['LA', 'Louisiana'], ['ME', 'Maine'], ['MD', 'Maryland'], ['MA', 'Massachusetts'],
+    ['MI', 'Michigan'], ['MN', 'Minnesota'], ['MS', 'Mississippi'], ['MO', 'Missouri'], ['MT', 'Montana'],
+    ['NE', 'Nebraska'], ['NV', 'Nevada'], ['NH', 'New Hampshire'], ['NJ', 'New Jersey'], ['NM', 'New Mexico'],
+    ['NY', 'New York'], ['NC', 'North Carolina'], ['ND', 'North Dakota'], ['OH', 'Ohio'], ['OK', 'Oklahoma'],
+    ['OR', 'Oregon'], ['PA', 'Pennsylvania'], ['RI', 'Rhode Island'], ['SC', 'South Carolina'], ['SD', 'South Dakota'],
+    ['TN', 'Tennessee'], ['TX', 'Texas'], ['UT', 'Utah'], ['VT', 'Vermont'], ['VA', 'Virginia'], ['WA', 'Washington'],
+    ['WV', 'West Virginia'], ['WI', 'Wisconsin'], ['WY', 'Wyoming'],
+  ].map(([code, name]) => ({ code, name }));
+  AUTO_VERIFY_STATES = ['FL'];
+
   // Item 8: keyword-only auto-suggestion (no vendor/LLM call — that's the deliberately separate,
   // still-pending integration decision this item's own scope excludes) for a certification's
   // trade_soc_code, run once when a resume's extraction first loads (see loadResumeExtraction).
@@ -6615,6 +6683,7 @@ class Component extends DCLogic {
     viewsOriginalPdfViewerScale: null, viewsOriginalPdfViewerFitScale: null,
     viewsOriginalDocOpen: false,
     resumeConfirmPending: false, resumeConfirmError: null,
+    licenseDetecting: false,
     // Item 1 (2026-09-11 status-check session, CRITICAL): see discardResumeDocument's own header.
     rejectResumeModalOpen: false, rejectResumePending: false, rejectResumeError: null,
     // Item C (2026-09-08 regression session): the new employer/certification contact-details
@@ -8853,6 +8922,7 @@ class Component extends DCLogic {
       // through — renderOriginalPdfViewer no-ops on its own if the extracted document isn't a PDF or
       // the container isn't mounted yet (retries via rAF), so this is safe to call unconditionally.
       this.renderOriginalPdfViewer();
+      this.maybeDetectLicenses(data);
     });
     const status = data.resume_document.extraction_status;
     // Item 1 (2026-09-08 regression session, SEV0): 'failed' used to stop polling here, the same
@@ -8924,8 +8994,85 @@ class Component extends DCLogic {
     this.setState(st => {
       if (!st.resumeExtraction) return {};
       const list = st.resumeExtraction[category].map(item => item.id === id ? { ...item, [field]: value } : item);
-      return { resumeExtraction: { ...st.resumeExtraction, [category]: list } };
+      const next = { ...st.resumeExtraction, [category]: list };
+      // A license card linked to this certification shows the same values — keep them in step.
+      if (category === 'certifications' && next.license_items) {
+        const licField = { name: 'license_name', issuing_body: 'issuing_body', license_number: 'license_number', issue_date: 'issue_date', expiration_date: 'expiration_date' }[field];
+        if (licField) next.license_items = next.license_items.map(l => l.linked_certification_id === id ? { ...l, [licField]: value } : l);
+      }
+      return { resumeExtraction: next };
     });
+  }
+
+  // Detected-license card edits (resumeConfirm). Fields shared with a linked certification are
+  // mirrored onto it so the two payloads never disagree about the same license.
+  updateLicenseItem(id, field, value) {
+    this.setState(st => {
+      const ex = st.resumeExtraction;
+      if (!ex || !ex.license_items) return {};
+      const lic = ex.license_items.find(l => l.id === id);
+      if (!lic) return {};
+      const license_items = ex.license_items.map(l => l.id === id ? { ...l, [field]: value } : l);
+      let certifications = ex.certifications;
+      const certField = { license_name: 'name', issuing_body: 'issuing_body', license_number: 'license_number', issue_date: 'issue_date', expiration_date: 'expiration_date' }[field];
+      if (lic.linked_certification_id && certField) {
+        certifications = certifications.map(c => c.id === lic.linked_certification_id ? { ...c, [certField]: value } : c);
+      }
+      return { resumeExtraction: { ...ex, license_items, certifications } };
+    });
+  }
+
+  // Candidate's "this isn't a license" dismissal of a false detection — applied at Confirm
+  // (confirm-resume-data deletes the row); a linked certification is left exactly as it was.
+  removeLicenseItem(id) {
+    this.setState(st => {
+      const ex = st.resumeExtraction;
+      if (!ex || !ex.license_items) return {};
+      return { resumeExtraction: { ...ex, license_items: ex.license_items.map(l => l.id === id ? { ...l, _remove: true } : l) } };
+    });
+  }
+
+  // Separate additive license-detection pass (detect-license-mentions), run once per unconfirmed
+  // resume from resumeConfirm. Confirm stays gated while it runs so a candidate can't submit before
+  // seeing the license cards, but it FAILS OPEN: any error or a slow response just clears the gate
+  // and the candidate continues with no license cards (nothing is lost — detection retries on the
+  // next load). Idempotent server-side; _licenseDetectDocId stops double-firing within a session.
+  async maybeDetectLicenses(data) {
+    const doc = data && data.resume_document;
+    if (!doc || doc.extraction_status !== 'extracted' || doc.license_detection_status === 'done') return;
+    if (this.state.screen !== 'resumeConfirm' || !this.state.resumeCandidateId) return;
+    const anyUnconfirmed = ['work_history', 'education', 'certifications', 'skills', 'freeform']
+      .some(k => (data[k] || []).some(i => !i.candidate_confirmed));
+    if (!anyUnconfirmed) return;
+    if (this._licenseDetectDocId === doc.id) return;
+    this._licenseDetectDocId = doc.id;
+    this.setState({ licenseDetecting: true });
+    let out = null;
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 90000);
+      const res = await fetch(this.SUPABASE_FN_URL + '/detect-license-mentions', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate_id: this.state.resumeCandidateId, resume_document_id: doc.id }),
+        signal: ctrl.signal,
+      });
+      clearTimeout(timer);
+      out = await res.json().catch(() => null);
+    } catch (e) { out = null; }
+    if (out && out.ok && out.status === 'running' && (this._licenseDetectPolls = (this._licenseDetectPolls || 0) + 1) < 20) {
+      setTimeout(() => { this._licenseDetectDocId = null; if (this.state.resumeExtraction) this.maybeDetectLicenses(this.state.resumeExtraction); }, 8000);
+      return;
+    }
+    if (out && out.ok && out.status === 'done') {
+      this.setState(st => {
+        const ex = st.resumeExtraction;
+        if (!ex || !ex.resume_document || ex.resume_document.id !== doc.id) return { licenseDetecting: false };
+        return { licenseDetecting: false, resumeExtraction: { ...ex, license_items: out.license_items || [], resume_document: { ...ex.resume_document, license_detection_status: 'done' } } };
+      });
+    } else {
+      this.setState({ licenseDetecting: false });
+    }
   }
 
   updateResumeFreeform(id, value) {
@@ -9045,6 +9192,10 @@ class Component extends DCLogic {
       // needs_review rows for staff without a second round-trip to look up what kind of freeform
       // row each id is — see that function's own header.
       freeform: ex.freeform.map(f => ({ id: f.id, content: f.content, section_type: f.section_type, heading: f.heading })),
+      // Detected licenses (automatic license verification): state is optional here — a license with
+      // no state is simply saved unverified; confirm-resume-data only fires verification when both
+      // a state and a license number are present.
+      licenses: (ex.license_items || []).map(l => ({ id: l.id, license_number: l.license_number || null, state: l.state || null, license_name: l.license_name || null, issuing_body: l.issuing_body || null, issue_date: l.issue_date || null, expiration_date: l.expiration_date || null, remove: !!l._remove })),
       opt_in: { work_history: this.state.optInWorkHistory, education: this.state.optInEducation, certifications: this.state.optInCertifications },
     };
     let res, data;
@@ -9078,6 +9229,15 @@ class Component extends DCLogic {
       return;
     }
     this.stopResumePolling();
+    // A verification call that never reached verify-license (transport error) is retried once,
+    // silently; verify-license is idempotent so a duplicate is harmless.
+    (data.license_verification || []).filter(v => !v.ok && v.status === 'transport_error').forEach(v => {
+      fetch(this.SUPABASE_FN_URL + '/verify-license', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate_id: this.state.resumeCandidateId, license_item_id: v.license_item_id }),
+      }).catch(() => {});
+    });
     // Item C (2026-09-08 regression session): the new employer/certification contact-details
     // screen goes here now instead of straight to 'tiers' — but only when there's actually
     // something to ask about (matching this screen's own "no education section" reasoning: nothing
@@ -10554,9 +10714,36 @@ class Component extends DCLogic {
           isNeedsReview: b.kind === 'needs_review',
         }));
       })(),
+      // Detected licenses: their own cards, never rendered through the certification template. See
+      // maybeDetectLicenses/updateLicenseItem. Cards for items the candidate dismissed are hidden.
+      usStateOptions: this.US_STATE_OPTIONS,
+      resumeLicenseDetecting: s.licenseDetecting,
+      resumeHasLicenseCards: !!(s.resumeExtraction && (s.resumeExtraction.license_items || []).some(l => !l._remove)),
+      resumeLicenseCards: ((s.resumeExtraction && s.resumeExtraction.license_items) || []).filter(l => !l._remove).map(l => {
+        const supported = !!l.state && this.AUTO_VERIFY_STATES.indexOf(l.state) !== -1;
+        return {
+          id: l.id,
+          name: l.license_name || '', issuingBody: l.issuing_body || '', licenseNumber: l.license_number || '',
+          state: l.state || '', issueDate: l.issue_date || '', expirationDate: l.expiration_date || '',
+          isLinked: !!l.linked_certification_id,
+          hasStateEvidence: !!(l.state && l.state_source === 'detected' && l.state_evidence),
+          stateEvidence: l.state_evidence || '',
+          noState: !l.state,
+          stateSupported: supported,
+          stateUnsupported: !!l.state && !supported,
+          onName: (e) => this.updateLicenseItem(l.id, 'license_name', e.target.value),
+          onIssuingBody: (e) => this.updateLicenseItem(l.id, 'issuing_body', e.target.value),
+          onLicenseNumber: (e) => this.updateLicenseItem(l.id, 'license_number', e.target.value),
+          onState: (e) => this.updateLicenseItem(l.id, 'state', e.target.value),
+          onIssueDate: (e) => this.updateLicenseItem(l.id, 'issue_date', e.target.value),
+          onExpirationDate: (e) => this.updateLicenseItem(l.id, 'expiration_date', e.target.value),
+          onRemove: () => this.removeLicenseItem(l.id),
+        };
+      }),
       resumeConfirmPending: s.resumeConfirmPending,
+      resumeConfirmDisabled: s.resumeConfirmPending || s.licenseDetecting,
       resumeConfirmError: s.resumeConfirmError,
-      resumeConfirmLabel: s.resumeConfirmPending ? 'Saving…' : 'Confirm and continue',
+      resumeConfirmLabel: s.resumeConfirmPending ? 'Saving…' : (s.licenseDetecting ? 'Checking for licenses…' : 'Confirm and continue'),
       confirmResumeData: () => this.submitResumeConfirmation(),
       // Item 1 (2026-09-11 status-check session, CRITICAL): see discardResumeDocument's own header.
       rejectResumeModalOpen: s.rejectResumeModalOpen,

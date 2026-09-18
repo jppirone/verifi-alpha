@@ -78,7 +78,7 @@ export default {
       // intentional skip back into resumeConfirm forever.
       // employer_contact_resolved_at added for Item C (2026-09-08): same class of signal, one step
       // later in the flow — see checkEmployerContactIncomplete's own header in candidate.html.
-      const RESUME_DOC_SELECT = "id, original_storage_path, original_filename, mime_type, extraction_status, uploaded_at, continued_without_data_at, employer_contact_resolved_at, candidate_location, printed_header";
+      const RESUME_DOC_SELECT = "id, original_storage_path, original_filename, mime_type, extraction_status, uploaded_at, continued_without_data_at, employer_contact_resolved_at, candidate_location, printed_header, license_detection_status";
 
       // Item (2026-09-14 live-testing session, real bug found in production data): this used to
       // order by uploaded_at alone — the single most recent row, full stop, with no regard for
@@ -215,7 +215,13 @@ export default {
         supabase.from("candidate_freeform_sections").update({ candidate_id }).eq("resume_document_id", effectiveDoc.id).is("candidate_id", null),
       ]).catch(() => {});
 
-      const [workHistory, education, certifications, skills, freeform, signed] = await Promise.all([
+      // Deliberately an explicit column list, not select("*"): verification_detail holds raw
+      // registry records and never goes to the candidate client.
+      const licenseItemsQuery = supabase.from("license_items")
+        .select("id, resume_document_id, linked_certification_id, source_text, license_number, holder_name_guess, state, state_evidence, state_source, license_name, issuing_body, issue_date, expiration_date, confidence, candidate_confirmed, verification_outcome")
+        .eq("resume_document_id", effectiveDoc.id).order("created_at", { ascending: true });
+
+      const [workHistory, education, certifications, skills, freeform, signed, licenseItems] = await Promise.all([
         supabase.from("work_history_items").select("*").eq("resume_document_id", effectiveDoc.id).order("start_date", { ascending: false }),
         supabase.from("education_items").select("*").eq("resume_document_id", effectiveDoc.id).order("start_date", { ascending: false }),
         supabase.from("certification_items").select("*").eq("resume_document_id", effectiveDoc.id).order("issue_date", { ascending: false }),
@@ -225,6 +231,7 @@ export default {
         supabase.from("skill_items").select("*").eq("resume_document_id", effectiveDoc.id).order("position", { ascending: true }),
         supabase.from("candidate_freeform_sections").select("*").eq("resume_document_id", effectiveDoc.id),
         supabase.storage.from(BUCKET).createSignedUrl(effectiveDoc.original_storage_path, 3600),
+        licenseItemsQuery,
       ]);
 
       return new Response(JSON.stringify({
@@ -235,6 +242,7 @@ export default {
         certifications: certifications.data ?? [],
         skills: skills.data ?? [],
         freeform: freeform.data ?? [],
+        license_items: licenseItems.data ?? [],
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: "unhandled", detail: String(e) }), {
