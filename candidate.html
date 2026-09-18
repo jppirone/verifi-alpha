@@ -3462,13 +3462,15 @@ a:hover{color:var(--color-accent)}
     </div>
   </div>
 
-  <!-- Item 11 (2026-09-13 live-testing session): this line is static text, not a real
-       kycVerified-driven condition — pre-existing, unrelated to this item's own scope, and left as
-       every full-resume candidate already saw it (kycVerified there is still pure client state, not
-       real backend fact — see the KYC modal's own header). A license_only candidate's KYC IS a
-       real, persisted fact by construction (kycVerifiedAt, set at confirm-verification time — see
-       that function's own header), so showing this exact "not completed" line to them would be a
-       new, avoidable dishonesty this item's own honesty standard doesn't allow. -->
+  <!-- Item 11 (2026-09-13 live-testing session) ORIGINALLY gated this on accountType === 'license_only'
+       — at the time, kycVerified was pure client state for full-resume accounts (not a real backend
+       fact yet), so showing "completed" to them here would have been a false claim; showing
+       "not completed" was accepted as a known, static, harmless inaccuracy instead, since it was still
+       purely informational and gated nothing. Verification-status persistence fix (2026-09-18) made
+       kycVerifiedAt a real, persisted fact for BOTH account types (see record-verification-event's own
+       header) — this banner now reflects that for every account, not just license_only, since the
+       original reason to special-case license_only no longer applies: the fact is equally real either
+       way now. -->
   <sc-if value="{{ showKycNotCompletedBanner }}" hint-placeholder-val="{{ true }}">
     <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.5;margin-bottom:var(--space-4)">Identity verification: not completed. Every tab stays open; only specific actions inside require verification.</div>
   </sc-if>
@@ -9195,8 +9197,8 @@ class Component extends DCLogic {
       // and confirmed with the user before building, not assumed.
       isFullResumeAccount: s.accountType !== 'license_only',
       isLicenseOnlyAccount: s.accountType === 'license_only',
-      showKycCompletedBanner: s.accountType === 'license_only' && !!s.kycVerifiedAt,
-      showKycNotCompletedBanner: !(s.accountType === 'license_only' && !!s.kycVerifiedAt),
+      showKycCompletedBanner: !!s.kycVerifiedAt,
+      showKycNotCompletedBanner: !s.kycVerifiedAt,
       tabIsProfile: s.accountTab === 'profile',
       tabProfileClass: s.accountTab === 'profile' ? 'btn-secondary' : 'btn-ghost',
       selectTabProfile: () => this.guardedNav(() => this.setState({ accountTab: 'profile' })),
