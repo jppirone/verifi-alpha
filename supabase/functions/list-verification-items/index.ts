@@ -41,6 +41,15 @@ export default {
       const workHistoryIds = [...new Set(rows.filter((r: any) => r.type === "Job Experience" && r.source_item_id).map((r: any) => r.source_item_id))];
       const certIds = [...new Set(rows.filter((r: any) => r.type === "Certification" && r.source_item_id).map((r: any) => r.source_item_id))];
 
+      // type "License" rows point at license_items (see verify-license): the stored state / number /
+      // last automatic outcome staff need in order to re-run the check against real data instead of
+      // hand-typed search terms.
+      const licenseIds = [...new Set(rows.filter((r: any) => r.type === "License" && r.source_item_id).map((r: any) => r.source_item_id))];
+      const licenseRows: any[] = licenseIds.length
+        ? await fetch(`${SUPABASE_URL}/rest/v1/license_items?id=in.(${licenseIds.join(",")})&select=id,state,license_number,license_name,issuing_body,state_source,verification_outcome,verification_reason,verification_source,verified_at`, { headers: REST_HEADERS }).then((r) => r.ok ? r.json() : [])
+        : [];
+      const licenseById = new Map(licenseRows.map((l) => [l.id, l]));
+
       const [workHistoryContacts, certContacts] = await Promise.all([
         workHistoryIds.length
           ? fetch(`${SUPABASE_URL}/rest/v1/work_history_items?id=in.(${workHistoryIds.join(",")})&select=id,company,employer_name_override,employer_location_override,contact_phone,contact_name`, { headers: REST_HEADERS }).then((r) => r.ok ? r.json() : [])
@@ -77,6 +86,14 @@ export default {
         note: r.note,
         internalNote: r.internal_note,
         automatedCheck: r.automated_check,
+        licenseData: r.type === "License" && r.source_item_id ? (() => {
+          const l = licenseById.get(r.source_item_id);
+          return l ? {
+            id: l.id, state: l.state, licenseNumber: l.license_number, licenseName: l.license_name, issuingBody: l.issuing_body,
+            stateSource: l.state_source, outcome: l.verification_outcome, reason: l.verification_reason,
+            source: l.verification_source, verifiedAt: l.verified_at,
+          } : null;
+        })() : null,
         status: r.status,
         assignedTo: r.assigned_to,
         correctionRequested: r.correction_requested,

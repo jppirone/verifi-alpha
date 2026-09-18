@@ -20,8 +20,12 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 //                                  reached, exact match but not active, rows but none name-matching,
 //                                  lookup/scrape/API failure
 //        unsupported_jurisdiction  no adapter for the state (never conflated with not_found)
-//      No outcome here is ever a negative determination about the candidate: everything that is not
-//      a clean pass routes to Needs Reconciliation for a human, never to Discrepancy/Unable to Verify.
+//      The automatic (candidate-confirm) path never produces a negative determination: everything
+//      that is not a clean pass routes to Needs Reconciliation for a human. The one exception is a
+//      staff-triggered re-run (staff_rerun), where an exact name+number match whose registry status
+//      is DEFINITIVELY not in good standing (inactive/suspended/revoked/expired...) becomes a
+//      Discrepancy on the queue row; "delinquent" and other indeterminate statuses stay
+//      Needs Reconciliation either way.
 //   3. persist() — writes the outcome onto license_items and (for verified / ambiguous / not_found)
 //      the verification_items queue row (type "License") plus a System timeline entry. An
 //      unsupported jurisdiction gets NO queue row: nothing exists for staff to run.
@@ -42,7 +46,7 @@ type RequiredField = "license_number" | "first_name" | "last_name";
 type RegistryRecord = {
   name: string;
   nameMatches: boolean;
-  active: boolean;
+  standing: "active" | "inactive" | "indeterminate";
   statusText: string;
   licenseType: string | null;
   expiration: string | null; // ISO yyyy-mm-dd when the registry gave one
@@ -64,15 +68,20 @@ interface JurisdictionAdapter {
 // ---------------------------------------------------------------------------------------------
 // decide(): shared outcome + ambiguity routing
 // ---------------------------------------------------------------------------------------------
-function decide(lookup: Lookup): { outcome: Outcome; reason: string; matched: RegistryRecord | null } {
-  if (!lookup.ok) return { outcome: "ambiguous", reason: "lookup_failed", matched: null };
-  if (lookup.records.length === 0) return { outcome: "not_found", reason: "no_records", matched: null };
-  if (lookup.capped) return { outcome: "ambiguous", reason: "result_cap_reached", matched: null };
+type Decision = { outcome: Outcome; reason: string; matched: RegistryRecord | null; definitiveNegative: boolean };
+function decide(lookup: Lookup): Decision {
+  const d = (outcome: Outcome, reason: string, matched: RegistryRecord | null = null, definitiveNegative = false): Decision =>
+    ({ outcome, reason, matched, definitiveNegative });
+  if (!lookup.ok) return d("ambiguous", "lookup_failed");
+  if (lookup.records.length === 0) return d("not_found", "no_records");
+  if (lookup.capped) return d("ambiguous", "result_cap_reached");
   const exact = lookup.records.filter((r) => r.nameMatches);
-  if (exact.length === 0) return { outcome: "ambiguous", reason: "no_exact_name_match", matched: null };
-  if (exact.length > 1) return { outcome: "ambiguous", reason: "multiple_exact_matches", matched: null };
-  if (!exact[0].active) return { outcome: "ambiguous", reason: "exact_match_not_active", matched: exact[0] };
-  return { outcome: "verified", reason: "exact_match_active", matched: exact[0] };
+  if (exact.length === 0) return d("ambiguous", "no_exact_name_match");
+  if (exact.length > 1) return d("ambiguous", "multiple_exact_matches");
+  const m = exact[0];
+  if (m.standing === "active") return d("verified", "exact_match_active", m);
+  if (m.standing === "inactive") return d("ambiguous", "exact_match_not_active", m, true);
+  return d("ambiguous", "exact_match_status_indeterminate", m);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -97,12 +106,14 @@ function mdyToIso(s: string | null | undefined): string | null {
 //    as possibly truncated.
 const DBPR_ROW_CAP = 10;
 
-function dbprIsActive(status: string): boolean {
+// "Current, Active" is the only clean pass. Statuses that are definitively not in good standing are
+// "inactive"; everything else (Delinquent, probation, anything unrecognized) is "indeterminate" —
+// a human decides, and it is never treated as a definitive negative.
+function dbprStanding(status: string): "active" | "inactive" | "indeterminate" {
   const s = (status || "").toLowerCase();
-  if (!/\bactive\b/.test(s)) return false;
-  if (/\binactive\b/.test(s)) return false;
-  if (/(delinquent|suspend|revok|null|void|expired|probation|denied|closed|cancel|withdrawn)/.test(s)) return false;
-  return true;
+  if (/\binactive\b|suspend|revok|\bnull\b|\bvoid\b|expired|denied|closed|cancel|withdrawn/.test(s)) return "inactive";
+  if (/\bactive\b/.test(s) && !/(delinquent|probation)/.test(s)) return "active";
+  return "indeterminate";
 }
 
 const floridaDbpr: JurisdictionAdapter = {
@@ -137,7 +148,7 @@ const floridaDbpr: JurisdictionAdapter = {
       records: matches.map((m) => ({
         name: String(m.name || ""),
         nameMatches: m.exactMatch === true,
-        active: dbprIsActive(String(m.status || "")),
+        standing: dbprStanding(String(m.status || "")),
         statusText: String(m.status || ""),
         licenseType: m.licenseType ? String(m.licenseType) : null,
         expiration: mdyToIso(m.expirationDate),
@@ -192,7 +203,11 @@ export default {
       new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     try {
-      const { candidate_id, license_item_id } = await req.json();
+      // staff_rerun: a staff member pressed "Re-run" on a License queue item. Bypasses the
+      // already-verified short-circuit and the cooldown, and is the only mode in which a definitive
+      // "not in good standing" registry status may become a Discrepancy (see decide()).
+      const { candidate_id, license_item_id, staff_rerun } = await req.json();
+      const staffRerun = staff_rerun === true;
       if (!candidate_id || !license_item_id) return json({ ok: false, error: "candidate_id and license_item_id are required" }, 400);
 
       const { data: item, error: itemErr } = await supabase
@@ -201,7 +216,7 @@ export default {
       if (!item) return json({ ok: false, error: "license_item_not_found" }, 404);
 
       // Already resolved (a clean pass is final): return what's stored rather than re-hitting the registry.
-      if (item.verification_outcome === "verified") {
+      if (item.verification_outcome === "verified" && !staffRerun) {
         return json({ ok: true, status: "already_verified", outcome: "verified", queue_item_id: item.queue_item_id });
       }
 
@@ -232,12 +247,12 @@ export default {
 
       // Atomic claim so a double-fire (e.g. a retried confirm) can't hit the registry twice at once.
       const cutoff = new Date(Date.now() - COOLDOWN_SECONDS * 1000).toISOString();
-      const { data: claimed } = await supabase
+      let claimQuery = supabase
         .from("license_items")
         .update({ verification_attempted_at: new Date().toISOString() })
-        .eq("id", license_item_id)
-        .or(`verification_attempted_at.is.null,verification_attempted_at.lt.${cutoff}`)
-        .select("id");
+        .eq("id", license_item_id);
+      if (!staffRerun) claimQuery = claimQuery.or(`verification_attempted_at.is.null,verification_attempted_at.lt.${cutoff}`);
+      const { data: claimed } = await claimQuery.select("id");
       if (!claimed || claimed.length === 0) {
         return json({ ok: true, status: "recently_attempted", outcome: item.verification_outcome, queue_item_id: item.queue_item_id });
       }
@@ -246,6 +261,7 @@ export default {
       let reason: string;
       let lookup: Lookup | null = null;
       let matched: RegistryRecord | null = null;
+      let definitiveNegative = false;
       let sourceTag: string;
       let label: string;
 
@@ -257,7 +273,7 @@ export default {
       } else {
         lookup = await adapter.lookup({ licenseNumber, firstName, lastName });
         const d = decide(lookup);
-        outcome = d.outcome; reason = d.reason; matched = d.matched;
+        outcome = d.outcome; reason = d.reason; matched = d.matched; definitiveNegative = d.definitiveNegative;
         sourceTag = adapter.source;
         label = adapter.registryLabel;
       }
@@ -272,24 +288,33 @@ export default {
         registry_expiration: matched ? matched.expiration : null,
       };
 
-      // Queue row: verified -> Confirmed; ambiguous / not_found -> Needs Reconciliation.
-      // unsupported_jurisdiction -> none. Re-runs reuse the same row instead of stacking new ones.
+      // Queue row: verified -> Confirmed; ambiguous / not_found -> Needs Reconciliation, except a
+      // staff re-run that finds an exact name+number match in a definitively-not-in-good-standing
+      // state -> Discrepancy. unsupported_jurisdiction -> none. Re-runs reuse the same row instead
+      // of stacking new ones.
       let queueId: string | null = item.queue_item_id || null;
+      let queueStatus: string | null = null;
       if (adapter) {
-        const status = outcome === "verified" ? "Confirmed" : "Needs Reconciliation";
+        const isDiscrepancy = staffRerun && definitiveNegative && !!matched;
+        const status = outcome === "verified" ? "Confirmed" : isDiscrepancy ? "Discrepancy" : "Needs Reconciliation";
+        queueStatus = status;
         const text = outcomeText(adapter, { outcome, reason }, lookup);
-        const historyLine = `Automated check result (not a determination) — ${label} (automatic), ${now}:\n${text}`;
+        const runLabel = staffRerun ? "re-run by staff" : "automatic";
+        const historyLine = `Automated check result (not a determination) — ${label} (${runLabel}), ${now}:\n${text}`;
+        // Candidate-visible on a Discrepancy row; factual registry data only.
+        const discrepancyNote = isDiscrepancy ? `The state registry lists this license with status "${matched!.statusText}".` : null;
         if (queueId) {
           const { data: existing } = await supabase.from("verification_items").select("automated_check").eq("id", queueId).maybeSingle();
           const prior = existing?.automated_check || "";
           await supabase.from("verification_items").update({
             status, automated_check: prior ? historyLine + "\n\n---\n\n" + prior : historyLine,
+            ...(discrepancyNote ? { note: discrepancyNote } : {}),
           }).eq("id", queueId);
         } else {
           const { data: idRow } = await supabase.rpc("nextval_verification_item_id");
           const { error: qErr } = await supabase.from("verification_items").insert({
             id: idRow, candidate_id, type: "License", claim: claimFor(item, state!), received: now.slice(0, 10),
-            status, automated_check: historyLine,
+            status, automated_check: historyLine, ...(discrepancyNote ? { note: discrepancyNote } : {}),
             internal_note: outcome === "verified" ? null : `Auto-flagged by automatic license verification: ${reason}. Not a negative determination — needs a human look.`,
             source_item_id: item.id, bundle_id: item.resume_document_id || null,
           });
@@ -299,8 +324,10 @@ export default {
         await supabase.from("verification_item_timeline").insert({
           item_id: queueId, event_date: now, actor: "System",
           action: outcome === "verified"
-            ? `Automatic license check passed (${label}): confirmed.`
-            : `Automatic license check could not confirm (${label}): flagged for reconciliation.`,
+            ? `License check passed (${label}, ${runLabel}): confirmed.`
+            : isDiscrepancy
+              ? `License check found a discrepancy (${label}, ${runLabel}): registry status is not in good standing.`
+              : `License check could not confirm (${label}, ${runLabel}): flagged for reconciliation.`,
           note: text,
         });
       }
@@ -312,7 +339,7 @@ export default {
       }).eq("id", license_item_id);
       if (updErr) return json({ ok: false, error: "persist_failed", detail: updErr.message }, 500);
 
-      return json({ ok: true, status: "checked", outcome, reason, queue_item_id: queueId });
+      return json({ ok: true, status: "checked", outcome, reason, queue_item_id: queueId, queue_status: queueStatus });
     } catch (e) {
       return json({ ok: false, error: "unhandled", detail: String(e) }, 500);
     }

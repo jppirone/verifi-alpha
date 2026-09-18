@@ -2638,6 +2638,34 @@ th.sortable{cursor:pointer;user-select:none}
       </div>
       </sc-if>
 
+      <!-- License items (automatic license verification): the check runs on its own when a candidate
+           confirms a license that has a state and number. This card is the staff-side view of it —
+           stored data only, no hand-typed search terms — plus a re-run that goes through the same
+           shared module, so a clean result actually sets the item's status. -->
+      <sc-if value="{{ showLicenseCheckSection }}" hint-placeholder-val="{{ false }}">
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3);margin-bottom:var(--space-4)">
+        <div class="card-kicker">Automatic license check</div>
+        <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.5">Runs automatically when a candidate confirms a license with a state and number. Unlike the manual checks, its result sets this item's status: Confirmed on a clean match, Needs Reconciliation when unclear, Discrepancy (staff re-run only) when the registry lists an exact match as not in good standing. Uses the stored data below — nothing is typed by hand.</div>
+        <sc-if value="{{ licHasData }}" hint-placeholder-val="{{ false }}">
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:4px var(--space-3);font-size:13px;color:var(--color-neutral-300)">
+            <div style="color:var(--color-neutral-500)">State</div><div>{{ licState }}</div>
+            <div style="color:var(--color-neutral-500)">License number</div><div>{{ licNumber }}</div>
+            <div style="color:var(--color-neutral-500)">Holder (candidate name)</div><div>{{ licHolder }}</div>
+            <div style="color:var(--color-neutral-500)">Last automatic outcome</div><div>{{ licLastOutcome }}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:var(--space-3)">
+            <button type="button" class="btn btn-primary" onClick="{{ runLicenseRecheck }}">{{ licRerunLabel }}</button>
+          </div>
+        </sc-if>
+        <sc-if value="{{ licNoData }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:var(--color-neutral-500)">No stored license record is linked to this item.</div>
+        </sc-if>
+        <sc-if value="{{ licShowResult }}" hint-placeholder-val="{{ false }}">
+          <div style="border-top:1px solid var(--color-divider);padding-top:var(--space-3);font-size:13px;color:var(--color-neutral-300);line-height:1.6;white-space:pre-wrap">{{ licResultText }}</div>
+        </sc-if>
+      </div>
+      </sc-if>
+
       <sc-if value="{{ detailCorrectionRequested }}" hint-placeholder-val="{{ false }}">
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3);margin-bottom:var(--space-4)">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3)">
@@ -3051,6 +3079,8 @@ class Component extends DCLogic {
       automatedCheckRunning: false,
       automatedCheckValidationError: '',
       automatedCheckLastResult: null,
+      licenseRecheckRunning: false,
+      licenseRecheckResult: null,
       sourceDocLoading: false,
       sourceDocError: null,
     };
@@ -3117,6 +3147,32 @@ class Component extends DCLogic {
       text: 'Entity found: "' + data.matchedName + '", status ' + data.entityStatus + ', doc #' + data.documentNumber + (data.filingType ? (' (' + data.filingType + ')') : '') + '.' + (exact ? '' : ' Name match is approximate, not exact.'),
       needsReview: !exact,
     };
+  }
+
+  // License items: re-run the shared verify-license module against the stored license record. The
+  // module itself writes the queue row's status (Confirmed / Needs Reconciliation / Discrepancy),
+  // automated_check history and timeline entry, so this only triggers it and then reloads the queue.
+  async runLicenseRecheck(item) {
+    if (!item || !item.licenseData || !item.candidateId) return;
+    this.setState({ licenseRecheckRunning: true, licenseRecheckResult: null });
+    let data;
+    try {
+      const res = await fetch(this.SUPABASE_FN_URL + '/verify-license', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate_id: item.candidateId, license_item_id: item.licenseData.id, staff_rerun: true }),
+      });
+      data = await res.json().catch(() => ({ ok: false, error: 'invalid_response' }));
+    } catch (e) {
+      data = { ok: false, error: 'network_error' };
+    }
+    let text;
+    if (!data.ok) text = 'Check failed: ' + (data.error || 'unknown_error') + '. Nothing was changed.';
+    else if (data.status === 'incomplete') text = 'Not run — missing: ' + (data.missing || []).join(', ') + '.';
+    else if (data.status === 'checked') text = 'Result: ' + data.outcome + (data.reason ? ' (' + data.reason + ')' : '') + (data.queue_status ? '. Item status is now ' + data.queue_status + '.' : '. No status change (no registry for this state).');
+    else text = 'Result: ' + (data.status || 'unknown') + '.';
+    this.setState({ licenseRecheckRunning: false, licenseRecheckResult: text });
+    await this.loadItems();
   }
 
   async runAutomatedCheckRequest(id, checkType, inputs) {
@@ -3781,6 +3837,7 @@ class Component extends DCLogic {
         { value: 'Job Experience', label: 'Job Experience' },
         { value: 'Education', label: 'Education' },
         { value: 'Certification', label: 'Certification' },
+        { value: 'License', label: 'License (automatic state-registry check)' },
         // Confirm-resume-data's own internal flag for needs_review resume content (see that
         // function's header) — always created at status 'Needs Reconciliation', never candidate-
         // submitted, never shown on the candidate's own status tab. Real, live-inserted rows, not a
@@ -3902,7 +3959,20 @@ class Component extends DCLogic {
 
       // No automated check applies to unstructured needs_review content (no credly/dbpr/sunbiz
       // lookup makes sense against free text) — same reasoning as excluding Education.
-      showAutomatedCheckSection: !!(selected && selected.type !== 'Education' && selected.type !== 'Needs Review'),
+      showAutomatedCheckSection: !!(selected && selected.type !== 'Education' && selected.type !== 'Needs Review' && selected.type !== 'License'),
+      // License items get their own card instead (stored data + a re-run that goes through the shared
+      // verify-license module) — the generic hand-typed check above is deliberately not offered.
+      showLicenseCheckSection: !!(selected && selected.type === 'License'),
+      licHasData: !!(selected && selected.licenseData),
+      licNoData: !!(selected && selected.type === 'License' && !selected.licenseData),
+      licState: selected && selected.licenseData ? (selected.licenseData.state || '—') : '',
+      licNumber: selected && selected.licenseData ? (selected.licenseData.licenseNumber || '—') : '',
+      licHolder: selected ? (selected.candidateName || '—') : '',
+      licLastOutcome: selected && selected.licenseData ? ((selected.licenseData.outcome || 'not checked') + (selected.licenseData.reason ? ' (' + selected.licenseData.reason + ')' : '')) : '',
+      licRerunLabel: s.licenseRecheckRunning ? 'Running…' : 'Re-run automatic check',
+      runLicenseRecheck: () => { if (selected && !s.licenseRecheckRunning) this.runLicenseRecheck(selected); },
+      licShowResult: !!s.licenseRecheckResult,
+      licResultText: s.licenseRecheckResult || '',
       // Item 12 (2026-09-11 status-check session): this used to be a flat, static array shown
       // identically for every item type — a Job Experience item offered Credly/DBPR (which verify a
       // credential, not an employer) and a Certification item offered Sunbiz (which verifies a
