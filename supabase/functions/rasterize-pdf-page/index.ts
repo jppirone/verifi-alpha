@@ -628,6 +628,53 @@ function isValidBoundaryResult(x: unknown): x is BoundaryResult {
   );
 }
 
+// Real bug, found and root-caused via a direct re-probe during this same investigation (2026-09-18):
+// when the boundary-detection call (step 1) is asked to categorize a headerless page-opening section
+// it itself recognizes as a continuation of the previous page, it doesn't reliably re-derive the
+// correct category from the continuation-context description in its own prompt — confirmed live,
+// returning {heading: "", category: "unknown", is_continuation_of_previous_page: true} for a section
+// that was plainly a work_history continuation (per previousPageContext.kind). When that happens, step
+// 2's prompt ends up holding two CONTRADICTORY instructions for the same content in the same
+// completion: the section-boundary block (built from step 1's "unknown") says route it to
+// needs_review, while the separate, unmodified continuation-context block (built straight from
+// previousPageContext, describeTrailingItem's own deterministic output) says it's a work_history
+// continuation and must NOT go to needs_review — the exact "two competing signals in one completion"
+// shape this whole redesign exists to eliminate, just reintroduced at a new seam. Confirmed live: the
+// content was lost, landing in neither work_history nor any needs_review row — worse than the
+// pre-Decision-38 misattribution pattern, which at least preserved it somewhere.
+//
+// The fix is structural, not more prose: we already know with certainty what kind of item is open
+// (previousPageContext was built deterministically by describeTrailingItem from the actual previous
+// page's own extraction) — there is no reason to ask the model to re-derive that same fact via a
+// separate, unreliable judgment call. When step 1 itself claims a section is a headerless continuation
+// (heading === "" && is_continuation_of_previous_page === true), its category is overridden here,
+// in code, from previousPageContext directly — removing the model's redundant re-derivation removes
+// the chance of it disagreeing with the continuation-context block it's also being handed. Scoped
+// tightly to exactly this one condition; a section step 1 does NOT itself flag as a headerless
+// continuation is left untouched, since that's a different, unrelated judgment this fix isn't about.
+function resolveContinuationCategory(boundaries: BoundaryResult, previousPageContext?: TrailingItemContext | null): BoundaryResult {
+  if (!previousPageContext || boundaries.sections.length === 0) return boundaries;
+  const first = boundaries.sections[0];
+  if (first.heading !== "" || !first.is_continuation_of_previous_page) return boundaries;
+
+  let resolvedCategory: BoundaryCategory | null = null;
+  if (previousPageContext.kind === "work_history") {
+    resolvedCategory = "work_history";
+  } else if (previousPageContext.kind === "certifications_list") {
+    resolvedCategory = "certifications";
+  } else if (previousPageContext.kind === "freeform") {
+    // "needs_review" has no matching known category — leaving it "unknown" is already correct,
+    // since step 2's own rules route "unknown" straight to needs_review, no contradiction possible.
+    if (previousPageContext.sectionType === "summary") resolvedCategory = "summary";
+    else if (previousPageContext.sectionType === "hobbies_other") resolvedCategory = "hobbies_other";
+  }
+  if (resolvedCategory === null || first.category === resolvedCategory) return boundaries;
+
+  const sections = boundaries.sections.slice();
+  sections[0] = { ...first, category: resolvedCategory };
+  return { sections };
+}
+
 // STEP 2 OF 2 support: renders step 1's already-decided boundaries into the block step 2's prompt
 // includes — this is what actually enforces "do not independently re-judge category", the same way
 // buildContinuationContext's block below enforces continuation behavior. Kept separate from that
@@ -1273,7 +1320,7 @@ export default {
       if (useVision) {
         try {
           const boundaryStart = Date.now();
-          sectionBoundaries = await runBoundaryDetectionVision(bytesToB64(pngBytes), trailingContext);
+          sectionBoundaries = resolveContinuationCategory(await runBoundaryDetectionVision(bytesToB64(pngBytes), trailingContext), trailingContext);
           boundaryMs = Date.now() - boundaryStart;
         } catch (boundaryErr) {
           console.log(`rasterize-pdf-page: boundary detection failed, falling back to shape-based classification for this page — ${String(boundaryErr)}`);
@@ -1289,7 +1336,7 @@ export default {
         ocrMs = Date.now() - ocrStart;
         try {
           const boundaryStart = Date.now();
-          sectionBoundaries = await runBoundaryDetectionHaiku(ocrText, trailingContext);
+          sectionBoundaries = resolveContinuationCategory(await runBoundaryDetectionHaiku(ocrText, trailingContext), trailingContext);
           boundaryMs = Date.now() - boundaryStart;
         } catch (boundaryErr) {
           console.log(`rasterize-pdf-page: boundary detection failed, falling back to shape-based classification for this page — ${String(boundaryErr)}`);
