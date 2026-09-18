@@ -7925,6 +7925,19 @@ class Component extends DCLogic {
       phoneVerifiedAt: (profile && profile.phone_verified_at) || this.state.phoneVerifiedAt,
       confirmedPhoneNumber: (profile && profile.verified_phone_number) || this.state.confirmedPhoneNumber,
       phoneConfirmed: !!((profile && profile.phone_verified_at) || this.state.phoneVerifiedAt),
+      // Real bug, found live testing this exact fix: phoneIsConfirmed and every other "is this
+      // phone verified" render-val compares verifiedPhoneEntry (what's currently sitting in the
+      // input box) against confirmedPhoneNumber (the persisted verified value) with a strict ===.
+      // confirmedPhoneNumber is now correctly hydrated above, but verifiedPhoneEntry itself is
+      // NEVER seeded from the server on a fresh mount — it only starts non-empty via
+      // seedContactFromAccount's one-time convenience pre-fill from candidates.phone (a different,
+      // older field), which doesn't fire at all once printedPhone is already set. Without this, a
+      // genuinely-verified phone number still showed "Send confirmation code" and "Not yet
+      // verified" on every fresh page load, because the comparison had an empty string on one side
+      // — confirmedPhoneNumber was right, but nothing was there to match it against. Seeded only
+      // when the entry is still at its blank default (never clobbers an in-progress edit).
+      verifiedPhoneEntry: (profile && profile.verified_phone_number && !this.state.verifiedPhoneEntry) ? profile.verified_phone_number : this.state.verifiedPhoneEntry,
+      savedVerifiedPhoneEntry: (profile && profile.verified_phone_number && !this.state.savedVerifiedPhoneEntry) ? profile.verified_phone_number : this.state.savedVerifiedPhoneEntry,
       crossValidationCompletedAt: (profile && profile.cross_validation_completed_at) || this.state.crossValidationCompletedAt,
       crossValidationDone: !!((profile && profile.cross_validation_completed_at) || this.state.crossValidationCompletedAt),
       licenseSubscriptionStartedAt: (profile && profile.license_subscription_started_at) || this.state.licenseSubscriptionStartedAt,
