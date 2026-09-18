@@ -254,7 +254,21 @@ export default {
                 "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
                 "Prefer": "return=representation",
               },
-              body: JSON.stringify({ stripe_subscription_cancelled_at: new Date().toISOString() }),
+              // tier is flipped here too, by the same webhook-confirmed fact — found live-testing
+              // Step 3: deactivate-account never touches tier, so a paid candidate who deleted their
+              // account kept tier = 'paid' against a subscription Stripe had actually cancelled, and
+              // would have come back on reactivation showing Paid with nothing behind it. The match
+              // is on the CURRENT stripe_subscription_id only (see the checkout.session.completed
+              // branch above, which overwrites it on every new subscription), so a late-arriving
+              // deleted event for an OLD subscription finds no row and can't downgrade a candidate
+              // who has since re-subscribed. Idempotent with confirmDowngrade's own earlier
+              // set-candidate-tier write; a license_only candidate's tier is never 'paid' to begin
+              // with, so this is a no-op for them.
+              body: JSON.stringify({
+                stripe_subscription_cancelled_at: new Date().toISOString(),
+                tier: "free",
+                tier_updated_at: new Date().toISOString(),
+              }),
             },
           );
           const patchRows = patchRes.ok ? await patchRes.json().catch(() => []) : [];

@@ -8463,8 +8463,12 @@ class Component extends DCLogic {
       this.setState({ checkoutPending: false, checkoutError: "Couldn't switch to Free. Please try again." });
       return;
     }
-    this.setState({ checkoutPending: false, checkoutError: null, downgradeModalOpen: false, accountTier: 'free', tierSelection: 'free', changePlanOpen: false, downgradeSuccessNotice: true, downgradeBillingStatus: null });
+    this.setState({ checkoutPending: false, checkoutError: null, downgradeModalOpen: false, accountTier: 'free', tierSelection: 'free', changePlanOpen: false, downgradeSuccessNotice: true, downgradeBillingStatus: 'pending' });
     this.addActivityLog('Switch to Free confirmed');
+    // 'pending' is set in the same update as the tier flip, not later inside pollBillingCancellation:
+    // found live-testing Step 3, there was a blank moment between the click and "Confirming…" while
+    // the cancel request itself was still in flight. Every exit below that isn't a real poll has to
+    // clear it again so it can't be left showing for a candidate with nothing to confirm.
     // Step 3: the tier flip above is already real and already complete — this doesn't block or
     // gate it, it's a second, separate fact (did the real Stripe subscription actually get
     // cancelled) surfaced honestly rather than assumed. See cancel-stripe-subscription's own header:
@@ -8483,7 +8487,10 @@ class Component extends DCLogic {
       this.setState({ downgradeBillingStatus: 'unconfirmed' });
       return;
     }
-    if (!cancelData.cancelled) return; // no_subscription_on_file — nothing real to confirm
+    if (!cancelData.cancelled) { // no_subscription_on_file — nothing real to confirm
+      this.setState({ downgradeBillingStatus: null });
+      return;
+    }
     // Real bug found live-testing this exact fix: resolveSession() doesn't just re-hydrate state —
     // it's the same call mountResolveOrToken() uses, and applySession() (which it calls) always
     // finishes by routing through enterAccount() when nothing else claims the screen first (see
@@ -8566,7 +8573,10 @@ class Component extends DCLogic {
       deactivatePending: false, deactivateError: null,
       screen: 'deactivated', deactStep: 'default', deactReason: '', deactNote: '', deactChoice: null,
       deletionScheduled: true, deletionDate: data.deletion_date,
-      deletionWasPaid: wasPaid, deletionBillingStatus: null,
+      // 'pending' from the first render of this screen (not set later inside pollBillingCancellation)
+      // so there's no blank moment while the cancel request is still in flight — same reasoning as
+      // confirmDowngrade's own downgradeBillingStatus above.
+      deletionWasPaid: wasPaid, deletionBillingStatus: wasPaid ? 'pending' : null,
     });
     if (!wasPaid) return; // free already — nothing paid to cancel, nothing to show on the goodbye screen
     // Subscription cancellation gap (2026-09-18): deactivate-account itself never touched Stripe or
@@ -8589,7 +8599,10 @@ class Component extends DCLogic {
       this.setState({ deletionBillingStatus: 'unconfirmed' });
       return;
     }
-    if (!cancelData.cancelled) return; // no_subscription_on_file — nothing real to confirm
+    if (!cancelData.cancelled) { // no_subscription_on_file — nothing real to confirm
+      this.setState({ deletionBillingStatus: null });
+      return;
+    }
     // Session-free poll (see checkCandidateBillingCancelled's own header) — resolveSession() isn't
     // usable here, every session this candidate held was just revoked by deactivate-account itself.
     const confirmed = await this.pollBillingCancellation('deletionBillingStatus', async () => {
