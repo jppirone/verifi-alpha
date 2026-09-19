@@ -7418,10 +7418,14 @@ class Component extends DCLogic {
     // Opening the Subscription tab: re-verify any local Paid selection against the real account (same check the
     // browser-tab-visibility listener runs) and retire the "you left without subscribing" banner, since the
     // persistent inline notice on this tab now carries the message.
-    if (prevState && this.state.screen === 'account' && this.state.accountTab === 'subscription' && prevState.accountTab !== 'subscription') {
+    // (The tab change is tracked here rather than read off prevState: the wrapper that hosts this class calls
+    // componentDidUpdate with prevProps only, so prevState is undefined.)
+    const tabNow = this.state.screen === 'account' ? this.state.accountTab : null;
+    if (tabNow === 'subscription' && this._lastAccountTab !== 'subscription') {
       if (this.state.subscribeAbandonedNotice) this.setState({ subscribeAbandonedNotice: false });
       this.recheckStaleTierSelection();
     }
+    this._lastAccountTab = tabNow;
     if (this.state.screen === 'tiers' || this.isLicenseProfileTabOpen()) this.ensureDiscoverableLoaded();
     if (this.state.screen === 'account' && this.state.accountType === 'license_only' && this.state.accountTab === 'activity') this.ensureLicenseActivityLoaded();
     if (prevState && this.state.tourActive && (prevState.tourStep !== this.state.tourStep || !prevState.tourActive)) {
