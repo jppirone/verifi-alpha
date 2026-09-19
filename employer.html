@@ -2244,10 +2244,182 @@ const __ds_scope = {};
   <div style="max-width:1040px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;padding:18px 0;border-bottom:1px solid var(--color-divider)">
     <span class="nav-brand" style="font-size:15px">Employer verification requests</span>
     <div style="display:flex;align-items:center;gap:var(--space-3)">
+      <sc-if value="{{ realSignedIn }}" hint-placeholder-val="{{ false }}">
+        <a href="#" style="font-size:12px" sc-camel-on-click="{{ openAccount }}">{{ realEmailLabel }}</a>
+        <a href="#" style="font-size:12px" sc-camel-on-click="{{ signOutReal }}">Sign out</a>
+      </sc-if>
+      <sc-if value="{{ realNotSignedIn }}" hint-placeholder-val="{{ true }}">
+        <a href="#" style="font-size:12px" sc-camel-on-click="{{ openSignin }}">Sign in</a>
+      </sc-if>
       <span class="tag tag-outline">Alpha prototype</span>
       <button type="button" class="btn btn-ghost" style="font-size:11px;opacity:0.6" sc-camel-on-click="{{ resetAll }}">Demo: reset to default state</button>
     </div>
   </div>
+
+  <sc-if value="{{ isSignin }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:440px;margin:0 auto;padding-top:64px;display:flex;flex-direction:column;gap:var(--space-4)">
+    <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:24px;margin:0">Sign in</h1>
+    <p style="margin:0;color:var(--color-neutral-400);font-size:14px;line-height:1.5">Enter your work email and we send you a sign-in link. There is no password. If you don't have an account yet, the link creates one.</p>
+    <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-4)">
+      <div class="field">
+        <label for="si-email">Email address</label>
+        <input class="input" id="si-email" value="{{ signinEmail }}" sc-camel-on-change="{{ setSigninEmail }}" placeholder="you@company.com">
+      </div>
+      <div class="field">
+        <label for="si-name">Your name (for a new account)</label>
+        <input class="input" id="si-name" value="{{ signinName }}" sc-camel-on-change="{{ setSigninName }}" placeholder="First Last">
+      </div>
+      <sc-if value="{{ signinError }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:12px;color:#e2735c;line-height:1.6">{{ signinError }}</div>
+      </sc-if>
+      <button type="button" class="btn btn-primary" disabled="{{ signinDisabled }}" sc-camel-on-click="{{ submitSignin }}">{{ signinSendLabel }}</button>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isSigninSent }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:440px;margin:0 auto;padding-top:72px;display:flex;flex-direction:column;gap:var(--space-4)">
+    <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3)">
+      <div class="card-kicker">Check your email</div>
+      <div style="font-size:17px;line-height:1.5">We sent a sign-in link to {{ signinSentTo }}.</div>
+      <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">The link works once and expires in 15 minutes. Open it in this same browser. If you don't see it, check spam, or start again.</div>
+      <button type="button" class="btn btn-ghost" style="align-self:flex-start" sc-camel-on-click="{{ openSignin }}">Use a different address</button>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isSigninChecking }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:440px;margin:0 auto;padding-top:72px">
+    <div class="card elev-md"><div class="card-kicker">Signing you in</div><div style="font-size:17px;margin-top:8px">One moment…</div></div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isSigninProblem }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:440px;margin:0 auto;padding-top:72px;display:flex;flex-direction:column;gap:var(--space-4)">
+    <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3)">
+      <div class="card-kicker">Sign-in link problem</div>
+      <div style="font-size:17px;line-height:1.5">{{ signinProblemText }}</div>
+      <button type="button" class="btn btn-primary" style="align-self:flex-start" sc-camel-on-click="{{ openSignin }}">Get a new link</button>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isAcct }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:720px;margin:0 auto;padding-top:40px;display:flex;flex-direction:column;gap:var(--space-4)">
+    <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:24px;margin:0">Your account</h1>
+    <sc-if value="{{ acctNotice }}" hint-placeholder-val="{{ false }}">
+      <div class="card elev-sm" style="font-size:13px;color:var(--color-accent-300)">{{ acctNotice }}</div>
+    </sc-if>
+    <sc-if value="{{ acctErr }}" hint-placeholder-val="{{ false }}">
+      <div class="card elev-sm" style="font-size:13px;color:#e2735c">{{ acctErr }}</div>
+    </sc-if>
+
+    <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+      <div class="card-kicker">You</div>
+      <div style="font-size:13px;color:var(--color-neutral-400)">{{ acctEmail }}</div>
+      <div class="field" style="max-width:320px">
+        <label for="ac-name">Your name</label>
+        <input class="input" id="ac-name" value="{{ acctNameDraft }}" sc-camel-on-change="{{ setAcctNameDraft }}">
+      </div>
+      <button type="button" class="btn btn-secondary" style="align-self:flex-start" disabled="{{ acctBusy }}" sc-camel-on-click="{{ saveAcctName }}">Save name</button>
+    </div>
+
+    <sc-if value="{{ hasOrgInvites }}" hint-placeholder-val="{{ false }}">
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+        <div class="card-kicker">Invitations</div>
+        <sc-for list="{{ orgInviteRows }}" as="row" hint-placeholder-count="1">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap;border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
+            <div style="font-size:13px;line-height:1.6">{{ row.text }}</div>
+            <div style="display:flex;gap:var(--space-2)">
+              <button type="button" class="btn btn-primary" style="font-size:12px" disabled="{{ acctBusy }}" sc-camel-on-click="{{ row.onAccept }}">Accept</button>
+              <button type="button" class="btn btn-ghost" style="font-size:12px" disabled="{{ acctBusy }}" sc-camel-on-click="{{ row.onDecline }}">Decline</button>
+            </div>
+          </div>
+        </sc-for>
+        <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">You can belong to one organization at a time. Accepting lets the organization's owner see checks run under it.</div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ acctNoOrg }}" hint-placeholder-val="{{ true }}">
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+        <div class="card-kicker">Create an organization</div>
+        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Whoever creates an organization is its owner: the only person who can manage its billing and members. Other people can be invited to use its checks but cannot touch billing.</div>
+        <div class="field" style="max-width:320px">
+          <label for="ac-neworg">Organization name</label>
+          <input class="input" id="ac-neworg" value="{{ newOrgNameDraft }}" sc-camel-on-change="{{ setNewOrgNameDraft }}" placeholder="Northwind Talent Group">
+        </div>
+        <button type="button" class="btn btn-primary" style="align-self:flex-start" disabled="{{ acctBusy }}" sc-camel-on-click="{{ createOrg }}">Create organization</button>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ acctHasOrg }}" hint-placeholder-val="{{ false }}">
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap">
+          <div class="card-kicker">Organization</div>
+          <span class="tag tag-outline">{{ acctRoleLabel }}</span>
+        </div>
+        <div style="font-size:17px">{{ acctOrgName }}</div>
+        <sc-if value="{{ acctIsOwner }}" hint-placeholder-val="{{ false }}">
+          <div class="field" style="max-width:320px">
+            <label for="ac-orgname">Organization name</label>
+            <input class="input" id="ac-orgname" value="{{ orgNameDraft }}" sc-camel-on-change="{{ setOrgNameDraft }}">
+          </div>
+          <button type="button" class="btn btn-secondary" style="align-self:flex-start" disabled="{{ acctBusy }}" sc-camel-on-click="{{ saveOrgName }}">Rename</button>
+        </sc-if>
+      </div>
+
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+        <div class="card-kicker">Members</div>
+        <sc-raw-table class="table">
+          <sc-raw-thead><sc-raw-tr><sc-raw-th>Name</sc-raw-th><sc-raw-th>Email</sc-raw-th><sc-raw-th>Role</sc-raw-th><sc-raw-th></sc-raw-th></sc-raw-tr></sc-raw-thead>
+          <sc-raw-tbody>
+            <sc-for list="{{ memberRows }}" as="row" hint-placeholder-count="2">
+              <sc-raw-tr>
+                <sc-raw-td>{{ row.name }}</sc-raw-td>
+                <sc-raw-td style="color:var(--color-neutral-400)">{{ row.email }}</sc-raw-td>
+                <sc-raw-td>{{ row.roleLabel }}</sc-raw-td>
+                <sc-raw-td style="text-align:right">
+                  <sc-if value="{{ row.canRemove }}" hint-placeholder-val="{{ false }}">
+                    <button type="button" class="btn btn-ghost" style="font-size:12px" disabled="{{ acctBusy }}" sc-camel-on-click="{{ row.onRemove }}">Remove</button>
+                  </sc-if>
+                </sc-raw-td>
+              </sc-raw-tr>
+            </sc-for>
+          </sc-raw-tbody>
+        </sc-raw-table>
+        <sc-if value="{{ acctIsOwner }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">The owner is also the billing owner and the only admin. Handing ownership to someone else is not available yet.</div>
+        </sc-if>
+        <sc-if value="{{ acctIsPlainMember }}" hint-placeholder-val="{{ false }}">
+          <button type="button" class="btn btn-ghost" style="align-self:flex-start;font-size:12px" disabled="{{ acctBusy }}" sc-camel-on-click="{{ leaveOrg }}">Leave this organization</button>
+        </sc-if>
+      </div>
+
+      <sc-if value="{{ acctIsOwner }}" hint-placeholder-val="{{ false }}">
+        <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+          <div class="card-kicker">Invite someone</div>
+          <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">They get an email, sign in with that address, and accept. Members can run and see the organization's checks; only you manage billing and members.</div>
+          <div class="field" style="max-width:320px">
+            <label for="ac-invite">Their email address</label>
+            <input class="input" id="ac-invite" value="{{ inviteEmailDraft }}" sc-camel-on-change="{{ setInviteEmailDraft }}" placeholder="colleague@company.com">
+          </div>
+          <button type="button" class="btn btn-primary" style="align-self:flex-start" disabled="{{ acctBusy }}" sc-camel-on-click="{{ sendInvite }}">Send invitation</button>
+          <sc-if value="{{ hasPendingInviteRows }}" hint-placeholder-val="{{ false }}">
+            <div style="border-top:1px solid var(--color-divider);padding-top:var(--space-3);display:flex;flex-direction:column;gap:var(--space-2)">
+              <div style="font-size:11px;letter-spacing:0.04em;text-transform:uppercase;color:var(--color-neutral-500)">Pending invitations</div>
+              <sc-for list="{{ pendingInviteRows }}" as="row" hint-placeholder-count="1">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);font-size:13px">
+                  <span>{{ row.email }}</span>
+                  <button type="button" class="btn btn-ghost" style="font-size:12px" disabled="{{ acctBusy }}" sc-camel-on-click="{{ row.onRevoke }}">Revoke</button>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+        </div>
+      </sc-if>
+    </sc-if>
+  </div>
+  </sc-if>
 
   <sc-if value="{{ isLoggedIn }}" hint-placeholder-val="{{ false }}">
   <div style="max-width:1040px;margin:0 auto;display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;padding:10px 0;border-bottom:1px solid var(--color-divider);font-size:12px">
@@ -3077,6 +3249,17 @@ class Component extends DCLogic {
     let token = '';
     try { token = new URLSearchParams(window.location.search).get('lookup_token') || ''; } catch (e) { token = ''; }
     if (token) this.runTokenLookup(token);
+    // Real employer sign-in: landing from an emailed sign-in link, or resuming a stored session.
+    let loginToken = '';
+    try { loginToken = new URLSearchParams(window.location.search).get('employer_login') || ''; } catch (e) { loginToken = ''; }
+    if (loginToken) {
+      try { window.history.replaceState(null, '', window.location.pathname); } catch (e) { /* not critical */ }
+      this.confirmEmployerLogin(loginToken);
+    } else {
+      let stored = null;
+      try { stored = localStorage.getItem(this.EMP_TOKEN_KEY); } catch (e) { stored = null; }
+      if (stored && !token) { this.setState({ realToken: stored }, () => this.loadReal()); }
+    }
   }
 
   componentWillUnmount() {
@@ -3089,7 +3272,7 @@ class Component extends DCLogic {
     if (this.state.screen !== 'compare') this._resumeDocKey = null;
   }
 
-  state = this.blank();
+  state = Object.assign(this.blank(), this.realBlank());
 
   norm(v) { return (v || '').trim().toLowerCase(); }
   digits(v) { return (v || '').replace(/\D/g, ''); }
@@ -3141,6 +3324,124 @@ class Component extends DCLogic {
     return this.FREE_EMAIL_DOMAINS.indexOf(domain) !== -1
       ? 'personal email domain'
       : 'appears to be a company domain';
+  }
+
+  // ===== Real employer accounts (2026-09-19): passwordless sign-in + a session enforced server-side by employer-api =====
+  EMP_TOKEN_KEY = 'verifi_employer_session';
+
+  realBlank() {
+    return {
+      realToken: null, real: null, realMembers: [], realOrgInvites: [],
+      signinEmail: '', signinName: '', signinBusy: false, signinErr: null, signinProblem: null, signinSentTo: '',
+      acctNameDraft: '', orgNameDraft: '', newOrgNameDraft: '', inviteEmailDraft: '', acctNotice: null, acctErr: null, acctBusy: false,
+    };
+  }
+
+  async empCall(action, params) {
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/employer-api', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_token: this.state.realToken || '', action: action, params: params || {} }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) { return { status: 0, data: { ok: false, error: 'network' } }; }
+    if (res.status === 401) this.dropRealSession(true);
+    return { status: res.status, data: data || {} };
+  }
+
+  dropRealSession(expired) {
+    try { localStorage.removeItem(this.EMP_TOKEN_KEY); } catch (e) { /* not critical */ }
+    const wasAcct = this.state.screen === 'acct';
+    this.setState(Object.assign(this.realBlank(), (expired && wasAcct) ? { screen: 'signin', signinErr: 'Your session ended. Please sign in again.' } : {}));
+  }
+
+  async loadReal() {
+    const me = await this.empCall('me');
+    if (!me.data.ok) return false;
+    let members = [];
+    let invites = [];
+    if (me.data.org) {
+      const lm = await this.empCall('list_members');
+      if (lm.data.ok) { members = lm.data.members || []; invites = lm.data.pending_invites || []; }
+    }
+    this.setState({
+      real: me.data, realMembers: members, realOrgInvites: invites,
+      acctNameDraft: (me.data.user && me.data.user.name) || '', orgNameDraft: (me.data.org && me.data.org.name) || '',
+    });
+    return true;
+  }
+
+  async submitSignin() {
+    const s = this.state;
+    if (s.signinBusy) return;
+    const email = (s.signinEmail || '').trim();
+    if (!email) return;
+    this.setState({ signinBusy: true, signinErr: null });
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/employer-request-login', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email, name: (s.signinName || '').trim() }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ signinBusy: false, signinErr: "We couldn't send the link. Check your connection and try again." });
+      return;
+    }
+    if (res.ok && data && data.ok) { this.setState({ signinBusy: false, screen: 'signinSent', signinSentTo: email }); return; }
+    const code = data && data.error;
+    this.setState({
+      signinBusy: false,
+      signinErr: code === 'rate_limited' ? 'Too many sign-in links were requested for this address. Please try again in an hour.'
+        : code === 'busy' ? 'Sign-in is busy right now. Please try again in a few minutes.'
+        : code === 'email_invalid' ? 'That email address does not look right.'
+        : "We couldn't send the link. Please try again.",
+    });
+  }
+
+  async confirmEmployerLogin(token) {
+    this.setState({ screen: 'signinChecking' });
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/employer-confirm-login', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: token }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) { this.setState({ screen: 'signinProblem', signinProblem: "We couldn't reach the server. Try the link again." }); return; }
+    if (res.status === 409) { this.setState({ screen: 'signinProblem', signinProblem: 'That sign-in link has already been used.' }); return; }
+    if (res.status === 410) { this.setState({ screen: 'signinProblem', signinProblem: 'That sign-in link has expired.' }); return; }
+    if (res.status === 400 || res.status === 404) { this.setState({ screen: 'signinProblem', signinProblem: "That sign-in link isn't valid." }); return; }
+    if (!res.ok || !data || !data.ok) { this.setState({ screen: 'signinProblem', signinProblem: "We couldn't sign you in. Please get a new link." }); return; }
+    try { localStorage.setItem(this.EMP_TOKEN_KEY, data.session_token); } catch (e) { /* session then lasts this page only */ }
+    this.setState({ realToken: data.session_token });
+    const loaded = await this.loadReal();
+    this.setState({ screen: loaded ? 'acct' : 'signinProblem', signinProblem: loaded ? null : "We couldn't load your account. Please sign in again." });
+  }
+
+  // One wrapper for every account action: run it, show the outcome, reload the account.
+  async acctAct(action, params, okNotice, errMap) {
+    if (this.state.acctBusy) return false;
+    this.setState({ acctBusy: true, acctErr: null, acctNotice: null });
+    const r = await this.empCall(action, params);
+    if (r.status === 401) { this.setState({ acctBusy: false }); return false; }
+    if (r.data && r.data.ok) {
+      await this.loadReal();
+      this.setState({ acctBusy: false, acctNotice: okNotice || null });
+      return true;
+    }
+    const code = r.data && r.data.error;
+    const map = Object.assign({
+      forbidden: "Only the organization's owner can do that.", already_in_org: 'You already belong to an organization.', not_found: 'That is no longer available.',
+      rate_limited: 'Too many invitations were sent recently. Try again later.', too_many_pending_invites: 'There are too many pending invitations.', email_failed: "We couldn't send the invitation email.",
+    }, errMap || {});
+    await this.loadReal();
+    this.setState({ acctBusy: false, acctErr: map[code] || "That didn't work. Please try again." });
+    return false;
   }
 
   clearTokenFromUrl() {
@@ -3239,6 +3540,68 @@ class Component extends DCLogic {
     const statusLabel = s.response === 'approved' ? 'Approved'
       : (s.response === 'pending' ? 'Awaiting candidate response' : 'Closed, not authorized');
     return {
+      isSignin: s.screen === 'signin',
+      isSigninSent: s.screen === 'signinSent',
+      isSigninChecking: s.screen === 'signinChecking',
+      isSigninProblem: s.screen === 'signinProblem',
+      isAcct: s.screen === 'acct' && !!s.real,
+      realSignedIn: !!s.real,
+      realNotSignedIn: !s.real,
+      realEmailLabel: s.real && s.real.user ? (s.real.user.name || s.real.user.email) : '',
+      openSignin: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'signin', signinErr: null }); },
+      openAccount: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'acct', acctNotice: null, acctErr: null }); this.loadReal(); },
+      signOutReal: async (e) => {
+        if (e && e.preventDefault) e.preventDefault();
+        await this.empCall('logout');
+        this.dropRealSession(false);
+        this.setState({ screen: 'lookup' });
+      },
+      signinEmail: s.signinEmail, signinName: s.signinName,
+      setSigninEmail: (e) => this.setState({ signinEmail: e.target.value }),
+      setSigninName: (e) => this.setState({ signinName: e.target.value }),
+      signinError: s.signinErr,
+      signinDisabled: s.signinBusy || !(s.signinEmail || '').trim(),
+      signinSendLabel: s.signinBusy ? 'Sending…' : 'Email me a sign-in link',
+      submitSignin: () => this.submitSignin(),
+      signinSentTo: s.signinSentTo,
+      signinProblemText: s.signinProblem || '',
+      acctEmail: s.real && s.real.user ? s.real.user.email : '',
+      acctNameDraft: s.acctNameDraft,
+      setAcctNameDraft: (e) => this.setState({ acctNameDraft: e.target.value }),
+      saveAcctName: () => this.acctAct('update_profile', { name: s.acctNameDraft }, 'Name saved.', { name_invalid: 'Please enter a name.' }),
+      acctNotice: s.acctNotice, acctErr: s.acctErr, acctBusy: s.acctBusy,
+      hasOrgInvites: !!(s.real && (s.real.pending_invites || []).length) && !(s.real && s.real.org),
+      orgInviteRows: ((s.real && s.real.pending_invites) || []).map(i => ({
+        text: (i.invited_by ? i.invited_by + ' invited you to join ' : 'You are invited to join ') + i.org_name + '.',
+        onAccept: () => this.acctAct('accept_invite', { invite_id: i.id }, 'You joined the organization.'),
+        onDecline: () => this.acctAct('decline_invite', { invite_id: i.id }, 'Invitation declined.'),
+      })),
+      acctNoOrg: !!s.real && !s.real.org,
+      acctHasOrg: !!(s.real && s.real.org),
+      newOrgNameDraft: s.newOrgNameDraft,
+      setNewOrgNameDraft: (e) => this.setState({ newOrgNameDraft: e.target.value }),
+      createOrg: () => this.acctAct('create_org', { name: s.newOrgNameDraft }, 'Organization created. You are its owner.', { org_name_invalid: 'Please enter an organization name (2 to 120 characters).' }),
+      acctOrgName: s.real && s.real.org ? s.real.org.name : '',
+      acctIsOwner: !!(s.real && s.real.role === 'owner'),
+      acctIsPlainMember: !!(s.real && s.real.role === 'member'),
+      acctRoleLabel: s.real && s.real.role === 'owner' ? 'Owner (billing owner and admin)' : 'Member',
+      orgNameDraft: s.orgNameDraft,
+      setOrgNameDraft: (e) => this.setState({ orgNameDraft: e.target.value }),
+      saveOrgName: () => this.acctAct('rename_org', { name: s.orgNameDraft }, 'Organization renamed.', { org_name_invalid: 'Please enter an organization name (2 to 120 characters).' }),
+      memberRows: (s.realMembers || []).map(m => ({
+        name: m.name || '(no name yet)', email: m.email, roleLabel: m.role === 'owner' ? 'Owner' : 'Member',
+        canRemove: !!(s.real && s.real.role === 'owner' && m.role === 'member'),
+        onRemove: () => this.acctAct('remove_member', { user_id: m.id }, 'Member removed.'),
+      })),
+      inviteEmailDraft: s.inviteEmailDraft,
+      setInviteEmailDraft: (e) => this.setState({ inviteEmailDraft: e.target.value }),
+      sendInvite: async () => {
+        const okd = await this.acctAct('invite_member', { email: s.inviteEmailDraft }, 'Invitation sent.', { email_invalid: 'That email address does not look right.', already_member: 'That person is already a member.' });
+        if (okd) this.setState({ inviteEmailDraft: '' });
+      },
+      hasPendingInviteRows: (s.realOrgInvites || []).length > 0,
+      pendingInviteRows: (s.realOrgInvites || []).map(i => ({ email: i.email, onRevoke: () => this.acctAct('revoke_invite', { invite_id: i.id }, 'Invitation revoked.') })),
+      leaveOrg: () => { if (window.confirm('Leave this organization? You will lose access to its checks.')) this.acctAct('leave_org', {}, 'You left the organization.'); },
       isLookup: s.screen === 'lookup',
       isConfirmEmail: s.screen === 'confirmEmail',
       isNoMatch: s.screen === 'noMatch',
