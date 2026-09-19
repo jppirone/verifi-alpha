@@ -3297,11 +3297,9 @@ class Component extends DCLogic {
     this.setState({ sourceDocLoading: true, sourceDocError: null });
     let data;
     try {
-      const res = await fetch(this.SUPABASE_FN_URL + '/get-resume-extraction', {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_id: candidateId }),
-      });
+      // Candidate-session pass (2026-09-19): get-resume-extraction hands back a signed URL to the candidate's original resume, so
+      // it now needs the candidate's own session or (this caller) a live staff session.
+      const res = await this.staffFetch('/get-resume-extraction', { candidate_id: candidateId });
       data = await res.json().catch(() => ({ ok: false, error: 'invalid_response' }));
     } catch (e) {
       data = { ok: false, error: 'network_error' };
