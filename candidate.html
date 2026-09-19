@@ -9003,7 +9003,11 @@ class Component extends DCLogic {
     this.setState({ checkoutPending: true, checkoutAwaitingWebhook: true, ...(!isLicenseFlow && !fromSignupTiers && this.state.screen === 'account' ? { accountTab: 'subscription' } : {}) });
     const alreadyConfirmed = () => isLicenseFlow ? !!this.state.licenseSubscriptionStartedAt : this.state.accountTier === 'paid';
     let confirmed = alreadyConfirmed();
-    for (let i = 0; !confirmed && i < 8; i++) {
+    // Time-based, not a retry count: with the cheap side-effect-free read above, 8 spaced tries would now end after ~10 s
+    // (each used to cost ~2 s inside resolveSession()), a shorter wait than before for a slow webhook. 25 s keeps the
+    // effective window the retries always had.
+    const waitUntil = Date.now() + 25000;
+    for (let i = 0; !confirmed && (i === 0 || Date.now() < waitUntil); i++) {
       if (i > 0) await new Promise((r) => setTimeout(r, 1500));
       const facts = await this.refreshBillingFacts();
       confirmed = !!facts && (isLicenseFlow ? !!facts.license_subscription_started_at : facts.tier === 'paid');
