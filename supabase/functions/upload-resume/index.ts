@@ -981,11 +981,11 @@ const RASTERIZE_RETRY_DPI = 110;
 
 type RasterizePageResult = {
   ok: boolean;
-  data: { ok?: boolean; page_count?: number; extraction?: unknown; ocr_raw_text?: string; routing?: { method?: string }; render?: unknown; timing_ms?: unknown; model_calls?: unknown; code?: string; error?: string; message?: string };
+  data: { ok?: boolean; page_count?: number; extraction?: unknown; ocr_raw_text?: string; routing?: { method?: string }; render?: unknown; timing_ms?: unknown; model_calls?: unknown; ocr_strips?: unknown; code?: string; error?: string; message?: string };
   status: number;
 };
 
-type AttemptLog = { dpi: number; force_vision: boolean; ms: number; status: number; code?: string };
+type AttemptLog = { dpi: number; force_vision: boolean; ms: number; status: number; code?: string; relay_calls: number };
 type RasterizeOutcome = RasterizePageResult & { attempts: AttemptLog[] };
 
 async function callRasterizePage(storagePath: string, pageNumber: number, opts?: { targetDpi?: number; forceVision?: boolean; previousPageContext?: TrailingItemContext }, signal?: AbortSignal): Promise<RasterizePageResult> {
@@ -1035,7 +1035,11 @@ async function rasterizePageWithRetry(storagePath: string, pageNumber: number, p
     const remaining = opts.deadline - t;
     if (remaining < 5_000) throw new Error("invocation_budget_exhausted");
     const r = await callRasterizePage(storagePath, pageNumber, { ...o, previousPageContext }, AbortSignal.timeout(remaining));
-    attempts.push({ dpi: o.targetDpi ?? 150, force_vision: !!o.forceVision, ms: Date.now() - t, status: r.status, code: (r.data?.code || r.data?.error) as string | undefined });
+    // Relay calls this attempt cost the trace: the call itself, plus one per OCR strip rasterize-pdf-page fanned out to
+    // (and any retry/split of a strip). See the RELAY BUDGET note in the resumable-extraction header.
+    const strips = (r.data as { ocr_strips?: { count?: number; strips?: Array<{ attempts?: number }> } })?.ocr_strips;
+    const stripCalls = (strips?.count ?? 0) + (strips?.strips ?? []).reduce((n, s) => n + Math.max(0, (s.attempts ?? 1) - 1), 0);
+    attempts.push({ dpi: o.targetDpi ?? 150, force_vision: !!o.forceVision, ms: Date.now() - t, status: r.status, code: (r.data?.code || r.data?.error) as string | undefined, relay_calls: 1 + stripCalls });
     return r;
   };
   if (opts.startWithVision) {
@@ -1354,6 +1358,18 @@ function mergeExtractions(pages: Array<{ pageNumber: number; extraction: Extract
 //     consumes step 1's output, and each page's prompt carries the previous page's trailing item — running them
 //     together brings back the boundary/continuation contradiction fixed on 2026-09-18.
 // ---------------------------------------------------------------------------------------------------
+// RELAY BUDGET (2026-09-19, found live while building strip OCR): the platform allows only 30 nested function calls
+// per minute within one TRACE (one client request and everything it calls in turn); the 31st throws
+// "RateLimitError: Rate limit exceeded for trace ..." from fetch itself (measured: bursts of 32/64/100 parallel calls
+// from one invocation all succeeded exactly 30 times). A page read through strip OCR costs 1 (this function's call to
+// rasterize-pdf-page) + one per strip (~8 on a dense page) = ~9, so a 4th dense page inside one invocation would trip
+// it, and once tripped every further call in that trace fails for the rest of the minute. An invocation therefore
+// counts the relay calls it has spent and stops (continue: true) before the next page could exceed
+// RELAY_CALLS_PER_INVOCATION; the client's next call is a NEW trace with a fresh budget, so this costs one round
+// trip, not time. A RateLimitError that still slips through surfaces as a thrown fetch error, which this loop already
+// treats as "end this invocation, continue in a fresh one".
+const RELAY_CALLS_PER_INVOCATION = 22;    // platform limit is 30/min/trace; the margin covers strip retries/splits and a QA re-read
+const DEFAULT_PAGE_RELAY_CALLS = 10;      // assumed cost of a page before one has been measured this invocation
 const INVOCATION_LIMIT_MS = 140_000;      // platform kills at ~150 s
 const FINALIZE_RESERVE_MS = 12_000;       // merge + insert RPC + status writes after the last page
 const DEFAULT_PAGE_COST_MS = 65_000;      // assumed cost of a page before one has been timed this invocation (measured vision page: 41-59 s plus dead attempts)
@@ -1419,7 +1435,11 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
   for (const r of rowsData ?? []) rows.set(r.page_number, r);
 
   const pageCosts: number[] = [];
-  const canStartAnotherPage = () => Date.now() + (pageCosts.length ? Math.max(...pageCosts) : DEFAULT_PAGE_COST_MS) * PAGE_COST_MARGIN <= pageDeadline;
+  let relayCalls = 0;                      // nested function calls this invocation has spent (see RELAY BUDGET above)
+  const pageRelay: number[] = [];
+  const canStartAnotherPage = () =>
+    Date.now() + (pageCosts.length ? Math.max(...pageCosts) : DEFAULT_PAGE_COST_MS) * PAGE_COST_MARGIN <= pageDeadline &&
+    relayCalls + (pageRelay.length ? Math.max(...pageRelay) : DEFAULT_PAGE_RELAY_CALLS) <= RELAY_CALLS_PER_INVOCATION;
   const contextFor = (pn: number) => (rows.get(pn - 1) ? describeTrailingItem(rows.get(pn - 1)!.extraction) : undefined);
   const hintFor = (pn: number) => rows.get(pn - 1)?.timing?.needed_force_vision === true;
   const continueResponse = async () => {
@@ -1442,6 +1462,7 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
       let ocrText = row.ocr_text;
       const r = await rasterizePageWithRetry(originalPath, pn, contextFor(pn), { deadline: pageDeadline, startWithVision: hintFor(pn) || row.timing?.needed_force_vision === true });
       qa.retry_ms = Date.now() - t0;
+      relayCalls += r.attempts.reduce((n, a) => n + a.relay_calls, 0);
       qa.kept = "original";
       if (r.ok && r.data.ok && isValidExtraction(r.data.extraction)) {
         const after = findStructuralIssues(r.data.extraction as ExtractionResult);
@@ -1464,6 +1485,9 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
       unitsDone++;
       const outcome = await rasterizePageWithRetry(originalPath, pn, contextFor(pn), { deadline: pageDeadline, startWithVision: hintFor(pn) });
       const pageMs = outcome.attempts.reduce((n, a) => n + a.ms, 0);
+      const pageCalls = outcome.attempts.reduce((n, a) => n + a.relay_calls, 0);
+      relayCalls += pageCalls;
+      pageRelay.push(pageCalls);
       const d = outcome.data;
       if (!outcome.ok || !d.ok || !isValidExtraction(d.extraction)) {
         const stillResourceLimited = d.code === RESOURCE_LIMIT_CODE;
@@ -1502,7 +1526,7 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
           // On the tesseract+Haiku route a retry is ~5 s and stays as before.
           timing.qa.skipped = "vision_route";
           console.log(`upload-resume: ${docId} page ${pn} flagged ${issues.length} structural issue(s) on the vision route; QA retry skipped (not worth a second vision read)`);
-        } else if (Date.now() + pageMs * PAGE_COST_MARGIN <= pageDeadline) {
+        } else if (Date.now() + pageMs * PAGE_COST_MARGIN <= pageDeadline && relayCalls + pageCalls <= RELAY_CALLS_PER_INVOCATION) {
           console.log(`upload-resume: ${docId} page ${pn} flagged ${issues.length} structural issue(s), retrying once — ${issues.join(" | ")}`);
           timing.qa.fired = true;
           qaState = "done";
@@ -1511,6 +1535,7 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
             const t0 = Date.now();
             const retry = await rasterizePageWithRetry(originalPath, pn, contextFor(pn), { deadline: pageDeadline, startWithVision: usedVisionFallback });
             timing.qa.retry_ms = Date.now() - t0;
+            relayCalls += retry.attempts.reduce((n, a) => n + a.relay_calls, 0);
             if (retry.ok && retry.data.ok && isValidExtraction(retry.data.extraction)) {
               const retryExtraction = retry.data.extraction as ExtractionResult;
               const retryIssues = findStructuralIssues(retryExtraction);
@@ -1542,7 +1567,7 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
         ...(pn === 1 && pageCount ? { extraction_page_count: pageCount } : {}),
       }).eq("id", docId);
       pageCosts.push(pageMs);
-      console.log(`upload-resume: ${docId} page ${pn}/${pageCount ?? "?"} checkpointed — ${pageMs} ms in ${outcome.attempts.length} attempt(s), routing=${timing.routing}, qa=${qaState}`);
+      console.log(`upload-resume: ${docId} page ${pn}/${pageCount ?? "?"} checkpointed — ${pageMs} ms in ${outcome.attempts.length} attempt(s), ${pageCalls} relay call(s) (${relayCalls} this invocation), routing=${timing.routing}, qa=${qaState}`);
       if (qaState === "pending") return await continueResponse();
     }
   } catch (e) {

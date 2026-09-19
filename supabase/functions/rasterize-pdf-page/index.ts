@@ -1123,6 +1123,116 @@ async function runTesseract(rgbaBytes: Uint8Array, width: number, height: number
   return text;
 }
 
+// STRIP OCR (2026-09-19). Supabase kills an Edge Function invocation after ~2 s of CPU time (surfaces as
+// WORKER_RESOURCE_LIMIT). tesseract-wasm costs ~5.5 ms per recognised word on the platform (measured: a 217-244 word
+// strip takes 1.3-1.5 s; the ~600-word full page of a real resume and even a ~350-word half are killed, at 150 AND
+// 110 DPI), so a dense page could never finish OCR inside one invocation, and every such page fell through to the
+// Sonnet-vision route (~45-75 s per page instead of ~7 s). Instead of OCR-ing the whole page here, a dense page is cut
+// into horizontal strips that each fit the budget and each strip is OCR'd by its own ocr-page-strip invocation, in
+// parallel; the word boxes are merged and go through the SAME word clustering and Haiku steps as before.
+//
+// Cuts are always in the blank rows BETWEEN text lines (a line is never split), chosen from the page's row ink profile.
+// A strip is closed when it holds OCR_MAX_LINES_PER_STRIP lines or OCR_INK_BUDGET_150DPI dark pixels (ink tracks glyph
+// count whatever the layout: measured 236-307 px per word at 150 DPI on 10 pt text, so 22,000 px ~ 70-90 words).
+// The budget is deliberately small because the platform's CPU speed is NOT steady: identical strips of ~170 words were
+// measured passing (0.86 s to recognise) and then being killed on a repeat call minutes later, and 81-word strips took
+// as long as 171-word ones had, i.e. ~2x swings over time. A strip therefore needs ~2.5x headroom under the 2 s limit,
+// not an average-case fit. As a second line of defence a strip that is still killed is split in half at a blank row and
+// retried (see ocrRowsAdaptive). A page that fits in one strip is OCR'd in-process exactly as before, so sparse pages
+// are unchanged. Measured against the PDF's exact text layer, strips match whole-page OCR
+// word for word (563/594 both ways on page 1), so the split costs no accuracy.
+const OCR_MAX_LINES_PER_STRIP = 8;
+const OCR_INK_BUDGET_150DPI = 22_000;
+const OCR_MAX_STRIPS = 12; // also bounded by the platform's per-trace relay limit (30 nested function calls per minute; see upload-resume)
+const OCR_MIN_SPLIT_ROWS = 120; // a strip shorter than this is not split further, only retried
+const OCR_STRIP_TIMEOUT_MS = 40_000;
+const OCR_STRIP_FN_URL = `${SUPABASE_URL}/functions/v1/ocr-page-strip`;
+
+function planOcrStrips(rgb: Uint8Array, width: number, height: number, scale: number): { strips: Array<[number, number]>; rowInk: Uint32Array } {
+  const inkBudget = OCR_INK_BUDGET_150DPI * Math.pow(scale / (150 / 72), 2);
+  const rowInk = new Uint32Array(height);
+  for (let y = 0; y < height; y++) {
+    let c = 0;
+    const o = y * width * 3;
+    for (let x = 0; x < width; x++) if (rgb[o + x * 3] < 170) c++;
+    rowInk[y] = c;
+  }
+  const bands: Array<{ start: number; end: number; ink: number }> = [];
+  let start = -1, ink = 0;
+  for (let y = 0; y <= height; y++) {
+    if (y < height && rowInk[y] > 0) { if (start < 0) start = y; ink += rowInk[y]; }
+    else if (start >= 0) { bands.push({ start, end: y, ink }); start = -1; ink = 0; }
+  }
+  if (bands.length <= 1) return { strips: [[0, height]], rowInk };
+  const strips: Array<[number, number]> = [];
+  let stripStart = 0, lines = 0, stripInk = 0, prevLines = 0;
+  for (let i = 0; i < bands.length; i++) {
+    if (lines > 0 && (lines >= OCR_MAX_LINES_PER_STRIP || stripInk + bands[i].ink > inkBudget)) {
+      const cut = Math.round((bands[i - 1].end + bands[i].start) / 2); // middle of the blank gap between two lines
+      strips.push([stripStart, cut]);
+      stripStart = cut; prevLines = lines; lines = 0; stripInk = 0;
+    }
+    lines++; stripInk += bands[i].ink;
+  }
+  // A last strip of one or two lines (a footer, a page number) is not worth its own invocation: fold it into the previous one.
+  if (lines <= 2 && strips.length > 0 && prevLines + lines <= OCR_MAX_LINES_PER_STRIP + 2) {
+    strips[strips.length - 1] = [strips[strips.length - 1][0], height];
+  } else {
+    strips.push([stripStart, height]);
+  }
+  return { strips, rowInk };
+}
+
+// Nearest fully blank row to the middle of [y0, y1) that leaves at least 30 rows on each side, or null.
+function findBlankRowNear(rowInk: Uint32Array, y0: number, y1: number): number | null {
+  const mid = Math.round((y0 + y1) / 2);
+  for (let d = 0; d <= (y1 - y0) / 2 - 30; d++) {
+    if (rowInk[mid + d] === 0) return mid + d;
+    if (rowInk[mid - d] === 0) return mid - d;
+  }
+  return null;
+}
+
+type StripResult = { words: TextItem[]; rows: [number, number]; timing_ms: unknown; attempts: number };
+
+async function callOcrStrip(storagePath: string, pageNum: number, scale: number, width: number, y0: number, y1: number): Promise<{ words: TextItem[]; timing_ms: unknown }> {
+  let lastErr = "unknown";
+  try {
+    const res = await fetch(OCR_STRIP_FN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
+      body: JSON.stringify({ storage_path: storagePath, page_number: pageNum, scale, width, y0, y1 }),
+      signal: AbortSignal.timeout(OCR_STRIP_TIMEOUT_MS),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.ok && Array.isArray(data.words)) return { words: data.words as TextItem[], timing_ms: data.timing_ms };
+    lastErr = `http_${res.status} ${data.code || data.error || ""}`.trim();
+  } catch (e) {
+    lastErr = String(e);
+  }
+  throw new Error(`ocr_strip_failed (rows ${y0}-${y1}): ${lastErr}`);
+}
+
+// One strip, with recovery: a strip is a fresh, independent invocation, so a kill is often transient. On failure a
+// tall strip is split at a blank row and both halves retried (depth-limited); a short one is simply retried once.
+async function ocrRowsAdaptive(storagePath: string, pageNum: number, scale: number, width: number, y0: number, y1: number, rowInk: Uint32Array, depth: number): Promise<StripResult[]> {
+  try {
+    const r = await callOcrStrip(storagePath, pageNum, scale, width, y0, y1);
+    return [{ words: r.words, rows: [y0, y1], timing_ms: r.timing_ms, attempts: 1 }];
+  } catch (firstErr) {
+    const cut = y1 - y0 >= OCR_MIN_SPLIT_ROWS && depth < 2 ? findBlankRowNear(rowInk, y0, y1) : null;
+    if (cut !== null) {
+      const halves = await Promise.all([
+        ocrRowsAdaptive(storagePath, pageNum, scale, width, y0, cut, rowInk, depth + 1),
+        ocrRowsAdaptive(storagePath, pageNum, scale, width, cut, y1, rowInk, depth + 1),
+      ]);
+      return halves.flat().map((h) => ({ ...h, attempts: h.attempts + 1 }));
+    }
+    const r = await callOcrStrip(storagePath, pageNum, scale, width, y0, y1); // last resort: same rows once more (throws if it fails)
+    return [{ words: r.words, rows: [y0, y1], timing_ms: r.timing_ms, attempts: 2 }];
+  }
+}
+
 // Expands 3-byte-per-pixel RGB into 4-byte-per-pixel RGBA (opaque, alpha=255 throughout) in plain
 // JS — see the render-block comment above for why this exists instead of asking mupdf for alpha
 // directly.
@@ -1316,6 +1426,8 @@ export default {
       let extractionMs: number;
       let ocrText: string | undefined;
       let ocrMs: number | undefined;
+      let ocrStripCount = 0;
+      let ocrStripTiming: unknown = undefined;
 
       // STEP 1 OF 2 (Decision 38): section-boundary detection, one extra call before the real
       // extraction call below, on whichever input this page's routing already picked (image for
@@ -1343,8 +1455,26 @@ export default {
       } else {
         const ocrStart = Date.now();
         const rgb = pixmap.getPixels(); // raw RGB Uint8Array (3 bytes/pixel) — no alpha, per above
-        const rgba = rgbToRgba(rgb);
-        ocrText = await runTesseract(rgba, renderedWidth, renderedHeight);
+        const { strips: stripPlan, rowInk } = planOcrStrips(rgb, renderedWidth, renderedHeight, scale);
+        ocrStripCount = stripPlan.length;
+        if (stripPlan.length <= 1) {
+          const rgba = rgbToRgba(rgb);
+          ocrText = await runTesseract(rgba, renderedWidth, renderedHeight);
+        } else {
+          try {
+            if (stripPlan.length > OCR_MAX_STRIPS) throw new Error(`ocr_too_many_strips (${stripPlan.length})`);
+            const parts = (await Promise.all(stripPlan.map(([a, b]) => ocrRowsAdaptive(storage_path, pageNum, scale, renderedWidth, a, b, rowInk, 0)))).flat();
+            ocrStripTiming = parts.map((pt) => ({ rows: pt.rows, words: pt.words.length, attempts: pt.attempts, timing_ms: pt.timing_ms }));
+            ocrText = reconstructByWordClustering(parts.flatMap((pt) => pt.words));
+          } catch (stripErr) {
+            // Reported with the same code the caller's retry ladder already keys on (WORKER_RESOURCE_LIMIT): this page
+            // cannot be OCR'd within the platform's CPU limit, so the ladder retries once at a lower DPI and finally
+            // routes it to the vision extraction (force_vision), exactly as for an in-process crash before.
+            return new Response(JSON.stringify({ ok: false, code: "WORKER_RESOURCE_LIMIT", error: "ocr_strips_failed", detail: String(stripErr), ocr_strips: { count: stripPlan.length } }), {
+              status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+        }
         ocrMs = Date.now() - ocrStart;
         try {
           const boundaryStart = Date.now();
@@ -1380,6 +1510,7 @@ export default {
         ocr_raw_text: ocrText,
         timing_ms: { fetch: fetchMs, import: importMs, open: openMs, render: renderMs, ocr: ocrMs, boundary: boundaryMs, extraction: extractionMs, total: Date.now() - handlerStart },
         model_calls: modelCalls,
+        ocr_strips: { count: ocrStripCount, strips: ocrStripTiming },
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: "unhandled", detail: String(e) }), {
