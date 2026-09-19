@@ -36,3 +36,8 @@ create table if not exists resume_extraction_pages (
   created_at timestamptz not null default now(),
   primary key (resume_document_id, page_number)
 );
+
+-- Every table this project adds needs this explicit grant: the API roles get no default table privileges here, and
+-- the Edge Functions talk to the database as service_role. (Found live: without it the first checkpoint write is
+-- denied.) anon/authenticated deliberately get nothing.
+grant select, insert, update, delete on table resume_extraction_pages to service_role;

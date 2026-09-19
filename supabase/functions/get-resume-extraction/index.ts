@@ -190,7 +190,11 @@ export default {
 
       let effectiveStatus = effectiveDoc.extraction_status;
       const ageSeconds = (Date.now() - new Date(effectiveDoc.uploaded_at).getTime()) / 1000;
-      const resumable = effectiveDoc.mime_type === "application/pdf" && effectiveDoc.extraction_lease_until != null;
+      // A resumable PDF is recognised by any trace of the new flow, not by the lease alone: the lease is released
+      // between runs (that is exactly when this needs to say "continue me"), and page_count/progress appear once page 1
+      // is read. All of these are empty/zero only on rows from before the change.
+      const resumable = effectiveDoc.mime_type === "application/pdf" &&
+        (effectiveDoc.extraction_lease_until != null || effectiveDoc.extraction_page_count != null || effectiveDoc.extraction_progress_at != null || (effectiveDoc.extraction_stalls ?? 0) > 0);
       if ((effectiveStatus === "pending" || effectiveStatus === "ocr_done") && ageSeconds > (resumable ? RESUMABLE_MAX_AGE_SECONDS : STALE_SECONDS)) {
         const { error: healErr } = await supabase
           .from("resume_documents")
