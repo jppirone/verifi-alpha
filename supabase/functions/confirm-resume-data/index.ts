@@ -29,8 +29,10 @@ const corsHeaders = {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-type WorkHistoryEdit = { id: string; company?: string; title?: string; location?: string; start_date?: string; end_date?: string; job_responsibilities?: string; heading?: string | null };
-type EducationEdit = { id: string; institution?: string; degree?: string; field_of_study?: string; location?: string; start_date?: string; end_date?: string; heading?: string | null };
+// *_precision: how precisely the SOURCE printed each date (year | month | day, or present for an end date), echoed
+// back by the client from get-resume-extraction; see migration 20260919090000_date_precision.sql.
+type WorkHistoryEdit = { id: string; company?: string; title?: string; location?: string; start_date?: string; end_date?: string; start_date_precision?: string | null; end_date_precision?: string | null; job_responsibilities?: string; heading?: string | null };
+type EducationEdit = { id: string; institution?: string; degree?: string; field_of_study?: string; location?: string; start_date?: string; end_date?: string; start_date_precision?: string | null; end_date_precision?: string | null; heading?: string | null };
 // source_match is echoed back by the client (candidate.html already has it, straight from
 // get-resume-extraction) for the same reason section_type/heading are on FreeformEdit below — this
 // function only needs it to decide which certifications get the unconditional staff flag, not to
@@ -39,7 +41,7 @@ type EducationEdit = { id: string; institution?: string; degree?: string; field_
 // trade_soc_code (Item 8, 2026-09-12 live-testing session): the candidate's chosen (or auto-suggested
 // and left as-is) SOC trade/occupation code, echoed back the same way license_number already is —
 // see the queueInserts loop below for what happens when it's missing.
-type CertificationEdit = { id: string; name?: string; issuing_body?: string; license_number?: string; issue_date?: string; expiration_date?: string; source_match?: string; trade_soc_code?: string | null; heading?: string | null };
+type CertificationEdit = { id: string; name?: string; issuing_body?: string; license_number?: string; issue_date?: string; expiration_date?: string; issue_date_precision?: string | null; expiration_date_precision?: string | null; source_match?: string; trade_soc_code?: string | null; heading?: string | null };
 // License edits (automatic license verification): a license is a certification row (edited through
 // CertificationEdit above — name, number, dates) plus a 1:1 license_items extension holding only the
 // issuing state. state is only ever a 2-letter US state/DC code (validated below) and is never
@@ -63,12 +65,32 @@ function dateOrNull(v: unknown): string | null {
   return typeof v === "string" && v.trim() !== "" ? v : null;
 }
 
+// Dates print exactly as precisely as the source did (date precision, 2026-09-19): "2007", "Mar 2007", "Mar 15, 2007",
+// or "Present" — never a month or day the source did not show. A row that carries no precision (an older client)
+// falls back to the same conservative rule as the database backfill: Jan 1 reads as a year, the 1st of a month as a month.
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function printDate(date: string | null | undefined, precision: string | null | undefined): string {
+  if (precision === "present") return "Present";
+  if (!date) return "";
+  const m = String(date).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return "";
+  const p = precision === "year" || precision === "month" || precision === "day" ? precision
+    : (m[2] === "01" && m[3] === "01" ? "year" : m[3] === "01" ? "month" : "day");
+  if (p === "year") return m[1];
+  const mon = MONTHS[Number(m[2]) - 1] ?? "";
+  return p === "month" ? `${mon} ${m[1]}` : `${mon} ${Number(m[3])}, ${m[1]}`;
+}
+function cleanPrecision(p: unknown, date: string | null, allowPresent: boolean): string | null {
+  if (allowPresent && p === "present" && !date) return "present";
+  if (date && (p === "year" || p === "month" || p === "day")) return p;
+  return null;
+}
 function claimForWorkHistory(w: WorkHistoryEdit): string {
-  const dates = [w.start_date, w.end_date || "Present"].filter(Boolean).join(" – ");
+  const dates = [printDate(w.start_date, w.start_date_precision), printDate(w.end_date, w.end_date_precision)].filter(Boolean).join(" – ");
   return [w.title, w.company, w.location, dates].filter(Boolean).join(", ");
 }
 function claimForEducation(e: EducationEdit): string {
-  const dates = [e.start_date, e.end_date].filter(Boolean).join(" – ");
+  const dates = [printDate(e.start_date, e.start_date_precision), printDate(e.end_date, e.end_date_precision)].filter(Boolean).join(" – ");
   return [e.degree, e.field_of_study, e.institution, e.location, dates].filter(Boolean).join(", ");
 }
 function claimForCertification(c: CertificationEdit): string {
@@ -76,7 +98,7 @@ function claimForCertification(c: CertificationEdit): string {
   // text too — this is the field a real state-licensing-board lookup (the DBPR/DORA automated
   // checks already wired into staff.html) actually needs visible at a glance, not just stored.
   const licenseLabel = c.license_number ? `Lic #${c.license_number}` : null;
-  return [c.name, c.issuing_body, licenseLabel, c.issue_date].filter(Boolean).join(", ");
+  return [c.name, c.issuing_body, licenseLabel, printDate(c.issue_date, c.issue_date_precision)].filter(Boolean).join(", ");
 }
 // Truncated, not the full content — this is a queue-list preview (claim), not the review surface
 // itself; internal_note below carries the full, untruncated content plus the reason it's flagged.
@@ -182,6 +204,10 @@ export default {
           company: w.company ?? null, title: w.title ?? null,
           location: w.location ?? null,
           start_date: dateOrNull(w.start_date), end_date: dateOrNull(w.end_date),
+          ...(w.start_date_precision !== undefined || w.end_date_precision !== undefined ? {
+            start_date_precision: cleanPrecision(w.start_date_precision, dateOrNull(w.start_date), false),
+            end_date_precision: cleanPrecision(w.end_date_precision, dateOrNull(w.end_date), true),
+          } : {}),
           job_responsibilities: w.job_responsibilities ?? null,
           // Item #3 (2026-09-17): heading is candidate-editable now (one shared value per
           // contiguous resumeConfirm group — see candidate.html's updateResumeSectionHeading), so
@@ -200,6 +226,10 @@ export default {
           institution: e.institution ?? null, degree: e.degree ?? null, field_of_study: e.field_of_study ?? null,
           location: e.location ?? null,
           start_date: dateOrNull(e.start_date), end_date: dateOrNull(e.end_date),
+          ...(e.start_date_precision !== undefined || e.end_date_precision !== undefined ? {
+            start_date_precision: cleanPrecision(e.start_date_precision, dateOrNull(e.start_date), false),
+            end_date_precision: cleanPrecision(e.end_date_precision, dateOrNull(e.end_date), true),
+          } : {}),
           heading: e.heading ?? null,
           candidate_confirmed: true, updated_at: new Date().toISOString(),
         }).eq("id", e.id).eq("candidate_id", candidate_id).select("id");
@@ -213,6 +243,10 @@ export default {
         const { data, error } = await supabase.from("certification_items").update({
           name: c.name ?? null, issuing_body: c.issuing_body ?? null, license_number: c.license_number ?? null,
           issue_date: dateOrNull(c.issue_date), expiration_date: dateOrNull(c.expiration_date),
+          ...(c.issue_date_precision !== undefined || c.expiration_date_precision !== undefined ? {
+            issue_date_precision: cleanPrecision(c.issue_date_precision, dateOrNull(c.issue_date), false),
+            expiration_date_precision: cleanPrecision(c.expiration_date_precision, dateOrNull(c.expiration_date), false),
+          } : {}),
           trade_soc_code: c.trade_soc_code ?? null,
           heading: c.heading ?? null,
           candidate_confirmed: true, updated_at: new Date().toISOString(),

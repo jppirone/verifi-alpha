@@ -98,12 +98,23 @@ function normNumber(s: unknown): string {
 function normName(s: unknown): string {
   return typeof s === "string" ? stripPunct(s) : "";
 }
-function isoDateOrNull(s: unknown): string | null {
+// Dates come back exactly as precisely as the resume printed them ("2027", "2027-08", "2027-08-31"); anything else, or an
+// impossible date, is null. Same rule as parse_partial_date/partial_date_precision in the database (migration
+// 20260919090000_date_precision.sql): a full date on the 1st is treated as month-only, on Jan 1 as year-only.
+function partialDateOrNull(s: unknown): string | null {
   if (typeof s !== "string") return null;
-  const m = s.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const t = s.trim();
+  const m = t.match(/^(\d{4})(?:-(0[1-9]|1[0-2])(?:-(\d{2}))?)?$/);
   if (!m) return null;
-  const d = new Date(`${m[1]}-${m[2]}-${m[3]}T00:00:00Z`);
-  return isNaN(d.getTime()) ? null : `${m[1]}-${m[2]}-${m[3]}`;
+  if (m[3]) { const d = new Date(`${t}T00:00:00Z`); if (isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== t) return null; }
+  return t;
+}
+function splitPartialDate(s: string | null): { date: string | null; precision: "year" | "month" | "day" | null } {
+  if (!s) return { date: null, precision: null };
+  if (/^\d{4}$/.test(s)) return { date: `${s}-01-01`, precision: "year" };
+  if (/^\d{4}-\d{2}$/.test(s)) return { date: `${s}-01`, precision: "month" };
+  if (s.endsWith("-01")) return { date: s, precision: s.slice(5, 7) === "01" ? "year" : "month" };
+  return { date: s, precision: "day" };
 }
 function strOrNull(s: unknown): string | null {
   return typeof s === "string" && s.trim() ? s.trim() : null;
@@ -138,8 +149,8 @@ Return ONLY a JSON object, no prose, in exactly this shape:
   "issuing_body": "the issuing board/agency exactly as printed, or null",
   "state": "2-letter US state code, or null",
   "state_evidence": "the verbatim words from the resume that name the state, or null",
-  "issue_date": "YYYY-MM-DD or null",
-  "expiration_date": "YYYY-MM-DD or null",
+  "issue_date": "the date exactly as precisely as the resume prints it: YYYY-MM-DD for a full date, YYYY-MM for a month and year, YYYY for a year only (never fill in a month or day it does not show), or null",
+  "expiration_date": "same rule as issue_date, or null",
   "existing_certification_id": "id of the already-extracted entry this is the same credential as, or null",
   "confidence": a number from 0 to 1
 }]}
@@ -208,7 +219,7 @@ async function callModel(fileBase64: string, mime: string, existing: ExistingCer
       source_text: strOrNull(m.source_text), license_number: strOrNull(m.license_number), holder_name: strOrNull(m.holder_name),
       license_name: strOrNull(m.license_name), issuing_body: strOrNull(m.issuing_body),
       state: strOrNull(m.state), state_evidence: strOrNull(m.state_evidence),
-      issue_date: isoDateOrNull(m.issue_date), expiration_date: isoDateOrNull(m.expiration_date),
+      issue_date: partialDateOrNull(m.issue_date), expiration_date: partialDateOrNull(m.expiration_date),
       existing_certification_id: strOrNull(m.existing_certification_id),
       confidence: typeof m.confidence === "number" ? Math.max(0, Math.min(1, m.confidence)) : 0.5,
     }));
@@ -338,8 +349,8 @@ export default {
           const c = certById.get(certId);
           const fill: Record<string, unknown> = {};
           if (!normNumber(c.license_number) && m.license_number) fill.license_number = m.license_number;
-          if (!c.issue_date && m.issue_date) fill.issue_date = m.issue_date;
-          if (!c.expiration_date && m.expiration_date) fill.expiration_date = m.expiration_date;
+          if (!c.issue_date && m.issue_date) { const d = splitPartialDate(m.issue_date); fill.issue_date = d.date; fill.issue_date_precision = d.precision; }
+          if (!c.expiration_date && m.expiration_date) { const d = splitPartialDate(m.expiration_date); fill.expiration_date = d.date; fill.expiration_date_precision = d.precision; }
           if (Object.keys(fill).length) {
             const { error: fillErr } = await supabase.from("certification_items").update({ ...fill, updated_at: new Date().toISOString() })
               .eq("id", certId).eq("candidate_id", candidateId);
@@ -355,7 +366,8 @@ export default {
             candidate_id: candidateId, resume_document_id: doc.id,
             name: m.license_name || m.issuing_body || "Professional license",
             issuing_body: m.issuing_body, license_number: m.license_number,
-            issue_date: m.issue_date, expiration_date: m.expiration_date,
+            issue_date: splitPartialDate(m.issue_date).date, issue_date_precision: splitPartialDate(m.issue_date).precision,
+            expiration_date: splitPartialDate(m.expiration_date).date, expiration_date_precision: splitPartialDate(m.expiration_date).precision,
             extraction_confidence: "license_detection", candidate_confirmed: false,
           }).select("id").single();
           if (createErr || !created) {

@@ -33,7 +33,7 @@ export default {
       }
 
       const res = await fetch(
-        `${SUPABASE_URL}/rest/v1/certification_items?candidate_id=eq.${encodeURIComponent(candidate_id)}&select=id,name,issuing_body,license_number,trade_soc_code,issue_date,expiration_date,status,candidate_confirmed,created_at&order=created_at.asc`,
+        `${SUPABASE_URL}/rest/v1/certification_items?candidate_id=eq.${encodeURIComponent(candidate_id)}&select=id,name,issuing_body,license_number,trade_soc_code,issue_date,issue_date_precision,expiration_date,expiration_date_precision,status,candidate_confirmed,created_at&order=created_at.asc`,
         { headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } },
       );
       if (!res.ok) {

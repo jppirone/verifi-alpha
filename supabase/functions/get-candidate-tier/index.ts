@@ -41,7 +41,7 @@ export default {
       }
 
       const res = await fetch(
-        `${SUPABASE_URL}/rest/v1/candidates?id=eq.${encodeURIComponent(candidate_id)}&select=tier,stripe_subscription_cancelled_at`,
+        `${SUPABASE_URL}/rest/v1/candidates?id=eq.${encodeURIComponent(candidate_id)}&select=tier,stripe_subscription_cancelled_at,license_subscription_started_at`,
         { headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } },
       );
       if (!res.ok) {
@@ -57,7 +57,7 @@ export default {
         });
       }
 
-      return new Response(JSON.stringify({ ok: true, tier: candidate.tier, stripe_subscription_cancelled_at: candidate.stripe_subscription_cancelled_at }), {
+      return new Response(JSON.stringify({ ok: true, tier: candidate.tier, stripe_subscription_cancelled_at: candidate.stripe_subscription_cancelled_at, license_subscription_started_at: candidate.license_subscription_started_at }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     } catch (e) {

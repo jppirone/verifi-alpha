@@ -643,11 +643,12 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   level) in a "summary" or "hobbies_other" freeform entry — do not silently drop it, and do not
   invent a precision level the graphic doesn't actually convey.
 
-DATES: use YYYY-MM-DD when the resume gives a specific day (rare), YYYY-MM-01 when it gives a
-month and year, YYYY-01-01 when it gives only a year. If a role/program is current/ongoing
-("Present", "Current", no end given), set end_date to an empty string "" — do not invent a real
-end date. If a date is entirely absent or unrecoverable, use an empty string "" for that field, not
-a guess.
+DATES: write every date exactly as precisely as the resume prints it, never more precisely. Use YYYY
+when the resume gives only a year, YYYY-MM when it gives a month and year, and YYYY-MM-DD only when it
+gives a specific day (rare). NEVER fill in a month or day the resume does not show: a bare "2019" is
+"2019", not "2019-01" and not "2019-01-01". If a role/program is current/ongoing ("Present", "Current",
+"Now"), write the word Present as its end_date. If a date is entirely absent or unrecoverable, use an
+empty string "" for that field, not a guess.
 
 If a category has no entries, return an empty array for it — do not omit the key.${buildSectionBoundaryBlock(sectionBoundaries)}`;
 }

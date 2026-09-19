@@ -252,7 +252,9 @@ export default {
             license_number: lic.license_number || null,
             trade_soc_code: lic.trade_soc_code || null,
             issue_date: lic.issue_date || null,
+            issue_date_precision: lic.issue_date ? "day" : null, // entered through a date picker: a full date
             expiration_date: lic.expiration_date || null,
+            expiration_date_precision: lic.expiration_date ? "day" : null,
             candidate_confirmed: true,
           }),
         });

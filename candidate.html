@@ -3098,8 +3098,8 @@ a:hover{color:var(--color-accent)}
               <div class="field" style="flex:1;min-width:160px"><label>Location</label><input class="input" placeholder="City, ST" value="{{ item.location }}" sc-camel-on-change="{{ item.onLocation }}"></div>
             </div>
             <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
-              <div class="field" style="flex:1;min-width:140px"><label>Start date</label><input class="input" type="date" value="{{ item.startDate }}" sc-camel-on-change="{{ item.onStartDate }}"></div>
-              <div class="field" style="flex:1;min-width:140px"><label>End date (blank = present)</label><input class="input" type="date" value="{{ item.endDate }}" sc-camel-on-change="{{ item.onEndDate }}"></div>
+              <div class="field" style="flex:1;min-width:140px"><label>Start date<span style="font-weight:normal;font-size:11px;color:var(--color-neutral-500)">{{ item.startDateNote }}</span></label><input class="input" type="date" value="{{ item.startDate }}" sc-camel-on-change="{{ item.onStartDate }}"></div>
+              <div class="field" style="flex:1;min-width:140px"><label>End date (blank = present)<span style="font-weight:normal;font-size:11px;color:var(--color-neutral-500)">{{ item.endDateNote }}</span></label><input class="input" type="date" value="{{ item.endDate }}" sc-camel-on-change="{{ item.onEndDate }}"></div>
             </div>
             <div class="field"><label>Job responsibilities</label><textarea class="input" rows="3" value="{{ item.jobResponsibilities }}" sc-camel-on-change="{{ item.onResponsibilities }}"></textarea></div>
           </div>
@@ -3127,8 +3127,8 @@ a:hover{color:var(--color-accent)}
               <div class="field" style="flex:1;min-width:160px"><label>Location</label><input class="input" placeholder="City, ST" value="{{ item.location }}" sc-camel-on-change="{{ item.onLocation }}"></div>
             </div>
             <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
-              <div class="field" style="flex:1;min-width:140px"><label>Start date</label><input class="input" type="date" value="{{ item.startDate }}" sc-camel-on-change="{{ item.onStartDate }}"></div>
-              <div class="field" style="flex:1;min-width:140px"><label>End date</label><input class="input" type="date" value="{{ item.endDate }}" sc-camel-on-change="{{ item.onEndDate }}"></div>
+              <div class="field" style="flex:1;min-width:140px"><label>Start date<span style="font-weight:normal;font-size:11px;color:var(--color-neutral-500)">{{ item.startDateNote }}</span></label><input class="input" type="date" value="{{ item.startDate }}" sc-camel-on-change="{{ item.onStartDate }}"></div>
+              <div class="field" style="flex:1;min-width:140px"><label>End date<span style="font-weight:normal;font-size:11px;color:var(--color-neutral-500)">{{ item.endDateNote }}</span></label><input class="input" type="date" value="{{ item.endDate }}" sc-camel-on-change="{{ item.onEndDate }}"></div>
             </div>
           </div>
           </sc-for>
@@ -3155,8 +3155,8 @@ a:hover{color:var(--color-accent)}
                  whatever informal or formal name the candidate's own document uses. -->
             <div class="field"><label>License number</label><input class="input" value="{{ item.licenseNumber }}" sc-camel-on-change="{{ item.onLicenseNumber }}"></div>
             <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
-              <div class="field" style="flex:1;min-width:140px"><label>Issue date</label><input class="input" type="date" value="{{ item.issueDate }}" sc-camel-on-change="{{ item.onIssueDate }}"></div>
-              <div class="field" style="flex:1;min-width:140px"><label>Expiration date</label><input class="input" type="date" value="{{ item.expirationDate }}" sc-camel-on-change="{{ item.onExpirationDate }}"></div>
+              <div class="field" style="flex:1;min-width:140px"><label>Issue date<span style="font-weight:normal;font-size:11px;color:var(--color-neutral-500)">{{ item.issueDateNote }}</span></label><input class="input" type="date" value="{{ item.issueDate }}" sc-camel-on-change="{{ item.onIssueDate }}"></div>
+              <div class="field" style="flex:1;min-width:140px"><label>Expiration date<span style="font-weight:normal;font-size:11px;color:var(--color-neutral-500)">{{ item.expirationDateNote }}</span></label><input class="input" type="date" value="{{ item.expirationDate }}" sc-camel-on-change="{{ item.onExpirationDate }}"></div>
             </div>
             <!-- Item 8 (2026-09-12 live-testing session): trade/occupation type — the routing field a
                  future licensing-board check needs to know which board to check against. Not blocked
@@ -4641,6 +4641,11 @@ a:hover{color:var(--color-accent)}
                button here, unlike the notices below — a candidate must not be able to wave this away
                and be left believing they're on Paid when they aren't. It clears itself only when it
                stops being true (a fresh checkout attempt starts, or one actually confirms). -->
+          <sc-if value="{{ checkoutAwaitingWebhook }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:8px 10px;border:1px solid var(--color-divider);border-radius:6px">
+              <span style="font-size:12px;color:var(--color-neutral-400)">Confirming your payment with Stripe…</span>
+            </div>
+          </sc-if>
           <sc-if value="{{ checkoutIncompleteNotice }}" hint-placeholder-val="{{ false }}">
             <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--color-divider);border-radius:6px">
               <span style="font-size:12px;color:var(--color-neutral-300)">You haven't completed subscribing — your account remains on the Free plan.</span>
@@ -5599,12 +5604,14 @@ class Component extends DCLogic {
     return [
       { key: 'experience', label: 'Job Experience', items: workHistory.map(w => ({
         key: w.id,
-        label: [w.title, w.company].filter(Boolean).join(' at ') + this.parenDateRange(w.start_date, w.end_date),
+        label: [w.title, w.company].filter(Boolean).join(' at ') + this.parenDateRange(w.start_date, w.start_date_precision, w.end_date, w.end_date_precision),
         description: w.job_responsibilities || '',
       })) },
       { key: 'education', label: 'Education', items: education.map(e => ({
         key: e.id,
-        label: [e.degree, e.field_of_study, [e.institution, e.location].filter(Boolean).join(', ')].filter(Boolean).join(', ') + (e.end_date ? ` (Graduated ${this.monthYearLabel(e.end_date)})` : ''),
+        // The dates print as the source printed them: a range stays a range ("1985-1990"), and nothing is added that the
+        // source did not say (this used to append "(Graduated Jan 1990)" to any education row that had an end date).
+        label: [e.degree, e.field_of_study, [e.institution, e.location].filter(Boolean).join(', ')].filter(Boolean).join(', ') + this.parenDateRange(e.start_date, e.start_date_precision, e.end_date, e.end_date_precision),
       })) },
       { key: 'skills', label: 'Skills' },
       { key: 'certifications', label: 'Certifications', items: certifications.map(c => ({
@@ -5614,7 +5621,7 @@ class Component extends DCLogic {
         // and buildResumeLines' PDF output all read from (see Item 4/6's own comments on why), so
         // fixing it once here keeps every surface in sync rather than needing the same fix repeated
         // per screen. Always rendered together with name, never split apart or silently dropped.
-        label: [c.name, c.issuing_body, c.license_number ? `Lic #${c.license_number}` : ''].filter(Boolean).join(', ') + (c.issue_date ? ` (Issued ${this.monthYearLabel(c.issue_date)})` : ''),
+        label: [c.name, c.issuing_body, c.license_number ? `Lic #${c.license_number}` : ''].filter(Boolean).join(', ') + (c.issue_date ? ` (${this.dateLabel(c.issue_date, c.issue_date_precision)})` : ''),
       })) },
       // Item 3 (2026-09-11 status-check session): needs_review previously had no representation in
       // Customization at all -- content flagged from the resume as not fitting a standard category
@@ -5638,11 +5645,37 @@ class Component extends DCLogic {
     return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
   }
 
-  parenDateRange(start, end) {
-    const startLabel = this.monthYearLabel(start);
-    const endLabel = end ? this.monthYearLabel(end) : (start ? 'Present' : '');
-    if (!startLabel && !endLabel) return '';
-    return ` (${[startLabel, endLabel].filter(Boolean).join('-')})`;
+  // Date precision (2026-09-19). Extraction stores a bare year as Jan 1 and a month-and-year as the 1st, so the old labels
+  // printed "Jan" for a year the resume gave alone ("Graduated Jan 1990" for a source that said 1985 - 1990). Every date
+  // label now goes through here and prints exactly as precisely as the SOURCE did: year -> "1990", month -> "Mar 1990",
+  // day -> "Mar 15, 1990", or "Present". precision is the *_date_precision column (year|month|day|present). A row with no
+  // precision falls back to the same conservative rule as the database backfill (Jan 1 = year, the 1st = month), so a
+  // month is never invented for it either.
+  dateLabel(dateStr, precision) {
+    if (precision === 'present') return 'Present';
+    if (!dateStr) return '';
+    const d = new Date(dateStr + 'T00:00:00');
+    if (isNaN(d.getTime())) return '';
+    const md = String(dateStr).slice(5, 10);
+    const p = (precision === 'year' || precision === 'month' || precision === 'day') ? precision
+      : (md === '01-01' ? 'year' : String(dateStr).slice(8, 10) === '01' ? 'month' : 'day');
+    if (p === 'year') return String(d.getFullYear());
+    if (p === 'day') return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+  }
+
+  parenDateRange(start, startPrecision, end, endPrecision) {
+    const label = [this.dateLabel(start, startPrecision), this.dateLabel(end, endPrecision)].filter(Boolean).join('-');
+    return label ? ` (${label})` : '';
+  }
+
+  // The confirm screen's date pickers cannot show "year only": they show the stored Jan 1. Say so beside the field,
+  // until the candidate edits it (then it is their own value, not the source's).
+  dateNote(dateStr, precision, edited) {
+    if (!dateStr || edited) return '';
+    if (precision === 'year') return ' (your resume shows only the year)';
+    if (precision === 'month') return ' (your resume shows only the month and year)';
+    return '';
   }
 
   _czFlashCounter = 0;
@@ -6521,7 +6554,7 @@ class Component extends DCLogic {
         expItems.push({ position: typeof w.position === 'number' ? w.position : Infinity, heading: w.heading || '', label: it.label, body: this.roleDescription(it.key) });
       });
       expItems.sort((a, b) => a.position - b.position);
-      this.groupByLiteralHeading(expItems).forEach(g => grouped.push({ kind: 'experience', position: g.position, heading: g.heading, items: g.items }));
+      this.groupByLiteralHeading(expItems, this.positionsOfOtherKinds(ex, 'work_history')).forEach(g => grouped.push({ kind: 'experience', position: g.position, heading: g.heading, items: g.items }));
 
       const eduVal = catVal('education');
       const eduItems = [];
@@ -6532,7 +6565,7 @@ class Component extends DCLogic {
         eduItems.push({ position: typeof x.position === 'number' ? x.position : Infinity, heading: x.heading || '', label: it.label, body: '' });
       });
       eduItems.sort((a, b) => a.position - b.position);
-      this.groupByLiteralHeading(eduItems).forEach(g => grouped.push({ kind: 'education', position: g.position, heading: g.heading, items: g.items }));
+      this.groupByLiteralHeading(eduItems, this.positionsOfOtherKinds(ex, 'education')).forEach(g => grouped.push({ kind: 'education', position: g.position, heading: g.heading, items: g.items }));
 
       const certVal = catVal('certifications');
       const certItems = [];
@@ -6543,7 +6576,7 @@ class Component extends DCLogic {
         certItems.push({ position: typeof c.position === 'number' ? c.position : Infinity, heading: c.heading || '', label: it.label, body: '' });
       });
       certItems.sort((a, b) => a.position - b.position);
-      this.groupByLiteralHeading(certItems).forEach(g => grouped.push({ kind: 'certifications', position: g.position, heading: g.heading, items: g.items }));
+      this.groupByLiteralHeading(certItems, this.positionsOfOtherKinds(ex, 'certifications')).forEach(g => grouped.push({ kind: 'certifications', position: g.position, heading: g.heading, items: g.items }));
 
       if (catVal('skills') && ex.skills && ex.skills.length > 0) {
         // Real regression found live testing a genuinely complex document (16-item Core
@@ -7068,7 +7101,7 @@ class Component extends DCLogic {
     tierSelection: 'free', billingCycle: 'monthly', changePlanOpen: false,
     // Item B (2026-09-08 regression session): real Stripe test-mode checkout state — see
     // startRealCheckout/handleCheckoutReturn's own headers.
-    checkoutPending: false, checkoutError: null, checkoutIncompleteNotice: false, checkoutSuccessNotice: false, subscribeAbandonedNotice: false,
+    checkoutPending: false, checkoutError: null, checkoutIncompleteNotice: false, checkoutSuccessNotice: false, subscribeAbandonedNotice: false, checkoutAwaitingWebhook: false,
     // Item 7 (2026-09-08 regression session): confirmDowngrade already made a real, checked backend
     // write (set-candidate-tier) before this fix -- the tier genuinely changed -- but nothing told
     // the candidate it worked; the modal just closed silently. Mirrors checkoutSuccessNotice's own
@@ -8882,6 +8915,31 @@ class Component extends DCLogic {
   // overrides that landing — to the interstitial screen on a confirmed paid signup, or back to the
   // tiers screen itself on a cancel or an unconfirmed payment — the same way the upgradeReturnTab
   // branch below it already overrides accountTab for the Subscription tab's own case.
+  // Side-effect-free read of the two billing facts a checkout return waits on. resolveSession() is NOT used for this: it
+  // re-hydrates the session and then re-runs the whole account routing (applySession ends by routing through enterAccount()),
+  // which resets accountTab to Profile Info on every call, so a wait that retried it kept undoing the tab placement. Same
+  // fix already used for the cancellation poll (see checkCandidateBillingCancelled). Returns the facts (or null on failure)
+  // so the caller decides from the response itself rather than from state that may not have landed yet.
+  async refreshBillingFacts() {
+    const candidateId = this.state.resumeCandidateId;
+    if (!candidateId) return null;
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/get-candidate-tier', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate_id: candidateId }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) { return null; }
+    if (!res.ok || !data.ok) return null;
+    this.setState(st => ({
+      accountTier: data.tier || st.accountTier,
+      licenseSubscriptionStartedAt: data.license_subscription_started_at || st.licenseSubscriptionStartedAt,
+    }));
+    return data;
+  }
+
   async handleCheckoutReturn() {
     const url = new URL(window.location.href);
     const checkout = url.searchParams.get('checkout');
@@ -8940,20 +8998,19 @@ class Component extends DCLogic {
     // column proves success differs by product — license_subscription_started_at for license
     // tracking, accountTier for the resume Pro upgrade — see test-stripe-webhook's own header on why
     // those are two separate columns, not one repurposed for both.
-    // (Known, left as is: each retry below calls resolveSession(), which re-runs the whole account routing and resets the
-    // tab to Profile Info, so while the webhook is being waited on for the unconfirmed case the candidate sits on Profile
-    // Info; the final patch below moves them to the Subscription tab. Moving earlier here would just be overwritten.)
-    this.setState({ checkoutPending: true });
+    // Placed on the Subscription tab for the whole wait (the retry loop below no longer re-runs account routing, so nothing
+    // resets it), with a "confirming" line there; the final patch below still picks the definitive landing tab.
+    this.setState({ checkoutPending: true, checkoutAwaitingWebhook: true, ...(!isLicenseFlow && !fromSignupTiers && this.state.screen === 'account' ? { accountTab: 'subscription' } : {}) });
     const alreadyConfirmed = () => isLicenseFlow ? !!this.state.licenseSubscriptionStartedAt : this.state.accountTier === 'paid';
     let confirmed = alreadyConfirmed();
     for (let i = 0; !confirmed && i < 8; i++) {
       if (i > 0) await new Promise((r) => setTimeout(r, 1500));
-      const ok = await this.resolveSession();
-      confirmed = ok && alreadyConfirmed();
+      const facts = await this.refreshBillingFacts();
+      confirmed = !!facts && (isLicenseFlow ? !!facts.license_subscription_started_at : facts.tier === 'paid');
     }
     if (isLicenseFlow) {
       this.setState({
-        checkoutPending: false,
+        checkoutPending: false, checkoutAwaitingWebhook: false,
         checkoutError: confirmed ? null : "Payment may still be processing — check back in a moment, or contact support if this persists.",
         checkoutIncompleteNotice: !confirmed,
         screen: confirmed ? 'account' : 'licenseBilling',
@@ -8966,7 +9023,7 @@ class Component extends DCLogic {
       return;
     }
     const patch = {
-      checkoutPending: false,
+      checkoutPending: false, checkoutAwaitingWebhook: false,
       changePlanOpen: false,
       // Real fix (was: this.state.tierSelection, i.e. left untouched when a checkout=success redirect
       // still failed to confirm after all 8 retries — e.g. a decline that somehow still bounced through
@@ -9531,7 +9588,13 @@ class Component extends DCLogic {
   updateResumeItem(category, id, field, value) {
     this.setState(st => {
       if (!st.resumeExtraction) return {};
-      const list = st.resumeExtraction[category].map(item => item.id === id ? { ...item, [field]: value } : item);
+      // A date the candidate types is their own value, not the source's: month-level precision (what every resume label
+      // showed before), and a blank work/education end date means Present (the field's own label says so).
+      const isDate = /_date$/.test(field);
+      const patch = isDate
+        ? { [field]: value, [field + '_precision']: value ? 'month' : (field === 'end_date' && category !== 'certifications' ? 'present' : null), [field + '_edited']: true }
+        : { [field]: value };
+      const list = st.resumeExtraction[category].map(item => item.id === id ? { ...item, ...patch } : item);
       return { resumeExtraction: { ...st.resumeExtraction, [category]: list } };
     });
   }
@@ -9680,19 +9743,44 @@ class Component extends DCLogic {
   // hits the exact same OCR ambiguity. Scoped to exact whole-heading equality after folding, same as
   // the precedent — can't cause a false merge between two otherwise-different headings the way a
   // substring or fuzzy match could.
-  groupByLiteralHeading(items) {
+  //
+  // Blank-header block fix (2026-09-19): an item with NO heading used to open a new section of its own, which the confirm
+  // screen shows as a card with an empty "Section heading" box. That is exactly what a page break produces: the vision
+  // route leaves heading "" on every job after the break (the section heading is printed once, on the first page), so those
+  // jobs got a blank-headed card of their own. An empty heading means "no new heading was printed here", i.e. the section
+  // above simply continues, so such an item now joins the preceding group of the same kind. Two guards keep that honest:
+  // it only applies when both positions are known and no item of ANOTHER kind sits between them in the document
+  // (otherOrderPositions: the positions of every other kind's items), so a genuinely separate headless block that follows
+  // some other section is still its own group, as before.
+  groupByLiteralHeading(items, otherOrderPositions) {
     const norm = (h) => (h || '').trim().toLowerCase().replace(/\s+/g, ' ').replace(/l/g, 'i');
+    const others = Array.isArray(otherOrderPositions) ? otherOrderPositions.filter(x => typeof x === 'number') : [];
+    const nothingBetween = (a, b) => typeof a === 'number' && typeof b === 'number' && !others.some(x => x > a && x < b);
     const groups = [];
     items.forEach(item => {
       const h = norm(item.heading);
       const last = groups[groups.length - 1];
       if (last && norm(last.heading) === h) {
         last.items.push(item);
+        last.lastPosition = item.position;
+      } else if (last && h === '' && nothingBetween(last.lastPosition, item.position)) {
+        last.items.push(item);
+        last.lastPosition = item.position;
       } else {
-        groups.push({ heading: (item.heading || '').trim(), position: item.position, items: [item] });
+        groups.push({ heading: (item.heading || '').trim(), position: item.position, lastPosition: item.position, items: [item] });
       }
     });
     return groups;
+  }
+
+  // Positions of every item that is NOT of the given kind (work_history | education | certifications), for
+  // groupByLiteralHeading's "nothing else sits between" check. Freeform sections and the skills block count too.
+  positionsOfOtherKinds(ex, kind) {
+    const out = [];
+    const add = (rows, k) => { if (k !== kind) (rows || []).forEach(r => { if (r && typeof r.position === 'number') out.push(r.position); }); };
+    add(ex && ex.work_history, 'work_history'); add(ex && ex.education, 'education'); add(ex && ex.certifications, 'certifications'); add(ex && ex.freeform, 'freeform');
+    ((ex && ex.skills) || []).forEach(sk => { if (sk && typeof sk.section_position === 'number') out.push(sk.section_position); });
+    return out;
   }
 
   async submitResumeConfirmation() {
@@ -9714,12 +9802,12 @@ class Component extends DCLogic {
       // freeform always has, since resumeConfirm can now edit it (one shared value per contiguous
       // group — see groupByLiteralHeading/updateResumeSectionHeading) and confirm-resume-data needs
       // the edited value, not just what extraction originally captured.
-      work_history: ex.work_history.map(w => ({ id: w.id, company: w.company, title: w.title, location: w.location, start_date: w.start_date, end_date: w.end_date, job_responsibilities: w.job_responsibilities, heading: w.heading || null })),
-      education: ex.education.map(x => ({ id: x.id, institution: x.institution, degree: x.degree, field_of_study: x.field_of_study, location: x.location, start_date: x.start_date, end_date: x.end_date, heading: x.heading || null })),
+      work_history: ex.work_history.map(w => ({ id: w.id, company: w.company, title: w.title, location: w.location, start_date: w.start_date, end_date: w.end_date, start_date_precision: w.start_date_precision || null, end_date_precision: w.end_date_precision || null, job_responsibilities: w.job_responsibilities, heading: w.heading || null })),
+      education: ex.education.map(x => ({ id: x.id, institution: x.institution, degree: x.degree, field_of_study: x.field_of_study, location: x.location, start_date: x.start_date, end_date: x.end_date, start_date_precision: x.start_date_precision || null, end_date_precision: x.end_date_precision || null, heading: x.heading || null })),
       // source_match is echoed back (not edited here) so confirm-resume-data can flag a
       // structurally-unmatched certification for staff regardless of the opt-in checkbox below —
       // see that function's own header (bug-2 defense-in-depth).
-      certifications: ex.certifications.map(c => ({ id: c.id, name: c.name, issuing_body: c.issuing_body, license_number: c.license_number, issue_date: c.issue_date, expiration_date: c.expiration_date, source_match: c.source_match, trade_soc_code: c.trade_soc_code || null, heading: c.heading || null })),
+      certifications: ex.certifications.map(c => ({ id: c.id, name: c.name, issuing_body: c.issuing_body, license_number: c.license_number, issue_date: c.issue_date, expiration_date: c.expiration_date, issue_date_precision: c.issue_date_precision || null, expiration_date_precision: c.expiration_date_precision || null, source_match: c.source_match, trade_soc_code: c.trade_soc_code || null, heading: c.heading || null })),
       skills: ex.skills.map(s => ({ id: s.id, skill_text: s.skill_text })),
       // section_type/heading are echoed back (not edited here) so confirm-resume-data can flag
       // needs_review rows for staff without a second round-trip to look up what kind of freeform
@@ -10356,6 +10444,7 @@ class Component extends DCLogic {
       checkoutError: s.checkoutError,
       checkoutIncompleteNotice: s.checkoutIncompleteNotice,
       subscribeAbandonedNotice: s.subscribeAbandonedNotice && s.accountTier !== 'paid',
+      checkoutAwaitingWebhook: s.checkoutAwaitingWebhook,
       checkoutSuccessNotice: s.checkoutSuccessNotice,
       downgradeSuccessNotice: s.downgradeSuccessNotice,
       // Subscription cancellation gap (2026-09-18), Step 3: same "no Dismiss, persistent until the
@@ -10878,7 +10967,7 @@ class Component extends DCLogic {
             editable: lic.verification.editable, correction: lic.verification.correction,
           }) : {}),
           hasExpiration: !!lic.expiration_date,
-          expirationLabel: lic.expiration_date ? this.monthYearLabel(lic.expiration_date) : '',
+          expirationLabel: lic.expiration_date ? this.dateLabel(lic.expiration_date, lic.expiration_date_precision) : '',
         };
       }),
       filterIsActive: s.verificationFilter === 'active',
@@ -11271,7 +11360,7 @@ class Component extends DCLogic {
         // buildResumeLines so this screen and the generated PDF agree on section boundaries), not one
         // card per raw item — matches the "one shared edit per section" decision, since several items
         // sharing a heading are one logical section a candidate would think of as having one title.
-        this.groupByLiteralHeading([...s.resumeExtraction.work_history].sort(byPosition)).forEach(g => {
+        this.groupByLiteralHeading([...s.resumeExtraction.work_history].sort(byPosition), this.positionsOfOtherKinds(s.resumeExtraction, 'work_history')).forEach(g => {
           const ids = g.items.map(w => w.id);
           blocks.push({
             kind: 'work_history', position: typeof g.position === 'number' ? g.position : Infinity,
@@ -11282,6 +11371,7 @@ class Component extends DCLogic {
               title: w.title || '', company: w.company || '',
               location: w.location || '',
               startDate: w.start_date || '', endDate: w.end_date || '',
+              startDateNote: this.dateNote(w.start_date, w.start_date_precision, w.start_date_edited), endDateNote: this.dateNote(w.end_date, w.end_date_precision, w.end_date_edited),
               jobResponsibilities: w.job_responsibilities || '',
               onTitle: (e) => this.updateResumeItem('work_history', w.id, 'title', e.target.value),
               onCompany: (e) => this.updateResumeItem('work_history', w.id, 'company', e.target.value),
@@ -11292,7 +11382,7 @@ class Component extends DCLogic {
             })),
           });
         });
-        this.groupByLiteralHeading([...s.resumeExtraction.education].sort(byPosition)).forEach(g => {
+        this.groupByLiteralHeading([...s.resumeExtraction.education].sort(byPosition), this.positionsOfOtherKinds(s.resumeExtraction, 'education')).forEach(g => {
           const ids = g.items.map(x => x.id);
           blocks.push({
             kind: 'education', position: typeof g.position === 'number' ? g.position : Infinity,
@@ -11303,6 +11393,7 @@ class Component extends DCLogic {
               degree: x.degree || '', fieldOfStudy: x.field_of_study || '', institution: x.institution || '',
               location: x.location || '',
               startDate: x.start_date || '', endDate: x.end_date || '',
+              startDateNote: this.dateNote(x.start_date, x.start_date_precision, x.start_date_edited), endDateNote: this.dateNote(x.end_date, x.end_date_precision, x.end_date_edited),
               onDegree: (e) => this.updateResumeItem('education', x.id, 'degree', e.target.value),
               onFieldOfStudy: (e) => this.updateResumeItem('education', x.id, 'field_of_study', e.target.value),
               onInstitution: (e) => this.updateResumeItem('education', x.id, 'institution', e.target.value),
@@ -11312,7 +11403,7 @@ class Component extends DCLogic {
             })),
           });
         });
-        this.groupByLiteralHeading([...s.resumeExtraction.certifications].sort(byPosition)).forEach(g => {
+        this.groupByLiteralHeading([...s.resumeExtraction.certifications].sort(byPosition), this.positionsOfOtherKinds(s.resumeExtraction, 'certifications')).forEach(g => {
           const ids = g.items.map(c => c.id);
           blocks.push({
             kind: 'certification', position: typeof g.position === 'number' ? g.position : Infinity,
@@ -11328,7 +11419,8 @@ class Component extends DCLogic {
               onLicenseState: (e) => lic && this.updateLicenseState(lic.id, e.target.value),
               onRemoveLicense: () => lic && this.removeLicenseItem(lic.id),
               name: c.name || '', issuingBody: c.issuing_body || '', licenseNumber: c.license_number || '',
-              issueDate: c.issue_date || '', expirationDate: c.expiration_date || '', tradeSocCode: c.trade_soc_code || '',
+              issueDate: c.issue_date || '', expirationDate: c.expiration_date || '',
+              issueDateNote: this.dateNote(c.issue_date, c.issue_date_precision, c.issue_date_edited), expirationDateNote: this.dateNote(c.expiration_date, c.expiration_date_precision, c.expiration_date_edited), tradeSocCode: c.trade_soc_code || '',
               onName: (e) => this.updateResumeItem('certifications', c.id, 'name', e.target.value),
               onIssuingBody: (e) => this.updateResumeItem('certifications', c.id, 'issuing_body', e.target.value),
               onLicenseNumber: (e) => this.updateResumeItem('certifications', c.id, 'license_number', e.target.value),
