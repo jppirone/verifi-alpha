@@ -5776,7 +5776,7 @@ class Component extends DCLogic {
       res = await fetch(this.SUPABASE_FN_URL + '/list-candidate-summaries', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_id: candidateId }),
+        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: candidateId }),
       });
       data = await res.json().catch(() => ({}));
     } catch (e) {
@@ -5910,7 +5910,7 @@ class Component extends DCLogic {
       res = await fetch(this.SUPABASE_FN_URL + '/' + fn, {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ ...body, session_token: this.candidateSessionToken() }),
       });
       data = await res.json().catch(() => ({}));
     } catch (e) {
@@ -5938,7 +5938,7 @@ class Component extends DCLogic {
       res = await fetch(this.SUPABASE_FN_URL + '/delete-candidate-summary', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_id: candidateId, id }),
+        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: candidateId, id }),
       });
       data = await res.json().catch(() => ({}));
     } catch (e) {
@@ -6105,7 +6105,7 @@ class Component extends DCLogic {
       res = await fetch(this.SUPABASE_FN_URL + '/update-license-details', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_id: candidateId, ...body }),
+        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: candidateId, ...body }),
       });
       data = await res.json().catch(() => ({}));
     } catch (e) {
@@ -6261,7 +6261,7 @@ class Component extends DCLogic {
       res = await fetch(this.SUPABASE_FN_URL + '/submit-candidate-correction-response', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_id: s.resumeCandidateId, item_id: itemId, corrected_value: value, note }),
+        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: s.resumeCandidateId, item_id: itemId, corrected_value: value, note }),
       });
       data = await res.json().catch(() => ({}));
     } catch (e) {
@@ -6308,7 +6308,7 @@ class Component extends DCLogic {
       res = await fetch(this.SUPABASE_FN_URL + '/get-resume-extraction', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_id: s.resumeCandidateId }),
+        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: s.resumeCandidateId }),
       });
       data = await res.json().catch(() => ({}));
     } catch (e) {
@@ -6363,7 +6363,7 @@ class Component extends DCLogic {
       res = await fetch(this.SUPABASE_FN_URL + '/resolve-employer-contact-details', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ ...body, session_token: this.candidateSessionToken() }),
       });
       data = await res.json().catch(() => ({}));
     } catch (e) {
@@ -6391,7 +6391,7 @@ class Component extends DCLogic {
       res = await fetch(this.SUPABASE_FN_URL + '/list-candidate-verification-items', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_id: candidateId }),
+        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: candidateId }),
       });
       data = await res.json().catch(() => ({}));
     } catch (e) {
@@ -6429,7 +6429,7 @@ class Component extends DCLogic {
       res = await fetch(this.SUPABASE_FN_URL + '/list-candidate-licenses', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_id: candidateId }),
+        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: candidateId }),
       });
       data = await res.json().catch(() => ({}));
     } catch (e) {
@@ -7424,7 +7424,7 @@ class Component extends DCLogic {
     fetch(this.SUPABASE_FN_URL + '/mark-tour-complete', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ candidate_id: candidateId }),
+      body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: candidateId }),
     }).catch(() => {});
   }
 
@@ -7695,7 +7695,44 @@ class Component extends DCLogic {
 
   state = this.getInitialState();
 
+  // Candidate-session pass (2026-09-19): every candidate endpoint now checks the caller's own session. When one answers 401
+  // "unauthorized" the session is gone (expired, revoked, signed out on another device): say so and send the candidate to
+  // sign-in instead of leaving a screen whose calls silently fail. Installed once per page load; a remounted app just
+  // re-points the guard at itself.
+  installSessionGuard() {
+    if (window.__verifiCandidateFetchGuard) { window.__verifiCandidateFetchGuard.app = this; return; }
+    const guard = { app: this };
+    window.__verifiCandidateFetchGuard = guard;
+    const orig = window.fetch.bind(window);
+    window.fetch = async (input, init) => {
+      const res = await orig(input, init);
+      try {
+        const url = typeof input === 'string' ? input : ((input && input.url) || '');
+        if (res.status === 401 && url.indexOf(guard.app.SUPABASE_FN_URL + '/') === 0) {
+          res.clone().json().then((j) => { if (j && j.error === 'unauthorized') guard.app.candidateSessionRejected(url); }).catch(() => {});
+        }
+      } catch (e) {}
+      return res;
+    };
+  }
+
+  candidateSessionRejected(url) {
+    const s = this.state;
+    // Only when this device believed it was signed in and is on a signed-in screen. The post-deactivation cancel call and the
+    // returning/deactivated screens carry no live session by design.
+    if (!s.sessionToken || !s.resumeCandidateId || s.screen === 'returning' || s.screen === 'deactivated') return;
+    if (/\/(cancel-stripe-subscription|logout|resolve-session)$/.test(url)) return;
+    try { localStorage.removeItem('verifi_session_token'); } catch (e) {}
+    this.stopLoginPolling();
+    this.setState({
+      screen: 'returning', sessionToken: null,
+      loginEmail: '', loginRequestPending: false, loginRequestError: 'Your session has ended. Please log in again.',
+      loginLinkSent: false, loginTokenId: null, loginPollExpired: false,
+    });
+  }
+
   componentDidMount() {
+    this.installSessionGuard();
     try {
       const raw = localStorage.getItem('verifi_draft');
       if (raw) this.setState({ draft: JSON.parse(raw) });
@@ -8021,6 +8058,7 @@ class Component extends DCLogic {
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           candidate_id: candidateId,
+          session_token: this.candidateSessionToken(),
           original_filename: staged.fileName,
           mime_type: staged.mimeType,
           original_base64: staged.originalBase64,
@@ -8282,7 +8320,7 @@ class Component extends DCLogic {
       const res = await fetch(this.SUPABASE_FN_URL + '/set-discoverable', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_id: id, discoverable: checked }),
+        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: id, discoverable: checked }),
       });
       const data = await res.json().catch(() => ({}));
       saved = res.ok && !!data.ok && data.discoverable === checked;
@@ -8309,7 +8347,7 @@ class Component extends DCLogic {
       res = await fetch(this.SUPABASE_FN_URL + '/list-candidate-activity', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_id: id }),
+        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: id }),
       });
       data = await res.json().catch(() => ({}));
     } catch (e) { data = null; }
@@ -8363,7 +8401,7 @@ class Component extends DCLogic {
       const res = await fetch(this.SUPABASE_FN_URL + '/get-discoverable', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_id: id }),
+        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: id }),
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.ok && typeof data.discoverable === 'boolean') value = data.discoverable;
@@ -8387,7 +8425,7 @@ class Component extends DCLogic {
       const res = await fetch(this.SUPABASE_FN_URL + '/set-discoverable', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_id: this.state.resumeCandidateId, discoverable: this.state.discoverable }),
+        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: this.state.resumeCandidateId, discoverable: this.state.discoverable }),
       });
       const data = await res.json().catch(() => ({}));
       saved = res.ok && !!data.ok;
@@ -8756,7 +8794,7 @@ class Component extends DCLogic {
       res = await fetch(this.SUPABASE_FN_URL + '/get-resume-extraction', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_id: candidateId }),
+        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: candidateId }),
       });
       data = await res.json().catch(() => ({}));
     } catch (e) {
@@ -8885,7 +8923,7 @@ class Component extends DCLogic {
       res = await fetch(this.SUPABASE_FN_URL + '/test-stripe-checkout', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_id: s.resumeCandidateId, billing_cycle: billingCycle, product }),
+        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: s.resumeCandidateId, billing_cycle: billingCycle, product }),
       });
       data = await res.json().catch(() => ({}));
     } catch (e) {
@@ -8928,7 +8966,7 @@ class Component extends DCLogic {
       res = await fetch(this.SUPABASE_FN_URL + '/get-candidate-tier', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_id: candidateId }),
+        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: candidateId }),
       });
       data = await res.json().catch(() => ({}));
     } catch (e) { return null; }
@@ -9093,7 +9131,7 @@ class Component extends DCLogic {
       const res = await fetch(this.SUPABASE_FN_URL + '/get-candidate-tier', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_id: candidateId }),
+        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: candidateId }),
       });
       const data = await res.json().catch(() => ({}));
       return !!(res.ok && data.ok && data.stripe_subscription_cancelled_at);
@@ -9296,7 +9334,7 @@ class Component extends DCLogic {
       res = await fetch(this.SUPABASE_FN_URL + '/reactivate-account', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_id: candidateId }),
+        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: candidateId }),
       });
       data = await res.json().catch(() => ({}));
     } catch (e) {
@@ -9461,7 +9499,7 @@ class Component extends DCLogic {
       res = await fetch(this.SUPABASE_FN_URL + '/get-resume-extraction', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_id: candidateId }),
+        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: candidateId }),
       });
       data = await res.json().catch(() => ({}));
     } catch (e) {
@@ -9585,7 +9623,7 @@ class Component extends DCLogic {
       fetch(this.SUPABASE_FN_URL + '/skip-resume-extraction', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_id: candidateId }),
+        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: candidateId }),
       }).catch(() => {});
     }
   }
@@ -9646,7 +9684,7 @@ class Component extends DCLogic {
       const res = await fetch(this.SUPABASE_FN_URL + '/detect-license-mentions', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_id: this.state.resumeCandidateId, resume_document_id: doc.id }),
+        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: this.state.resumeCandidateId, resume_document_id: doc.id }),
         signal: ctrl.signal,
       });
       clearTimeout(timer);
@@ -9829,7 +9867,7 @@ class Component extends DCLogic {
       res = await fetch(this.SUPABASE_FN_URL + '/confirm-resume-data', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ ...body, session_token: this.candidateSessionToken() }),
       });
       data = await res.json().catch(() => ({}));
     } catch (e) {
@@ -9861,7 +9899,7 @@ class Component extends DCLogic {
       fetch(this.SUPABASE_FN_URL + '/verify-license', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_id: this.state.resumeCandidateId, license_item_id: v.license_item_id }),
+        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: this.state.resumeCandidateId, license_item_id: v.license_item_id }),
       }).catch(() => {});
     });
     // Item C (2026-09-08 regression session): the new employer/certification contact-details
@@ -9897,7 +9935,7 @@ class Component extends DCLogic {
       res = await fetch(this.SUPABASE_FN_URL + '/discard-resume-document', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_id: s.resumeCandidateId, resume_document_id: ex.resume_document.id }),
+        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: s.resumeCandidateId, resume_document_id: ex.resume_document.id }),
       });
       data = await res.json().catch(() => ({}));
     } catch (e) {
@@ -9964,7 +10002,7 @@ class Component extends DCLogic {
       res = await fetch(this.SUPABASE_FN_URL + '/resolve-employer-contact-details', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ ...body, session_token: this.candidateSessionToken() }),
       });
       data = await res.json().catch(() => ({}));
     } catch (e) {
@@ -9992,7 +10030,7 @@ class Component extends DCLogic {
       res = await fetch(this.SUPABASE_FN_URL + '/get-resume-extraction', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_id: candidateId }),
+        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: candidateId }),
       });
       data = await res.json().catch(() => ({}));
     } catch (e) {
@@ -10104,7 +10142,7 @@ class Component extends DCLogic {
       const res = await fetch(this.SUPABASE_FN_URL + '/save-header-preferences', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_id: s.resumeCandidateId, header_display_mode: s.headerDisplayMode, personal_location: s.personalLocation }),
+        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: s.resumeCandidateId, header_display_mode: s.headerDisplayMode, personal_location: s.personalLocation }),
       });
       const data = await res.json().catch(() => ({}));
       return { res, data };
@@ -10151,7 +10189,7 @@ class Component extends DCLogic {
         const res = await fetch(this.SUPABASE_FN_URL + '/update-profile-name', {
           method: 'POST',
           headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ candidate_id: candidateId, first_name: first, last_name: last }),
+          body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: candidateId, first_name: first, last_name: last }),
         });
         const data = await res.json().catch(() => ({}));
         if ((res.ok && data.ok) || tryNum === 1 || (res.status >= 400 && res.status < 500)) result = { res, data };

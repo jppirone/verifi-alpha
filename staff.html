@@ -2261,7 +2261,7 @@ th.sortable{cursor:pointer;user-select:none}
         </sc-if>
 
         <sc-if value="{{ loginLinkSent }}" hint-placeholder-val="{{ false }}">
-          <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">We sent a login link to {{ loginEmail }}. Click it on this device to continue — it expires in 15 minutes and works once.</div>
+          <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">If {{ loginEmail }} is a staff account, a login link is on its way. Click it on this device to continue — it expires in 15 minutes and works once. Nothing arriving means that address is not a staff account (this page cannot tell you which).</div>
           <button type="button" class="btn btn-ghost" style="align-self:flex-start;font-size:12px" onClick="{{ resetLoginForm }}">Use a different email</button>
         </sc-if>
 
@@ -3760,7 +3760,8 @@ class Component extends DCLogic {
               this.setState({
                 loginRequestPending: false,
                 loginRequestError: true,
-                loginRequestErrorText: data.error === 'no_account_found' ? "We couldn't find a staff account for that email." : "Something went wrong. Try again.",
+                // Never says whether the address is a staff account: staff-request-login answers identically either way.
+                loginRequestErrorText: data.error === 'rate_limited' || data.error === 'busy' ? "Too many login requests right now. Wait a while and try again." : data.error === 'email_invalid' ? "Enter a valid email address." : "Something went wrong. Try again.",
               });
             }
           })

@@ -336,6 +336,19 @@ async function authenticateStaffOrService(req: Request, body: any, allow: { staf
   }
   return null;
 }
+function authIsServiceCaller(req: Request): boolean {
+  const h = req.headers.get("authorization") || "";
+  const t = h.toLowerCase().startsWith("bearer ") ? h.slice(7).trim() : "";
+  return !!t && !!AUTH_SB_KEY && authSafeEqual(t, AUTH_SB_KEY);
+}
+async function authIsCandidateSession(body: any, candidateId: string): Promise<boolean> {
+  const tok = typeof body?.session_token === "string" ? body.session_token : "";
+  if (tok.length < 20 || tok.length > 200 || !candidateId) return false;
+  const rest = { "apikey": AUTH_SB_KEY, "Authorization": `Bearer ${AUTH_SB_KEY}` };
+  const r = await fetch(`${AUTH_SB_URL}/rest/v1/candidate_sessions?token_hash=eq.${await authSha256Hex(tok)}&select=candidate_id,expires_at,revoked_at`, { headers: rest });
+  const sess = r.ok ? (await r.json())[0] : null;
+  return !!sess && !sess.revoked_at && new Date(sess.expires_at).getTime() > Date.now() && sess.candidate_id === candidateId;
+}
 const UNAUTHORIZED = () => new Response(JSON.stringify({ ok: false, error: "unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
 export default {
@@ -363,6 +376,10 @@ export default {
       if (serviceOnly || reqBody.staff_rerun === true) {
         const caller = await authenticateStaffOrService(req, reqBody, { staff: !serviceOnly, service: true });
         if (!caller) return json({ ok: false, error: "unauthorized" }, 401);
+      } else if (!(authIsServiceCaller(req) || await authIsCandidateSession(reqBody, typeof reqBody.candidate_id === "string" ? reqBody.candidate_id : ""))) {
+        // Candidate-session pass: the plain check was open by design in the first pass (idempotent, cooldown-limited); it now
+        // also needs the candidate's own session, or the service-role key from our own functions.
+        return json({ ok: false, error: "unauthorized" }, 401);
       }
       const { candidate_id, license_item_id, staff_rerun, after_correction } = reqBody;
       const deferNotice = reqBody.defer_notice === true;
