@@ -8232,8 +8232,13 @@ class Component extends DCLogic {
 
   licenseActivityFiltered() {
     const s = this.state;
+    // Compared by the reader's LOCAL calendar day, the same clock the Date column displays.
+    const localDay = (iso) => {
+      const dt = new Date(iso);
+      return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+    };
     return (s.licenseActivity || []).filter(e => {
-      const d = String(e.at || '').slice(0, 10);
+      const d = localDay(e.at);
       return (!s.licActStart || d >= s.licActStart) && (!s.licActEnd || d <= s.licActEnd);
     });
   }
