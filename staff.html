@@ -2293,7 +2293,9 @@ th.sortable{cursor:pointer;user-select:none}
 
   <div style="display:flex;gap:var(--space-2);border-bottom:1px solid var(--color-divider);margin-bottom:var(--space-6)">
     <button type="button" class="btn {{ tabQueueClass }}" onClick="{{ selectTabQueue }}">Queue</button>
-    <button type="button" class="btn {{ tabReportingClass }}" onClick="{{ selectTabReporting }}">Reporting</button>
+    <sc-if value="{{ isAdmin }}" hint-placeholder-val="{{ false }}">
+      <button type="button" class="btn {{ tabReportingClass }}" onClick="{{ selectTabReporting }}">Reporting</button>
+    </sc-if>
   </div>
 
   <sc-if value="{{ tabIsQueue }}" hint-placeholder-val="{{ true }}">
@@ -2977,7 +2979,9 @@ class Component extends DCLogic {
       loginResolving: false,
     });
     this.loadItems();
-    this.loadStaffUsers();
+    // Staff role policy (2026-09-19): the roster (for the admin's "Assigned to" picker) and the Reporting tab are admin-only on the
+    // SERVER (403 for a worker); the client just doesn't ask for what it would be refused. This is display, not the gate.
+    if (profile.role === 'admin') this.loadStaffUsers();
   }
 
   // Staff endpoint auth pass (2026-09-19): every staff data/action endpoint now requires a live staff session, checked

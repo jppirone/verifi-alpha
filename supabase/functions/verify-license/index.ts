@@ -376,6 +376,18 @@ export default {
       if (serviceOnly || reqBody.staff_rerun === true) {
         const caller = await authenticateStaffOrService(req, reqBody, { staff: !serviceOnly, service: true });
         if (!caller) return json({ ok: false, error: "unauthorized" }, 401);
+        // Staff role policy (2026-09-19): an admin (or our own service key) may re-run any license; a worker only a license whose
+        // queue row is assigned to them. The role comes from staff_users on this request, never from the request body.
+        if (caller.kind === "staff" && caller.role !== "admin") {
+          const lid = typeof reqBody.license_item_id === "string" ? reqBody.license_item_id : "";
+          const { data: li } = lid ? await supabase.from("license_items").select("queue_item_id, candidate_id").eq("id", lid).maybeSingle() : { data: null };
+          let owns = false;
+          if (li && li.queue_item_id && li.candidate_id === reqBody.candidate_id) {
+            const { data: qi } = await supabase.from("verification_items").select("assigned_to").eq("id", li.queue_item_id).maybeSingle();
+            owns = !!qi && qi.assigned_to === caller.name;
+          }
+          if (!owns) return json({ ok: false, error: "forbidden" }, 403);
+        }
       } else if (!(authIsServiceCaller(req) || await authIsCandidateSession(reqBody, typeof reqBody.candidate_id === "string" ? reqBody.candidate_id : ""))) {
         // Candidate-session pass: the plain check was open by design in the first pass (idempotent, cooldown-limited); it now
         // also needs the candidate's own session, or the service-role key from our own functions.

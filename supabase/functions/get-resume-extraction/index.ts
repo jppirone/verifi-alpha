@@ -101,15 +101,23 @@ async function authIsCandidateSession(body: any, candidateId: string): Promise<b
   const sess = r.ok ? (await r.json())[0] : null;
   return !!sess && !sess.revoked_at && new Date(sess.expires_at).getTime() > Date.now() && sess.candidate_id === candidateId;
 }
-async function authIsStaffSession(body: any): Promise<boolean> {
+// Staff role policy (2026-09-19): a live staff session resolved to its staff_users row (role + name, read from the database on every
+// call). An admin may open any candidate's original document; a worker only one for a candidate who has a queue item assigned to them.
+async function authStaffCaller(body: any): Promise<{ name: string; role: string } | null> {
   const tok = typeof body?.staff_session_token === "string" ? body.staff_session_token : "";
-  if (tok.length < 20 || tok.length > 200) return false;
+  if (tok.length < 20 || tok.length > 200) return null;
   const rest = { "apikey": AUTH_SB_KEY, "Authorization": `Bearer ${AUTH_SB_KEY}` };
   const sRes = await fetch(`${AUTH_SB_URL}/rest/v1/staff_sessions?token_hash=eq.${await authSha256Hex(tok)}&select=staff_user_id,expires_at,revoked_at`, { headers: rest });
   const sess = sRes.ok ? (await sRes.json())[0] : null;
-  if (!sess || sess.revoked_at || new Date(sess.expires_at).getTime() <= Date.now()) return false;
-  const uRes = await fetch(`${AUTH_SB_URL}/rest/v1/staff_users?id=eq.${sess.staff_user_id}&select=id`, { headers: rest });
-  return uRes.ok && !!(await uRes.json())[0];
+  if (!sess || sess.revoked_at || new Date(sess.expires_at).getTime() <= Date.now()) return null;
+  const uRes = await fetch(`${AUTH_SB_URL}/rest/v1/staff_users?id=eq.${sess.staff_user_id}&select=name,role`, { headers: rest });
+  const u = uRes.ok ? (await uRes.json())[0] : null;
+  return u ? { name: u.name, role: u.role } : null;
+}
+async function workerHasItemFor(name: string, candidateId: unknown): Promise<boolean> {
+  if (typeof candidateId !== "string" || !candidateId) return false;
+  const r = await fetch(`${AUTH_SB_URL}/rest/v1/verification_items?candidate_id=eq.${encodeURIComponent(candidateId)}&assigned_to=eq.${encodeURIComponent(name)}&select=id&limit=1`, { headers: { "apikey": AUTH_SB_KEY, "Authorization": `Bearer ${AUTH_SB_KEY}` } });
+  return r.ok && ((await r.json()) as any[]).length === 1;
 }
 const UNAUTHORIZED = () => new Response(JSON.stringify({ ok: false, error: "unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 async function authGateCandidate(req: Request, body: any): Promise<Response | null> {
@@ -127,7 +135,12 @@ export default {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     try {
       const authBody = await req.clone().json().catch(() => ({}));
-      if (!(await authIsStaffSession(authBody))) {
+      const staffCaller = await authStaffCaller(authBody);
+      if (staffCaller) {
+        if (staffCaller.role !== "admin" && !(await workerHasItemFor(staffCaller.name, authBody?.candidate_id))) {
+          return new Response(JSON.stringify({ ok: false, error: "forbidden" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+      } else {
         const authDenied = await authGateCandidate(req, authBody);
         if (authDenied) return authDenied;
       }

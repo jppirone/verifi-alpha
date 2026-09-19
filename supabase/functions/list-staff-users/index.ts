@@ -21,6 +21,21 @@ const corsHeaders = {
 // (admins can already do everything workers can in this queue), so there's no real reason to exclude
 // admins from being assignable too.
 // ---------------------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------------------------------
+// STAFF ROLE POLICY (2026-09-19). Until now this function only checked that the caller held SOME live staff session; the
+// role (staff_users.role: 'admin' | 'worker') was fetched and never used, so every worker could do everything an admin could.
+// The role is now enforced HERE, on the server, on every call, from the database row (never from the request, the session row
+// or staff.html):
+//   * admin  - everything.
+//   * worker - only the queue items ASSIGNED TO THEM (verification_items.assigned_to = their staff_users.name): read them,
+//     update them (status, notes, follow-up, automated-check text, correction apply/decline), add timeline entries, re-run a
+//     license check on them, open their candidate's original document. A worker cannot reassign, cannot read or change any
+//     other item, and cannot list staff or the extraction-failure report. Registry look-ups (the five verify-* adapters) carry
+//     no candidate data and stay open to any staff session.
+//   * an unknown role is treated as worker (least privilege); only the exact string 'admin' is privileged.
+// A caller outside its role gets 403 {ok:false,error:"forbidden"} (401 stays "no live session"), so staff.html can tell
+// "your session ended" from "not yours".
+// ---------------------------------------------------------------------------------------------------
 // CALLER AUTHENTICATION (staff/internal endpoint auth pass, 2026-09-19).
 // This function used to have no caller check beyond the platform's own key check, which the PUBLIC anon key (embedded in
 // candidate.html and staff.html) passes: anyone could call it. It now requires one of:
@@ -65,6 +80,9 @@ async function authenticateStaffOrService(req: Request, body: any, allow: { staf
   }
   return null;
 }
+const FORBIDDEN = () => new Response(JSON.stringify({ ok: false, error: "forbidden" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+const isAdminCaller = (c: AuthCaller) => c.kind === "service" || (c.kind === "staff" && c.role === "admin");
+const workerName = (c: AuthCaller): string | null => (c.kind === "staff" && c.role !== "admin" ? c.name : null);
 const UNAUTHORIZED = () => new Response(JSON.stringify({ ok: false, error: "unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
 export default {
@@ -76,6 +94,7 @@ export default {
     try { authBody = await _req.clone().json(); } catch (_e) { authBody = {}; }
     const caller = await authenticateStaffOrService(_req, authBody, { staff: true, service: true });
     if (!caller) return UNAUTHORIZED();
+    if (!isAdminCaller(caller)) return FORBIDDEN(); // the staff roster is only needed to assign work, which only an admin does
     try {
       const res = await fetch(`${SUPABASE_URL}/rest/v1/staff_users?select=id,name,role&order=name.asc`, {
         headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
