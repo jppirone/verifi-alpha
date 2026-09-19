@@ -1369,7 +1369,7 @@ type PageTiming = {
   render?: unknown;
   timing_ms?: unknown;
   model_calls?: unknown;
-  qa: { fired: boolean; deferred: boolean; issues_before?: number; issues_after?: number; retry_ms?: number; kept?: "retry" | "original" };
+  qa: { fired: boolean; deferred: boolean; skipped?: "vision_route"; issues_before?: number; issues_after?: number; retry_ms?: number; kept?: "retry" | "original" };
 };
 
 function jsonResponse(obj: unknown, status = 200): Response {
@@ -1495,7 +1495,14 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
       const issues = findStructuralIssues(extraction);
       if (issues.length > 0) {
         timing.qa.issues_before = issues.length;
-        if (Date.now() + pageMs * PAGE_COST_MARGIN <= pageDeadline) {
+        if (timing.routing === "vision") {
+          // Not retried on a vision-routed page (2026-09-19): a second read costs a full vision extraction
+          // (measured 34 s, ~22% of a 2-page resume) and changed nothing in 3 of 3 runs on the one real document
+          // that has exercised it (1 issue before, 1 after, original kept every time). The flag is still recorded.
+          // On the tesseract+Haiku route a retry is ~5 s and stays as before.
+          timing.qa.skipped = "vision_route";
+          console.log(`upload-resume: ${docId} page ${pn} flagged ${issues.length} structural issue(s) on the vision route; QA retry skipped (not worth a second vision read)`);
+        } else if (Date.now() + pageMs * PAGE_COST_MARGIN <= pageDeadline) {
           console.log(`upload-resume: ${docId} page ${pn} flagged ${issues.length} structural issue(s), retrying once — ${issues.join(" | ")}`);
           timing.qa.fired = true;
           qaState = "done";
