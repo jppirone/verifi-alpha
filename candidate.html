@@ -3562,6 +3562,12 @@ a:hover{color:var(--color-accent)}
   <sc-if value="{{ showKycCompletedBanner }}" hint-placeholder-val="{{ false }}">
     <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.5;margin-bottom:var(--space-4)">Identity verification: step completed (simulated in this alpha; no identity check was performed).</div>
   </sc-if>
+  <!-- Subscription-tab warning gap (2026-09-19): shown on whichever tab the candidate lands on after leaving the
+       Subscription tab with a Paid choice that was never completed. No Dismiss, same reasoning as the inline notice on
+       the Subscription tab: it clears itself when they open that tab (where the inline notice stays) or subscribe. -->
+  <sc-if value="{{ subscribeAbandonedNotice }}" hint-placeholder-val="{{ false }}">
+    <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.5;margin-bottom:var(--space-4);padding:8px 10px;border:1px solid var(--color-divider);border-radius:6px">You haven't completed subscribing — nothing was charged and your account remains on the Free plan. Open the Subscription tab to finish.</div>
+  </sc-if>
 
 
   <div class="tabbar-desktop" style="width:100vw;margin-left:calc(50% - 50vw);margin-bottom:var(--space-6)">
@@ -7062,7 +7068,7 @@ class Component extends DCLogic {
     tierSelection: 'free', billingCycle: 'monthly', changePlanOpen: false,
     // Item B (2026-09-08 regression session): real Stripe test-mode checkout state — see
     // startRealCheckout/handleCheckoutReturn's own headers.
-    checkoutPending: false, checkoutError: null, checkoutIncompleteNotice: false, checkoutSuccessNotice: false,
+    checkoutPending: false, checkoutError: null, checkoutIncompleteNotice: false, checkoutSuccessNotice: false, subscribeAbandonedNotice: false,
     // Item 7 (2026-09-08 regression session): confirmDowngrade already made a real, checked backend
     // write (set-candidate-tier) before this fix -- the tier genuinely changed -- but nothing told
     // the candidate it worked; the modal just closed silently. Mirrors checkoutSuccessNotice's own
@@ -7409,6 +7415,13 @@ class Component extends DCLogic {
   }
 
   componentDidUpdate(prevProps, prevState) {
+    // Opening the Subscription tab: re-verify any local Paid selection against the real account (same check the
+    // browser-tab-visibility listener runs) and retire the "you left without subscribing" banner, since the
+    // persistent inline notice on this tab now carries the message.
+    if (prevState && this.state.screen === 'account' && this.state.accountTab === 'subscription' && prevState.accountTab !== 'subscription') {
+      if (this.state.subscribeAbandonedNotice) this.setState({ subscribeAbandonedNotice: false });
+      this.recheckStaleTierSelection();
+    }
     if (this.state.screen === 'tiers' || this.isLicenseProfileTabOpen()) this.ensureDiscoverableLoaded();
     if (this.state.screen === 'account' && this.state.accountType === 'license_only' && this.state.accountTab === 'activity') this.ensureLicenseActivityLoaded();
     if (prevState && this.state.tourActive && (prevState.tourStep !== this.state.tourStep || !prevState.tourActive)) {
@@ -8820,7 +8833,7 @@ class Component extends DCLogic {
     // back to s.billingCycle otherwise, unchanged for every existing call site.
     const product = (opts && opts.product) || 'resume_pro';
     const billingCycle = (opts && opts.billingCycle) || s.billingCycle;
-    this.setState({ checkoutPending: true, checkoutError: null, checkoutIncompleteNotice: false });
+    this.setState({ checkoutPending: true, checkoutError: null, checkoutIncompleteNotice: false, subscribeAbandonedNotice: false });
     try {
       localStorage.setItem('verifi_checkout_return', JSON.stringify({
         upgradeReturnTab: s.upgradeReturnTab || null,
@@ -8907,7 +8920,9 @@ class Component extends DCLogic {
         // Real fix (was: tierSelection left untouched, stuck at 'paid' from before the redirect).
         // Resets to the real accountTier, not a hardcoded 'free' — an already-paid candidate whose
         // billing-cycle-change attempt gets cancelled stays correctly on their existing real plan.
-        this.setState(st => ({ tierSelection: st.accountTier, checkoutIncompleteNotice: true }));
+        // Lands on the Subscription tab, where this notice actually renders (the routing that ran just before this
+        // handler leaves a fresh mount on Profile Info by default).
+        this.setState(st => ({ tierSelection: st.accountTier, checkoutIncompleteNotice: true, ...(st.screen === 'account' ? { accountTab: 'subscription' } : {}) }));
       }
       return;
     }
@@ -8968,6 +8983,13 @@ class Component extends DCLogic {
       patch.accountTab = returnCtx.upgradeReturnTab;
       if (returnCtx.upgradeReturnTab === 'customization') patch.customizeTarget = returnCtx.upgradeReturnTarget;
       if (returnCtx.upgradeReturnTab === 'views') patch.viewsTabPartner = returnCtx.upgradeReturnTarget;
+    } else if (this.state.screen === 'account') {
+      // Post-payment redirect gap (2026-09-19): this handler DOES run, after session routing, but only ever set
+      // accountTab when an entry point had stashed upgradeReturnTab before the redirect. The main path (pick Paid on
+      // the Subscription tab, click Card) stashes none, so nothing here moved the tab and the candidate stayed on the
+      // Profile Info that enterAccount() defaults a fresh mount to, away from the confirmation banner (or the
+      // "may still be processing" message) that lives on the Subscription tab. Land there.
+      patch.accountTab = 'subscription';
     }
     this.setState(patch, () => { if (patch.accountTab === 'views') this.renderPdfPreview(); });
   }
@@ -10098,8 +10120,20 @@ class Component extends DCLogic {
   guardedNav(action) {
     if (this.isDirty() && !window.confirm('You have unsaved changes on this tab. Leave without saving?')) return;
     const prevTab = this.state.accountTab;
+    // Subscription-tab warning gap (2026-09-19): this reset used to be silent. A candidate who picked Paid and then
+    // moved to another tab, never having touched Stripe, came back to Free with no word that nothing was completed
+    // (the only re-check ran on browser-tab visibility, and only while already on this tab). Leaving with a Paid
+    // choice that has no confirmed subscription behind it is now said out loud: the persistent inline notice on the
+    // Subscription tab, plus a banner on whichever tab they land on (cleared once they open Subscription, where the
+    // inline notice stays). accountTier is the real, webhook-backed value, so this never depends on Stripe having
+    // been reached at all.
+    const abandonedPaidChoice = this.state.tierSelection === 'paid' && this.state.accountTier !== 'paid' && !this.state.checkoutPending;
     action();
-    this.setState(st => ({ viewsTabPartner: '', tierSelection: st.accountTier, changePlanOpen: false, deactReason: '', deactNote: '', ...(prevTab === 'sharing' && st.accountTab !== 'sharing' ? { arrivedFromDeactivationPause: false } : {}) }));
+    this.setState(st => ({
+      viewsTabPartner: '', tierSelection: st.accountTier, changePlanOpen: false, deactReason: '', deactNote: '',
+      ...(abandonedPaidChoice ? { checkoutIncompleteNotice: true, subscribeAbandonedNotice: st.accountTab !== 'subscription' } : {}),
+      ...(prevTab === 'sharing' && st.accountTab !== 'sharing' ? { arrivedFromDeactivationPause: false } : {}),
+    }));
   }
 
   renderVals() {
@@ -10264,7 +10298,7 @@ class Component extends DCLogic {
       tierRadiosDisabled: s.accountTier === 'paid',
       tierRadiosEnabled: s.accountTier !== 'paid',
       selectTierFree: () => { if (s.accountTier === 'paid') return; this.setState({ tierSelection: 'free' }); },
-      selectTierPaid: () => { if (s.accountTier === 'paid') return; this.setState({ tierSelection: 'paid' }); },
+      selectTierPaid: () => { if (s.accountTier === 'paid') return; this.setState({ tierSelection: 'paid', checkoutIncompleteNotice: false, subscribeAbandonedNotice: false }); },
       isCurrentlyPaid: s.accountTier === 'paid',
       // Item 11: license_only's own Subscription-tab facts — licenseSubscriptionStartedAt is real,
       // persisted state (candidates.license_subscription_started_at, written by test-stripe-webhook —
@@ -10314,6 +10348,7 @@ class Component extends DCLogic {
       checkoutPending: s.checkoutPending,
       checkoutError: s.checkoutError,
       checkoutIncompleteNotice: s.checkoutIncompleteNotice,
+      subscribeAbandonedNotice: s.subscribeAbandonedNotice && s.accountTier !== 'paid',
       checkoutSuccessNotice: s.checkoutSuccessNotice,
       downgradeSuccessNotice: s.downgradeSuccessNotice,
       // Subscription cancellation gap (2026-09-18), Step 3: same "no Dismiss, persistent until the

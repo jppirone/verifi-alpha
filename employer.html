@@ -2244,6 +2244,7 @@ const __ds_scope = {};
   <div style="max-width:1040px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;padding:18px 0;border-bottom:1px solid var(--color-divider)">
     <span class="nav-brand" style="font-size:15px">Employer verification requests</span>
     <div style="display:flex;align-items:center;gap:var(--space-3)">
+      <a href="#" style="font-size:12px" sc-camel-on-click="{{ goHome }}">Home</a>
       <sc-if value="{{ realSignedIn }}" hint-placeholder-val="{{ false }}">
         <a href="#" style="font-size:12px" sc-camel-on-click="{{ openAccount }}">{{ realEmailLabel }}</a>
         <a href="#" style="font-size:12px" sc-camel-on-click="{{ signOutReal }}">Sign out</a>
@@ -2485,6 +2486,23 @@ const __ds_scope = {};
     </sc-if>
     <a href="#" sc-camel-on-click="{{ startOver }}">Start a new lookup</a>
     <span style="margin-left:auto;color:var(--color-neutral-500)">{{ accountLine }}</span>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isLanding }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:640px;margin:0 auto;padding-top:56px;display:flex;flex-direction:column;gap:var(--space-4)">
+    <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:26px;margin:0">What would you like to do?</h1>
+    <p style="margin:0;color:var(--color-neutral-400);font-size:14px;line-height:1.5">Pick one. You can come back here any time from Home.</p>
+    <div style="display:flex;gap:var(--space-4);flex-wrap:wrap">
+      <button type="button" id="landing-check" class="card elev-sm" style="flex:1;min-width:240px;text-align:left;cursor:pointer;display:flex;flex-direction:column;gap:var(--space-2);color:inherit;font:inherit" sc-camel-on-click="{{ openCheckForAccount }}">
+        <span style="font-size:18px;font-family:var(--font-heading)">Check for account</span>
+        <span style="font-size:13px;color:var(--color-accent-300)">Free</span>
+      </button>
+      <button type="button" id="landing-compare" class="card elev-sm" style="flex:1;min-width:240px;text-align:left;cursor:pointer;display:flex;flex-direction:column;gap:var(--space-2);color:inherit;font:inherit" sc-camel-on-click="{{ openResumeComparison }}">
+        <span style="font-size:18px;font-family:var(--font-heading)">Resume comparison</span>
+        <span style="font-size:13px;color:var(--color-accent-300)">Sign in or create account</span>
+      </button>
+    </div>
   </div>
   </sc-if>
 
@@ -3334,7 +3352,18 @@ class Component extends DCLogic {
     if (this.state.screen !== 'compare') this._resumeDocKey = null;
   }
 
-  state = Object.assign(this.blank(), this.realBlank());
+  // The landing choice (2026-09-19): the first screen used to be the Tier 1 lookup form alone, with the real sign-in only a
+  // small header link. A URL that is already carrying a specific flow (an emailed lookup link, a sign-in link, a payment
+  // or billing return) skips it, so those never flash the landing screen before their own screen loads.
+  initialScreen() {
+    try {
+      const q = new URLSearchParams(window.location.search);
+      if (q.get('lookup_token') || q.get('employer_login') || q.get('payment') || q.get('billing')) return 'lookup';
+    } catch (e) { /* fall through */ }
+    return 'landing';
+  }
+
+  state = Object.assign(this.blank(), this.realBlank(), { screen: this.initialScreen() });
 
   norm(v) { return (v || '').trim().toLowerCase(); }
   digits(v) { return (v || '').replace(/\D/g, ''); }
@@ -3689,7 +3718,7 @@ class Component extends DCLogic {
         if (e && e.preventDefault) e.preventDefault();
         await this.empCall('logout');
         this.dropRealSession(false);
-        this.setState({ screen: 'lookup' });
+        this.setState({ screen: 'landing' });
       },
       signinEmail: s.signinEmail, signinName: s.signinName,
       setSigninEmail: (e) => this.setState({ signinEmail: e.target.value }),
@@ -3987,7 +4016,15 @@ class Component extends DCLogic {
       simExpired: () => this.setState({ response: 'expired' }),
 
       backToLookup: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'lookup', lookupResult: null, lookup: null, request: null, pendingEmail: '' }); },
-      resetAll: () => { this.clearTokenFromUrl(); this.setState(this.blank()); },
+      resetAll: () => { this.clearTokenFromUrl(); this.setState(Object.assign(this.blank(), { screen: 'landing' })); },
+      isLanding: s.screen === 'landing',
+      goHome: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'landing' }); },
+      openCheckForAccount: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'lookup' }); },
+      openResumeComparison: (e) => {
+        if (e && e.preventDefault) e.preventDefault();
+        if (s.real) { this.setState({ screen: 'acct', acctNotice: null, acctErr: null }); this.loadReal(); }
+        else this.setState({ screen: 'signin', signinErr: null });
+      },
     };
   }
 }
