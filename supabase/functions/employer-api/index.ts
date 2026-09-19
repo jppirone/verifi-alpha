@@ -367,7 +367,19 @@ const ACTIONS: Record<string, Action> = {
         "line_items[0][price_data][product_data][description]": `${pricing.included_lookups} comparison lookups per billing period, shared by everyone in ${org!.name}. Billed monthly; the organization owner can cancel any time.`,
       };
       for (const [k, v] of Object.entries(meta)) { form[`metadata[${k}]`] = v; form[`subscription_data[metadata][${k}]`] = v; }
-      const sess = await stripe("POST", "/v1/checkout/sessions", form);
+      let sess = await stripe("POST", "/v1/checkout/sessions", form);
+      if (!sess.ok && sess.data?.error?.code === "resource_missing" && String(sess.data?.error?.param || "").includes("customer")) {
+        // The stored Stripe customer no longer exists (deleted on the Stripe side). Without this the org could never
+        // subscribe again: make a fresh customer (a NEW idempotency key, since the old one would replay the dead
+        // customer for 24 hours), store it, and retry once.
+        const c = await stripe("POST", "/v1/customers", {
+          email: user.email, name: org!.name, "metadata[org_id]": org!.id, "metadata[product]": "employer_org_subscription", "metadata[owner_user_id]": user.id,
+        }, `employer-org-customer-${org!.id}-${Date.now()}`);
+        if (!c.ok) return fail(502, "stripe_error");
+        await rest(`employer_orgs?id=eq.${org!.id}`, { method: "PATCH", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ stripe_customer_id: c.data.id }) });
+        form.customer = c.data.id as string;
+        sess = await stripe("POST", "/v1/checkout/sessions", form);
+      }
       if (!sess.ok || !sess.data.url) return fail(502, "stripe_error");
       return ok({ url: sess.data.url });
     },
