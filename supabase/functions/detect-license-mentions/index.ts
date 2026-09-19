@@ -157,6 +157,11 @@ type Mention = {
   issue_date: string | null; expiration_date: string | null; existing_certification_id: string | null; confidence: number;
 };
 
+// The detection call had no ceiling of its own: a stalled model call held resumeConfirm's Confirm button (which is
+// gated on this) until the client gave up at 90 s. Bounded here at 60 s, inside that client limit, so a stall comes
+// back as an ordinary failure (status 'failed', which the client already treats as fail-open) instead of a hang.
+const DETECT_CALL_TIMEOUT_MS = 60_000;
+
 async function callModel(fileBase64: string, mime: string, existing: ExistingCert[]): Promise<{ ok: true; mentions: Mention[] } | { ok: false; error: string }> {
   if (!ANTHROPIC_API_KEY) return { ok: false, error: "ANTHROPIC_API_KEY not configured" };
   const fileBlock = mime === "application/pdf"
@@ -172,15 +177,22 @@ async function callModel(fileBase64: string, mime: string, existing: ExistingCer
         max_tokens: 8000,
         messages: [{ role: "user", content: [fileBlock, { type: "text", text: buildDetectionPrompt(existing) }] }],
       }),
+      signal: AbortSignal.timeout(DETECT_CALL_TIMEOUT_MS),
     });
   } catch (e) {
+    if ((e as { name?: string })?.name === "TimeoutError") return { ok: false, error: `claude_call_timeout (after ${DETECT_CALL_TIMEOUT_MS}ms)` };
     return { ok: false, error: `claude_network_error: ${String(e)}` };
   }
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     return { ok: false, error: `claude_call_failed (${res.status}): ${detail.slice(0, 300)}` };
   }
-  const data = await res.json();
+  let data: any;
+  try {
+    data = await res.json(); // covered by the same signal: a response that starts and then stalls ends here
+  } catch (e) {
+    return { ok: false, error: `claude_body_failed: ${String(e)}` };
+  }
   const textBlock = (data?.content ?? []).find((b: { type?: string }) => b.type === "text");
   const cleaned = String(textBlock?.text ?? "").trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "");
   let parsed: any;

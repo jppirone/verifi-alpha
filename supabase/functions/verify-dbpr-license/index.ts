@@ -122,8 +122,14 @@ function parseRows(html: string): Row[] {
   return rows;
 }
 
+// The three requests below are sequential and had no ceiling of their own (a slow myfloridalicense.com simply
+// held the caller for as long as it liked). One shared signal bounds the whole search, bodies included; a timeout
+// surfaces as this function's normal 500 {ok:false,error} which verify-license already handles as a failed lookup.
+const DBPR_SEARCH_TIMEOUT_MS = 30_000;
+
 async function dbprSearch(searchType: "Name" | "LicNbr", fields: [string, string][]): Promise<{ html: string; status: number }> {
-  const res1 = await fetch(BASE, { headers: { "User-Agent": UA } });
+  const signal = AbortSignal.timeout(DBPR_SEARCH_TIMEOUT_MS);
+  const res1 = await fetch(BASE, { headers: { "User-Agent": UA }, signal });
   const cookieHeader = extractCookies(res1).join("; ");
   await res1.text();
 
@@ -131,6 +137,7 @@ async function dbprSearch(searchType: "Name" | "LicNbr", fields: [string, string
     method: "POST",
     headers: { "User-Agent": UA, "Content-Type": "application/x-www-form-urlencoded", "Cookie": cookieHeader },
     body: "SearchType=" + searchType,
+    signal,
   });
   await res2.text();
 
@@ -139,6 +146,7 @@ async function dbprSearch(searchType: "Name" | "LicNbr", fields: [string, string
     method: "POST",
     headers: { "User-Agent": UA, "Content-Type": "application/x-www-form-urlencoded", "Cookie": cookieHeader },
     body,
+    signal,
   });
   const html = await res3.text();
   return { html, status: res3.status };

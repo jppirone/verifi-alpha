@@ -431,11 +431,16 @@ export default {
         }
       }
 
-      // Automatic license verification: everything above is committed, so a slow or failing
-      // registry lookup can never lose the candidate's confirmation. Awaited (no background-task
-      // primitive is used anywhere in this project) but bounded, run in parallel, and each result is
-      // reported per item so the client can retry a transport-level failure. verify-license itself is
-      // idempotent and does its own required-field validation.
+      // Automatic license verification: everything above is committed, so a slow or failing registry lookup can
+      // never lose the candidate's confirmation. It also no longer holds the candidate's response: state registry
+      // lookups are slow and outside our control (DBPR alone is three sequential requests), and the confirm used to
+      // wait for the slowest of them, up to 45 s per license plus 20 s for the email. Verification now runs AFTER the
+      // response is returned, as an Edge Runtime background task (EdgeRuntime.waitUntil): same parallel, bounded,
+      // idempotent verify-license calls as before, same single bundled correction email once every license has
+      // persisted. The candidate sees each license's result on their Verification tab as it lands (that screen
+      // already reads verify-license's stored outcome), exactly as they did for a license that was re-checked later.
+      // If the runtime offers no background primitive the work is awaited, i.e. the old behaviour: slower, never wrong.
+      const runLicenseVerification = async () => {
       const licenseVerification = await Promise.all(licenseIdsToVerify.map(async (license_item_id) => {
         try {
           const vRes = await fetch(`${SUPABASE_URL}/functions/v1/verify-license`, {
@@ -473,12 +478,26 @@ export default {
           });
         } catch (_e) { /* best-effort; the candidate still sees each license on their Verification tab */ }
       }
+      return licenseVerification;
+      };
+
+      let licenseVerification: Array<{ license_item_id: string; ok: boolean; status: string | null; outcome?: string | null; correction_requested?: boolean }>;
+      const edgeRuntime = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime;
+      if (licenseIdsToVerify.length === 0) {
+        licenseVerification = [];
+      } else if (edgeRuntime && typeof edgeRuntime.waitUntil === "function") {
+        edgeRuntime.waitUntil(runLicenseVerification().catch((e) => console.log("confirm-resume-data: background license verification failed -", String(e))));
+        licenseVerification = licenseIdsToVerify.map((license_item_id) => ({ license_item_id, ok: true, status: "queued" }));
+      } else {
+        licenseVerification = await runLicenseVerification();
+      }
 
       return new Response(JSON.stringify({
         ok: true,
         confirmed_counts: { work_history: work_history.length, education: education.length, certifications: certifications.length, skills: skills.length, freeform: freeform.length, licenses: licenses.filter((l) => !l.remove).length },
         queued_for_verification: queueInserts.length,
         license_verification: licenseVerification,
+        license_verification_mode: licenseVerification.some((v) => v.status === "queued") ? "background" : "inline",
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: "unhandled", detail: String(e) }), {

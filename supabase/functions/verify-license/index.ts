@@ -149,6 +149,7 @@ const floridaDbpr: JurisdictionAdapter = {
           "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
         },
         body: JSON.stringify({ license_number: licenseNumber, first_name: firstName, last_name: lastName }),
+        signal: AbortSignal.timeout(40_000), // just above verify-dbpr-license's own 30 s search bound
       });
     } catch (e) {
       return { ok: false, error: "network_error", detail: String(e) };
