@@ -9117,7 +9117,7 @@ class Component extends DCLogic {
       res = await fetch(this.SUPABASE_FN_URL + '/set-candidate-tier', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_id: s.resumeCandidateId, tier: 'free' }),
+        body: JSON.stringify({ candidate_id: s.resumeCandidateId, tier: 'free', session_token: this.candidateSessionToken() }),
       });
       data = await res.json().catch(() => ({}));
     } catch (e) {
@@ -9144,7 +9144,7 @@ class Component extends DCLogic {
       const cancelRes = await fetch(this.SUPABASE_FN_URL + '/cancel-stripe-subscription', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_id: s.resumeCandidateId }),
+        body: JSON.stringify({ candidate_id: s.resumeCandidateId, session_token: this.candidateSessionToken() }),
       });
       cancelData = await cancelRes.json().catch(() => null);
     } catch (e) {}
@@ -9210,6 +9210,7 @@ class Component extends DCLogic {
   async deactivateAccount() {
     const candidateId = this.state.resumeCandidateId;
     if (!candidateId) { this.setState({ deactivateError: 'No account is loaded — try logging in again.' }); return; }
+    const sessionTokenForDeactivate = this.candidateSessionToken(); // this device's token is removed below once the server revokes it
     // Captured before anything below changes screen/state — this is the last point accountTier
     // still means anything for this device; once deactivate-account revokes every session, there's
     // no more resolveSession() to re-read it from, so it has to be remembered now, not re-derived
@@ -9227,7 +9228,7 @@ class Component extends DCLogic {
       res = await fetch(this.SUPABASE_FN_URL + '/deactivate-account', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_id: candidateId }),
+        body: JSON.stringify({ candidate_id: candidateId, session_token: sessionTokenForDeactivate }),
       });
       data = await res.json().catch(() => ({}));
     } catch (e) {
@@ -9254,8 +9255,8 @@ class Component extends DCLogic {
     // tier at all — a paid candidate who deleted their account kept their real Stripe subscription
     // running indefinitely, same underlying gap confirmDowngrade had (see its own comment on this
     // same call). candidateId is still in closure scope even though this device's session token is
-    // now gone — cancel-stripe-subscription doesn't need a session (candidate_id + anon key only,
-    // same as every function in this file). Awaited now (was fire-and-forget before Step 3) so the
+    // now gone — cancel-stripe-subscription accepts an account that deactivate-account has just scheduled
+    // for deletion without a live session (auth pass, 2026-09-19: every other caller needs its session). Awaited now (was fire-and-forget before Step 3) so the
     // deactivated screen can show real progress rather than silence.
     let cancelData = null;
     try {
@@ -10191,6 +10192,15 @@ class Component extends DCLogic {
   // rarely-invoked shape). Returns the parsed response data on success, null on failure; callers
   // decide their own pending/error state and how to react, since phone/KYC/cross-validation each
   // have their own separate render-vals for that.
+  // Staff/internal endpoint auth pass (2026-09-19): set-candidate-tier (downgrade), cancel-stripe-subscription,
+  // deactivate-account and record-verification-event now require this candidate's own live session, checked
+  // server-side against the candidate_id they act on. applySession stores the token in state and localStorage; a signup
+  // whose best-effort session issuance failed has neither, and those calls then fail with 401 like any other error.
+  candidateSessionToken() {
+    if (this.state.sessionToken) return this.state.sessionToken;
+    try { return localStorage.getItem('verifi_session_token') || ''; } catch (e) { return ''; }
+  }
+
   async recordVerificationEvent(verificationType, extra) {
     const s = this.state;
     if (!s.resumeCandidateId) return null;
@@ -10198,7 +10208,7 @@ class Component extends DCLogic {
       const res = await fetch(this.SUPABASE_FN_URL + '/record-verification-event', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_id: s.resumeCandidateId, verification_type: verificationType, ...extra }),
+        body: JSON.stringify({ candidate_id: s.resumeCandidateId, verification_type: verificationType, session_token: this.candidateSessionToken(), ...extra }),
       });
       const data = await res.json().catch(() => ({}));
       return { res, data };

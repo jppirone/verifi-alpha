@@ -2980,16 +2980,44 @@ class Component extends DCLogic {
     this.loadStaffUsers();
   }
 
+  // Staff endpoint auth pass (2026-09-19): every staff data/action endpoint now requires a live staff session, checked
+  // server-side on every call (the public anon key that used to be all it took no longer opens them). The token is read
+  // from localStorage first because applyStaffSession writes it there before it calls loadItems()/loadStaffUsers(), while
+  // this.state.sessionToken is not set yet at that moment (setState is batched).
+  staffToken() {
+    try { const t = localStorage.getItem('verifi_staff_session_token'); if (t) return t; } catch (e) {}
+    return this.state.sessionToken || '';
+  }
+
+  // POST to a staff endpoint with the staff session attached. A 401 means the session is gone (expired, revoked, signed
+  // out elsewhere): drop back to the sign-in screen instead of leaving a half-working portal that silently fails.
+  async staffFetch(path, body) {
+    const res = await fetch(this.SUPABASE_FN_URL + path, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...body, staff_session_token: this.staffToken() }),
+    });
+    if (res.status === 401) this.staffSessionExpired();
+    return res;
+  }
+
+  staffSessionExpired() {
+    if (this.state.screen !== 'portal') return;
+    try { localStorage.removeItem('verifi_staff_session_token'); } catch (e) {}
+    this.setState({
+      screen: 'login', selectedId: null, tab: 'queue',
+      sessionToken: null, staffEmail: null, currentUser: null, loginRole: null,
+      loginEmail: '', loginLinkSent: false,
+      loginRequestError: true, loginRequestErrorText: 'Your session has ended. Please sign in again.',
+    });
+  }
+
   // Item 12 (2026-09-07 wiring audit): real staff roster for the "Assign to" dropdown — see
   // list-staff-users' own header for why this returns every staff_users row, not just workers.
   async loadStaffUsers() {
     let res, data;
     try {
-      res = await fetch(this.SUPABASE_FN_URL + '/list-staff-users', {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      });
+      res = await this.staffFetch('/list-staff-users', {});
       data = await res.json().catch(() => ({}));
     } catch (e) {
       console.error('list-staff-users failed', e);
@@ -3162,11 +3190,7 @@ class Component extends DCLogic {
     this.setState({ licenseRecheckRunning: true, licenseRecheckResult: null });
     let data;
     try {
-      const res = await fetch(this.SUPABASE_FN_URL + '/verify-license', {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_id: item.candidateId, license_item_id: item.licenseData.id, staff_rerun: true }),
-      });
+      const res = await this.staffFetch('/verify-license', { candidate_id: item.candidateId, license_item_id: item.licenseData.id, staff_rerun: true });
       data = await res.json().catch(() => ({ ok: false, error: 'invalid_response' }));
     } catch (e) {
       data = { ok: false, error: 'network_error' };
@@ -3208,11 +3232,7 @@ class Component extends DCLogic {
 
     let data;
     try {
-      const res = await fetch(this.SUPABASE_FN_URL + path, {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
+      const res = await this.staffFetch(path, body);
       data = await res.json().catch(() => ({ ok: false, error: 'invalid_response' }));
     } catch (e) {
       data = { ok: false, error: 'network_error', detail: String(e) };
@@ -3385,11 +3405,7 @@ class Component extends DCLogic {
   async loadItems() {
     let res, data;
     try {
-      res = await fetch(this.SUPABASE_FN_URL + '/list-verification-items', {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      });
+      res = await this.staffFetch('/list-verification-items', {});
       data = await res.json().catch(() => ({}));
     } catch (e) {
       console.error('list-verification-items failed', e);
@@ -3411,11 +3427,7 @@ class Component extends DCLogic {
     this.setState({ resumeFailuresLoading: true, resumeFailuresError: false });
     let res, data;
     try {
-      res = await fetch(this.SUPABASE_FN_URL + '/list-resume-extraction-failures', {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      });
+      res = await this.staffFetch('/list-resume-extraction-failures', {});
       data = await res.json().catch(() => ({}));
     } catch (e) {
       console.error('list-resume-extraction-failures failed', e);
@@ -3504,11 +3516,7 @@ class Component extends DCLogic {
   async persistItemPatch(id, patch) {
     let ok = false;
     try {
-      const res = await fetch(this.SUPABASE_FN_URL + '/update-verification-item', {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, patch }),
-      });
+      const res = await this.staffFetch('/update-verification-item', { id, patch });
       const data = await res.json().catch(() => ({}));
       ok = res.ok && !!data.ok;
     } catch (e) {
@@ -3530,11 +3538,7 @@ class Component extends DCLogic {
   async persistTimelineEntry(id, entry) {
     let ok = false;
     try {
-      const res = await fetch(this.SUPABASE_FN_URL + '/add-verification-timeline-entry', {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ item_id: id, event_date: entry.date, actor: entry.actor, action: entry.action, note: entry.note }),
-      });
+      const res = await this.staffFetch('/add-verification-timeline-entry', { item_id: id, event_date: entry.date, actor: entry.actor, action: entry.action, note: entry.note });
       const data = await res.json().catch(() => ({}));
       ok = res.ok && !!data.ok;
     } catch (e) {
@@ -3568,11 +3572,7 @@ class Component extends DCLogic {
     if (id === this.state.selectedId) this.setState({ noteSaveState: 'saving' });
     let ok = false;
     try {
-      const res = await fetch(this.SUPABASE_FN_URL + '/update-verification-item', {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, patch: { note: value } }),
-      });
+      const res = await this.staffFetch('/update-verification-item', { id, patch: { note: value } });
       const data = await res.json().catch(() => ({}));
       ok = res.ok && !!data.ok;
     } catch (e) {
@@ -3619,11 +3619,7 @@ class Component extends DCLogic {
     if (id === this.state.selectedId) this.setState({ internalNoteSaveState: 'saving' });
     let ok = false;
     try {
-      const res = await fetch(this.SUPABASE_FN_URL + '/update-verification-item', {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, patch: { internalNote: value } }),
-      });
+      const res = await this.staffFetch('/update-verification-item', { id, patch: { internalNote: value } });
       const data = await res.json().catch(() => ({}));
       ok = res.ok && !!data.ok;
     } catch (e) {
