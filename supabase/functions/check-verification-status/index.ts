@@ -85,6 +85,10 @@ export default {
       // Only 'signup' confirmations ever create a candidates row (see confirm-verification's own
       // header) — other purposes (e.g. a future 'email_change') have nothing to link to here.
       let candidateId: string | null = null;
+      // Existing-account sign-in (2026-09-19): when the signup link was clicked for an address that already had an account,
+      // confirm-verification signed that account in and recorded it here; this polling device gets the same session.
+      let existingAccount = false;
+      let existingProfile: any = null;
       if (record.purpose === "signup") {
         const candRes = await fetch(
           `${SUPABASE_URL}/rest/v1/candidates?verification_id=eq.${email_verification_id}&select=id`,
@@ -92,6 +96,7 @@ export default {
         );
         const candRows = candRes.ok ? await candRes.json() : [];
         candidateId = candRows[0]?.id ?? null;
+        if (!candidateId && record.existing_candidate_id) { candidateId = record.existing_candidate_id; existingAccount = true; }
       }
 
       // Item 20 (2026-09-12 live-testing session): real, persisted session for THIS device — see the
@@ -134,10 +139,11 @@ export default {
           sessionToken = rpcRows?.[0]?.session_token ?? null;
           // Item 6 (2026-09-12 live-testing session, follow-up build): see confirm-verification's
           // own comment on this same select addition.
-          const candRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=tier,header_display_mode,personal_location,account_type,kyc_verified_at,phone_verified_at,cross_validation_completed_at,verified_phone_number`, {
+          const candRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=tier,header_display_mode,personal_location,account_type,kyc_verified_at,phone_verified_at,cross_validation_completed_at,verified_phone_number,email,phone,first_name,last_name,deletion_scheduled_at,tour_completed_at,license_subscription_started_at`, {
             headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
           });
           const candRows = candRes.ok ? await candRes.json() : [];
+          existingProfile = candRows[0] ?? null;
           candidateTier = candRows[0]?.tier ?? null;
           candidateHeaderDisplayMode = candRows[0]?.header_display_mode ?? null;
           candidatePersonalLocation = candRows[0]?.personal_location ?? null;
@@ -157,18 +163,18 @@ export default {
         ok: true,
         confirmed: true,
         candidate_id: candidateId,
-        email: record.email,
-        phone: record.phone,
+        email: existingAccount ? (existingProfile?.email ?? record.email) : record.email,
+        phone: existingAccount ? (existingProfile?.phone ?? null) : record.phone,
         // Item 12/15 (2026-09-12 live-testing session): same gap, same fix as confirm-verification's
         // own header explains — this is the "stayed on Check your email and polled" device's
         // equivalent of that response, feeding the exact same applySignupConfirmation/applySession
         // path, so it needs the exact same fields.
-        first_name: record.first_name,
-        last_name: record.last_name,
+        first_name: existingAccount ? (existingProfile?.first_name ?? null) : record.first_name,
+        last_name: existingAccount ? (existingProfile?.last_name ?? null) : record.last_name,
         purpose: record.purpose,
-        opt_in_work_history: !!record.opt_in_work_history,
-        opt_in_education: !!record.opt_in_education,
-        opt_in_certifications: !!record.opt_in_certifications,
+        opt_in_work_history: !existingAccount && !!record.opt_in_work_history,
+        opt_in_education: !existingAccount && !!record.opt_in_education,
+        opt_in_certifications: !existingAccount && !!record.opt_in_certifications,
         session_token: sessionToken,
         tier: candidateTier,
         header_display_mode: candidateHeaderDisplayMode,
@@ -178,6 +184,11 @@ export default {
         phone_verified_at: candidatePhoneVerifiedAt,
         cross_validation_completed_at: candidateCrossValidationCompletedAt,
         verified_phone_number: candidateVerifiedPhoneNumber,
+        // Existing-account sign-in (2026-09-19): see confirm-verification's header note on the duplicate-email branch.
+        existing_account: existingAccount,
+        deletion_scheduled_at: existingAccount ? (existingProfile?.deletion_scheduled_at ?? null) : null,
+        tour_completed_at: existingAccount ? (existingProfile?.tour_completed_at ?? null) : null,
+        license_subscription_started_at: existingAccount ? (existingProfile?.license_subscription_started_at ?? null) : null,
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: "unhandled", detail: String(e) }), {

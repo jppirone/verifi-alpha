@@ -77,8 +77,22 @@ export default {
     }
     try {
       const authBody = await req.clone().json().catch(() => ({}));
+      let billingFactOnly = false;
       const authDenied = await authGateCandidate(req, authBody);
-      if (authDenied) return authDenied;
+      if (authDenied) {
+        // Regression fix (2026-09-19, found while walking the login flow): candidate.html's account-deactivation screen polls this
+        // for stripe_subscription_cancelled_at AFTER deactivate-account has revoked every session (see checkCandidateBillingCancelled,
+        // "session-free" by design), so gating it on a live session made a paid candidate's goodbye screen end "unconfirmed" even
+        // though the cancel succeeded. Like cancel-stripe-subscription, an account that is already scheduled for deletion is answered
+        // without a session, but ONLY with that one billing fact (no tier, no license fact); anything else is still 401.
+        const cid = typeof authBody?.candidate_id === "string" ? authBody.candidate_id : "";
+        const dRes = cid ? await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${encodeURIComponent(cid)}&select=deletion_scheduled_at`, {
+          headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
+        }) : null;
+        const dRow = dRes && dRes.ok ? (await dRes.json())[0] : null;
+        if (!dRow || !dRow.deletion_scheduled_at) return authDenied;
+        billingFactOnly = true;
+      }
       const { candidate_id } = await req.json();
       if (!candidate_id || typeof candidate_id !== "string") {
         return new Response(JSON.stringify({ ok: false, error: "candidate_id_required" }), {
@@ -100,6 +114,12 @@ export default {
       if (!candidate) {
         return new Response(JSON.stringify({ ok: false, error: "candidate_not_found" }), {
           status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      if (billingFactOnly) {
+        return new Response(JSON.stringify({ ok: true, stripe_subscription_cancelled_at: candidate.stripe_subscription_cancelled_at }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
 

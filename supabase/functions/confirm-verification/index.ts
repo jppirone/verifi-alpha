@@ -151,6 +151,13 @@ export default {
       }
 
       let candidateId: string | null = null;
+      // Existing-account sign-in (2026-09-19). The signup email is sent for EVERY address (send-verification answers identically
+      // whether or not the address has an account); for an address that already has one, the email says so and carries this same
+      // link. Reaching this point through that link proves control of the address, exactly like a login link, so instead of the
+      // old 409 email_already_registered this signs the EXISTING account in: nothing about it is changed, nothing staged for the
+      // signup (resume upload, license, opt-ins) is attached to it, and the response says existing_account:true so the client
+      // routes it like a login. Nobody who has not opened the emailed link is ever told the account exists.
+      let existingAccount = false;
 
       if (record.purpose === 'signup') {
         const insertRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates`, {
@@ -181,7 +188,15 @@ export default {
             }
           }
 
-          if (!ownRowAlreadyInserted) {
+          if (!ownRowAlreadyInserted && isDuplicateEmail) {
+            const exRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates?email=eq.${encodeURIComponent(record.email)}&select=id`, {
+              headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
+            });
+            const exId = exRes.ok ? (await exRes.json())[0]?.id : null;
+            if (exId) { candidateId = exId; existingAccount = true; }
+          }
+
+          if (!ownRowAlreadyInserted && !existingAccount) {
             const reason = isDuplicateEmail ? "email_already_registered" : "account_creation_failed";
             return new Response(JSON.stringify({ ok: false, error: reason, detail: errText }), {
               status: isDuplicateEmail ? 409 : 500,
@@ -204,7 +219,7 @@ export default {
             "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
             "Prefer": "return=minimal",
           },
-          body: JSON.stringify({ confirmed_at: new Date().toISOString() }),
+          body: JSON.stringify({ confirmed_at: new Date().toISOString(), ...(existingAccount ? { existing_candidate_id: candidateId } : {}) }),
         },
       );
 
@@ -216,7 +231,7 @@ export default {
       }
 
       let resumeBackfillError: string | null = null;
-      if (candidateId) {
+      if (candidateId && !existingAccount) {
         const backfillRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/backfill_resume_pipeline_candidate_id`, {
           method: "POST",
           headers: {
@@ -234,7 +249,7 @@ export default {
       // Items 9/10: the license-only signup's certification row — see this function's own header
       // above for why resume_document_id stays null and status is left at its table default.
       let licenseCreationError: string | null = null;
-      if (candidateId && record.account_type === 'license_only' && record.staged_license) {
+      if (candidateId && !existingAccount && record.account_type === 'license_only' && record.staged_license) {
         const lic = record.staged_license;
         const licenseRes = await fetch(`${SUPABASE_URL}/rest/v1/certification_items`, {
           method: "POST",
@@ -327,6 +342,7 @@ export default {
       let candidatePhoneVerifiedAt: string | null = null;
       let candidateCrossValidationCompletedAt: string | null = null;
       let candidateVerifiedPhoneNumber: string | null = null;
+      let existingProfile: any = null;
       if (candidateId) {
         const rawSessionToken = randomToken();
         const tokenHash = await hashToken(rawSessionToken);
@@ -348,10 +364,11 @@ export default {
           // paths return it uniformly" reasoning as resolve-session's own header explains, and this
           // is really a fourth such path (see the first_name/last_name comment on this response
           // below). A brand-new candidate just gets the DB defaults ('printed', null).
-          const candRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=tier,header_display_mode,personal_location,account_type,kyc_verified_at,phone_verified_at,cross_validation_completed_at,verified_phone_number`, {
+          const candRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=tier,header_display_mode,personal_location,account_type,kyc_verified_at,phone_verified_at,cross_validation_completed_at,verified_phone_number,email,phone,first_name,last_name,deletion_scheduled_at,tour_completed_at,license_subscription_started_at`, {
             headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
           });
           const candRows = candRes.ok ? await candRes.json() : [];
+          existingProfile = candRows[0] ?? null;
           candidateTier = candRows[0]?.tier ?? null;
           candidateHeaderDisplayMode = candRows[0]?.header_display_mode ?? null;
           candidatePersonalLocation = candRows[0]?.personal_location ?? null;
@@ -373,8 +390,8 @@ export default {
 
       return new Response(JSON.stringify({
         ok: true,
-        email: record.email,
-        phone: record.phone,
+        email: existingAccount ? (existingProfile?.email ?? record.email) : record.email,
+        phone: existingAccount ? (existingProfile?.phone ?? null) : record.phone,
         // Item 12/15 (2026-09-12 live-testing session): the real gap — this response never echoed
         // back first_name/last_name, unlike resolve-session/confirm-login/check-login-status (see
         // resolve-session's own header: "all three session-establishing paths... uniformly" — this
@@ -387,14 +404,14 @@ export default {
         // permanently empty until some later, unrelated full session resolve — confirmed live as
         // the root cause of both the Basic Info screen's empty name fields and the generated
         // document's missing candidate name.
-        first_name: record.first_name,
-        last_name: record.last_name,
+        first_name: existingAccount ? (existingProfile?.first_name ?? null) : record.first_name,
+        last_name: existingAccount ? (existingProfile?.last_name ?? null) : record.last_name,
         purpose: record.purpose,
         candidate_id: candidateId,
         email_verification_id: record.id,
-        opt_in_work_history: !!record.opt_in_work_history,
-        opt_in_education: !!record.opt_in_education,
-        opt_in_certifications: !!record.opt_in_certifications,
+        opt_in_work_history: !existingAccount && !!record.opt_in_work_history,
+        opt_in_education: !existingAccount && !!record.opt_in_education,
+        opt_in_certifications: !existingAccount && !!record.opt_in_certifications,
         resume_backfill_error: resumeBackfillError,
         license_creation_error: licenseCreationError,
         session_token: sessionToken,
@@ -406,6 +423,11 @@ export default {
         phone_verified_at: candidatePhoneVerifiedAt,
         cross_validation_completed_at: candidateCrossValidationCompletedAt,
         verified_phone_number: candidateVerifiedPhoneNumber,
+        // Existing-account sign-in (2026-09-19): see confirm-verification's header note on the duplicate-email branch.
+        existing_account: existingAccount,
+        deletion_scheduled_at: existingAccount ? (existingProfile?.deletion_scheduled_at ?? null) : null,
+        tour_completed_at: existingAccount ? (existingProfile?.tour_completed_at ?? null) : null,
+        license_subscription_started_at: existingAccount ? (existingProfile?.license_subscription_started_at ?? null) : null,
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

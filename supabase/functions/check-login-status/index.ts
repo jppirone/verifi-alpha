@@ -57,17 +57,34 @@ export default {
       }
       const rows = await lookupRes.json();
       const record = rows[0];
-      if (!record) {
-        return new Response(JSON.stringify({ ok: false, error: "not_found" }), {
-          status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      // No existence oracle (2026-09-19): request-login returns the id of a candidate_login_attempts row for EVERY address, and only a
+      // real candidate gets a login_tokens row (created with that same id, after the response). So "no login_tokens row" is not
+      // "not found" here: an attempt row means a request was made, and it polls exactly like a real, still-unconfirmed link. Both
+      // kinds answer pending for 15 minutes, expired until an hour after the request, and 404 after that.
+      const HOUR_MS = 60 * 60 * 1000, LINK_MS = 15 * 60 * 1000;
+      const notFound = () => new Response(JSON.stringify({ ok: false, error: "not_found" }), {
+        status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+      const pending = (requestedAtMs: number) => {
+        const age = Date.now() - requestedAtMs;
+        if (age > HOUR_MS) return notFound();
+        return new Response(JSON.stringify({ ok: true, confirmed: false, expired: age > LINK_MS }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
+      };
+      if (!record) {
+        const aRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/candidate_login_attempts?id=eq.${login_token_id}&kind=eq.login&select=requested_at`,
+          { headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } },
+        );
+        const attempt = aRes.ok ? (await aRes.json())[0] : null;
+        if (!attempt) return notFound();
+        return pending(new Date(attempt.requested_at).getTime());
       }
 
       if (!record.confirmed_at) {
-        const expired = new Date(record.expires_at) < new Date();
-        return new Response(JSON.stringify({ ok: true, confirmed: false, expired }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        // A real link's clock starts when the request was made, same as an attempt row's (its expiry is request time + 15 minutes).
+        return pending(new Date(record.expires_at).getTime() - LINK_MS);
       }
 
       // Confirmed. Claim (or re-fetch) Device A's own session via the atomic RPC — never a raw

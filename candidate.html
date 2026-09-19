@@ -2653,17 +2653,6 @@ a:hover{color:var(--color-accent)}
 </div>
 </sc-if>
 
-<sc-if value="{{ isDuplicateFound }}" hint-placeholder-val="{{ false }}">
-<div style="max-width:420px;margin:0 auto;padding:120px 20px 40px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:var(--space-3)">
-  <div class="card elev-md" style="width:100%;padding:var(--space-8)">
-    <div style="font-size:17px;margin-bottom:8px">We found an existing account.</div>
-    <div style="font-size:13px;color:var(--color-neutral-500);line-height:1.5">An account already exists with this email address or phone number.</div>
-  </div>
-  <button type="button" class="btn btn-primary" sc-camel-on-click="{{ goLogin }}">Log in instead</button>
-  <button type="button" class="btn btn-ghost" sc-camel-on-click="{{ backToSignupDetails }}">That's not right, let me re-check my details</button>
-</div>
-</sc-if>
-
 <sc-if value="{{ isEntry }}" hint-placeholder-val="{{ false }}">
 <div style="max-width:420px;margin:0 auto;padding:88px 20px 40px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:var(--space-4)">
   <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:26px;margin:0">Upload your resume</h1>
@@ -2716,7 +2705,7 @@ a:hover{color:var(--color-accent)}
   <sc-if value="{{ loginLinkSent }}" hint-placeholder-val="{{ false }}">
   <div class="card elev-sm" style="padding:var(--space-6);text-align:center">
     <div style="font-size:15px;margin-bottom:6px">Check your email</div>
-    <div style="font-size:13px;color:var(--color-neutral-500);line-height:1.5">We sent a login link to <strong style="color:var(--color-neutral-300)">{{ sentToEmailDisplay }}</strong>. Open it on any device — this page will pick it up automatically.</div>
+    <div style="font-size:13px;color:var(--color-neutral-500);line-height:1.5">If <strong style="color:var(--color-neutral-300)">{{ sentToEmailDisplay }}</strong> has an account, we've sent it a login link. Open it on any device — this page will pick it up automatically. Nothing arrived after a few minutes? Check the address, or sign up if you don't have an account yet.</div>
   </div>
   <button type="button" class="btn btn-ghost btn-block" sc-camel-on-click="{{ useAnotherEmailForLogin }}">Use a different email</button>
   </sc-if>
@@ -3565,6 +3554,9 @@ a:hover{color:var(--color-accent)}
   <!-- Subscription-tab warning gap (2026-09-19): shown on whichever tab the candidate lands on after leaving the
        Subscription tab with a Paid choice that was never completed. No Dismiss, same reasoning as the inline notice on
        the Subscription tab: it clears itself when they open that tab (where the inline notice stays) or subscribe. -->
+  <sc-if value="{{ existingAccountNotice }}" hint-placeholder-val="{{ false }}">
+    <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.5;margin-bottom:var(--space-4);padding:8px 10px;border:1px solid var(--color-divider);border-radius:6px;display:flex;justify-content:space-between;gap:var(--space-3);align-items:center"><span>You already had a Verifi account with this email, so we signed you in to it instead of creating a new one. Nothing about your account was changed.</span><button type="button" class="btn btn-ghost" style="font-size:12px" sc-camel-on-click="{{ dismissExistingAccountNotice }}">Dismiss</button></div>
+  </sc-if>
   <sc-if value="{{ subscribeAbandonedNotice }}" hint-placeholder-val="{{ false }}">
     <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.5;margin-bottom:var(--space-4);padding:8px 10px;border:1px solid var(--color-divider);border-radius:6px">You haven't completed subscribing — nothing was charged and your account remains on the Free plan. Open the Subscription tab to finish.</div>
   </sc-if>
@@ -7101,7 +7093,7 @@ class Component extends DCLogic {
     tierSelection: 'free', billingCycle: 'monthly', changePlanOpen: false,
     // Item B (2026-09-08 regression session): real Stripe test-mode checkout state — see
     // startRealCheckout/handleCheckoutReturn's own headers.
-    checkoutPending: false, checkoutError: null, checkoutIncompleteNotice: false, checkoutSuccessNotice: false, subscribeAbandonedNotice: false, checkoutAwaitingWebhook: false,
+    checkoutPending: false, checkoutError: null, checkoutIncompleteNotice: false, checkoutSuccessNotice: false, subscribeAbandonedNotice: false, existingAccountNotice: false, checkoutAwaitingWebhook: false,
     // Item 7 (2026-09-08 regression session): confirmDowngrade already made a real, checked backend
     // write (set-candidate-tier) before this fix -- the tier genuinely changed -- but nothing told
     // the candidate it worked; the modal just closed silently. Mirrors checkoutSuccessNotice's own
@@ -7919,7 +7911,7 @@ class Component extends DCLogic {
       return;
     }
     if (!res.ok || !data.ok) {
-      this.setState({ emailSendPending: false, emailSendError: "Couldn't send that verification email. Please try again." });
+      this.setState({ emailSendPending: false, emailSendError: res.status === 429 ? "Too many attempts for that email address. Please wait a while and try again." : "Couldn't send that verification email. Please try again." });
       return;
     }
     this.setState({ emailSendPending: false, emailSendError: null, screen: 'checkEmail', resumeEmailVerificationId: data.email_verification_id || null });
@@ -8206,39 +8198,14 @@ class Component extends DCLogic {
     }
   }
 
-  // Shared by the signupDetails button and draft-resume paths so there is exactly one
-  // implementation of "is this email/phone already registered" to keep correct.
-  async runDuplicateCheck(email, phone) {
-    this.setState({ duplicateCheckPending: true, duplicateCheckError: null });
-    let res, data;
-    try {
-      res = await fetch(this.SUPABASE_FN_URL + '/check-duplicate-account', {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, phone }),
-      });
-      data = await res.json().catch(() => ({}));
-    } catch (e) {
-      this.setState({ duplicateCheckPending: false, duplicateCheckError: "Couldn't reach the server. Check your connection and try again." });
-      return { ok: false };
-    }
-    if (!res.ok) {
-      this.setState({ duplicateCheckPending: false, duplicateCheckError: (data && data.error) || "Couldn't check that email and phone number. Please try again." });
-      return { ok: false };
-    }
-    this.setState({ duplicateCheckPending: false, duplicateCheckError: null });
-    return { ok: true, exists: !!data.exists };
-  }
-
+  // No existence check here any more (2026-09-19). This used to ask check-duplicate-account "does this email already have an
+  // account?" and route to a "We found an existing account" screen, which answered that question for ANYONE who typed an
+  // address. Signup now goes straight on for every address; the duplicate case is resolved by the emailed link instead (see
+  // send-verification's header): the person who owns the address is told, and signed in to the account they already have
+  // (applySignupConfirmation -> existing_account); nobody else is told anything, by response or by routing.
   async checkDuplicateAccount(email, phone) {
-    const result = await this.runDuplicateCheck(email, phone);
-    if (!result.ok) return;
-    if (result.exists) {
-      this.setState({ screen: 'duplicateFound' });
-      return;
-    }
     // Item 9 (2026-09-13 live-testing session): the new interstitial path choice, right after basic
-    // info/duplicate-check and before the (previously unconditional) jump into the resume-upload
+    // info and before the (previously unconditional) jump into the resume-upload
     // flow — full_resume continues into that same 'entry' screen unchanged; license_only branches
     // into the new licenseKyc/licenseDetails/licenseBilling sequence instead (see pathChoice's own
     // render-vals below).
@@ -8261,15 +8228,6 @@ class Component extends DCLogic {
     this.setState({ fileName: d.fileName, email, firstName, lastName, phone, draft: null });
     if (!email || !phone) {
       this.setState({ screen: 'signupDetails' });
-      return;
-    }
-    const result = await this.runDuplicateCheck(email, phone);
-    if (!result.ok) {
-      this.setState({ screen: 'signupDetails' });
-      return;
-    }
-    if (result.exists) {
-      this.setState({ screen: 'duplicateFound' });
       return;
     }
     this.setState({ screen: d.screen });
@@ -8498,6 +8456,15 @@ class Component extends DCLogic {
   // this is the read side of the same email_verifications row send-verification staged these onto,
   // so it works regardless of which device reaches it first.
   async applySignupConfirmation(data) {
+    // Existing-account sign-in (2026-09-19): the emailed signup link was for an address that already has an account. The link
+    // reaching this browser proves the address is theirs, so this is a login, exactly like confirmLoginToken/checkLoginStatus: the
+    // existing account is applied as it is (the signup's staged opt-ins and upload are deliberately NOT applied to it), with a note.
+    if (data && data.existing_account) {
+      this.clearDraft();
+      this.setState({ draft: null, verifyStatus: 'success', existingAccountNotice: true });
+      await this.applySession(data.session_token, data);
+      return;
+    }
     this.clearDraft();
     this.setState({
       draft: null, verifyStatus: 'success',
@@ -9211,9 +9178,8 @@ class Component extends DCLogic {
 
   // Passwordless login, step 1 (requesting device). Deliberately mirrors sendVerificationEmail's
   // shape rather than reusing it — request-login looks up an EXISTING candidate by email instead of
-  // staging a new one, and a wrong/unregistered email is a real, honest 404 here (see
-  // request-login's own header for why that's not an email-enumeration regression in this
-  // codebase).
+  // staging a new one. It answers identically for a known and an unknown address (see its own header), so this screen
+  // never learns, and never says, whether the address has an account.
   async requestLoginLink(email) {
     this.setState({ loginRequestPending: true, loginRequestError: null });
     let res, data;
@@ -9229,9 +9195,10 @@ class Component extends DCLogic {
       return;
     }
     if (!res.ok || !data.ok) {
-      const msg = data.error === 'no_account_found'
-        ? "We couldn't find an account with that email. Double-check it, or sign up instead."
-        : "Couldn't send that login link. Please try again.";
+      // Never says whether the address has an account: request-login answers identically either way (2026-09-19).
+      const msg = (res.status === 429 || data.error === 'rate_limited' || data.error === 'busy')
+        ? "Too many login requests for that email right now. Please wait a while and try again."
+        : (data.error === 'email_invalid' ? "Enter a valid email address." : "Couldn't send that login link. Please try again.");
       this.setState({ loginRequestPending: false, loginRequestError: msg });
       return;
     }
@@ -10308,6 +10275,8 @@ class Component extends DCLogic {
         });
       },
       goLogin: (e) => { pd(e); this.setState({ screen: 'returning' }); },
+      existingAccountNotice: s.existingAccountNotice,
+      dismissExistingAccountNotice: () => this.setState({ existingAccountNotice: false }),
       reactivateAccount: () => { if (!s.reactivatePending) this.reactivateAccountReal(); },
       reactivateButtonLabel: s.reactivatePending ? 'Reactivating…' : 'Reactivate my account',
       reactivatePending: s.reactivatePending,
@@ -11188,7 +11157,6 @@ class Component extends DCLogic {
         try { localStorage.removeItem('verifi_session_token'); } catch (e) {}
         this.setState({ screen: 'returning', sessionResumeLabel: '' });
       },
-      isDuplicateFound: s.screen === 'duplicateFound',
       // Items 9/10: the license-only signup branch's own screens.
       isPathChoice: s.screen === 'pathChoice',
       choosePathFullResume: () => { this.setState({ accountType: 'full_resume', screen: 'entry' }); this.saveDraft({ screen: 'entry' }); },
