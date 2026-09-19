@@ -304,8 +304,8 @@ const ACTIONS: Record<string, Action> = {
     access: "member",
     run: async ({ user, org }) => {
       const pricing = (await rows(`employer_pricing?key=eq.org_subscription_monthly&select=amount_cents,currency,included_lookups,note`))?.[0] || null;
-      const subs = await rows(`employer_org_subscriptions?org_id=eq.${org!.id}&select=*&order=created_at.desc&limit=1`);
-      const sub = subs?.[0] || null;
+      // The live subscription if there is one, otherwise the most recent one (so a just-canceled plan still shows).
+      const sub = (await liveSubscription(org!.id)) || (await rows(`employer_org_subscriptions?org_id=eq.${org!.id}&select=*&order=created_at.desc&limit=1`))?.[0] || null;
       let used = 0;
       if (sub) {
         const start = sub.current_period_start || sub.created_at;
@@ -335,16 +335,25 @@ const ACTIONS: Record<string, Action> = {
       // customer, and the conditional PATCH keeps whichever id got stored first.
       const o = (await rows(`employer_orgs?id=eq.${org!.id}&select=stripe_customer_id`))?.[0];
       let customerId: string | null = o?.stripe_customer_id || null;
-      if (!customerId) {
+      // Two clicks at once: Stripe answers the second create (same idempotency key, first still in flight) with a 409
+      // "in use". That is not a failure: wait for the first to store its customer id and use that.
+      for (let attempt = 0; !customerId && attempt < 6; attempt++) {
         const c = await stripe("POST", "/v1/customers", {
           email: user.email, name: org!.name, "metadata[org_id]": org!.id, "metadata[product]": "employer_org_subscription", "metadata[owner_user_id]": user.id,
         }, `employer-org-customer-${org!.id}`);
-        if (!c.ok) return fail(502, "stripe_error");
-        customerId = c.data.id as string;
-        const stored = await rest(`employer_orgs?id=eq.${org!.id}&stripe_customer_id=is.null`, { method: "PATCH", headers: { "Prefer": "return=representation" }, body: JSON.stringify({ stripe_customer_id: customerId }) });
-        const storedRows = stored.ok ? await stored.json() : [];
-        if (!Array.isArray(storedRows) || storedRows.length === 0) customerId = (await rows(`employer_orgs?id=eq.${org!.id}&select=stripe_customer_id`))?.[0]?.stripe_customer_id || customerId;
+        if (c.ok) {
+          customerId = c.data.id as string;
+          const stored = await rest(`employer_orgs?id=eq.${org!.id}&stripe_customer_id=is.null`, { method: "PATCH", headers: { "Prefer": "return=representation" }, body: JSON.stringify({ stripe_customer_id: customerId }) });
+          const storedRows = stored.ok ? await stored.json() : [];
+          if (!Array.isArray(storedRows) || storedRows.length === 0) customerId = (await rows(`employer_orgs?id=eq.${org!.id}&select=stripe_customer_id`))?.[0]?.stripe_customer_id || customerId;
+        } else if (c.status === 409) {
+          await new Promise((r) => setTimeout(r, 400));
+          customerId = (await rows(`employer_orgs?id=eq.${org!.id}&select=stripe_customer_id`))?.[0]?.stripe_customer_id || null;
+        } else {
+          return fail(502, "stripe_error");
+        }
       }
+      if (!customerId) return fail(503, "try_again");
 
       const meta = { product: "employer_org_subscription", org_id: org!.id, owner_user_id: user.id, included_lookups: String(pricing.included_lookups), unit_amount_cents: String(pricing.amount_cents) };
       const form: Record<string, string> = {

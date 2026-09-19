@@ -116,6 +116,11 @@ async function syncSubscription(sub: any, eventCreated: number, deleted: boolean
   };
   if (existing) return await patchExisting();
 
+  // A subscription we have never recorded is only worth recording if it is live. A canceled/expired one we never saw
+  // (e.g. the duplicate this handler itself canceled, whose 'deleted' event arrives next) must not become a history row:
+  // it would be newer than the real subscription and be mistaken for it.
+  if (!["active", "trialing", "past_due", "unpaid", "incomplete"].includes(status)) return `unknown_nonlive_subscription_ignored:${status}`;
+
   // First sight of this subscription: snapshot the plan it was sold with (from the metadata set at checkout).
   const pricing = (await rows(`employer_pricing?key=eq.org_subscription_monthly&select=amount_cents,included_lookups,currency`))[0];
   const included = Number(sub?.metadata?.included_lookups) || pricing?.included_lookups || 1;
