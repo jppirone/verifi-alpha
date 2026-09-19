@@ -3252,13 +3252,15 @@ class Component extends DCLogic {
     // Real employer sign-in: landing from an emailed sign-in link, or resuming a stored session.
     let loginToken = '';
     try { loginToken = new URLSearchParams(window.location.search).get('employer_login') || ''; } catch (e) { loginToken = ''; }
+    // A stored session is always resumed, even when a sign-in link is being opened: a stale or already-used link
+    // then shows its problem screen without also making a signed-in person look signed out. A link that
+    // succeeds simply replaces the session.
+    let stored = null;
+    try { stored = localStorage.getItem(this.EMP_TOKEN_KEY); } catch (e) { stored = null; }
+    if (stored && !token) { this.setState({ realToken: stored }, () => this.loadReal()); }
     if (loginToken) {
       try { window.history.replaceState(null, '', window.location.pathname); } catch (e) { /* not critical */ }
       this.confirmEmployerLogin(loginToken);
-    } else {
-      let stored = null;
-      try { stored = localStorage.getItem(this.EMP_TOKEN_KEY); } catch (e) { stored = null; }
-      if (stored && !token) { this.setState({ realToken: stored }, () => this.loadReal()); }
     }
   }
 
