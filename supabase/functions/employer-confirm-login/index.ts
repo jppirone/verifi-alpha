@@ -61,7 +61,11 @@ export default {
       if (!claimRes.ok) return json({ ok: false, error: "consume_failed" }, 500);
       const claimed = await claimRes.json();
       if (!Array.isArray(claimed) || claimed.length === 0) {
-        return record.confirmed_at ? json({ ok: false, error: "already_used" }, 409) : json({ ok: false, error: "expired" }, 410);
+        // Lost the claim. The row read above predates the race, so it can't say why: re-read it. If someone else
+        // confirmed it in the meantime it is "already used"; only a link that is genuinely past its expiry is "expired".
+        const againRes = await fetch(`${SUPABASE_URL}/rest/v1/employer_login_tokens?token=eq.${encodeURIComponent(token)}&select=confirmed_at`, { headers: REST });
+        const again = againRes.ok ? (await againRes.json())[0] : null;
+        return (again && again.confirmed_at) || record.confirmed_at ? json({ ok: false, error: "already_used" }, 409) : json({ ok: false, error: "expired" }, 410);
       }
 
       // Exactly one request reaches here per token. Find or create the user.
