@@ -10,7 +10,7 @@ const corsHeaders = {
 // The license_only Activity tab's data (2026-09-19). candidate.html's existing Activity tab (full-resume)
 // is a client-only log seeded with fixed entries and lost on reload; this is the real one, built ONLY from
 // durable server records, read at request time:
-//   - the candidate row's own timestamps (account created, identity verified, phone verified,
+//   - the candidate row's own timestamps (account created, identity/phone steps (simulated, see below),
 //     license-tracking subscription started)
 //   - each license (license_items + its certification_items row): added, correction requested, the
 //     correction email sent (correction_notified_at)
@@ -94,8 +94,12 @@ export default {
       const add = (at: string | null | undefined, category: string, text: string) => { if (at) events.push({ at: new Date(at).toISOString(), category, text }); };
 
       add(c.created_at, "account", "Account created");
-      add(c.kyc_verified_at, "account", "Identity verification completed");
-      add(c.phone_verified_at, "account", "Phone number verified");
+      // These two timestamps record a click, not a completed verification: the KYC step is a "Simulate
+      // verification complete" button and the phone-code dialog never sends or checks a code (verified
+      // 2026-09-19). Worded to say so. When real identity / phone verification exists, this wording and the
+      // timestamps' meaning must be revisited together.
+      add(c.kyc_verified_at, "account", "Identity verification step completed (simulated in this alpha: no identity check was performed)");
+      add(c.phone_verified_at, "account", "Phone number confirmed (self-reported in this alpha: no code was sent or checked)");
       add(c.license_subscription_started_at, "account", "License-tracking subscription started");
 
       for (const l of licenses) {
