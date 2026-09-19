@@ -53,6 +53,14 @@ const corsHeaders = {
 // candidate on a dead-end screen.
 const STALE_SECONDS = 240;
 
+// Resumable PDF extraction (2026-09-19, see upload-resume's RESUMABLE PDF EXTRACTION header): a PDF is read in
+// checkpointed runs of up to ~150 s each, and the client (or this screen's own poll) starts the next run, so a
+// document sitting in 'pending' between runs is normal, not dead. Its failure is decided where the work happens
+// (three claims in a row that produce no page mark it 'failed'), not by the 240 s age rule above, which would
+// wrongly kill a healthy multi-run resume. Such a document only gets the age rule as a very long backstop.
+// Rows from before this change have no lease and keep the original rule.
+const RESUMABLE_MAX_AGE_SECONDS = 3600;
+
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const BUCKET = "resume-documents";
@@ -78,7 +86,7 @@ export default {
       // intentional skip back into resumeConfirm forever.
       // employer_contact_resolved_at added for Item C (2026-09-08): same class of signal, one step
       // later in the flow — see checkEmployerContactIncomplete's own header in candidate.html.
-      const RESUME_DOC_SELECT = "id, original_storage_path, original_filename, mime_type, extraction_status, uploaded_at, continued_without_data_at, employer_contact_resolved_at, candidate_location, printed_header, license_detection_status";
+      const RESUME_DOC_SELECT = "id, original_storage_path, original_filename, mime_type, extraction_status, uploaded_at, continued_without_data_at, employer_contact_resolved_at, candidate_location, printed_header, license_detection_status, extraction_page_count, extraction_lease_until, extraction_progress_at, extraction_stalls";
 
       // Item (2026-09-14 live-testing session, real bug found in production data): this used to
       // order by uploaded_at alone — the single most recent row, full stop, with no regard for
@@ -182,7 +190,8 @@ export default {
 
       let effectiveStatus = effectiveDoc.extraction_status;
       const ageSeconds = (Date.now() - new Date(effectiveDoc.uploaded_at).getTime()) / 1000;
-      if ((effectiveStatus === "pending" || effectiveStatus === "ocr_done") && ageSeconds > STALE_SECONDS) {
+      const resumable = effectiveDoc.mime_type === "application/pdf" && effectiveDoc.extraction_lease_until != null;
+      if ((effectiveStatus === "pending" || effectiveStatus === "ocr_done") && ageSeconds > (resumable ? RESUMABLE_MAX_AGE_SECONDS : STALE_SECONDS)) {
         const { error: healErr } = await supabase
           .from("resume_documents")
           .update({ extraction_status: "failed" })
@@ -234,9 +243,19 @@ export default {
         licenseItemsQuery,
       ]);
 
+      // Progress for a resumable PDF still being read, and whether NO run currently holds it (so the client should
+      // start the next one). Lease empty or expired = nobody is working on it.
+      let extractionPagesDone: number | null = null;
+      let extractionContinuable = false;
+      if (resumable && effectiveStatus === "pending") {
+        const { count } = await supabase.from("resume_extraction_pages").select("page_number", { count: "exact", head: true }).eq("resume_document_id", effectiveDoc.id);
+        extractionPagesDone = count ?? 0;
+        extractionContinuable = !effectiveDoc.extraction_lease_until || new Date(effectiveDoc.extraction_lease_until).getTime() < Date.now();
+      }
+
       return new Response(JSON.stringify({
         ok: true,
-        resume_document: { ...effectiveDoc, extraction_status: effectiveStatus, original_signed_url: signed.data?.signedUrl ?? null },
+        resume_document: { ...effectiveDoc, extraction_status: effectiveStatus, original_signed_url: signed.data?.signedUrl ?? null, extraction_pages_done: extractionPagesDone, extraction_continuable: extractionContinuable },
         work_history: workHistory.data ?? [],
         education: education.data ?? [],
         certifications: certifications.data ?? [],

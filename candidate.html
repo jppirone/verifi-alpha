@@ -2900,7 +2900,8 @@ a:hover{color:var(--color-accent)}
   <sc-if value="{{ resumeStillProcessing }}" hint-placeholder-val="{{ false }}">
     <div class="card elev-md" style="padding:var(--space-8);text-align:center;display:flex;flex-direction:column;gap:var(--space-3);align-items:center">
       <div style="font-size:15px">Still reading your resume…</div>
-      <div style="font-size:13px;color:var(--color-neutral-500);line-height:1.5">This usually finishes in well under a minute. If it's been longer than that, click below to check again.</div>
+      <div style="font-size:13px;color:var(--color-neutral-500);line-height:1.5">{{ resumeProgressText }}</div>
+      <div style="font-size:13px;color:var(--color-neutral-500);line-height:1.5">Longer or denser resumes can take a few minutes. You can leave this page open and we'll keep going, or click below to check now.</div>
       <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ checkResumeAgain }}">Check again</button>
     </div>
   </sc-if>
@@ -7901,7 +7902,40 @@ class Component extends DCLogic {
     }
     if (!res.ok || !data.ok) return;
     this.setState({ resumeDocumentId: data.resume_document_id });
+    // A PDF that did not finish inside one server run answers { continue: true }: keep asking for the rest.
+    if (data.continue) { this.continueResumeExtraction(data.resume_document_id); return; }
     this.extractResumeInBackground(data.resume_document_id);
+  }
+
+  // Resumable PDF extraction (see upload-resume's RESUMABLE PDF EXTRACTION header). The server reads as many pages
+  // as fit in one ~150 s run, checkpoints each, and answers { continue: true }; calling upload-resume again with just
+  // the document id reads the next batch. Single-flight per tab (the server's lease makes an overlap harmless anyway).
+  // If the tab is closed in between, loadResumeExtraction below restarts it from the checkpoints on the next visit.
+  async continueResumeExtraction(resumeDocumentId) {
+    if (this._continuingExtraction === resumeDocumentId) return;
+    this._continuingExtraction = resumeDocumentId;
+    try {
+      for (let i = 0; i < 60; i++) {
+        let res, data;
+        try {
+          res = await this.fetchWithTimeout(this.SUPABASE_FN_URL + '/upload-resume', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ resume_document_id: resumeDocumentId }),
+          }, 200000);
+          data = await res.json().catch(() => ({}));
+        } catch (e) {
+          // A run that was killed or a dropped connection: its lease expires on its own. Wait it out, ask again.
+          await new Promise(r => setTimeout(r, 20000));
+          continue;
+        }
+        if (!res.ok || !data.ok) break;                    // failed or no longer pending: the poll shows the real state
+        if (data.extraction_status !== 'pending') break;   // extracted: the poll picks it up
+        if (data.running) await new Promise(r => setTimeout(r, 15000)); // another run holds it: wait, ask again
+      }
+    } finally {
+      this._continuingExtraction = null;
+    }
   }
 
   async extractResumeInBackground(resumeDocumentId) {
@@ -7956,7 +7990,8 @@ class Component extends DCLogic {
       return;
     }
     this.setState({ resumeDocumentId: data.resume_document_id });
-    this.extractResumeInBackground(data.resume_document_id);
+    if (data.continue) this.continueResumeExtraction(data.resume_document_id);
+    else this.extractResumeInBackground(data.resume_document_id);
     this.loadResumeExtraction(candidateId);
   }
 
@@ -9408,6 +9443,9 @@ class Component extends DCLogic {
     // moves on) instead of permanently stranding the candidate on a dead-end screen. A genuinely
     // dead extraction just keeps returning 'failed' every tick — harmless, the same failure screen
     // stays showing, exactly as before.
+    if (status === 'pending' && data.resume_document.extraction_continuable) {
+      this.continueResumeExtraction(data.resume_document.id);
+    }
     if (status === 'pending' || status === 'ocr_done' || status === 'failed') {
       this.startResumePolling(candidateId);
     } else {
@@ -11020,6 +11058,11 @@ class Component extends DCLogic {
       resumeExtractionLoading: s.resumeExtractionLoading,
       resumeStillProcessing: !s.resumeExtractionLoading && !!s.resumeExtraction && s.resumeExtraction.resume_document &&
         (s.resumeExtraction.resume_document.extraction_status === 'pending' || s.resumeExtraction.resume_document.extraction_status === 'ocr_done'),
+      resumeProgressText: (() => {
+        const d = s.resumeExtraction && s.resumeExtraction.resume_document;
+        if (!d || d.extraction_status !== 'pending' || !d.extraction_page_count || typeof d.extraction_pages_done !== 'number') return '';
+        return 'Read ' + d.extraction_pages_done + ' of ' + d.extraction_page_count + ' pages so far.';
+      })(),
       resumeExtractionFailed: !s.resumeExtractionLoading && !!s.resumeExtraction && s.resumeExtraction.resume_document &&
         s.resumeExtraction.resume_document.extraction_status === 'failed',
       resumeNoDocument: !s.resumeExtractionLoading && !s.resumeExtraction,

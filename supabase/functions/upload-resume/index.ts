@@ -981,11 +981,14 @@ const RASTERIZE_RETRY_DPI = 110;
 
 type RasterizePageResult = {
   ok: boolean;
-  data: { ok?: boolean; page_count?: number; extraction?: unknown; code?: string; error?: string; message?: string };
+  data: { ok?: boolean; page_count?: number; extraction?: unknown; ocr_raw_text?: string; routing?: { method?: string }; render?: unknown; timing_ms?: unknown; model_calls?: unknown; code?: string; error?: string; message?: string };
   status: number;
 };
 
-async function callRasterizePage(storagePath: string, pageNumber: number, opts?: { targetDpi?: number; forceVision?: boolean; previousPageContext?: TrailingItemContext }): Promise<RasterizePageResult> {
+type AttemptLog = { dpi: number; force_vision: boolean; ms: number; status: number; code?: string };
+type RasterizeOutcome = RasterizePageResult & { attempts: AttemptLog[] };
+
+async function callRasterizePage(storagePath: string, pageNumber: number, opts?: { targetDpi?: number; forceVision?: boolean; previousPageContext?: TrailingItemContext }, signal?: AbortSignal): Promise<RasterizePageResult> {
   const body: Record<string, unknown> = { storage_path: storagePath, page_number: pageNumber };
   if (opts?.targetDpi) body.target_dpi = opts.targetDpi;
   if (opts?.forceVision) body.force_vision = true;
@@ -998,6 +1001,7 @@ async function callRasterizePage(storagePath: string, pageNumber: number, opts?:
       "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
     },
     body: JSON.stringify(body),
+    signal,
   });
   const data = await res.json().catch(() => ({}));
   return { ok: res.ok, data, status: res.status };
@@ -1014,16 +1018,38 @@ async function callRasterizePage(storagePath: string, pageNumber: number, opts?:
 // heavier WASM memory use entirely rather than just shrinking what it has to process, the
 // strongest lever actually available against a resource ceiling neither this page's content nor
 // its own request can predict or control.
-async function rasterizePageWithRetry(storagePath: string, pageNumber: number, previousPageContext?: TrailingItemContext): Promise<RasterizePageResult> {
-  const attempt1 = await callRasterizePage(storagePath, pageNumber, { previousPageContext });
-  if (attempt1.data?.code !== RESOURCE_LIMIT_CODE) return attempt1;
+//
+// TWO ADDITIONS (2026-09-19, resume-parsing slowness investigation):
+//  * deadline: every attempt is bounded by the invocation's own time budget (AbortSignal), and no attempt is
+//    started with under 5 s left. An attempt that cannot finish inside this invocation is abandoned so the
+//    caller can checkpoint and continue in a fresh one, rather than running into the platform's ~150 s kill.
+//  * startWithVision: measured on a real resume, tesseract kills the isolate on EVERY page (5/5 tries, at both
+//    150 and 110 DPI), so each page burned ~8 s on two dead attempts before reaching the vision route that
+//    actually works. When the previous page in this document needed that last-resort vision route, the next one
+//    goes straight to it (at RASTERIZE_RETRY_DPI). If the earlier failure was transient contention rather than a
+//    property of this document, that costs the faster tesseract route on the later pages — slower, never wrong.
+async function rasterizePageWithRetry(storagePath: string, pageNumber: number, previousPageContext: TrailingItemContext | undefined, opts: { deadline: number; startWithVision?: boolean }): Promise<RasterizeOutcome> {
+  const attempts: AttemptLog[] = [];
+  const run = async (o: { targetDpi?: number; forceVision?: boolean }): Promise<RasterizePageResult> => {
+    const t = Date.now();
+    const remaining = opts.deadline - t;
+    if (remaining < 5_000) throw new Error("invocation_budget_exhausted");
+    const r = await callRasterizePage(storagePath, pageNumber, { ...o, previousPageContext }, AbortSignal.timeout(remaining));
+    attempts.push({ dpi: o.targetDpi ?? 150, force_vision: !!o.forceVision, ms: Date.now() - t, status: r.status, code: (r.data?.code || r.data?.error) as string | undefined });
+    return r;
+  };
+  if (opts.startWithVision) {
+    return { ...(await run({ targetDpi: RASTERIZE_RETRY_DPI, forceVision: true })), attempts };
+  }
+  const attempt1 = await run({});
+  if (attempt1.data?.code !== RESOURCE_LIMIT_CODE) return { ...attempt1, attempts };
   console.log(`upload-resume: page ${pageNumber} hit ${RESOURCE_LIMIT_CODE} at default DPI, retrying at ${RASTERIZE_RETRY_DPI} DPI`);
 
-  const attempt2 = await callRasterizePage(storagePath, pageNumber, { targetDpi: RASTERIZE_RETRY_DPI, previousPageContext });
-  if (attempt2.data?.code !== RESOURCE_LIMIT_CODE) return attempt2;
+  const attempt2 = await run({ targetDpi: RASTERIZE_RETRY_DPI });
+  if (attempt2.data?.code !== RESOURCE_LIMIT_CODE) return { ...attempt2, attempts };
   console.log(`upload-resume: page ${pageNumber} hit ${RESOURCE_LIMIT_CODE} again at ${RASTERIZE_RETRY_DPI} DPI, retrying with force_vision`);
 
-  return await callRasterizePage(storagePath, pageNumber, { targetDpi: RASTERIZE_RETRY_DPI, forceVision: true, previousPageContext });
+  return { ...(await run({ targetDpi: RASTERIZE_RETRY_DPI, forceVision: true })), attempts };
 }
 
 // Merges N per-page ExtractionResult objects (one per rasterize-pdf-page call) into one. Plain
@@ -1300,13 +1326,293 @@ function mergeExtractions(pages: Array<{ pageNumber: number; extraction: Extract
   return mergeBoundaryContinuations(merged);
 }
 
+// ---------------------------------------------------------------------------------------------------
+// RESUMABLE PDF EXTRACTION (2026-09-19)
+//
+// The platform kills an Edge Function invocation at ~150 s of wall clock. Every page of a PDF used to be read
+// inside ONE invocation, so a resume that could not be finished in that window lost everything, including the
+// pages already read. Measured on a real 2-page resume whose pages take the Sonnet-vision route (tesseract cannot
+// run on it): ~139 s end to end — a third page, or any slow model call, and the candidate gets nothing.
+// Where a page's time goes (per-call instrumentation in rasterize-pdf-page): the vision extraction call is 30-50 s
+// per page, ~65-70% of it adaptive-thinking tokens, versus ~3-5 s for the tesseract+Haiku route.
+//
+// Shape of the fix: each page is checkpointed (resume_extraction_pages) as soon as it is read. An invocation stops
+// before it would run out of time and answers { continue: true }; the client calls this function again with just
+// { resume_document_id } (and the resume screen's own poll does the same if the tab was closed in between). Every
+// invocation gets a fresh ~150 s, so page count is no longer bounded by the platform limit.
+//
+//   * Lease: an invocation holds extraction_lease_until while it works; a continuation claims the document only if
+//     that is empty or expired (atomic conditional UPDATE), so two overlapping calls never process it together.
+//   * Stalls: each claim bumps extraction_stalls; every checkpointed page resets it. Three claims in a row that
+//     produce no page mark the document 'failed' — a genuinely unreadable page ends, it does not loop forever.
+//   * Previous-page context (the boundary/continuation fix) is rebuilt from the STORED previous page, never from
+//     memory, so a resumed run feeds page N exactly what an uninterrupted run would have.
+//   * Structural-QA retry is DEFERRED, never dropped: if there is no time left for a second read of a flagged page
+//     in this invocation, the page is checkpointed with qa_retry='pending' and the next invocation retries it
+//     FIRST, before the following page (whose context depends on which version of this page is kept).
+//   * Parallelising the two model calls (boundary, then extraction) or the pages was rejected on purpose: step 2
+//     consumes step 1's output, and each page's prompt carries the previous page's trailing item — running them
+//     together brings back the boundary/continuation contradiction fixed on 2026-09-18.
+// ---------------------------------------------------------------------------------------------------
+const INVOCATION_LIMIT_MS = 140_000;      // platform kills at ~150 s
+const FINALIZE_RESERVE_MS = 12_000;       // merge + insert RPC + status writes after the last page
+const DEFAULT_PAGE_COST_MS = 65_000;      // assumed cost of a page before one has been timed this invocation (measured vision page: 41-59 s plus dead attempts)
+const PAGE_COST_MARGIN = 1.25;
+const EXTRACTION_LEASE_MS = 150_000;
+const MAX_EXTRACTION_STALLS = 3;
+
+type PageTiming = {
+  page_ms: number;
+  attempts: AttemptLog[];
+  routing: string | null;
+  needed_force_vision: boolean;
+  render?: unknown;
+  timing_ms?: unknown;
+  model_calls?: unknown;
+  qa: { fired: boolean; deferred: boolean; issues_before?: number; issues_after?: number; retry_ms?: number; kept?: "retry" | "original" };
+};
+
+function jsonResponse(obj: unknown, status = 200): Response {
+  return new Response(JSON.stringify(obj), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+}
+
+async function claimExtractionLease(supabase: any, docId: string, currentStalls: number): Promise<boolean> {
+  const { data, error } = await supabase.from("resume_documents")
+    .update({ extraction_lease_until: new Date(Date.now() + EXTRACTION_LEASE_MS).toISOString(), extraction_stalls: currentStalls + 1 })
+    .eq("id", docId).eq("extraction_status", "pending").eq("extraction_stalls", currentStalls)
+    .or(`extraction_lease_until.is.null,extraction_lease_until.lt.${new Date().toISOString()}`)
+    .select("id");
+  return !error && Array.isArray(data) && data.length === 1;
+}
+
+// Entry for a continuation call: body is { resume_document_id } with no file bytes.
+async function continuePdfExtraction(supabase: any, docId: string, invocationStart: number): Promise<Response> {
+  const { data: doc } = await supabase.from("resume_documents")
+    .select("id, original_storage_path, mime_type, extraction_status, extraction_stalls").eq("id", docId).maybeSingle();
+  if (!doc) return jsonResponse({ ok: false, error: "resume_document_not_found" }, 404);
+  if (doc.mime_type !== "application/pdf") return jsonResponse({ ok: false, error: "not_resumable", message: "Only PDF extraction is resumable." }, 400);
+  if (doc.extraction_status === "extracted") return jsonResponse({ ok: true, resume_document_id: docId, extraction_status: "extracted", continue: false });
+  if (doc.extraction_status !== "pending") return jsonResponse({ ok: false, error: "not_pending", extraction_status: doc.extraction_status, resume_document_id: docId }, 409);
+  if ((doc.extraction_stalls ?? 0) >= MAX_EXTRACTION_STALLS) {
+    await supabase.from("resume_documents").update({ extraction_status: "failed", extraction_lease_until: null }).eq("id", docId);
+    return jsonResponse({ ok: false, error: "extraction_stalled", message: "Extraction made no progress across repeated attempts.", resume_document_id: docId }, 502);
+  }
+  const claimed = await claimExtractionLease(supabase, docId, doc.extraction_stalls ?? 0);
+  // Not claimed = another invocation holds the lease (or advanced the state first). Nothing to do but wait.
+  if (!claimed) return jsonResponse({ ok: true, resume_document_id: docId, extraction_status: "pending", continue: false, running: true });
+  return await processPdfPages(supabase, docId, doc.original_storage_path, invocationStart);
+}
+
+async function processPdfPages(supabase: any, docId: string, originalPath: string, invocationStart: number): Promise<Response> {
+  const pageDeadline = invocationStart + INVOCATION_LIMIT_MS - FINALIZE_RESERVE_MS;
+  const releaseLease = async () => { await supabase.from("resume_documents").update({ extraction_lease_until: null }).eq("id", docId); };
+  const fail = async (status: number, payload: Record<string, unknown>) => {
+    await supabase.from("resume_documents").update({ extraction_status: "failed", extraction_lease_until: null }).eq("id", docId);
+    return jsonResponse({ ok: false, resume_document_id: docId, ...payload }, status);
+  };
+
+  const { data: docMeta } = await supabase.from("resume_documents").select("extraction_page_count, candidate_id").eq("id", docId).maybeSingle();
+  let pageCount: number | null = docMeta?.extraction_page_count ?? null;
+  const { data: rowsData } = await supabase.from("resume_extraction_pages")
+    .select("page_number, extraction, ocr_text, qa_retry, timing").eq("resume_document_id", docId).order("page_number", { ascending: true });
+  const rows = new Map<number, { page_number: number; extraction: ExtractionResult; ocr_text: string | null; qa_retry: string; timing: PageTiming | null }>();
+  for (const r of rowsData ?? []) rows.set(r.page_number, r);
+
+  const pageCosts: number[] = [];
+  const canStartAnotherPage = () => Date.now() + (pageCosts.length ? Math.max(...pageCosts) : DEFAULT_PAGE_COST_MS) * PAGE_COST_MARGIN <= pageDeadline;
+  const contextFor = (pn: number) => (rows.get(pn - 1) ? describeTrailingItem(rows.get(pn - 1)!.extraction) : undefined);
+  const hintFor = (pn: number) => rows.get(pn - 1)?.timing?.needed_force_vision === true;
+  const continueResponse = async () => {
+    await releaseLease();
+    return jsonResponse({ ok: true, resume_document_id: docId, extraction_status: "pending", extraction_method: "pdf_rasterize", page_count: pageCount, pages_done: rows.size, continue: true });
+  };
+  let unitsDone = 0;
+
+  try {
+    // 1. Deferred structural-QA retries come first: they decide which version of the page the NEXT page's context is built from.
+    for (const pn of [...rows.keys()].sort((a, b) => a - b)) {
+      const row = rows.get(pn)!;
+      if (row.qa_retry !== "pending") continue;
+      if (unitsDone > 0 && !canStartAnotherPage()) return await continueResponse();
+      unitsDone++;
+      const t0 = Date.now();
+      const before = findStructuralIssues(row.extraction);
+      const qa = { ...(row.timing?.qa ?? { fired: true, deferred: true }), fired: true, deferred: true, issues_before: before.length } as PageTiming["qa"];
+      let extraction = row.extraction;
+      let ocrText = row.ocr_text;
+      const r = await rasterizePageWithRetry(originalPath, pn, contextFor(pn), { deadline: pageDeadline, startWithVision: hintFor(pn) || row.timing?.needed_force_vision === true });
+      qa.retry_ms = Date.now() - t0;
+      qa.kept = "original";
+      if (r.ok && r.data.ok && isValidExtraction(r.data.extraction)) {
+        const after = findStructuralIssues(r.data.extraction as ExtractionResult);
+        qa.issues_after = after.length;
+        if (after.length < before.length) { extraction = r.data.extraction as ExtractionResult; ocrText = (r.data.ocr_raw_text as string | undefined) ?? null; qa.kept = "retry"; }
+      }
+      const { error: upErr } = await supabase.from("resume_extraction_pages")
+        .update({ extraction, ocr_text: ocrText, qa_retry: "done", timing: { ...(row.timing ?? {}), qa } })
+        .eq("resume_document_id", docId).eq("page_number", pn);
+      if (upErr) return await fail(500, { error: "checkpoint_failed", detail: upErr.message });
+      rows.set(pn, { ...row, extraction, ocr_text: ocrText, qa_retry: "done", timing: { ...(row.timing as PageTiming), qa } });
+      await supabase.from("resume_documents").update({ extraction_progress_at: new Date().toISOString(), extraction_stalls: 0 }).eq("id", docId);
+      console.log(`upload-resume: ${docId} page ${pn} deferred QA retry done in ${qa.retry_ms} ms (issues ${before.length} -> ${qa.issues_after ?? "n/a"}, kept ${qa.kept})`);
+    }
+
+    // 2. Remaining pages, in order.
+    for (let pn = 1; pn <= Math.min(pageCount ?? 1, MAX_PDF_PAGES); pn++) {
+      if (rows.has(pn)) continue;
+      if (unitsDone > 0 && !canStartAnotherPage()) return await continueResponse();
+      unitsDone++;
+      const outcome = await rasterizePageWithRetry(originalPath, pn, contextFor(pn), { deadline: pageDeadline, startWithVision: hintFor(pn) });
+      const pageMs = outcome.attempts.reduce((n, a) => n + a.ms, 0);
+      const d = outcome.data;
+      if (!outcome.ok || !d.ok || !isValidExtraction(d.extraction)) {
+        const stillResourceLimited = d.code === RESOURCE_LIMIT_CODE;
+        return await fail(502, {
+          error: stillResourceLimited ? "pdf_page_extraction_failed_after_retries" : "pdf_page_extraction_failed",
+          detail: d.message || d.error || d.code || "unknown_error", page: pn,
+        });
+      }
+      let extraction = d.extraction as ExtractionResult;
+      let ocrText: string | null = (d.ocr_raw_text as string | undefined) ?? null;
+      const usedVisionFallback = outcome.attempts.length > 0 && outcome.attempts[outcome.attempts.length - 1].force_vision;
+      const timing: PageTiming = {
+        page_ms: pageMs,
+        attempts: outcome.attempts,
+        routing: (d as { routing?: { method?: string } }).routing?.method ?? null,
+        needed_force_vision: usedVisionFallback,
+        render: (d as { render?: unknown }).render,
+        timing_ms: (d as { timing_ms?: unknown }).timing_ms,
+        model_calls: (d as { model_calls?: unknown }).model_calls,
+        qa: { fired: false, deferred: false },
+      };
+
+      // STRUCTURAL QA CHECK (see findStructuralIssues' own header): one bounded, silent re-extraction of THIS page
+      // when its own output shows one of the two confirmed corruption shapes — never surfaced to the candidate.
+      // Keeps whichever attempt has fewer flagged issues; a tie keeps the first attempt. Now also budget-aware:
+      // with no time left for a full second read in this invocation the retry is deferred (see the header above),
+      // not skipped and not allowed to push the invocation into the platform's kill.
+      let qaState: "not_needed" | "pending" | "done" = "not_needed";
+      const issues = findStructuralIssues(extraction);
+      if (issues.length > 0) {
+        timing.qa.issues_before = issues.length;
+        if (Date.now() + pageMs * PAGE_COST_MARGIN <= pageDeadline) {
+          console.log(`upload-resume: ${docId} page ${pn} flagged ${issues.length} structural issue(s), retrying once — ${issues.join(" | ")}`);
+          timing.qa.fired = true;
+          qaState = "done";
+          timing.qa.kept = "original";
+          try {
+            const t0 = Date.now();
+            const retry = await rasterizePageWithRetry(originalPath, pn, contextFor(pn), { deadline: pageDeadline, startWithVision: usedVisionFallback });
+            timing.qa.retry_ms = Date.now() - t0;
+            if (retry.ok && retry.data.ok && isValidExtraction(retry.data.extraction)) {
+              const retryExtraction = retry.data.extraction as ExtractionResult;
+              const retryIssues = findStructuralIssues(retryExtraction);
+              timing.qa.issues_after = retryIssues.length;
+              console.log(`upload-resume: ${docId} page ${pn} retry produced ${retryIssues.length} issue(s) (was ${issues.length})`);
+              if (retryIssues.length < issues.length) {
+                extraction = retryExtraction;
+                ocrText = (retry.data.ocr_raw_text as string | undefined) ?? null;
+                timing.qa.kept = "retry";
+              }
+            }
+          } catch (retryErr) {
+            console.log(`upload-resume: ${docId} page ${pn} structural-QA retry failed, keeping original — ${String(retryErr)}`);
+          }
+        } else {
+          timing.qa.deferred = true;
+          qaState = "pending";
+          console.log(`upload-resume: ${docId} page ${pn} flagged ${issues.length} structural issue(s); no time left in this invocation, QA retry deferred to the next`);
+        }
+      }
+
+      const { error: ckErr } = await supabase.from("resume_extraction_pages")
+        .upsert({ resume_document_id: docId, page_number: pn, extraction, ocr_text: ocrText, qa_retry: qaState, timing }, { onConflict: "resume_document_id,page_number" });
+      if (ckErr) return await fail(500, { error: "checkpoint_failed", detail: ckErr.message, page: pn });
+      rows.set(pn, { page_number: pn, extraction, ocr_text: ocrText, qa_retry: qaState, timing });
+      if (pn === 1 && typeof d.page_count === "number" && d.page_count > 0) pageCount = d.page_count;
+      await supabase.from("resume_documents").update({
+        extraction_progress_at: new Date().toISOString(), extraction_stalls: 0,
+        ...(pn === 1 && pageCount ? { extraction_page_count: pageCount } : {}),
+      }).eq("id", docId);
+      pageCosts.push(pageMs);
+      console.log(`upload-resume: ${docId} page ${pn}/${pageCount ?? "?"} checkpointed — ${pageMs} ms in ${outcome.attempts.length} attempt(s), routing=${timing.routing}, qa=${qaState}`);
+      if (qaState === "pending") return await continueResponse();
+    }
+  } catch (e) {
+    // The invocation's own time budget ran out mid-page (or a call could not be completed). Everything already
+    // checkpointed is kept; a fresh invocation picks up from the next missing page.
+    console.log(`upload-resume: ${docId} invocation ended without finishing its page — ${String(e)}`);
+    return await continueResponse();
+  }
+
+  // 3. Every page is checkpointed and none has a QA retry outstanding: merge and finalize.
+  const total = Math.min(pageCount ?? 1, MAX_PDF_PAGES);
+  const ordered = [...rows.values()].sort((a, b) => a.page_number - b.page_number);
+  if (ordered.length < total || ordered.some((r) => r.qa_retry === "pending")) return await continueResponse();
+
+  const merged = dedupePositions(mergeExtractions(ordered.map((r) => ({ pageNumber: r.page_number, extraction: r.extraction }))));
+  // OCR text per page, in page order, with a marker so a person or a future tool can tell where a stretch came
+  // from. A vision-routed page contributes no OCR text by architecture; its marker still shows the gap.
+  const combinedOcrText = ordered.map((r) => `--- page ${r.page_number} ---\n` + (r.ocr_text ?? "(vision-routed page, no OCR text)")).join("\n\n");
+  // Item 1 (2026-09-08 regression session): race-window fix — the candidate_id captured when the upload started can
+  // be stale by the time extraction finishes (confirm-verification backfills it while pages are being read).
+  // Re-reading it fresh, immediately before the insert, shrinks that window to one query.
+  const { data: freshDocPdf } = await supabase.from("resume_documents").select("candidate_id").eq("id", docId).maybeSingle();
+  const { error: pdfRpcErr } = await supabase.rpc("insert_resume_extraction", {
+    p_resume_document_id: docId,
+    p_candidate_id: freshDocPdf?.candidate_id ?? docMeta?.candidate_id ?? null,
+    p_work_history: merged.work_history,
+    p_education: merged.education,
+    p_certifications: merged.certifications,
+    p_skills: merged.skills,
+    p_skills_position: merged.skills_position ?? null,
+    p_freeform: merged.freeform,
+    p_ocr_text: combinedOcrText,
+    p_candidate_location: merged.candidate_location || null,
+    p_printed_header: merged.printed_header || null,
+  });
+  if (pdfRpcErr) return await fail(500, { error: "insert_failed", detail: pdfRpcErr.message });
+
+  // Best-effort audit record of what the pipeline read off the document plus the per-page timing summary; the
+  // extraction itself is already inserted above, so a failure here does not fail the upload.
+  await supabase.from("resume_documents").update({
+    ocr_raw_text: combinedOcrText,
+    extraction_timing: { pages: ordered.map((r) => ({ page: r.page_number, ...(r.timing ?? {}) })), finished_at: new Date().toISOString() },
+  }).eq("id", docId);
+
+  const { error: pdfStatusErr } = await supabase.from("resume_documents")
+    .update({ extraction_status: "extracted", extracted_at: new Date().toISOString(), extraction_lease_until: null }).eq("id", docId);
+  if (pdfStatusErr) return jsonResponse({ ok: false, error: "status_update_failed", detail: pdfStatusErr.message }, 500);
+  await supabase.from("resume_extraction_pages").delete().eq("resume_document_id", docId); // scratch space; best-effort
+
+  const { data: signedPdf } = await supabase.storage.from(BUCKET).createSignedUrl(originalPath, 3600);
+  return jsonResponse({
+    ok: true,
+    resume_document_id: docId,
+    extraction_status: "extracted",
+    extraction_method: "pdf_rasterize",
+    page_count: pageCount ?? 1,
+    original_signed_url: signedPdf?.signedUrl ?? null,
+    continue: false,
+    timing: { invocation_ms: Date.now() - invocationStart, pages: ordered.map((r) => ({ page: r.page_number, ...(r.timing ?? {}) })) },
+  });
+}
+
 export default {
   fetch: withSupabase({ auth: "none" }, async (req, _ctx) => {
     if (req.method === "OPTIONS") {
       return new Response(null, { headers: corsHeaders });
     }
+    const invocationStart = Date.now();
     try {
       const body = await req.json();
+      // Continuation of a resumable PDF extraction: only the document id, no file bytes (see the RESUMABLE PDF
+      // EXTRACTION header above). Anyone holding the (unguessable) id can only ask it to keep reading the file
+      // that is already stored; it returns no extracted data.
+      if (typeof body.resume_document_id === "string" && !body.original_base64) {
+        if (!/^[0-9a-f-]{36}$/i.test(body.resume_document_id)) return jsonResponse({ ok: false, error: "resume_document_id_invalid" }, 400);
+        return await continuePdfExtraction(createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY), body.resume_document_id, invocationStart);
+      }
       const {
         email_verification_id,
         candidate_id,
@@ -1410,6 +1716,9 @@ export default {
           mime_type,
           sanitized_render_path: sanitizedPath,
           extraction_status: "pending",
+          // The first run of a PDF holds the lease from the start (and counts as the first claim), so a
+          // continuation call arriving early cannot start a second run against the same document.
+          ...(isPdf ? { extraction_lease_until: new Date(Date.now() + EXTRACTION_LEASE_MS).toISOString(), extraction_stalls: 1 } : {}),
         })
         .select()
         .single();
@@ -1433,146 +1742,8 @@ export default {
       // to 'extracted', skipping 'ocr_done' and extract-resume-fields' separate Haiku call, since
       // every page already comes back fully extracted.
       if (isPdf) {
-        console.log(`upload-resume: ${docId} is a PDF, routing through rasterize-pdf-page`);
-        const pageExtractions: Array<{ pageNumber: number; extraction: ExtractionResult }> = [];
-        // Real gap this closes (2026-09-07, bug-2 defense-in-depth investigation): rasterize-pdf-page
-        // returns ocr_raw_text in its own per-page response, but nothing here ever read it — the
-        // only thing pulled off pageData was `.extraction`. For a multi-page PDF (the real, common
-        // case — this is exactly the document that surfaced bug 2), that meant no OCR text existed
-        // ANYWHERE in the database once extraction finished, confirmed directly against the deployed
-        // code before writing this. Collected here, per page, in page order; joined with a page
-        // marker (not just concatenated blind) so a human or a future tool can still tell where a
-        // given stretch of text came from. A vision-routed page contributes nothing here (there is
-        // no OCR step for vision, by architecture, not an oversight) — its marker is still emitted so
-        // the gap in coverage is visible in the stored text itself, not silently absent.
-        const pageOcrTexts: string[] = [];
-        let pageCount = 1;
-        // Page-boundary continuation context (2026-09-07, priority-3 investigation — see
-        // describeTrailingItem's own header for the full story): pages are already requested
-        // strictly in order in this loop, one full round-trip at a time, so this is simply "what did
-        // the page we just finished end with" carried into the next call. undefined on page 1 (there
-        // is no previous page) — buildContinuationContext treats that as "say nothing," unchanged
-        // prompt behavior for a single-page resume or the first page of any resume.
-        let previousPageContext: TrailingItemContext | undefined;
-        for (let pageNumber = 1; pageNumber <= pageCount && pageNumber <= MAX_PDF_PAGES; pageNumber++) {
-          let pageData: { ok?: boolean; page_count?: number; extraction?: unknown; ocr_raw_text?: string; code?: string; error?: string; message?: string };
-          let pageOk: boolean;
-          try {
-            const result = await rasterizePageWithRetry(originalPath, pageNumber, previousPageContext);
-            pageOk = result.ok;
-            pageData = result.data;
-          } catch (fetchErr) {
-            await supabase.from("resume_documents").update({ extraction_status: "failed" }).eq("id", docId);
-            return new Response(JSON.stringify({
-              ok: false, error: "pdf_rasterize_unreachable", detail: String(fetchErr),
-              resume_document_id: docId, page: pageNumber,
-            }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-          }
-          if (!pageOk || !pageData.ok || !isValidExtraction(pageData.extraction)) {
-            await supabase.from("resume_documents").update({ extraction_status: "failed" }).eq("id", docId);
-            const stillResourceLimited = pageData.code === RESOURCE_LIMIT_CODE;
-            return new Response(JSON.stringify({
-              ok: false,
-              error: stillResourceLimited ? "pdf_page_extraction_failed_after_retries" : "pdf_page_extraction_failed",
-              detail: pageData.message || pageData.error || pageData.code || "unknown_error",
-              resume_document_id: docId, page: pageNumber,
-            }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-          }
-          // STRUCTURAL QA CHECK (see findStructuralIssues' own header): one bounded, silent
-          // re-extraction of THIS page when its own output shows one of the two confirmed
-          // corruption shapes — never surfaced to the candidate, never blocks the upload either
-          // way. Keeps whichever of the two attempts has fewer flagged issues; a tie (including
-          // "retry didn't help") keeps the first attempt rather than trusting a second roll of
-          // the same non-deterministic dice to be better by assumption.
-          let pageExtraction = pageData.extraction as ExtractionResult;
-          let pageOcrText = pageData.ocr_raw_text;
-          let pageIssues = findStructuralIssues(pageExtraction);
-          if (pageIssues.length > 0) {
-            console.log(`upload-resume: ${docId} page ${pageNumber} flagged ${pageIssues.length} structural issue(s), retrying once — ${pageIssues.join(" | ")}`);
-            try {
-              const retryResult = await rasterizePageWithRetry(originalPath, pageNumber, previousPageContext);
-              if (retryResult.ok && retryResult.data.ok && isValidExtraction(retryResult.data.extraction)) {
-                const retryExtraction = retryResult.data.extraction as ExtractionResult;
-                const retryIssues = findStructuralIssues(retryExtraction);
-                console.log(`upload-resume: ${docId} page ${pageNumber} retry produced ${retryIssues.length} issue(s) (was ${pageIssues.length})`);
-                if (retryIssues.length < pageIssues.length) {
-                  pageExtraction = retryExtraction;
-                  pageOcrText = retryResult.data.ocr_raw_text;
-                  pageIssues = retryIssues;
-                }
-              }
-            } catch (retryErr) {
-              console.log(`upload-resume: ${docId} page ${pageNumber} structural-QA retry failed, keeping original — ${String(retryErr)}`);
-            }
-          }
-          pageExtractions.push({ pageNumber, extraction: pageExtraction });
-          pageOcrTexts.push(`--- page ${pageNumber} ---\n` + (pageOcrText ?? "(vision-routed page, no OCR text)"));
-          previousPageContext = describeTrailingItem(pageExtraction);
-          if (pageNumber === 1 && typeof pageData.page_count === "number" && pageData.page_count > 0) {
-            pageCount = pageData.page_count;
-          }
-        }
-
-        const merged = dedupePositions(mergeExtractions(pageExtractions));
-        const combinedOcrText = pageOcrTexts.join("\n\n");
-        // Item 1 (2026-09-08 regression session): race-window fix — see extract-resume-fields' own
-        // header for the full mechanism, reproduced live against two real accounts. docRow.candidate_id
-        // was captured once, at the top of this function, before the per-page rasterizePageWithRetry
-        // loop above — several real, sequential network round-trips for a multi-page resume, easily
-        // several seconds. If the candidate confirmed their signup email during that window,
-        // confirm-verification's one-time backfill would have already set resume_documents.candidate_id
-        // (finding no child rows yet to fix, since they don't exist until the insert below) — using
-        // the stale captured value here would permanently orphan every row this call is about to
-        // insert. Re-reading it fresh, immediately before the insert, shrinks that window to one query.
-        const { data: freshDocPdf } = await supabase
-          .from("resume_documents").select("candidate_id").eq("id", docId).maybeSingle();
-        const { error: pdfRpcErr } = await supabase.rpc("insert_resume_extraction", {
-          p_resume_document_id: docId,
-          p_candidate_id: freshDocPdf?.candidate_id ?? docRow.candidate_id,
-          p_work_history: merged.work_history,
-          p_education: merged.education,
-          p_certifications: merged.certifications,
-          p_skills: merged.skills,
-          p_skills_position: merged.skills_position ?? null,
-          p_freeform: merged.freeform,
-          p_ocr_text: combinedOcrText,
-          p_candidate_location: merged.candidate_location || null,
-          p_printed_header: merged.printed_header || null,
-        });
-        if (pdfRpcErr) {
-          await supabase.from("resume_documents").update({ extraction_status: "failed" }).eq("id", docId);
-          return new Response(JSON.stringify({ ok: false, error: "insert_failed", detail: pdfRpcErr.message, resume_document_id: docId }), {
-            status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-
-        // ocr_raw_text: previously written only by the single-image tesseract branch below (see
-        // that branch's own update() call) — never for a PDF. Written here now too, real retained
-        // value beyond just feeding certification_source_match above: an auditable record of what
-        // the pipeline actually read off the document, the same reason it was already kept for
-        // images. Best-effort — a failure here doesn't fail the upload; the extraction itself
-        // already succeeded and was already inserted above.
-        await supabase.from("resume_documents").update({ ocr_raw_text: combinedOcrText }).eq("id", docId);
-
-        const { error: pdfStatusErr } = await supabase
-          .from("resume_documents")
-          .update({ extraction_status: "extracted", extracted_at: new Date().toISOString() })
-          .eq("id", docId);
-        if (pdfStatusErr) {
-          return new Response(JSON.stringify({ ok: false, error: "status_update_failed", detail: pdfStatusErr.message }), {
-            status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-
-        const { data: signedPdf } = await supabase.storage.from(BUCKET).createSignedUrl(originalPath, 3600);
-        return new Response(JSON.stringify({
-          ok: true,
-          resume_document_id: docId,
-          extraction_status: "extracted",
-          extraction_method: "pdf_rasterize",
-          page_count: pageCount,
-          original_signed_url: signedPdf?.signedUrl ?? null,
-        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        console.log(`upload-resume: ${docId} is a PDF, routing through rasterize-pdf-page (resumable, checkpointed per page)`);
+        return await processPdfPages(supabase, docId, originalPath, invocationStart);
       }
 
       const w = Number(width), h = Number(height);
