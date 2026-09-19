@@ -2261,7 +2261,7 @@ th.sortable{cursor:pointer;user-select:none}
         </sc-if>
 
         <sc-if value="{{ loginLinkSent }}" hint-placeholder-val="{{ false }}">
-          <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">If {{ loginEmail }} is a staff account, a login link is on its way. Click it on this device to continue — it expires in 15 minutes and works once. Nothing arriving means that address is not a staff account (this page cannot tell you which).</div>
+          <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">If {{ loginEmail }} is a staff account, a login link is on its way. Click it on this device to continue — it expires in 15 minutes and works once. If nothing arrives in a few minutes, check the address or ask an admin (this page never says whether an address is a staff account).</div>
           <button type="button" class="btn btn-ghost" style="align-self:flex-start;font-size:12px" onClick="{{ resetLoginForm }}">Use a different email</button>
         </sc-if>
 
