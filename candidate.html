@@ -3417,11 +3417,14 @@ a:hover{color:var(--color-accent)}
   </sc-if>
   <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
     <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;color:var(--color-neutral-300);cursor:pointer">
-      <input type="checkbox" checked="{{ discoverable }}" sc-camel-on-change="{{ toggleDiscoverable }}" style="margin-top:2px">
+      <input type="checkbox" checked="{{ discoverable }}" disabled="{{ discoverableLoading }}" sc-camel-on-change="{{ toggleDiscoverable }}" style="margin-top:2px">
       <span>Let employers confirm I have an account here</span>
     </label>
+    <sc-if value="{{ discoverableLoadFailed }}" hint-placeholder-val="{{ false }}">
+      <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">We couldn't load your saved choice for this, so what's shown may not reflect it. Your saved choice stays as it is unless you change the box here.</div>
+    </sc-if>
     <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Employers can run a free existence-only check. Leaving this unchecked means any such check returns "no record," identical to what's shown for someone not in our system at all.</div>
-    <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6;border-top:1px solid var(--color-divider);padding-top:var(--space-3)">When enabled, an existence check matches against both your Verified and Printed phone/email, not Verified only.</div>
+    <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6;border-top:1px solid var(--color-divider);padding-top:var(--space-3)">When enabled, an employer who already has your name and either the email address or the phone number you signed up with can confirm that you have an account here, and nothing else about you. The name has to match too. Deactivating your account also turns this off.</div>
   </div>
   <sc-if value="{{ noTierChosen }}" hint-placeholder-val="{{ true }}">
     <button type="button" class="btn btn-primary btn-block" disabled="disabled">Continue</button>
@@ -6841,6 +6844,11 @@ class Component extends DCLogic {
     savedLinkedinPaused: false, savedIndeedPaused: false, savedGlassdoorPaused: false,
     savedPausedGlobal: false, savedJobStatus: null, savedVisibility: 'hidden',
     accountTier: 'free', discoverable: false, discoverableSavePending: false, discoverableSaveError: null,
+    // discoverable above is only a display default until the real saved value is loaded from the server
+    // (ensureDiscoverableLoaded). discoverableLoadedFor/FailedFor are the candidate id the load settled
+    // for; discoverableTouchedFor is the candidate id whose toggle the user actually changed on this page
+    // load. Nothing writes the flag back to the server unless it was loaded or touched.
+    discoverableLoadedFor: null, discoverableFailedFor: null, discoverableLoading: false, discoverableTouchedFor: null,
     // Item 6 (2026-09-12 live-testing session, follow-up build): matches the DB default
     // (candidates.header_display_mode default 'printed') so a not-yet-resolved session and a
     // freshly-loaded one agree before any real session response ever lands.
@@ -7262,6 +7270,7 @@ class Component extends DCLogic {
   }
 
   componentDidUpdate(prevProps, prevState) {
+    if (this.state.screen === 'tiers') this.ensureDiscoverableLoaded();
     if (prevState && this.state.tourActive && (prevState.tourStep !== this.state.tourStep || !prevState.tourActive)) {
       this.measureTourTarget();
     }
@@ -8018,8 +8027,38 @@ class Component extends DCLogic {
   // email/phone: matches how every other write in this pipeline identifies its candidate once a
   // real one exists (confirm-resume-data, skip-resume-extraction) — email/phone matching is this
   // project's read-only existence-check pattern, not how a specific row gets written.
+  // Loads the candidate's real saved discoverable value. This screen is reachable again after a page
+  // reload (e.g. landing back from a cancelled Stripe checkout), where the local default is false: showing
+  // that, and letting Continue save it, silently erased a real earlier opt-in. A value the user has already
+  // toggled on this page load is never overwritten by a slower load.
+  async ensureDiscoverableLoaded() {
+    const s = this.state;
+    const id = s.resumeCandidateId;
+    if (!id || s.discoverableLoading || s.discoverableLoadedFor === id || s.discoverableFailedFor === id) return;
+    this.setState({ discoverableLoading: true });
+    let value = null;
+    try {
+      const res = await fetch(this.SUPABASE_FN_URL + '/get-discoverable', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate_id: id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok && typeof data.discoverable === 'boolean') value = data.discoverable;
+    } catch (e) { value = null; }
+    if (value === null) { this.setState({ discoverableLoading: false, discoverableFailedFor: id }); return; }
+    this.setState(st => ({
+      discoverableLoading: false, discoverableLoadedFor: id,
+      discoverable: st.discoverableTouchedFor === id ? st.discoverable : value,
+    }));
+  }
+
   async saveDiscoverableThenAdvance() {
     if (this.state.discoverableSavePending) return;
+    // Nothing loaded and nothing touched (the load failed): the box on screen is just the local default, not
+    // the candidate's choice, so writing it would be exactly the silent overwrite this guards against.
+    const id = this.state.resumeCandidateId;
+    if (this.state.discoverableTouchedFor !== id) { this.setState({ discoverableSaveError: null }); this.advanceFromTiers(); return; }
     this.setState({ discoverableSavePending: true, discoverableSaveError: null });
     let saved = false;
     try {
@@ -10421,7 +10460,9 @@ class Component extends DCLogic {
       upgradeModalBody: s.upgradeModalContext === 'contentManager' ? 'Editing job responsibilities and keeping multiple named Summary versions is a paid feature. Upgrade to write per-partner summaries and choose which one LinkedIn, Indeed, and Glassdoor each receives.' : 'Per-recipient content customization and previews are a paid feature. Upgrade to choose exactly what LinkedIn, Indeed, and Glassdoor each receive.',
       accountTier: s.accountTier,
       discoverable: s.discoverable,
-      toggleDiscoverable: (e) => this.setState({ discoverable: !!e.target.checked }),
+      toggleDiscoverable: (e) => this.setState(st => ({ discoverable: !!e.target.checked, discoverableTouchedFor: st.resumeCandidateId })),
+      discoverableLoading: s.discoverableLoading,
+      discoverableLoadFailed: !!s.resumeCandidateId && s.discoverableFailedFor === s.resumeCandidateId,
       optInWorkHistory: s.optInWorkHistory,
       optInEducation: s.optInEducation,
       optInCertifications: s.optInCertifications,
@@ -11078,7 +11119,7 @@ class Component extends DCLogic {
       // Item C (2026-09-08 session, redirect revision): checkoutPending covers the brief real
       // fetch to test-stripe-checkout before the full-page redirect fires (see startRealCheckout's
       // own header) — there's no modal in front of it any more to show this state in instead.
-      tiersContinueDisabled: s.discoverableSavePending || s.checkoutPending,
+      tiersContinueDisabled: s.discoverableSavePending || s.checkoutPending || s.discoverableLoading,
       continueFromTiersLabel: s.discoverableSavePending ? 'Saving preference…' : s.checkoutPending ? 'Redirecting to checkout…' : 'Continue',
       isInterstitial: s.screen === 'interstitial',
       interstitialLearnMoreOpen: s.interstitialLearnMoreOpen,
