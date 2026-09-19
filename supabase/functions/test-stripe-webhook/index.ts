@@ -7,6 +7,13 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "content-type, stripe-signature",
 };
 
+// 2026-09-19 (employer billing): this is still the ONE endpoint Stripe delivers to, so it is now also the router. After
+// signature verification it (1) rejects a stale signed timestamp, (2) works out whether the event is an employer event
+// (metadata.product "employer_*" or an id that belongs to an employer row), (3) claims the event id so a re-delivery is
+// acknowledged without being processed again, and (4) forwards employer events to employer-stripe-events. Candidate
+// events then run exactly the logic below, except that an explicit unrecognized product is no longer defaulted into
+// resume_pro. customer.subscription.updated is still not handled for candidates.
+//
 // Item B (2026-09-08 regression session): this function's signature-verification core is the
 // original HIP-POCKET FEASIBILITY TEST, proven working against a real Stripe webhook delivery (see
 // the RESULT block below, unchanged) — reused as-is, not rebuilt. What's new: on a real
@@ -89,6 +96,35 @@ async function verifyStripeSignature(payload: string, sigHeader: string, secret:
   return { valid: v1s.includes(computedHex), timestamp: t };
 }
 
+const WEBHOOK_TOLERANCE_SECONDS = 300;
+const SB_HEADERS = {
+  "Content-Type": "application/json",
+  "apikey": SUPABASE_SERVICE_ROLE_KEY,
+  "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+};
+
+// Is this event an employer-billing event? Two independent signals, either one is enough:
+//   1. the object carries metadata.product starting with "employer_" (set on every employer session / subscription /
+//      payment intent at creation), or
+//   2. a Stripe id on the object (customer, subscription, payment intent) belongs to an employer row. This catches
+//      events whose object does not carry our metadata (charges, invoices, etc.).
+// A database error propagates: the caller must not fall through to candidate logic when it cannot tell.
+async function isEmployerEvent(event: any): Promise<boolean> {
+  const obj = event?.data?.object || {};
+  const product = obj?.metadata?.product;
+  if (typeof product === "string" && product.startsWith("employer_")) return true;
+  const str = (v: any) => (typeof v === "string" ? v : (v && typeof v.id === "string" ? v.id : null));
+  const customer = str(obj.customer);
+  const subscription = obj.object === "subscription" ? str(obj.id) : str(obj.subscription);
+  const paymentIntent = obj.object === "payment_intent" ? str(obj.id) : str(obj.payment_intent);
+  if (!customer && !subscription && !paymentIntent) return false;
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/employer_owns_stripe_ids`, {
+    method: "POST", headers: SB_HEADERS, body: JSON.stringify({ p_customer: customer, p_subscription: subscription, p_payment_intent: paymentIntent }),
+  });
+  if (!res.ok) throw new Error(`employer_owns_stripe_ids ${res.status}`);
+  return (await res.json()) === true;
+}
+
 export default {
   fetch: withSupabase({ auth: "none" }, async (req, _ctx) => {
     if (req.method === "OPTIONS") {
@@ -118,6 +154,18 @@ export default {
       });
     }
 
+    // Replay protection, part 1 (2026-09-19): the signature only proves the payload came from Stripe, not that it is
+    // fresh. Reject a signed payload whose timestamp is more than 5 minutes off (Stripe's own default tolerance), so a
+    // captured request cannot be replayed later. (Stripe signs each delivery attempt with a fresh timestamp, so
+    // legitimate retries are unaffected.)
+    const tsNum = Number(timestamp);
+    if (!isFinite(tsNum) || Math.abs(Date.now() / 1000 - tsNum) > WEBHOOK_TOLERANCE_SECONDS) {
+      return new Response(JSON.stringify({ ok: false, error: "signature_timestamp_out_of_tolerance" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     let event: any;
     try {
       event = JSON.parse(rawBody);
@@ -136,6 +184,60 @@ export default {
       eventType: event.type,
       livemode: event.livemode,
     };
+
+    // ---- Routing + replay protection part 2 (2026-09-19) — runs BEFORE any candidate logic below ----
+    // One Stripe endpoint receives every event on the account, candidate and employer alike. Decide whose it is first,
+    // claim the event id (a re-delivered event is acknowledged and NOT processed again), and hand employer events to
+    // their own handler. Nothing below this block ever sees an employer event.
+    let kind: "employer" | "candidate";
+    try {
+      kind = (await isEmployerEvent(event)) ? "employer" : "candidate";
+    } catch (e) {
+      // Cannot tell whose event this is: fail so Stripe retries, rather than guess into candidate logic.
+      return new Response(JSON.stringify({ ok: false, error: "routing_failed", detail: String(e).slice(0, 200) }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    summary.routedTo = kind;
+    let claimed = false;
+    try {
+      const claimRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/claim_stripe_event`, {
+        method: "POST", headers: SB_HEADERS, body: JSON.stringify({ p_event_id: event.id, p_type: event.type, p_kind: kind }),
+      });
+      if (!claimRes.ok) throw new Error(`claim ${claimRes.status}`);
+      claimed = (await claimRes.json()) === true;
+    } catch (e) {
+      return new Response(JSON.stringify({ ok: false, error: "idempotency_check_failed", detail: String(e).slice(0, 200) }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    if (!claimed) {
+      return new Response(JSON.stringify({ ok: true, duplicate: true, eventId: event.id, routedTo: kind }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const rpcDone = (fn: "finish_stripe_event" | "release_stripe_event", outcome: string) =>
+      fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, { method: "POST", headers: SB_HEADERS, body: JSON.stringify({ p_event_id: event.id, p_outcome: outcome }) }).catch(() => {});
+    if (kind === "employer") {
+      try {
+        const fwd = await fetch(`${SUPABASE_URL}/functions/v1/employer-stripe-events`, {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ event }),
+        });
+        const out = await fwd.json().catch(() => ({}));
+        if (!fwd.ok || !out.ok) throw new Error(`employer handler ${fwd.status} ${out.detail || out.error || ""}`);
+        await rpcDone("finish_stripe_event", "employer:" + out.outcome);
+        return new Response(JSON.stringify({ ...summary, employerOutcome: out.outcome }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      } catch (e) {
+        // Unlike the candidate branch (which never fails a verified delivery), an employer payment must not be lost:
+        // release the claim and return non-2xx so Stripe retries.
+        await rpcDone("release_stripe_event", "employer_failed:" + String(e).slice(0, 120));
+        return new Response(JSON.stringify({ ok: false, error: "employer_handler_failed", detail: String(e).slice(0, 200) }), {
+          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
 
     if (event.type === "checkout.session.completed") {
       const session = event.data?.object || {};
@@ -161,8 +263,17 @@ export default {
       // constraint and meaning are specific to the free/paid resume tier, and a license-only
       // candidate never has a free resume tier to be "upgraded" from.
       const candidateId: string | null = session.client_reference_id || null;
-      const product: string = session.metadata?.product === "license_tracking" ? "license_tracking" : "resume_pro";
-      if (candidateId && session.payment_status === "paid") {
+      // 2026-09-19: this used to be `=== "license_tracking" ? "license_tracking" : "resume_pro"`, i.e. ANY other
+      // product (including one that was never a candidate product) silently became a Verifi Pro upgrade for whichever
+      // candidate the session's client_reference_id named. An explicit, different product is now refused here. A session
+      // with NO product metadata (created before metadata[product] existed) keeps its old meaning, resume_pro.
+      // Employer products never get this far: they are routed away above.
+      const rawProduct = session.metadata?.product ?? null;
+      const knownCandidateProduct = rawProduct === null || rawProduct === "" || rawProduct === "resume_pro" || rawProduct === "license_tracking";
+      const product: string = rawProduct === "license_tracking" ? "license_tracking" : "resume_pro";
+      if (!knownCandidateProduct) {
+        summary.tierUpdate = { attempted: false, reason: "unrecognized_product", product: rawProduct };
+      } else if (candidateId && session.payment_status === "paid") {
         try {
           // Subscription cancellation gap (2026-09-18): session.subscription is the real Stripe
           // subscription id (sub_...) Stripe attaches to a completed subscription-mode Checkout
@@ -299,6 +410,8 @@ export default {
       }
     }
 
+    // Candidate branch done (its own write failures never fail the delivery, see above): mark the event processed.
+    await rpcDone("finish_stripe_event", "candidate");
     return new Response(JSON.stringify(summary), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

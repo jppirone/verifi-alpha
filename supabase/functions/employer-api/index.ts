@@ -3,6 +3,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { withSupabase } from "jsr:@supabase/server@^1";
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
+const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
@@ -29,9 +30,14 @@ const corsHeaders = {
 //
 // Access levels:  any (signed in) | orgless (signed in, no org) | member (owner or member) | owner | plain_member.
 //
-// Not here: billing. Billing-changing actions will be added to this registry as owner-only when the Stripe pass
-// lands, so they inherit all of the above. Owner handover and the owner leaving are deliberately not built
-// (billing attaches to the owner): the owner cannot be removed and cannot leave.
+// Billing (added 2026-09-19): start_subscription, cancel_subscription, resume_subscription and billing_portal are
+// registry entries with access "owner", so they inherit everything above: only the org's single owner (who is also its
+// billing owner and only admin) can create, cancel, resume or change the payment method of the org's subscription; a
+// member gets 403 before any Stripe call happens. billing_status is "member": members can see whether the org is
+// subscribed and how much quota is left (they need that to use it) but never get Stripe ids, payment details or any
+// way to change them. Subscription STATE is never written here: these actions only ask Stripe to do something; the
+// verified webhook (employer-stripe-events) is what updates the database. Owner handover and the owner leaving are
+// still deliberately not built: the owner cannot be removed and cannot leave.
 //
 // This is employer-side only. Candidate and staff endpoints are NOT changed by this and are still identified by
 // id in the request body (a separate, already-tracked cleanup).
@@ -67,6 +73,21 @@ async function rows(path: string): Promise<any[] | null> {
 }
 function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+const RETURN_BASE = "https://alpha.applitrust.com/employer.html";
+const LIVE_STATUSES = ["active", "trialing", "past_due", "unpaid", "incomplete"];
+
+async function stripe(method: string, path: string, form?: Record<string, string>, idem?: string): Promise<{ ok: boolean; status: number; data: any }> {
+  const body = form ? new URLSearchParams(form).toString() : undefined;
+  const r = await fetch(`https://api.stripe.com${path}`, {
+    method,
+    headers: { "Authorization": `Bearer ${STRIPE_SECRET_KEY}`, ...(body ? { "Content-Type": "application/x-www-form-urlencoded" } : {}), ...(idem ? { "Idempotency-Key": idem } : {}) },
+    body,
+  });
+  return { ok: r.ok, status: r.status, data: await r.json().catch(() => ({})) };
+}
+async function liveSubscription(orgId: string): Promise<any | null> {
+  return (await rows(`employer_org_subscriptions?org_id=eq.${orgId}&status=in.(${LIVE_STATUSES.join(",")})&select=*&order=created_at.desc&limit=1`))?.[0] || null;
 }
 function cleanName(v: unknown, min: number, max: number): string | null {
   if (typeof v !== "string") return null;
@@ -275,6 +296,118 @@ const ACTIONS: Record<string, Action> = {
       });
       const changed = r.ok ? await r.json() : [];
       return Array.isArray(changed) && changed.length ? ok() : fail(404, "not_found");
+    },
+  },
+
+  // ---- billing ----
+  billing_status: {
+    access: "member",
+    run: async ({ user, org }) => {
+      const pricing = (await rows(`employer_pricing?key=eq.org_subscription_monthly&select=amount_cents,currency,included_lookups,note`))?.[0] || null;
+      const subs = await rows(`employer_org_subscriptions?org_id=eq.${org!.id}&select=*&order=created_at.desc&limit=1`);
+      const sub = subs?.[0] || null;
+      let used = 0;
+      if (sub) {
+        const start = sub.current_period_start || sub.created_at;
+        const u = await rows(`employer_lookup_usage?subscription_id=eq.${sub.id}&used_at=gte.${encodeURIComponent(start)}&select=id&limit=10000`);
+        used = u ? u.length : 0;
+      }
+      return ok({
+        is_owner: user.role === "owner",
+        pricing: pricing ? { amount_cents: pricing.amount_cents, currency: pricing.currency, included_lookups: pricing.included_lookups, placeholder: true } : null,
+        subscription: sub ? {
+          status: sub.status, current_period_start: sub.current_period_start, current_period_end: sub.current_period_end,
+          cancel_at_period_end: sub.cancel_at_period_end, canceled_at: sub.canceled_at,
+          included_lookups: sub.included_lookups, unit_amount_cents: sub.unit_amount_cents, currency: sub.currency,
+          used, remaining: Math.max(sub.included_lookups - used, 0), live: LIVE_STATUSES.includes(sub.status),
+        } : null,
+      });
+    },
+  },
+  start_subscription: {
+    access: "owner",
+    run: async ({ user, org }) => {
+      if (await liveSubscription(org!.id)) return fail(409, "already_subscribed");
+      const pricing = (await rows(`employer_pricing?key=eq.org_subscription_monthly&select=amount_cents,currency,included_lookups`))?.[0];
+      if (!pricing || !pricing.included_lookups) return fail(500, "pricing_unavailable");
+
+      // One Stripe customer per org, created once. The idempotency key makes two simultaneous creates return the same
+      // customer, and the conditional PATCH keeps whichever id got stored first.
+      const o = (await rows(`employer_orgs?id=eq.${org!.id}&select=stripe_customer_id`))?.[0];
+      let customerId: string | null = o?.stripe_customer_id || null;
+      if (!customerId) {
+        const c = await stripe("POST", "/v1/customers", {
+          email: user.email, name: org!.name, "metadata[org_id]": org!.id, "metadata[product]": "employer_org_subscription", "metadata[owner_user_id]": user.id,
+        }, `employer-org-customer-${org!.id}`);
+        if (!c.ok) return fail(502, "stripe_error");
+        customerId = c.data.id as string;
+        const stored = await rest(`employer_orgs?id=eq.${org!.id}&stripe_customer_id=is.null`, { method: "PATCH", headers: { "Prefer": "return=representation" }, body: JSON.stringify({ stripe_customer_id: customerId }) });
+        const storedRows = stored.ok ? await stored.json() : [];
+        if (!Array.isArray(storedRows) || storedRows.length === 0) customerId = (await rows(`employer_orgs?id=eq.${org!.id}&select=stripe_customer_id`))?.[0]?.stripe_customer_id || customerId;
+      }
+
+      const meta = { product: "employer_org_subscription", org_id: org!.id, owner_user_id: user.id, included_lookups: String(pricing.included_lookups), unit_amount_cents: String(pricing.amount_cents) };
+      const form: Record<string, string> = {
+        mode: "subscription", customer: customerId!, client_reference_id: org!.id,
+        success_url: `${RETURN_BASE}?billing=success`, cancel_url: `${RETURN_BASE}?billing=cancel`,
+        "line_items[0][quantity]": "1",
+        "line_items[0][price_data][currency]": pricing.currency,
+        "line_items[0][price_data][unit_amount]": String(pricing.amount_cents),
+        "line_items[0][price_data][recurring][interval]": "month",
+        "line_items[0][price_data][product_data][name]": "Verifi employer comparisons (monthly)",
+        "line_items[0][price_data][product_data][description]": `${pricing.included_lookups} comparison lookups per billing period, shared by everyone in ${org!.name}. Billed monthly; the organization owner can cancel any time.`,
+      };
+      for (const [k, v] of Object.entries(meta)) { form[`metadata[${k}]`] = v; form[`subscription_data[metadata][${k}]`] = v; }
+      const sess = await stripe("POST", "/v1/checkout/sessions", form);
+      if (!sess.ok || !sess.data.url) return fail(502, "stripe_error");
+      return ok({ url: sess.data.url });
+    },
+  },
+  cancel_subscription: {
+    access: "owner",
+    run: async ({ org, p }) => {
+      const sub = await liveSubscription(org!.id);
+      if (!sub || !["active", "trialing", "past_due"].includes(sub.status)) return fail(404, "no_subscription");
+      const now = p.when === "now";
+      // Only ASKS Stripe. The subscription row changes when the verified webhook says so.
+      const r = now
+        ? await stripe("DELETE", `/v1/subscriptions/${encodeURIComponent(sub.stripe_subscription_id)}`)
+        : await stripe("POST", `/v1/subscriptions/${encodeURIComponent(sub.stripe_subscription_id)}`, { cancel_at_period_end: "true" });
+      if (!r.ok) return fail(502, "stripe_error");
+      return ok({ requested: now ? "cancel_now" : "cancel_at_period_end" });
+    },
+  },
+  resume_subscription: {
+    access: "owner",
+    run: async ({ org }) => {
+      const sub = await liveSubscription(org!.id);
+      if (!sub || sub.status !== "active" || !sub.cancel_at_period_end) return fail(404, "nothing_to_resume");
+      const r = await stripe("POST", `/v1/subscriptions/${encodeURIComponent(sub.stripe_subscription_id)}`, { cancel_at_period_end: "false" });
+      return r.ok ? ok({ requested: "resume" }) : fail(502, "stripe_error");
+    },
+  },
+  billing_portal: {
+    access: "owner",
+    run: async ({ org }) => {
+      const o = (await rows(`employer_orgs?id=eq.${org!.id}&select=stripe_customer_id`))?.[0];
+      if (!o?.stripe_customer_id) return fail(409, "no_billing_account");
+      // Payment-method changes go through Stripe's hosted portal. It is configured once (payment method + invoice history
+      // only; cancellation stays with cancel_subscription so it is handled the same way everywhere) and the id remembered.
+      let configId = (await rows(`employer_pricing?key=eq.portal_configuration&select=note`))?.[0]?.note || null;
+      if (!configId) {
+        const c = await stripe("POST", "/v1/billing_portal/configurations", {
+          "business_profile[headline]": "Verifi employer billing",
+          "features[payment_method_update][enabled]": "true",
+          "features[invoice_history][enabled]": "true",
+          "features[customer_update][enabled]": "false",
+          "features[subscription_cancel][enabled]": "false",
+        });
+        if (!c.ok) return fail(502, "stripe_error");
+        configId = c.data.id as string;
+        await rest("employer_pricing", { method: "POST", headers: { "Prefer": "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ key: "portal_configuration", amount_cents: 0, note: configId }) });
+      }
+      const s = await stripe("POST", "/v1/billing_portal/sessions", { customer: o.stripe_customer_id, return_url: `${RETURN_BASE}?billing=return`, configuration: configId! });
+      return s.ok && s.data.url ? ok({ url: s.data.url }) : fail(502, "stripe_error");
     },
   },
 };
