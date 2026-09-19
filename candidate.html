@@ -3559,7 +3559,7 @@ a:hover{color:var(--color-accent)}
     <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.5;margin-bottom:var(--space-4)">Identity verification: not completed. Every tab stays open; only specific actions inside require verification.</div>
   </sc-if>
   <sc-if value="{{ showKycCompletedBanner }}" hint-placeholder-val="{{ false }}">
-    <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.5;margin-bottom:var(--space-4)">Identity verification: completed.</div>
+    <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.5;margin-bottom:var(--space-4)">Identity verification: step completed (simulated in this alpha; no identity check was performed).</div>
   </sc-if>
 
 
@@ -3684,22 +3684,22 @@ a:hover{color:var(--color-accent)}
                 <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ openPhoneModal }}">Send confirmation code</button>
               </sc-if>
               <sc-if value="{{ phoneIsConfirmed }}" hint-placeholder-val="{{ false }}">
-                <span class="tag tag-accent">Verified</span>
+                <span class="tag tag-accent">Confirmed (simulated)</span>
               </sc-if>
               <sc-if value="{{ phonePendingVerification }}" hint-placeholder-val="{{ true }}">
-                <span class="tag tag-outline">Not yet verified</span>
+                <span class="tag tag-outline">Not yet confirmed</span>
               </sc-if>
             </div>
             <sc-if value="{{ phoneVerifySaveError }}" hint-placeholder-val="{{ false }}">
               <div style="font-size:12px;color:#e2735c">{{ phoneVerifySaveError }}</div>
             </sc-if>
-            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Pre-filled from your account, if a number is on file. Typing a number here never makes it verified: send a code and confirm it first.</div>
+            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Pre-filled from your account, if a number is on file. In this alpha no code is actually sent and any entry is accepted, so "confirmed" here is simulated: it does not prove you control this number.</div>
 
             <sc-if value="{{ isFullResumeAccount }}" hint-placeholder-val="{{ true }}">
             <div style="display:flex;flex-direction:column;gap:6px;padding:var(--space-3);border:1px solid var(--color-neutral-800);border-radius:var(--radius-md)">
               <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">What partners receive, phone</div>
               <sc-if value="{{ phoneDeliveryVerified }}" hint-placeholder-val="{{ false }}">
-                <div style="display:flex;align-items:center;gap:8px;font-size:13px"><span class="tag tag-accent">Verified</span> <span>{{ printedPhone }}</span></div>
+                <div style="display:flex;align-items:center;gap:8px;font-size:13px"><span class="tag tag-accent">Confirmed (simulated)</span> <span>{{ printedPhone }}</span></div>
               </sc-if>
               <sc-if value="{{ phoneDeliveryStated }}" hint-placeholder-val="{{ true }}">
                 <div style="display:flex;align-items:center;gap:8px;font-size:13px"><span class="tag tag-outline">Candidate-stated</span> <span>{{ printedPhone }}</span></div>
@@ -3828,7 +3828,7 @@ a:hover{color:var(--color-accent)}
           </div>
         </sc-if>
         <sc-if value="{{ crossValidationDoneFullResume }}" hint-placeholder-val="{{ false }}">
-          <div style="font-size:12px;color:var(--color-neutral-500);display:flex;align-items:center;gap:8px"><span class="tag tag-accent">Cross-validated</span> Email and phone confirmed to belong to the same person.</div>
+          <div style="font-size:12px;color:var(--color-neutral-500);display:flex;align-items:center;gap:8px"><span class="tag tag-accent">Cross-validated (simulated)</span> No codes were actually sent in this alpha, so this does not prove the email and phone belong to the same person.</div>
         </sc-if>
 
         <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
@@ -3854,15 +3854,16 @@ a:hover{color:var(--color-accent)}
         <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
           <div class="card-kicker">Identity verification (KYC)</div>
           <sc-if value="{{ kycVerified }}" hint-placeholder-val="{{ false }}">
-            <div style="display:flex;align-items:center;gap:var(--space-2)"><span class="tag tag-accent">Verified</span></div>
-            <button type="button" class="btn btn-secondary" style="align-self:flex-start" sc-camel-on-click="{{ openKycModal }}">Reverify</button>
+            <div style="display:flex;align-items:center;gap:var(--space-2)"><span class="tag tag-accent">Completed (simulated)</span></div>
+            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">This alpha has no real identity check: the step is a simulated button, so this does not confirm who you are.</div>
+            <button type="button" class="btn btn-secondary" style="align-self:flex-start" sc-camel-on-click="{{ openKycModal }}">Repeat the step</button>
           </sc-if>
           <sc-if value="{{ kycUnverified }}" hint-placeholder-val="{{ true }}">
-            <div style="display:flex;align-items:center;gap:var(--space-2)"><span class="tag tag-outline">Not verified</span></div>
-            <a href="#" sc-camel-on-click="{{ openKycModal }}">Complete verification</a>
+            <div style="display:flex;align-items:center;gap:var(--space-2)"><span class="tag tag-outline">Not completed</span></div>
+            <a href="#" sc-camel-on-click="{{ openKycModal }}">Complete the (simulated) step</a>
           </sc-if>
           <sc-if value="{{ kycVerified }}" hint-placeholder-val="{{ false }}">
-            <div style="font-size:12px;color:var(--color-neutral-500)">Reverifying will direct you to complete the entire verification process again, with your updated information independently confirmed. Used primarily for legal name changes or address changes.</div>
+            <div style="font-size:12px;color:var(--color-neutral-500)">Repeating the step runs the same simulated button again. Once real identity verification exists, this is where a legal name or address change would be re-verified.</div>
           </sc-if>
           <sc-if value="{{ kycUnverifiedLicenseOnly }}" hint-placeholder-val="{{ false }}">
             <div style="font-size:12px;color:var(--color-neutral-500)">Confirming your identity is what lets us match your licenses to you.</div>
@@ -3879,7 +3880,7 @@ a:hover{color:var(--color-accent)}
         <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
           <div class="card-kicker">Email/SMS cross-validation</div>
           <sc-if value="{{ crossValidationDone }}" hint-placeholder-val="{{ false }}">
-            <div style="display:flex;align-items:center;gap:var(--space-2)"><span class="tag tag-accent">Completed</span></div>
+            <div style="display:flex;align-items:center;gap:var(--space-2)"><span class="tag tag-accent">Completed (simulated)</span></div>
           </sc-if>
           <sc-if value="{{ crossValidationNotDone }}" hint-placeholder-val="{{ true }}">
             <div style="display:flex;align-items:center;gap:var(--space-2)"><span class="tag tag-neutral">Not completed</span></div>
