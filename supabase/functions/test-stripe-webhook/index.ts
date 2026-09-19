@@ -97,6 +97,11 @@ async function verifyStripeSignature(payload: string, sigHeader: string, secret:
 }
 
 const WEBHOOK_TOLERANCE_SECONDS = 300;
+// True only for a finite signed timestamp within 5 minutes of now (either direction).
+function withinTolerance(timestamp: string | undefined, nowMs: number = Date.now()): boolean {
+  const t = Number(timestamp);
+  return isFinite(t) && Math.abs(nowMs / 1000 - t) <= WEBHOOK_TOLERANCE_SECONDS;
+}
 const SB_HEADERS = {
   "Content-Type": "application/json",
   "apikey": SUPABASE_SERVICE_ROLE_KEY,
@@ -158,8 +163,7 @@ export default {
     // fresh. Reject a signed payload whose timestamp is more than 5 minutes off (Stripe's own default tolerance), so a
     // captured request cannot be replayed later. (Stripe signs each delivery attempt with a fresh timestamp, so
     // legitimate retries are unaffected.)
-    const tsNum = Number(timestamp);
-    if (!isFinite(tsNum) || Math.abs(Date.now() / 1000 - tsNum) > WEBHOOK_TOLERANCE_SECONDS) {
+    if (!withinTolerance(timestamp)) {
       return new Response(JSON.stringify({ ok: false, error: "signature_timestamp_out_of_tolerance" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
