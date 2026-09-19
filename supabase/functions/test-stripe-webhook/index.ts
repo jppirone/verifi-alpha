@@ -97,6 +97,13 @@ async function verifyStripeSignature(payload: string, sigHeader: string, secret:
 }
 
 const WEBHOOK_TOLERANCE_SECONDS = 300;
+// Which CANDIDATE product a session is for. An explicit product that is not a candidate product is NOT known and must
+// never be treated as resume_pro; only a session with no product metadata at all keeps the original resume_pro meaning.
+function candidateProductOf(raw: unknown): { known: boolean; product: string } {
+  if (raw === null || raw === undefined || raw === "" || raw === "resume_pro") return { known: true, product: "resume_pro" };
+  if (raw === "license_tracking") return { known: true, product: "license_tracking" };
+  return { known: false, product: "resume_pro" };
+}
 // True only for a finite signed timestamp within 5 minutes of now (either direction).
 function withinTolerance(timestamp: string | undefined, nowMs: number = Date.now()): boolean {
   const t = Number(timestamp);
@@ -273,8 +280,7 @@ export default {
       // with NO product metadata (created before metadata[product] existed) keeps its old meaning, resume_pro.
       // Employer products never get this far: they are routed away above.
       const rawProduct = session.metadata?.product ?? null;
-      const knownCandidateProduct = rawProduct === null || rawProduct === "" || rawProduct === "resume_pro" || rawProduct === "license_tracking";
-      const product: string = rawProduct === "license_tracking" ? "license_tracking" : "resume_pro";
+      const { known: knownCandidateProduct, product } = candidateProductOf(rawProduct);
       if (!knownCandidateProduct) {
         summary.tierUpdate = { attempted: false, reason: "unrecognized_product", product: rawProduct };
       } else if (candidateId && session.payment_status === "paid") {
