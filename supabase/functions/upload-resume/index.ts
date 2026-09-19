@@ -1351,9 +1351,7 @@ function mergeExtractions(pages: Array<{ pageNumber: number; extraction: Extract
 //     produce no page mark the document 'failed' — a genuinely unreadable page ends, it does not loop forever.
 //   * Previous-page context (the boundary/continuation fix) is rebuilt from the STORED previous page, never from
 //     memory, so a resumed run feeds page N exactly what an uninterrupted run would have.
-//   * Structural-QA retry is DEFERRED, never dropped: if there is no time left for a second read of a flagged page
-//     in this invocation, the page is checkpointed with qa_retry='pending' and the next invocation retries it
-//     FIRST, before the following page (whose context depends on which version of this page is kept).
+//   * (The structural-QA re-read that used to sit here is gone, see the note where findStructuralIssues is called.)
 //   * Parallelising the two model calls (boundary, then extraction) or the pages was rejected on purpose: step 2
 //     consumes step 1's output, and each page's prompt carries the previous page's trailing item — running them
 //     together brings back the boundary/continuation contradiction fixed on 2026-09-18.
@@ -1385,7 +1383,7 @@ type PageTiming = {
   render?: unknown;
   timing_ms?: unknown;
   model_calls?: unknown;
-  qa: { fired: boolean; deferred: boolean; skipped?: "vision_route"; issues_before?: number; issues_after?: number; retry_ms?: number; kept?: "retry" | "original" };
+  qa: { fired: boolean; deferred: boolean; skipped?: "vision_route" | "no_measured_benefit"; issues_before?: number; issues_after?: number; retry_ms?: number; kept?: "retry" | "original" };
 };
 
 function jsonResponse(obj: unknown, status = 200): Response {
@@ -1449,36 +1447,7 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
   let unitsDone = 0;
 
   try {
-    // 1. Deferred structural-QA retries come first: they decide which version of the page the NEXT page's context is built from.
-    for (const pn of [...rows.keys()].sort((a, b) => a - b)) {
-      const row = rows.get(pn)!;
-      if (row.qa_retry !== "pending") continue;
-      if (unitsDone > 0 && !canStartAnotherPage()) return await continueResponse();
-      unitsDone++;
-      const t0 = Date.now();
-      const before = findStructuralIssues(row.extraction);
-      const qa = { ...(row.timing?.qa ?? { fired: true, deferred: true }), fired: true, deferred: true, issues_before: before.length } as PageTiming["qa"];
-      let extraction = row.extraction;
-      let ocrText = row.ocr_text;
-      const r = await rasterizePageWithRetry(originalPath, pn, contextFor(pn), { deadline: pageDeadline, startWithVision: hintFor(pn) || row.timing?.needed_force_vision === true });
-      qa.retry_ms = Date.now() - t0;
-      relayCalls += r.attempts.reduce((n, a) => n + a.relay_calls, 0);
-      qa.kept = "original";
-      if (r.ok && r.data.ok && isValidExtraction(r.data.extraction)) {
-        const after = findStructuralIssues(r.data.extraction as ExtractionResult);
-        qa.issues_after = after.length;
-        if (after.length < before.length) { extraction = r.data.extraction as ExtractionResult; ocrText = (r.data.ocr_raw_text as string | undefined) ?? null; qa.kept = "retry"; }
-      }
-      const { error: upErr } = await supabase.from("resume_extraction_pages")
-        .update({ extraction, ocr_text: ocrText, qa_retry: "done", timing: { ...(row.timing ?? {}), qa } })
-        .eq("resume_document_id", docId).eq("page_number", pn);
-      if (upErr) return await fail(500, { error: "checkpoint_failed", detail: upErr.message });
-      rows.set(pn, { ...row, extraction, ocr_text: ocrText, qa_retry: "done", timing: { ...(row.timing as PageTiming), qa } });
-      await supabase.from("resume_documents").update({ extraction_progress_at: new Date().toISOString(), extraction_stalls: 0 }).eq("id", docId);
-      console.log(`upload-resume: ${docId} page ${pn} deferred QA retry done in ${qa.retry_ms} ms (issues ${before.length} -> ${qa.issues_after ?? "n/a"}, kept ${qa.kept})`);
-    }
-
-    // 2. Remaining pages, in order.
+    // 1. Pages, in order.
     for (let pn = 1; pn <= Math.min(pageCount ?? 1, MAX_PDF_PAGES); pn++) {
       if (rows.has(pn)) continue;
       if (unitsDone > 0 && !canStartAnotherPage()) return await continueResponse();
@@ -1496,8 +1465,8 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
           detail: d.message || d.error || d.code || "unknown_error", page: pn,
         });
       }
-      let extraction = d.extraction as ExtractionResult;
-      let ocrText: string | null = (d.ocr_raw_text as string | undefined) ?? null;
+      const extraction = d.extraction as ExtractionResult;
+      const ocrText: string | null = (d.ocr_raw_text as string | undefined) ?? null;
       const usedVisionFallback = outcome.attempts.length > 0 && outcome.attempts[outcome.attempts.length - 1].force_vision;
       const timing: PageTiming = {
         page_ms: pageMs,
@@ -1510,65 +1479,30 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
         qa: { fired: false, deferred: false },
       };
 
-      // STRUCTURAL QA CHECK (see findStructuralIssues' own header): one bounded, silent re-extraction of THIS page
-      // when its own output shows one of the two confirmed corruption shapes — never surfaced to the candidate.
-      // Keeps whichever attempt has fewer flagged issues; a tie keeps the first attempt. Now also budget-aware:
-      // with no time left for a full second read in this invocation the retry is deferred (see the header above),
-      // not skipped and not allowed to push the invocation into the platform's kill.
-      let qaState: "not_needed" | "pending" | "done" = "not_needed";
+      // STRUCTURAL QA CHECK — RETRY REMOVED (2026-09-19). findStructuralIssues still runs and its flag is still
+      // recorded in the page timing, but it no longer triggers a second read of the page. That retry (one bounded,
+      // silent re-extraction, keeping whichever attempt had fewer flagged issues) never once changed a result in the
+      // measured runs: on the one real document that trips it, the same single issue was flagged and the original was
+      // kept every time (vision route 3/3, ~34 s each; tesseract route 6/6, ~10-12 s and ~9 relay calls each, ~30% of
+      // that document's extraction time). Removed rather than gated by route, so nothing dead is left behind.
       const issues = findStructuralIssues(extraction);
       if (issues.length > 0) {
         timing.qa.issues_before = issues.length;
-        if (timing.routing === "vision") {
-          // Not retried on a vision-routed page (2026-09-19): a second read costs a full vision extraction
-          // (measured 34 s, ~22% of a 2-page resume) and changed nothing in 3 of 3 runs on the one real document
-          // that has exercised it (1 issue before, 1 after, original kept every time). The flag is still recorded.
-          // On the tesseract+Haiku route a retry is ~5 s and stays as before.
-          timing.qa.skipped = "vision_route";
-          console.log(`upload-resume: ${docId} page ${pn} flagged ${issues.length} structural issue(s) on the vision route; QA retry skipped (not worth a second vision read)`);
-        } else if (Date.now() + pageMs * PAGE_COST_MARGIN <= pageDeadline && relayCalls + pageCalls <= RELAY_CALLS_PER_INVOCATION) {
-          console.log(`upload-resume: ${docId} page ${pn} flagged ${issues.length} structural issue(s), retrying once — ${issues.join(" | ")}`);
-          timing.qa.fired = true;
-          qaState = "done";
-          timing.qa.kept = "original";
-          try {
-            const t0 = Date.now();
-            const retry = await rasterizePageWithRetry(originalPath, pn, contextFor(pn), { deadline: pageDeadline, startWithVision: usedVisionFallback });
-            timing.qa.retry_ms = Date.now() - t0;
-            relayCalls += retry.attempts.reduce((n, a) => n + a.relay_calls, 0);
-            if (retry.ok && retry.data.ok && isValidExtraction(retry.data.extraction)) {
-              const retryExtraction = retry.data.extraction as ExtractionResult;
-              const retryIssues = findStructuralIssues(retryExtraction);
-              timing.qa.issues_after = retryIssues.length;
-              console.log(`upload-resume: ${docId} page ${pn} retry produced ${retryIssues.length} issue(s) (was ${issues.length})`);
-              if (retryIssues.length < issues.length) {
-                extraction = retryExtraction;
-                ocrText = (retry.data.ocr_raw_text as string | undefined) ?? null;
-                timing.qa.kept = "retry";
-              }
-            }
-          } catch (retryErr) {
-            console.log(`upload-resume: ${docId} page ${pn} structural-QA retry failed, keeping original — ${String(retryErr)}`);
-          }
-        } else {
-          timing.qa.deferred = true;
-          qaState = "pending";
-          console.log(`upload-resume: ${docId} page ${pn} flagged ${issues.length} structural issue(s); no time left in this invocation, QA retry deferred to the next`);
-        }
+        timing.qa.skipped = "no_measured_benefit";
+        console.log(`upload-resume: ${docId} page ${pn} flagged ${issues.length} structural issue(s), recorded; no retry — ${issues.join(" | ")}`);
       }
 
       const { error: ckErr } = await supabase.from("resume_extraction_pages")
-        .upsert({ resume_document_id: docId, page_number: pn, extraction, ocr_text: ocrText, qa_retry: qaState, timing }, { onConflict: "resume_document_id,page_number" });
+        .upsert({ resume_document_id: docId, page_number: pn, extraction, ocr_text: ocrText, qa_retry: "not_needed", timing }, { onConflict: "resume_document_id,page_number" });
       if (ckErr) return await fail(500, { error: "checkpoint_failed", detail: ckErr.message, page: pn });
-      rows.set(pn, { page_number: pn, extraction, ocr_text: ocrText, qa_retry: qaState, timing });
+      rows.set(pn, { page_number: pn, extraction, ocr_text: ocrText, qa_retry: "not_needed", timing });
       if (pn === 1 && typeof d.page_count === "number" && d.page_count > 0) pageCount = d.page_count;
       await supabase.from("resume_documents").update({
         extraction_progress_at: new Date().toISOString(), extraction_stalls: 0,
         ...(pn === 1 && pageCount ? { extraction_page_count: pageCount } : {}),
       }).eq("id", docId);
       pageCosts.push(pageMs);
-      console.log(`upload-resume: ${docId} page ${pn}/${pageCount ?? "?"} checkpointed — ${pageMs} ms in ${outcome.attempts.length} attempt(s), ${pageCalls} relay call(s) (${relayCalls} this invocation), routing=${timing.routing}, qa=${qaState}`);
-      if (qaState === "pending") return await continueResponse();
+      console.log(`upload-resume: ${docId} page ${pn}/${pageCount ?? "?"} checkpointed — ${pageMs} ms in ${outcome.attempts.length} attempt(s), ${pageCalls} relay call(s) (${relayCalls} this invocation), routing=${timing.routing}`);
     }
   } catch (e) {
     // The invocation's own time budget ran out mid-page (or a call could not be completed). Everything already
@@ -1577,10 +1511,10 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
     return await continueResponse();
   }
 
-  // 3. Every page is checkpointed and none has a QA retry outstanding: merge and finalize.
+  // 2. Every page is checkpointed: merge and finalize.
   const total = Math.min(pageCount ?? 1, MAX_PDF_PAGES);
   const ordered = [...rows.values()].sort((a, b) => a.page_number - b.page_number);
-  if (ordered.length < total || ordered.some((r) => r.qa_retry === "pending")) return await continueResponse();
+  if (ordered.length < total) return await continueResponse();
 
   const merged = dedupePositions(mergeExtractions(ordered.map((r) => ({ pageNumber: r.page_number, extraction: r.extraction }))));
   // OCR text per page, in page order, with a marker so a person or a future tool can tell where a stretch came
