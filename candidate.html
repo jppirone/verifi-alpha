@@ -8940,7 +8940,9 @@ class Component extends DCLogic {
     // column proves success differs by product — license_subscription_started_at for license
     // tracking, accountTier for the resume Pro upgrade — see test-stripe-webhook's own header on why
     // those are two separate columns, not one repurposed for both.
-    this.setState({ checkoutPending: true });
+    // Already on the Subscription tab while the webhook is being waited on (up to ~25 s of retries below), not on the
+    // Profile Info that a fresh mount defaults to; the final patch below still picks the definitive landing tab.
+    this.setState({ checkoutPending: true, ...(!isLicenseFlow && !fromSignupTiers && this.state.screen === 'account' ? { accountTab: 'subscription' } : {}) });
     const alreadyConfirmed = () => isLicenseFlow ? !!this.state.licenseSubscriptionStartedAt : this.state.accountTier === 'paid';
     let confirmed = alreadyConfirmed();
     for (let i = 0; !confirmed && i < 8; i++) {
