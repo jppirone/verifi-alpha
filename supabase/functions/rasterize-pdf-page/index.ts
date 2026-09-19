@@ -914,91 +914,107 @@ function extractJsonFromClaudeResponse(claudeData: any): { parsed: unknown; pars
 // vision, Haiku for OCR text) for consistency; temperature:0 on the Haiku variant for the same reason
 // step 2's Haiku call already runs at temperature:0 (see that function's own comment) — Sonnet still
 // rejects the parameter outright under adaptive thinking, unchanged from step 2's existing constraint.
-async function runBoundaryDetectionVision(pngBase64: string, previousPageContext?: TrailingItemContext | null): Promise<BoundaryResult> {
-  if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not configured");
-  const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: VISION_MODEL,
-      max_tokens: 2048,
-      messages: [{
-        role: "user",
-        content: [
-          { type: "image", source: { type: "base64", media_type: "image/png", data: pngBase64 } },
-          { type: "text", text: buildBoundaryDetectionPromptVision(previousPageContext) },
-        ],
-      }],
-    }),
-  });
+// Every Anthropic call goes through here so each one is timed and bounded. The bound is real, not cosmetic:
+// before this, a stalled model call had no ceiling of its own and simply ran into the platform's ~150 s kill,
+// taking the whole page (and, for a caller that awaits sequentially, the whole upload) with it. The per-call
+// numbers are returned to the caller in the page response (model_calls) so where a page's time actually went is
+// recorded, not inferred.
+type CallStat = { step: string; model: string; ms: number; input_tokens?: number; output_tokens?: number; stop_reason?: string; thinking_blocks?: number; error?: string };
+const BOUNDARY_CALL_TIMEOUT_MS = 45_000; // step 1 is a small-output call (2-12 s measured); a failure here degrades to the fallback, so fail fast
+const EXTRACTION_CALL_TIMEOUT_MS = 100_000; // 30-47 s measured on Sonnet vision; leaves room inside the ~150 s platform limit
+
+async function anthropicMessages(step: string, payload: Record<string, unknown>, timeoutMs: number, stats?: CallStat[]): Promise<any> {
+  const start = Date.now();
+  const model = String(payload.model);
+  let claudeRes: Response;
+  try {
+    claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": ANTHROPIC_API_KEY!, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (e) {
+    const timedOut = (e as { name?: string })?.name === "TimeoutError";
+    stats?.push({ step, model, ms: Date.now() - start, error: timedOut ? "timeout" : "network" });
+    throw new Error(timedOut ? `claude_call_timeout (${step} after ${timeoutMs}ms)` : `claude_call_unreachable (${step}): ${String(e)}`);
+  }
   if (!claudeRes.ok) {
     const detail = await claudeRes.text().catch(() => "");
+    stats?.push({ step, model, ms: Date.now() - start, error: `http_${claudeRes.status}` });
     throw new Error(`claude_call_failed (${claudeRes.status}): ${detail.slice(0, 500)}`);
   }
-  const claudeData = await claudeRes.json();
+  let claudeData: any;
+  try {
+    claudeData = await claudeRes.json();
+  } catch (e) {
+    // The body stream is covered by the same signal: a response that starts and then stalls lands here.
+    stats?.push({ step, model, ms: Date.now() - start, error: "body_timeout_or_malformed" });
+    throw new Error(`claude_call_body_failed (${step}): ${String(e)}`);
+  }
+  stats?.push({
+    step, model, ms: Date.now() - start,
+    input_tokens: claudeData?.usage?.input_tokens, output_tokens: claudeData?.usage?.output_tokens, stop_reason: claudeData?.stop_reason,
+    thinking_blocks: (claudeData?.content ?? []).filter((b: { type?: string }) => b.type === "thinking" || b.type === "redacted_thinking").length,
+  });
+  return claudeData;
+}
+
+async function runBoundaryDetectionVision(pngBase64: string, previousPageContext?: TrailingItemContext | null, stats?: CallStat[]): Promise<BoundaryResult> {
+  if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not configured");
+  const claudeData = await anthropicMessages("boundary_vision", {
+    model: VISION_MODEL,
+    max_tokens: 2048,
+    messages: [{
+      role: "user",
+      content: [
+        { type: "image", source: { type: "base64", media_type: "image/png", data: pngBase64 } },
+        { type: "text", text: buildBoundaryDetectionPromptVision(previousPageContext) },
+      ],
+    }],
+  }, BOUNDARY_CALL_TIMEOUT_MS, stats);
   const { parsed, parseError, rawText } = extractJsonFromClaudeResponse(claudeData);
   if (parseError) throw new Error(`malformed_boundary_vision_response: ${rawText.slice(0, 500)}`);
   if (!isValidBoundaryResult(parsed)) throw new Error("boundary_vision_response_wrong_shape");
   return parsed;
 }
 
-async function runBoundaryDetectionHaiku(ocrText: string, previousPageContext?: TrailingItemContext | null): Promise<BoundaryResult> {
+async function runBoundaryDetectionHaiku(ocrText: string, previousPageContext?: TrailingItemContext | null, stats?: CallStat[]): Promise<BoundaryResult> {
   if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not configured");
-  const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: HAIKU_MODEL,
-      max_tokens: 1024,
-      temperature: 0,
-      messages: [{ role: "user", content: buildBoundaryDetectionPromptText(ocrText, previousPageContext) }],
-    }),
-  });
-  if (!claudeRes.ok) {
-    const detail = await claudeRes.text().catch(() => "");
-    throw new Error(`claude_call_failed (${claudeRes.status}): ${detail.slice(0, 500)}`);
-  }
-  const claudeData = await claudeRes.json();
+  const claudeData = await anthropicMessages("boundary_haiku", {
+    model: HAIKU_MODEL,
+    max_tokens: 1024,
+    temperature: 0,
+    messages: [{ role: "user", content: buildBoundaryDetectionPromptText(ocrText, previousPageContext) }],
+  }, BOUNDARY_CALL_TIMEOUT_MS, stats);
   const { parsed, parseError, rawText } = extractJsonFromClaudeResponse(claudeData);
   if (parseError) throw new Error(`malformed_boundary_haiku_response: ${rawText.slice(0, 500)}`);
   if (!isValidBoundaryResult(parsed)) throw new Error("boundary_haiku_response_wrong_shape");
   return parsed;
 }
 
-async function runVisionExtraction(pngBase64: string, previousPageContext?: TrailingItemContext | null, sectionBoundaries?: BoundaryResult | null): Promise<ExtractionResult> {
+async function runVisionExtraction(pngBase64: string, previousPageContext?: TrailingItemContext | null, sectionBoundaries?: BoundaryResult | null, stats?: CallStat[]): Promise<ExtractionResult> {
   if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not configured");
-  const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: VISION_MODEL,
-      max_tokens: 16000, // 8192 truncated real runs earlier tonight; 16000 didn't
-      messages: [{
-        role: "user",
-        content: [
-          { type: "image", source: { type: "base64", media_type: "image/png", data: pngBase64 } },
-          { type: "text", text: buildVisionExtractionPrompt(previousPageContext, sectionBoundaries) },
-        ],
-      }],
-    }),
-  });
-  if (!claudeRes.ok) {
-    const detail = await claudeRes.text().catch(() => "");
-    throw new Error(`claude_call_failed (${claudeRes.status}): ${detail.slice(0, 500)}`);
-  }
-  const claudeData = await claudeRes.json();
+  const claudeData = await anthropicMessages("extraction_vision", {
+    model: VISION_MODEL,
+    max_tokens: 16000, // 8192 truncated real runs earlier tonight; 16000 didn't
+    messages: [{
+      role: "user",
+      content: [
+        { type: "image", source: { type: "base64", media_type: "image/png", data: pngBase64 } },
+        { type: "text", text: buildVisionExtractionPrompt(previousPageContext, sectionBoundaries) },
+      ],
+    }],
+  }, EXTRACTION_CALL_TIMEOUT_MS, stats);
   const { parsed, parseError, rawText } = extractJsonFromClaudeResponse(claudeData);
   if (parseError) throw new Error(`malformed_vision_response: ${rawText.slice(0, 500)}`);
   if (!isValidExtraction(parsed)) throw new Error("vision_response_wrong_shape");
   return parsed;
 }
 
-async function runHaikuExtraction(ocrText: string, previousPageContext?: TrailingItemContext | null, sectionBoundaries?: BoundaryResult | null): Promise<ExtractionResult> {
+async function runHaikuExtraction(ocrText: string, previousPageContext?: TrailingItemContext | null, sectionBoundaries?: BoundaryResult | null, stats?: CallStat[]): Promise<ExtractionResult> {
   if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not configured");
-  const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
-    body: JSON.stringify({
+  const claudeData = await anthropicMessages("extraction_haiku", {
       model: HAIKU_MODEL,
       max_tokens: 4096,
       // Non-determinism diagnostic (2026-09-17): a direct 58-call probe (15x per page x 4 pages,
@@ -1013,13 +1029,7 @@ async function runHaikuExtraction(ocrText: string, previousPageContext?: Trailin
       // guaranteed fix -- Claude models don't guarantee bit-identical output at temperature 0 either.
       temperature: 0,
       messages: [{ role: "user", content: buildOcrExtractionPrompt(ocrText, previousPageContext, sectionBoundaries) }],
-    }),
-  });
-  if (!claudeRes.ok) {
-    const detail = await claudeRes.text().catch(() => "");
-    throw new Error(`claude_call_failed (${claudeRes.status}): ${detail.slice(0, 500)}`);
-  }
-  const claudeData = await claudeRes.json();
+  }, EXTRACTION_CALL_TIMEOUT_MS, stats);
   const { parsed, parseError, rawText } = extractJsonFromClaudeResponse(claudeData);
   if (parseError) throw new Error(`malformed_haiku_response: ${rawText.slice(0, 500)}`);
   if (!isValidExtraction(parsed)) throw new Error("haiku_response_wrong_shape");
@@ -1161,6 +1171,8 @@ export default {
           ? previous_page_context as TrailingItemContext
           : null;
 
+      const handlerStart = Date.now();
+      const modelCalls: CallStat[] = []; // one entry per Anthropic call this page made (timing/tokens/stop reason)
       const fetchStart = Date.now();
       const fileRes = await fetch(
         `${SUPABASE_URL}/storage/v1/object/${BUCKET}/${storage_path}`,
@@ -1320,13 +1332,13 @@ export default {
       if (useVision) {
         try {
           const boundaryStart = Date.now();
-          sectionBoundaries = resolveContinuationCategory(await runBoundaryDetectionVision(bytesToB64(pngBytes), trailingContext), trailingContext);
+          sectionBoundaries = resolveContinuationCategory(await runBoundaryDetectionVision(bytesToB64(pngBytes), trailingContext, modelCalls), trailingContext);
           boundaryMs = Date.now() - boundaryStart;
         } catch (boundaryErr) {
           console.log(`rasterize-pdf-page: boundary detection failed, falling back to shape-based classification for this page — ${String(boundaryErr)}`);
         }
         const visionStart = Date.now();
-        extraction = await runVisionExtraction(bytesToB64(pngBytes), trailingContext, sectionBoundaries);
+        extraction = await runVisionExtraction(bytesToB64(pngBytes), trailingContext, sectionBoundaries, modelCalls);
         extractionMs = Date.now() - visionStart;
       } else {
         const ocrStart = Date.now();
@@ -1336,13 +1348,13 @@ export default {
         ocrMs = Date.now() - ocrStart;
         try {
           const boundaryStart = Date.now();
-          sectionBoundaries = resolveContinuationCategory(await runBoundaryDetectionHaiku(ocrText, trailingContext), trailingContext);
+          sectionBoundaries = resolveContinuationCategory(await runBoundaryDetectionHaiku(ocrText, trailingContext, modelCalls), trailingContext);
           boundaryMs = Date.now() - boundaryStart;
         } catch (boundaryErr) {
           console.log(`rasterize-pdf-page: boundary detection failed, falling back to shape-based classification for this page — ${String(boundaryErr)}`);
         }
         const haikuStart = Date.now();
-        extraction = await runHaikuExtraction(ocrText, trailingContext, sectionBoundaries);
+        extraction = await runHaikuExtraction(ocrText, trailingContext, sectionBoundaries, modelCalls);
         extractionMs = Date.now() - haikuStart;
       }
 
@@ -1366,7 +1378,8 @@ export default {
         extraction,
         section_boundaries: sectionBoundaries,
         ocr_raw_text: ocrText,
-        timing_ms: { fetch: fetchMs, import: importMs, open: openMs, render: renderMs, ocr: ocrMs, boundary: boundaryMs, extraction: extractionMs },
+        timing_ms: { fetch: fetchMs, import: importMs, open: openMs, render: renderMs, ocr: ocrMs, boundary: boundaryMs, extraction: extractionMs, total: Date.now() - handlerStart },
+        model_calls: modelCalls,
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: "unhandled", detail: String(e) }), {
