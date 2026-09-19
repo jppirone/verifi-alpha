@@ -2277,6 +2277,17 @@ const __ds_scope = {};
   </div>
   </sc-if>
 
+  <sc-if value="{{ isPaymentReturn }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:440px;margin:0 auto;padding-top:72px;display:flex;flex-direction:column;gap:var(--space-4)">
+    <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3)">
+      <div class="card-kicker">{{ paymentReturnKicker }}</div>
+      <div style="font-size:17px;line-height:1.5">{{ paymentReturnTitle }}</div>
+      <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">{{ paymentReturnBody }}</div>
+      <button type="button" class="btn btn-primary" style="align-self:flex-start" sc-camel-on-click="{{ startOver }}">Back to lookup</button>
+    </div>
+  </div>
+  </sc-if>
+
   <sc-if value="{{ isSigninSent }}" hint-placeholder-val="{{ false }}">
   <div style="max-width:440px;margin:0 auto;padding-top:72px;display:flex;flex-direction:column;gap:var(--space-4)">
     <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3)">
@@ -2393,6 +2404,51 @@ const __ds_scope = {};
         <sc-if value="{{ acctIsPlainMember }}" hint-placeholder-val="{{ false }}">
           <button type="button" class="btn btn-ghost" style="align-self:flex-start;font-size:12px" disabled="{{ acctBusy }}" sc-camel-on-click="{{ leaveOrg }}">Leave this organization</button>
         </sc-if>
+      </div>
+
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+        <div class="card-kicker">Billing</div>
+        <sc-if value="{{ billingNotice }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:13px;color:var(--color-accent-300);line-height:1.6">{{ billingNotice }}</div>
+        </sc-if>
+        <sc-if value="{{ billingError }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:13px;color:#e2735c;line-height:1.6">{{ billingError }}</div>
+        </sc-if>
+        <sc-if value="{{ billingNoSub }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:14px">No active subscription.</div>
+          <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">{{ billingPriceLine }}</div>
+          <sc-if value="{{ acctIsOwner }}" hint-placeholder-val="{{ false }}">
+            <button type="button" class="btn btn-primary" style="align-self:flex-start" disabled="{{ billingBusy }}" sc-camel-on-click="{{ startSubscription }}">Start subscription</button>
+          </sc-if>
+          <sc-if value="{{ acctIsPlainMember }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Only the organization's owner can start a subscription.</div>
+          </sc-if>
+        </sc-if>
+        <sc-if value="{{ billingHasSub }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:14px">{{ billingStatusLine }}</div>
+          <div style="font-size:13px;color:var(--color-neutral-300)">{{ billingUsageLine }}</div>
+          <sc-if value="{{ acctIsOwner }}" hint-placeholder-val="{{ false }}">
+            <sc-if value="{{ billingIsLive }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+                <button type="button" class="btn btn-secondary" disabled="{{ billingBusy }}" sc-camel-on-click="{{ openBillingPortal }}">Change payment method</button>
+                <sc-if value="{{ billingCancelPending }}" hint-placeholder-val="{{ false }}">
+                  <button type="button" class="btn btn-secondary" disabled="{{ billingBusy }}" sc-camel-on-click="{{ resumeSubscription }}">Keep the subscription</button>
+                </sc-if>
+                <sc-if value="{{ billingCanCancel }}" hint-placeholder-val="{{ true }}">
+                  <button type="button" class="btn btn-ghost" disabled="{{ billingBusy }}" sc-camel-on-click="{{ cancelAtPeriodEnd }}">Cancel at the end of the period</button>
+                </sc-if>
+                <button type="button" class="btn btn-ghost" style="font-size:12px" disabled="{{ billingBusy }}" sc-camel-on-click="{{ cancelNow }}">Cancel now</button>
+              </div>
+            </sc-if>
+            <sc-if value="{{ billingIsEnded }}" hint-placeholder-val="{{ false }}">
+              <button type="button" class="btn btn-primary" style="align-self:flex-start" disabled="{{ billingBusy }}" sc-camel-on-click="{{ startSubscription }}">Start a new subscription</button>
+            </sc-if>
+          </sc-if>
+          <sc-if value="{{ acctIsPlainMember }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Everyone in the organization shares these lookups. Only the owner can change or cancel billing.</div>
+          </sc-if>
+        </sc-if>
+        <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Placeholder pricing and quota: nothing here has been sized against real usage yet. Payment is taken on Stripe's own page; card details never touch this site.</div>
       </div>
 
       <sc-if value="{{ acctIsOwner }}" hint-placeholder-val="{{ false }}">
@@ -3257,7 +3313,11 @@ class Component extends DCLogic {
     // succeeds simply replaces the session.
     let stored = null;
     try { stored = localStorage.getItem(this.EMP_TOKEN_KEY); } catch (e) { stored = null; }
-    if (stored && !token) { this.setState({ realToken: stored }, () => this.loadReal()); }
+    let billingReturn = '', paymentReturn = '';
+    try { const q = new URLSearchParams(window.location.search); billingReturn = q.get('billing') || ''; paymentReturn = q.get('payment') || ''; } catch (e) { /* ignore */ }
+    if (billingReturn || paymentReturn) { try { window.history.replaceState(null, '', window.location.pathname); } catch (e) { /* not critical */ } }
+    if (paymentReturn) this.setState({ screen: 'paymentReturn', paymentReturnKind: paymentReturn });
+    if (stored && !token) { this.setState({ realToken: stored }, async () => { await this.loadReal(); if (billingReturn && !paymentReturn) this.afterBillingReturn(billingReturn); }); }
     if (loginToken) {
       try { window.history.replaceState(null, '', window.location.pathname); } catch (e) { /* not critical */ }
       this.confirmEmployerLogin(loginToken);
@@ -3333,7 +3393,7 @@ class Component extends DCLogic {
 
   realBlank() {
     return {
-      realToken: null, real: null, realMembers: [], realOrgInvites: [],
+      realToken: null, real: null, realMembers: [], realOrgInvites: [], billing: null, billingBusy: false, billingNote: null, billingErr: null,
       signinEmail: '', signinName: '', signinBusy: false, signinErr: null, signinProblem: null, signinSentTo: '',
       acctNameDraft: '', orgNameDraft: '', newOrgNameDraft: '', inviteEmailDraft: '', acctNotice: null, acctErr: null, acctBusy: false,
     };
@@ -3368,11 +3428,52 @@ class Component extends DCLogic {
       const lm = await this.empCall('list_members');
       if (lm.data.ok) { members = lm.data.members || []; invites = lm.data.pending_invites || []; }
     }
+    let billing = null;
+    if (me.data.org) { const bs = await this.empCall('billing_status'); if (bs.data.ok) billing = bs.data; }
     this.setState({
-      real: me.data, realMembers: members, realOrgInvites: invites,
+      real: me.data, realMembers: members, realOrgInvites: invites, billing: billing,
       acctNameDraft: (me.data.user && me.data.user.name) || '', orgNameDraft: (me.data.org && me.data.org.name) || '',
     });
     return true;
+  }
+
+  // ----- billing (owner-only actions are enforced by the gateway; the buttons are only hidden here) -----
+  async billingAct(action, params, opts) {
+    if (this.state.billingBusy) return;
+    this.setState({ billingBusy: true, billingNote: null, billingErr: null });
+    const r = await this.empCall(action, params);
+    if (r.status === 401) { this.setState({ billingBusy: false }); return; }
+    if (!r.data || !r.data.ok) {
+      const code = r.data && r.data.error;
+      this.setState({ billingBusy: false, billingErr: code === 'forbidden' ? "Only the organization's owner can do that." : code === 'already_subscribed' ? 'This organization already has a subscription.' : "That didn't work. Please try again." });
+      await this.loadReal();
+      return;
+    }
+    if (r.data.url) { window.location.href = r.data.url; return; } // Stripe's own hosted page
+    // Cancel / resume only ASK Stripe; wait for the verified webhook to change the state before saying it happened.
+    this.setState({ billingNote: 'Confirming with Stripe…' });
+    const done = await this.pollBilling(opts && opts.until);
+    this.setState({ billingBusy: false, billingNote: done ? (opts && opts.done) || null : "Stripe hasn't confirmed yet. Check back in a moment." });
+  }
+
+  async pollBilling(until) {
+    for (let i = 0; i < 12; i++) {
+      await this.loadReal();
+      if (!until || until(this.state.billing)) return true;
+      await new Promise(r => setTimeout(r, 2000));
+    }
+    return false;
+  }
+
+  async afterBillingReturn(kind) {
+    this.setState({ screen: 'acct', billingNote: kind === 'success' ? 'Confirming your subscription with Stripe…' : null, billingErr: null });
+    if (kind === 'success') {
+      const done = await this.pollBilling(b => !!(b && b.subscription && b.subscription.live));
+      this.setState({ billingNote: done ? 'Subscription active.' : "Stripe hasn't confirmed it yet. Check back in a moment." });
+    } else {
+      await this.loadReal();
+      this.setState({ billingNote: kind === 'cancel' ? 'No subscription was started.' : null });
+    }
   }
 
   async submitSignin() {
@@ -3542,6 +3643,38 @@ class Component extends DCLogic {
     const statusLabel = s.response === 'approved' ? 'Approved'
       : (s.response === 'pending' ? 'Awaiting candidate response' : 'Closed, not authorized');
     return {
+      isPaymentReturn: s.screen === 'paymentReturn',
+      paymentReturnKicker: s.paymentReturnKind === 'success' ? 'Payment submitted' : 'No payment made',
+      paymentReturnTitle: s.paymentReturnKind === 'success' ? 'Thank you.' : 'Nothing was charged.',
+      paymentReturnBody: s.paymentReturnKind === 'success'
+        ? 'Stripe confirms the payment to us directly, and a receipt is emailed to the address you paid with once it does. You can close this page.'
+        : 'You left the payment page without paying. Start again whenever you are ready.',
+      billingNotice: s.billingNote, billingError: s.billingErr, billingBusy: s.billingBusy,
+      billingNoSub: !!s.billing && !s.billing.subscription,
+      billingHasSub: !!(s.billing && s.billing.subscription),
+      billingIsLive: !!(s.billing && s.billing.subscription && s.billing.subscription.live),
+      billingIsEnded: !!(s.billing && s.billing.subscription && !s.billing.subscription.live),
+      billingCancelPending: !!(s.billing && s.billing.subscription && s.billing.subscription.cancel_at_period_end),
+      billingCanCancel: !(s.billing && s.billing.subscription && s.billing.subscription.cancel_at_period_end),
+      billingPriceLine: s.billing && s.billing.pricing ? ('$' + (s.billing.pricing.amount_cents / 100).toFixed(2) + ' per month, including ' + s.billing.pricing.included_lookups + ' comparison lookups per billing period, shared by everyone in the organization. When the lookups are used up, no more are available until the next period.') : '',
+      billingStatusLine: (() => {
+        const b = s.billing && s.billing.subscription;
+        if (!b) return '';
+        const d = b.current_period_end ? new Date(b.current_period_end).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+        if (!b.live) return 'Subscription canceled' + (b.canceled_at ? ' on ' + new Date(b.canceled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '') + '.';
+        if (b.status === 'past_due' || b.status === 'unpaid') return 'Payment problem: the last payment failed. Update the payment method.';
+        return b.cancel_at_period_end ? 'Active. Cancellation is scheduled: it ends ' + d + '.' : 'Active. Renews ' + d + '.';
+      })(),
+      billingUsageLine: (() => {
+        const b = s.billing && s.billing.subscription;
+        if (!b || !b.live) return '';
+        return b.used + ' of ' + b.included_lookups + ' lookups used this period (' + b.remaining + ' left).';
+      })(),
+      startSubscription: () => this.billingAct('start_subscription'),
+      openBillingPortal: () => this.billingAct('billing_portal'),
+      cancelAtPeriodEnd: () => { if (window.confirm('Cancel at the end of the current period? The organization keeps its remaining lookups until then.')) this.billingAct('cancel_subscription', { when: 'period_end' }, { until: b => !!(b && b.subscription && b.subscription.cancel_at_period_end), done: 'Cancellation scheduled.' }); },
+      cancelNow: () => { if (window.confirm('Cancel immediately? The organization loses its remaining lookups right away and nothing is refunded.')) this.billingAct('cancel_subscription', { when: 'now' }, { until: b => !!(b && b.subscription && !b.subscription.live), done: 'Subscription canceled.' }); },
+      resumeSubscription: () => this.billingAct('resume_subscription', {}, { until: b => !!(b && b.subscription && !b.subscription.cancel_at_period_end), done: 'The subscription will continue.' }),
       isSignin: s.screen === 'signin',
       isSigninSent: s.screen === 'signinSent',
       isSigninChecking: s.screen === 'signinChecking',
