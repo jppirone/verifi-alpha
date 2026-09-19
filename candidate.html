@@ -3560,7 +3560,7 @@ a:hover{color:var(--color-accent)}
 
   <div class="tabbar-desktop" style="width:100vw;margin-left:calc(50% - 50vw);margin-bottom:var(--space-6)">
     <div style="display:flex;gap:var(--space-2);border-bottom:1px solid var(--color-divider);flex-wrap:nowrap;overflow-x:auto;max-width:1040px;margin:0 auto;padding:0 20px">
-    <button type="button" id="tab-profile" class="btn {{ tabProfileClass }}" sc-camel-on-click="{{ selectTabProfile }}">Profile Info</button>
+    <button type="button" id="tab-profile" class="btn {{ tabProfileClass }}" sc-camel-on-click="{{ selectTabProfile }}">{{ profileTabLabel }}</button>
     <button type="button" id="tab-verification" class="btn {{ tabVerificationClass }}" sc-camel-on-click="{{ selectTabVerification }}">{{ verificationTabLabel }}</button>
     <!-- Item 11 (2026-09-13 live-testing session): Content Manager/Customization/Views/Sharing/
          Activity all assume resume-derived content — see isFullResumeAccount's own comment. -->
@@ -3571,10 +3571,8 @@ a:hover{color:var(--color-accent)}
     <button type="button" id="tab-sharing" class="btn {{ tabSharingClass }}" sc-camel-on-click="{{ selectTabSharing }}">Sharing</button>
     </sc-if>
     <button type="button" id="tab-subscription" class="btn {{ tabSubscriptionClass }}" sc-camel-on-click="{{ selectTabSubscription }}">Subscription</button>
-    <sc-if value="{{ isFullResumeAccount }}" hint-placeholder-val="{{ true }}">
     <button type="button" id="tab-activity" class="btn {{ tabActivityClass }}" sc-camel-on-click="{{ selectTabActivity }}">Activity</button>
-    </sc-if>
-    <button type="button" id="tab-deactivation" class="btn {{ tabDeactivationClass }}" sc-camel-on-click="{{ selectTabDeactivation }}">Account Deactivation</button>
+    <button type="button" id="tab-deactivation" class="btn {{ tabDeactivationClass }}" sc-camel-on-click="{{ selectTabDeactivation }}">{{ deactivationTabLabel }}</button>
     </div>
   </div>
 
@@ -3635,9 +3633,15 @@ a:hover{color:var(--color-accent)}
           <!-- Item A (2026-09-08 regression session): the DEV-ONLY test-scenario panel that used to
                sit here (four buttons resetting contact state to hardcoded fake scenarios) is gone —
                removed entirely, not left dormant. See seedContactFromAccount's own header. -->
+          <sc-if value="{{ isFullResumeAccount }}" hint-placeholder-val="{{ true }}">
           <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Two separate things live here: the values printed on your resume and delivered to partners, and the values we have independently verified. They do not have to match. A verified value is only ever sent if you put it in a printed field yourself.</div>
+          </sc-if>
+          <sc-if value="{{ isLicenseOnlyAccount }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">The email address you log in with, and a phone number you can confirm with a code. We use these to reach you about your licenses.</div>
+          </sc-if>
 
           <div style="display:flex;flex-direction:column;gap:var(--space-3)">
+            <sc-if value="{{ isFullResumeAccount }}" hint-placeholder-val="{{ true }}">
             <div class="field" style="max-width:280px">
               <label for="pf-printed-phone">Printed Number</label>
               <input class="input" id="pf-printed-phone" placeholder="+1 (___) ___-____" value="{{ printedPhone }}" sc-camel-on-change="{{ setPrintedPhone }}">
@@ -3658,12 +3662,13 @@ a:hover{color:var(--color-accent)}
                  real resume-contact-extraction was never built (see seedContactFromAccount's own
                  header); this now genuinely pre-fills from your account, so the copy says that. -->
             <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Pre-filled once from your account. Editable at any time, with no re-verification required.</div>
+            </sc-if>
 
             <div class="field" style="max-width:280px">
-              <label for="pf-phone">Verified Number</label>
+              <label for="pf-phone">{{ verifiedPhoneLabel }}</label>
               <input class="input" id="pf-phone" placeholder="+1 (___) ___-____" value="{{ verifiedPhoneEntry }}" sc-camel-on-change="{{ setVerifiedPhoneEntry }}">
             </div>
-            <sc-if value="{{ verifiedPhoneEdited }}" hint-placeholder-val="{{ false }}">
+            <sc-if value="{{ verifiedPhoneEditedFullResume }}" hint-placeholder-val="{{ false }}">
               <div style="font-size:12px;color:var(--color-accent-300);line-height:1.6">This number will not be printed or delivered if a Printed Number is present above. Downstream partners will still be told a verified number is on file, without disclosing what it is.</div>
             </sc-if>
             <div style="display:flex;align-items:center;gap:var(--space-3)">
@@ -3685,6 +3690,7 @@ a:hover{color:var(--color-accent)}
             </sc-if>
             <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Pre-filled from your account, if a number is on file. Typing a number here never makes it verified: send a code and confirm it first.</div>
 
+            <sc-if value="{{ isFullResumeAccount }}" hint-placeholder-val="{{ true }}">
             <div style="display:flex;flex-direction:column;gap:6px;padding:var(--space-3);border:1px solid var(--color-neutral-800);border-radius:var(--radius-md)">
               <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">What partners receive, phone</div>
               <sc-if value="{{ phoneDeliveryVerified }}" hint-placeholder-val="{{ false }}">
@@ -3702,9 +3708,11 @@ a:hover{color:var(--color-accent)}
                 <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">No number is sent. Clearing the printed field is never read as permission to send your verified number instead.</div>
               </sc-if>
             </div>
+            </sc-if>
           </div>
 
           <div style="display:flex;flex-direction:column;gap:var(--space-3)">
+            <sc-if value="{{ isFullResumeAccount }}" hint-placeholder-val="{{ true }}">
             <div class="field" style="max-width:320px">
               <label for="pf-printed-email">Printed Email</label>
               <input class="input" id="pf-printed-email" placeholder="you@email.com" value="{{ printedEmail }}" sc-camel-on-change="{{ setPrintedEmail }}">
@@ -3723,13 +3731,15 @@ a:hover{color:var(--color-accent)}
                 </div>
               </div>
             </sc-if>
+            </sc-if>
 
             <div class="field" style="max-width:320px">
-              <label for="pf-verified-email">Verified Email</label>
+              <label for="pf-verified-email">{{ verifiedEmailLabel }}</label>
               <input class="input" id="pf-verified-email" value="{{ accountEmail }}" readonly="readonly" disabled="disabled">
             </div>
             <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Your login email, confirmed when you created the account. It cannot be edited here: <a href="#" sc-camel-on-click="{{ noop }}">change your login email</a> through the protected flow above.</div>
 
+            <sc-if value="{{ isFullResumeAccount }}" hint-placeholder-val="{{ true }}">
             <div style="display:flex;flex-direction:column;gap:6px;padding:var(--space-3);border:1px solid var(--color-neutral-800);border-radius:var(--radius-md)">
               <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">What partners receive, email</div>
               <sc-if value="{{ emailDeliveryVerified }}" hint-placeholder-val="{{ false }}">
@@ -3744,8 +3754,30 @@ a:hover{color:var(--color-accent)}
                 <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">No address is sent. Clearing the printed field is never read as permission to send your account email instead.</div>
               </sc-if>
             </div>
+            </sc-if>
           </div>
         </div>
+
+        <sc-if value="{{ isLicenseOnlyAccount }}" hint-placeholder-val="{{ false }}">
+        <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+          <div class="card-kicker">Employer lookups</div>
+          <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;color:var(--color-neutral-300);cursor:pointer">
+            <input type="checkbox" checked="{{ discoverable }}" disabled="{{ discoverableProfileDisabled }}" sc-camel-on-change="{{ toggleDiscoverableProfile }}" style="margin-top:2px">
+            <span>Let employers confirm I have an account here</span>
+          </label>
+          <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Employers can run a free existence-only check. Leaving this unchecked means any such check returns "no record," identical to what's shown for someone not in our system at all.</div>
+          <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6;border-top:1px solid var(--color-divider);padding-top:var(--space-3)">When enabled, an employer who already has your name and either the email address or the phone number you signed up with can confirm that you have an account here, and nothing else about you. The name has to match too. Deactivating your account also turns this off. Each time an employer confirms a lookup that matches you, it is listed on your Activity tab.</div>
+          <sc-if value="{{ discoverableProfileLoadFailed }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">We couldn't load your saved choice, so this is locked rather than showing a guess. Refresh the page to try again.</div>
+          </sc-if>
+          <sc-if value="{{ discoverableProfileError }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:#e2735c">{{ discoverableProfileError }}</div>
+          </sc-if>
+          <sc-if value="{{ discoverableProfileSaved }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:var(--color-accent-300)">Saved.</div>
+          </sc-if>
+        </div>
+        </sc-if>
 
         <!-- Item 6 (2026-09-12 live-testing session, follow-up build): the one real, explicit
              all-or-nothing choice for what header (name/contact/location) renders on generated
@@ -3780,7 +3812,7 @@ a:hover{color:var(--color-accent)}
         </div>
         </sc-if>
 
-        <sc-if value="{{ showCrossValidationPrompt }}" hint-placeholder-val="{{ false }}">
+        <sc-if value="{{ showCrossValidationPromptFullResume }}" hint-placeholder-val="{{ false }}">
           <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
             <div class="card-kicker">Confirm both channels</div>
             <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">Now that your phone number is confirmed, you can cross-validate it with your email in one step: a code sent to your email confirms your phone number, and a code sent via SMS confirms your email address, proving you control both. Optional here; it will only be required later, right before enabling a downstream feed on the Sharing tab.</div>
@@ -3790,7 +3822,7 @@ a:hover{color:var(--color-accent)}
             </div>
           </div>
         </sc-if>
-        <sc-if value="{{ crossValidationDone }}" hint-placeholder-val="{{ false }}">
+        <sc-if value="{{ crossValidationDoneFullResume }}" hint-placeholder-val="{{ false }}">
           <div style="font-size:12px;color:var(--color-neutral-500);display:flex;align-items:center;gap:8px"><span class="tag tag-accent">Cross-validated</span> Email and phone confirmed to belong to the same person.</div>
         </sc-if>
 
@@ -3827,7 +3859,10 @@ a:hover{color:var(--color-accent)}
           <sc-if value="{{ kycVerified }}" hint-placeholder-val="{{ false }}">
             <div style="font-size:12px;color:var(--color-neutral-500)">Reverifying will direct you to complete the entire verification process again, with your updated information independently confirmed. Used primarily for legal name changes or address changes.</div>
           </sc-if>
-          <sc-if value="{{ kycUnverified }}" hint-placeholder-val="{{ true }}">
+          <sc-if value="{{ kycUnverifiedLicenseOnly }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:var(--color-neutral-500)">Confirming your identity is what lets us match your licenses to you.</div>
+          </sc-if>
+          <sc-if value="{{ kycUnverifiedFullResume }}" hint-placeholder-val="{{ true }}">
             <div style="font-size:12px;color:var(--color-neutral-500)">Purely informational here. Viewing this tab or completing verification never blocks anything else in your account. The only place it becomes required is authorizing a share to a downstream recipient on the Sharing tab. Upon saving your sharing preferences you will be prompted to complete verification, and that will automatically be reflected on this tab once completed.</div>
           </sc-if>
           <sc-if value="{{ kycSaveError }}" hint-placeholder-val="{{ false }}">
@@ -3835,6 +3870,7 @@ a:hover{color:var(--color-accent)}
           </sc-if>
         </div>
 
+        <sc-if value="{{ isFullResumeAccount }}" hint-placeholder-val="{{ true }}">
         <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
           <div class="card-kicker">Email/SMS cross-validation</div>
           <sc-if value="{{ crossValidationDone }}" hint-placeholder-val="{{ false }}">
@@ -3847,6 +3883,7 @@ a:hover{color:var(--color-accent)}
             <div style="font-size:12px;color:#e2735c">{{ crossValidationSaveError }}</div>
           </sc-if>
         </div>
+        </sc-if>
 
       </div>
     </sc-if>
@@ -4655,6 +4692,56 @@ a:hover{color:var(--color-accent)}
       </sc-if>
     </sc-if>
     <sc-if value="{{ tabIsActivity }}" hint-placeholder-val="{{ false }}">
+      <sc-if value="{{ isLicenseOnlyAccount }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-direction:column;gap:var(--space-4)">
+        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Everything here is read from your account's saved records: your license checks, the correction emails we sent you, name changes, and employer lookups that matched you. For each license you see its latest state and the check results recorded for it, not every intermediate attempt.</div>
+        <div style="display:flex;gap:var(--space-4);flex-wrap:wrap;align-items:flex-end">
+          <div class="field" style="max-width:200px">
+            <label for="la-start">From (optional)</label>
+            <input class="input" id="la-start" type="date" value="{{ licActStart }}" sc-camel-on-change="{{ setLicActStart }}">
+          </div>
+          <div class="field" style="max-width:200px">
+            <label for="la-end">To (optional)</label>
+            <input class="input" id="la-end" type="date" value="{{ licActEnd }}" sc-camel-on-change="{{ setLicActEnd }}">
+          </div>
+          <button type="button" class="btn btn-ghost" sc-camel-on-click="{{ refreshLicenseActivity }}">Refresh</button>
+        </div>
+        <sc-if value="{{ licenseActivityLoading }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:13px;color:var(--color-neutral-500)">Loading your activity…</div>
+        </sc-if>
+        <sc-if value="{{ licenseActivityError }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:13px;color:#e2735c">We couldn't load your activity just now. Try Refresh.</div>
+        </sc-if>
+        <sc-if value="{{ licenseActivityTruncated }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:var(--color-neutral-500)">Showing your most recent 500 entries.</div>
+        </sc-if>
+        <div style="display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap">
+          <div style="font-size:12px;color:var(--color-neutral-500)">{{ licenseActivityCountLabel }}</div>
+          <button type="button" class="btn btn-primary" style="font-size:12px" disabled="{{ licenseActivityExportDisabled }}" sc-camel-on-click="{{ exportLicenseActivityCsv }}">Export CSV</button>
+        </div>
+        <sc-if value="{{ licenseActivityHasRows }}" hint-placeholder-val="{{ false }}">
+          <sc-raw-table class="table">
+            <sc-raw-thead>
+              <sc-raw-tr>
+                <sc-raw-th>Date</sc-raw-th>
+                <sc-raw-th>Type</sc-raw-th>
+                <sc-raw-th>Activity</sc-raw-th>
+              </sc-raw-tr>
+            </sc-raw-thead>
+            <sc-raw-tbody>
+              <sc-for list="{{ licenseActivityRows }}" as="row" hint-placeholder-count="5">
+                <sc-raw-tr>
+                  <sc-raw-td style="white-space:nowrap;color:var(--color-neutral-400)">{{ row.dateLabel }}</sc-raw-td>
+                  <sc-raw-td style="white-space:nowrap">{{ row.typeLabel }}</sc-raw-td>
+                  <sc-raw-td style="line-height:1.6">{{ row.text }}</sc-raw-td>
+                </sc-raw-tr>
+              </sc-for>
+            </sc-raw-tbody>
+          </sc-raw-table>
+        </sc-if>
+      </div>
+      </sc-if>
+      <sc-if value="{{ isFullResumeAccount }}" hint-placeholder-val="{{ true }}">
       <div style="display:flex;flex-direction:column;gap:var(--space-4)">
         <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Export your verification-status history and sharing/delivery activity as a two-column CSV (Activity, Timestamp). No on-screen table, just a date-ranged download.</div>
         <div style="display:flex;gap:var(--space-4);flex-wrap:wrap">
@@ -4760,6 +4847,7 @@ a:hover{color:var(--color-accent)}
           <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">{{ tier1UnconfirmedLine }}</div>
         </div>
       </div>
+      </sc-if>
     </sc-if>
     <sc-if value="{{ tabIsDeactivation }}" hint-placeholder-val="{{ false }}">
       <sc-if value="{{ deactIsDefault }}" hint-placeholder-val="{{ true }}">
@@ -4770,6 +4858,7 @@ a:hover{color:var(--color-accent)}
               <label for="deact-reason">Reason (optional)</label>
               <sc-raw-select class="input" id="deact-reason" value="{{ deactReason }}" sc-camel-on-change="{{ setDeactReason }}">
                 <option value="">Choose a reason (optional)</option>
+                <sc-if value="{{ isFullResumeAccount }}" hint-placeholder-val="{{ true }}">
                 <sc-if value="{{ isCurrentlyPaid }}" hint-placeholder-val="{{ false }}">
                   <option value="cost">Not worth the cost</option>
                 </sc-if>
@@ -4780,6 +4869,16 @@ a:hover{color:var(--color-accent)}
                 <option value="verification_slow">Verification process too hard/time-consuming</option>
                 <option value="found_job">Found a job / no longer job searching</option>
                 <option value="other">Other</option>
+                </sc-if>
+                <sc-if value="{{ isLicenseOnlyAccount }}" hint-placeholder-val="{{ false }}">
+                <sc-if value="{{ hasLicenseSubscription }}" hint-placeholder-val="{{ false }}">
+                  <option value="cost">Not worth the cost</option>
+                </sc-if>
+                <option value="complicated">Too complicated</option>
+                <option value="license_verification">My license wouldn't verify</option>
+                <option value="no_longer_needed">I no longer need to track my licenses</option>
+                <option value="other">Other</option>
+                </sc-if>
               </sc-raw-select>
             </div>
             <div class="field" style="max-width:420px">
@@ -4802,6 +4901,31 @@ a:hover{color:var(--color-accent)}
             </div>
           </sc-if>
 
+          <sc-if value="{{ isLicenseOnlyAccount }}" hint-placeholder-val="{{ false }}">
+          <sc-raw-table class="table">
+            <sc-raw-thead>
+              <sc-raw-tr>
+                <sc-raw-th>What happens to</sc-raw-th>
+                <sc-raw-th>Deactivate</sc-raw-th>
+              </sc-raw-tr>
+            </sc-raw-thead>
+            <sc-raw-tbody>
+              <sc-raw-tr>
+                <sc-raw-td>Your licenses and verification history</sc-raw-td>
+                <sc-raw-td>{{ dtX }}Kept for 30 days in case you come back, then scheduled for permanent removal</sc-raw-td>
+              </sc-raw-tr>
+              <sc-raw-tr>
+                <sc-raw-td>Billing</sc-raw-td>
+                <sc-raw-td>{{ dtX }}Stops: your license-tracking subscription is cancelled with Stripe</sc-raw-td>
+              </sc-raw-tr>
+              <sc-raw-tr>
+                <sc-raw-td>Getting back</sc-raw-td>
+                <sc-raw-td>{{ dtCheck }}Log in within 30 days to reactivate. Because the subscription was cancelled, you would start a new one.</sc-raw-td>
+              </sc-raw-tr>
+            </sc-raw-tbody>
+          </sc-raw-table>
+          </sc-if>
+          <sc-if value="{{ isFullResumeAccount }}" hint-placeholder-val="{{ true }}">
           <sc-raw-table class="table">
             <sc-raw-thead>
               <sc-raw-tr>
@@ -4868,6 +4992,7 @@ a:hover{color:var(--color-accent)}
               </sc-raw-tr>
             </sc-raw-tbody>
           </sc-raw-table>
+          </sc-if>
 
           <div style="display:flex;gap:var(--space-3)">
             <button type="button" class="btn btn-primary" disabled="{{ deactConfirmButtonDisabled }}" sc-camel-on-click="{{ deactConfirmButtonAction }}">{{ deactConfirmButtonLabel }}</button>
@@ -5425,10 +5550,11 @@ class Component extends DCLogic {
   getAccountTabsForType() {
     if (this.state.accountType === 'license_only') {
       return [
-        { key: 'profile', label: 'Profile Info' },
-        { key: 'verification', label: 'License Status' },
+        { key: 'profile', label: 'Personal Info' },
+        { key: 'verification', label: 'Validation' },
         { key: 'subscription', label: 'Subscription' },
-        { key: 'deactivation', label: 'Account Deactivation' },
+        { key: 'activity', label: 'Activity' },
+        { key: 'deactivation', label: 'Deactivation' },
       ];
     }
     return this.ACCOUNT_TABS;
@@ -6849,6 +6975,11 @@ class Component extends DCLogic {
     // for; discoverableTouchedFor is the candidate id whose toggle the user actually changed on this page
     // load. Nothing writes the flag back to the server unless it was loaded or touched.
     discoverableLoadedFor: null, discoverableFailedFor: null, discoverableLoading: false, discoverableTouchedFor: null,
+    // Personal Info (license_only) toggle: saves the moment it changes.
+    discoverableProfileSaving: false, discoverableProfileSaved: false, discoverableProfileError: null,
+    // license_only Activity tab: real server data (list-candidate-activity), reloaded each time the tab opens.
+    licenseActivity: [], licenseActivityLoading: false, licenseActivityError: false, licenseActivityLoadedFor: null,
+    licenseActivityTruncated: false, licActStart: '', licActEnd: '',
     // Item 6 (2026-09-12 live-testing session, follow-up build): matches the DB default
     // (candidates.header_display_mode default 'printed') so a not-yet-resolved session and a
     // freshly-loaded one agree before any real session response ever lands.
@@ -7191,10 +7322,11 @@ class Component extends DCLogic {
     // useful underneath. Mirrors the reduced tab set exactly.
     if (this.state.accountType === 'license_only') {
       return [
-        { tab: 'profile', title: 'Profile Info', body: 'Manage your name, email, and contact info.' },
-        { tab: 'verification', title: 'License Status', body: 'Track your license(s) and their status here. Licenses issued in supported states are checked automatically against the state registry; anything else is candidate-stated, tracked but not independently verified.' },
-        { tab: 'subscription', title: 'Subscription', body: 'See your license-tracking subscription and change your billing details whenever you like.' },
-        { tab: 'deactivation', title: 'Account Deactivation', body: 'End your account here, with a 30-day recovery window before anything is permanently deleted.' },
+        { tab: 'profile', title: 'Personal Info', body: 'Manage your name, email, and phone, and choose whether employers can confirm you have an account here.' },
+        { tab: 'verification', title: 'Validation', body: 'Track your license(s) and their status here. Licenses issued in supported states are checked automatically against the state registry; if one can\u2019t be verified you can correct the details here. Anything else is candidate-stated, tracked but not independently verified.' },
+        { tab: 'subscription', title: 'Subscription', body: 'See whether your license-tracking subscription is active and start it if it isn\u2019t. To stop billing, deactivate your account.' },
+        { tab: 'activity', title: 'Activity', body: 'See a record of your license checks, emails we sent you, name changes, and employer lookups that matched you, and export it as a CSV.' },
+        { tab: 'deactivation', title: 'Deactivation', body: 'End your account here, with a 30-day recovery window.' },
       ];
     }
     return [
@@ -7270,7 +7402,8 @@ class Component extends DCLogic {
   }
 
   componentDidUpdate(prevProps, prevState) {
-    if (this.state.screen === 'tiers') this.ensureDiscoverableLoaded();
+    if (this.state.screen === 'tiers' || this.isLicenseProfileTabOpen()) this.ensureDiscoverableLoaded();
+    if (this.state.screen === 'account' && this.state.accountType === 'license_only' && this.state.accountTab === 'activity') this.ensureLicenseActivityLoaded();
     if (prevState && this.state.tourActive && (prevState.tourStep !== this.state.tourStep || !prevState.tourActive)) {
       this.measureTourTarget();
     }
@@ -7287,6 +7420,15 @@ class Component extends DCLogic {
       verification_slow: 'Verification retries are candidate-initiated, free at every tier, with no scheduled wait. You can request one any time from Verification Status.',
       other: 'Thanks for sharing this. It\u2019s logged with your account.',
     };
+    if (s.accountType === 'license_only') {
+      const licenseMap = {
+        cost: 'Deactivating stops your license-tracking subscription: it is cancelled with Stripe when you confirm.',
+        complicated: 'If a specific part of the account is confusing, Open AI chat below can walk through it.',
+        license_verification: 'The Validation tab shows what we found for each license and lets you correct the state or license number and resubmit.',
+        other: 'Thanks for sharing this. It\u2019s logged with your account.',
+      };
+      return licenseMap[s.deactReason] || 'Thanks for the detail. It\u2019s logged with your account.';
+    }
     return map[s.deactReason] || 'Thanks for the detail. It\u2019s logged with your account.';
   }
 
@@ -8031,6 +8173,90 @@ class Component extends DCLogic {
   // reload (e.g. landing back from a cancelled Stripe checkout), where the local default is false: showing
   // that, and letting Continue save it, silently erased a real earlier opt-in. A value the user has already
   // toggled on this page load is never overwritten by a slower load.
+  isLicenseProfileTabOpen() {
+    const s = this.state;
+    return s.screen === 'account' && s.accountType === 'license_only' && s.accountTab === 'profile';
+  }
+
+  // Personal Info toggle (license_only): saves the moment it changes, and puts the box back if the save
+  // fails so it never shows a value the server doesn't hold.
+  async toggleDiscoverableProfile(checked) {
+    const s = this.state;
+    const id = s.resumeCandidateId;
+    if (!id || s.discoverableProfileSaving || s.discoverableLoadedFor !== id) return;
+    const previous = s.discoverable;
+    this.setState({ discoverable: checked, discoverableProfileSaving: true, discoverableProfileError: null, discoverableProfileSaved: false });
+    let saved = false;
+    try {
+      const res = await fetch(this.SUPABASE_FN_URL + '/set-discoverable', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate_id: id, discoverable: checked }),
+      });
+      const data = await res.json().catch(() => ({}));
+      saved = res.ok && !!data.ok && data.discoverable === checked;
+    } catch (e) { saved = false; }
+    if (!saved) {
+      this.setState({ discoverable: previous, discoverableProfileSaving: false, discoverableProfileError: "We couldn't save that change, so it's back to what it was. Please try again." });
+      return;
+    }
+    this.setState({ discoverableProfileSaving: false, discoverableProfileSaved: true, discoverableProfileError: null });
+  }
+
+  ensureLicenseActivityLoaded(force) {
+    const s = this.state;
+    const id = s.resumeCandidateId;
+    if (!id || s.licenseActivityLoading) return;
+    if (!force && s.licenseActivityLoadedFor === id) return;
+    this.loadLicenseActivity(id);
+  }
+
+  async loadLicenseActivity(id) {
+    this.setState({ licenseActivityLoading: true, licenseActivityError: false });
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/list-candidate-activity', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate_id: id }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) { data = null; }
+    if (!data || !res.ok || !data.ok) {
+      // loadedFor is set even on failure so the didUpdate hook doesn't retry in a loop; Refresh retries.
+      this.setState({ licenseActivityLoading: false, licenseActivityError: true, licenseActivityLoadedFor: id });
+      return;
+    }
+    this.setState({ licenseActivityLoading: false, licenseActivityError: false, licenseActivity: data.events || [], licenseActivityTruncated: !!data.truncated, licenseActivityLoadedFor: id });
+  }
+
+  licenseActivityFiltered() {
+    const s = this.state;
+    return (s.licenseActivity || []).filter(e => {
+      const d = String(e.at || '').slice(0, 10);
+      return (!s.licActStart || d >= s.licActStart) && (!s.licActEnd || d <= s.licActEnd);
+    });
+  }
+
+  licenseActivityTypeLabel(cat) {
+    return ({ account: 'Account', license: 'License', notice: 'Email', name: 'Name change', employer: 'Employer lookup' })[cat] || 'Activity';
+  }
+
+  exportLicenseActivityCsv() {
+    const rows = this.licenseActivityFiltered();
+    const esc = (v) => '"' + String(v).replace(/"/g, '""') + '"';
+    const csv = ['Timestamp,Type,Activity'].concat(rows.map(r => [esc(r.at), esc(this.licenseActivityTypeLabel(r.category)), esc(r.text)].join(','))).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'activity' + (this.state.licActStart ? '-from-' + this.state.licActStart : '') + (this.state.licActEnd ? '-to-' + this.state.licActEnd : '') + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
   async ensureDiscoverableLoaded() {
     const s = this.state;
     const id = s.resumeCandidateId;
@@ -10502,7 +10728,42 @@ class Component extends DCLogic {
       // Item 11: the same tab key/slot is reused for both account types rather than adding a
       // parallel 'licenseStatus' tab — only the label and the content rendered inside it (see
       // tabIsVerification's own template block) differ.
-      verificationTabLabel: s.accountType === 'license_only' ? 'License Status' : 'Verification Status',
+      verificationTabLabel: s.accountType === 'license_only' ? 'Validation' : 'Verification Status',
+      profileTabLabel: s.accountType === 'license_only' ? 'Personal Info' : 'Profile Info',
+      deactivationTabLabel: s.accountType === 'license_only' ? 'Deactivation' : 'Account Deactivation',
+      verifiedPhoneLabel: s.accountType === 'license_only' ? 'Phone number' : 'Verified Number',
+      verifiedEmailLabel: s.accountType === 'license_only' ? 'Login email' : 'Verified Email',
+      // The cross-validation / KYC copy below exists for the downstream-feed requirement on the Sharing tab,
+      // which a license_only account doesn't have.
+      showCrossValidationPromptFullResume: s.accountType !== 'license_only' && !!s.verifiedPhoneEntry && s.verifiedPhoneEntry === s.confirmedPhoneNumber && !s.crossValidationDone && !s.crossValidationPromptDismissed,
+      crossValidationDoneFullResume: s.accountType !== 'license_only' && s.crossValidationDone,
+      kycUnverifiedLicenseOnly: s.accountType === 'license_only' && !s.kycVerified,
+      kycUnverifiedFullResume: s.accountType !== 'license_only' && !s.kycVerified,
+      verifiedPhoneEditedFullResume: s.accountType !== 'license_only' && s.verifiedPhoneEntry !== s.savedVerifiedPhoneEntry,
+      // Personal Info discoverable toggle (license_only)
+      discoverableProfileDisabled: s.discoverableLoadedFor !== s.resumeCandidateId || s.discoverableProfileSaving,
+      discoverableProfileLoadFailed: !!s.resumeCandidateId && s.discoverableFailedFor === s.resumeCandidateId,
+      discoverableProfileError: s.discoverableProfileError,
+      discoverableProfileSaved: s.discoverableProfileSaved,
+      toggleDiscoverableProfile: (e) => this.toggleDiscoverableProfile(!!e.target.checked),
+      // license_only Activity tab
+      licActStart: s.licActStart,
+      licActEnd: s.licActEnd,
+      setLicActStart: (e) => this.setState({ licActStart: e.target.value }),
+      setLicActEnd: (e) => this.setState({ licActEnd: e.target.value }),
+      refreshLicenseActivity: () => this.ensureLicenseActivityLoaded(true),
+      licenseActivityLoading: s.licenseActivityLoading,
+      licenseActivityError: s.licenseActivityError,
+      licenseActivityTruncated: s.licenseActivityTruncated,
+      licenseActivityRows: this.licenseActivityFiltered().map(e => ({
+        dateLabel: new Date(e.at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }),
+        typeLabel: this.licenseActivityTypeLabel(e.category),
+        text: e.text,
+      })),
+      licenseActivityHasRows: this.licenseActivityFiltered().length > 0,
+      licenseActivityCountLabel: s.licenseActivityLoading ? '' : (this.licenseActivityFiltered().length + ' entries' + (s.licActStart || s.licActEnd ? ' in this range.' : '.')),
+      licenseActivityExportDisabled: s.licenseActivityLoading || this.licenseActivityFiltered().length === 0,
+      exportLicenseActivityCsv: () => this.exportLicenseActivityCsv(),
       // Item 11: License Status tab rows — reads directly off s.licenseItems (loaded via
       // list-candidate-licenses, see ensureLicenseItemsLoaded). status is rendered VERBATIM from the
       // real Item-18-model column (e.g. 'Not Submitted for Verification') — this is candidate-facing
@@ -10610,7 +10871,7 @@ class Component extends DCLogic {
       setDeactNote: (e) => this.setState({ deactNote: e.target.value }),
       openDeactConfirm: () => this.setState({ deactStep: 'confirm' }),
       cancelDeactivate: () => this.setState({ deactStep: 'default', deactChoice: null }),
-      showDeactDiagnostic: s.deactReason !== 'found_job' && (!!s.deactReason || !!s.deactNote.trim()),
+      showDeactDiagnostic: s.deactReason !== 'found_job' && s.deactReason !== 'no_longer_needed' && (!!s.deactReason || !!s.deactNote.trim()),
       deactDiagnosticText: this.deactDiagnosticText(),
       openAiChat: (e) => openPlaceholder(e),
       dtCheck: '\u2713 ',
@@ -10651,7 +10912,7 @@ class Component extends DCLogic {
       }),
       selectTabSharing: () => this.guardedNav(() => this.setState({ accountTab: 'sharing' })),
       selectTabSubscription: () => this.guardedNav(() => this.setState({ accountTab: 'subscription' })),
-      selectTabActivity: () => this.guardedNav(() => this.setState({ accountTab: 'activity' })),
+      selectTabActivity: () => this.guardedNav(() => { this.setState({ accountTab: 'activity' }); if (s.accountType === 'license_only') this.ensureLicenseActivityLoaded(true); }),
       selectTabDeactivation: () => this.guardedNav(() => this.setState({ accountTab: 'deactivation' })),
       mobileNavOpen: s.mobileNavOpen,
       mobileNavOpenStr: s.mobileNavOpen ? 'true' : 'false',
@@ -10667,6 +10928,7 @@ class Component extends DCLogic {
           if (t.key === 'verification') {
             if (s.accountType === 'license_only') this.ensureLicenseItemsLoaded(); else this.ensureVerificationItemsLoaded();
           }
+          if (t.key === 'activity' && s.accountType === 'license_only') this.ensureLicenseActivityLoaded(true);
         },
       })),
       isSignupDetails: s.screen === 'signupDetails',
