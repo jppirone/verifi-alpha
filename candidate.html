@@ -3491,7 +3491,12 @@ a:hover{color:var(--color-accent)}
 <div style="max-width:440px;margin:0 auto;padding:120px 20px 40px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:var(--space-3)">
   <div class="card elev-md" style="width:100%;padding:var(--space-8);display:flex;flex-direction:column;gap:var(--space-3);text-align:left">
     <div style="font-size:17px;text-align:center">Your account has been deactivated.</div>
+    <sc-if value="{{ isFullResumeAccount }}" hint-placeholder-val="{{ true }}">
     <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">Your access ended immediately. Data already shared with linked downstream partners will be removed there too. Partners have 10 business days to acknowledge the deletion instruction and 45 days to complete it.</div>
+    </sc-if>
+    <sc-if value="{{ isLicenseOnlyAccount }}" hint-placeholder-val="{{ false }}">
+    <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">Your access ended immediately.</div>
+    </sc-if>
     <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">Your account and verified data are fully retained until {{ deletionDateLabel }}, in case you change your mind, then permanently deleted on that date. To reactivate, log in again from the entry screen before then.</div>
     <!-- Subscription cancellation gap (2026-09-18), Step 3: gated on deletionWasPaid (Step 3's
          render-vals) so a candidate who was already on Free never sees this block at all — nothing
