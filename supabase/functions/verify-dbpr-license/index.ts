@@ -99,14 +99,23 @@ type Row = {
 // clean row. Confirmed correct against captured real responses for three different license
 // types/boards (Real Estate, Cosmetology, Certified Plumbing Contractor) including rows with
 // blank license number/rank/expiration (e.g. "Application in Progress" records).
-const ROW_RE = /<tr height='40'><td colspan='1' width='20%' align='center' bgcolor='#[0-9a-fA-F]{6}'><font face=Arial color=#000000 size=-1>([^<]*)<\/font><\/td><td colspan='1' align='center' bgcolor='#[0-9a-fA-F]{6}'><font face=Arial color=#000000 size=-1><a href='LicenseDetail\.asp\?SID=&id=([0-9A-Fa-f]+)'>([^<]*)<\/a><\/font><\/td><td colspan='1' align='center' bgcolor='#[0-9a-fA-F]{6}'><font face=Arial color=#000000 size=-1>([^<]*)<\/font><\/td><td colspan='1' align='center' bgcolor='#[0-9a-fA-F]{6}'><font face=Arial color=#000000 size=-1>([^<]*)<br\/>([^<]*)<\/font><\/td><td colspan='1' align='center' bgcolor='#[0-9a-fA-F]{6}'><font face=Arial color=#000000 size=-1>([^<]*)<br\/>([^<]*)<\/font><\/td><tr height='40'> <td colspan='6' align='left' bgcolor='#[0-9a-fA-F]{6}'><table><tr><td align='left' bgcolor='#[0-9a-fA-F]{6}'><font face=Arial color=#000000 size='-2'>[^<]*<span title='[^']*'><b>Main Address\*:<\/b><\/span><\/font><\/td> <td align='left' bgcolor='#[0-9a-fA-F]{6}'><font face=Arial color=#000000 size='-2'>([^<]*)<\/font><\/td><\/tr><\/table><\/td><\/tr>/g;
+// 2026-09-20: the address row that follows is NOT a fixed shape. A licensee with a business location has TWO address lines in it
+// ("License Location Address*" and "Main Address*"), an individual only the second. The old single regex required exactly the
+// one-address shape and so matched ZERO rows on any page where every row had a location (verify-license then reported
+// lookup_failed for a real active contractor, SCC131151265). The five result cells are now matched on their own, and the Main Address
+// is read out of the address block that follows, wherever it sits in it.
+const ROW_HEAD_RE = /<tr height='40'><td colspan='1' width='20%' align='center' bgcolor='#[0-9a-fA-F]{6}'><font face=Arial color=#000000 size=-1>([^<]*)<\/font><\/td><td colspan='1' align='center' bgcolor='#[0-9a-fA-F]{6}'><font face=Arial color=#000000 size=-1><a href='LicenseDetail\.asp\?SID=&id=([0-9A-Fa-f]+)'>([^<]*)<\/a><\/font><\/td><td colspan='1' align='center' bgcolor='#[0-9a-fA-F]{6}'><font face=Arial color=#000000 size=-1>([^<]*)<\/font><\/td><td colspan='1' align='center' bgcolor='#[0-9a-fA-F]{6}'><font face=Arial color=#000000 size=-1>([^<]*)<br\/>([^<]*)<\/font><\/td><td colspan='1' align='center' bgcolor='#[0-9a-fA-F]{6}'><font face=Arial color=#000000 size=-1>([^<]*)<br\/>([^<]*)<\/font><\/td>(?=<tr height='40'> <td colspan='6')/g;
 
 function parseRows(html: string): Row[] {
   const rows: Row[] = [];
   let m: RegExpExecArray | null;
-  // Reset lastIndex since ROW_RE is a shared module-level global-flag regex.
-  ROW_RE.lastIndex = 0;
-  while ((m = ROW_RE.exec(html)) !== null) {
+  // Reset lastIndex since ROW_HEAD_RE is a shared module-level global-flag regex.
+  ROW_HEAD_RE.lastIndex = 0;
+  while ((m = ROW_HEAD_RE.exec(html)) !== null) {
+    const blockStart = m.index + m[0].length;
+    const blockEnd = html.indexOf("</table></td></tr>", blockStart);
+    const block = blockEnd < 0 ? "" : html.slice(blockStart, blockEnd);
+    const addr = block.match(/Main Address\*:<\/b><\/span><\/font><\/td>\s*<td[^>]*><font[^>]*>([^<]*)<\/font>/);
     rows.push({
       licenseType: decodeHtmlEntities(m[1].trim()),
       detailId: m[2].trim(),
@@ -116,7 +125,7 @@ function parseRows(html: string): Row[] {
       rank: decodeHtmlEntities(m[6].trim()),
       status: decodeHtmlEntities(m[7].trim()).replace(/,$/, ""), // DBPR's own status text is inconsistent about a trailing comma
       expirationDate: m[8].trim(),
-      mainAddress: decodeHtmlEntities(m[9].trim()).replace(/\s+/g, " ").trim(),
+      mainAddress: addr ? decodeHtmlEntities(addr[1].trim()).replace(/\s+/g, " ").trim() : "",
     });
   }
   return rows;
@@ -269,6 +278,15 @@ export default {
       }
 
       const rows = parseRows(html);
+      // Every result row carries exactly one detail link. Fewer parsed rows than links means a row shape we do not read: report it as
+      // a shape problem rather than deciding on a silently shortened list.
+      const detailLinks = (html.match(/LicenseDetail\.asp\?SID=&id=/g) || []).length;
+      if (rows.length > 0 && rows.length < detailLinks) {
+        return new Response(JSON.stringify({ ok: false, error: "unexpected_response_shape", detail: "parsed " + rows.length + " of " + detailLinks + " result rows" }), {
+          status: 502,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
       if (rows.length === 0) {
         // "Search Results" header present, no "no records found" marker, yet nothing matched the
         // row regex — the page shape changed in some other way this hasn't seen before.
