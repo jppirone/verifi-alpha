@@ -186,9 +186,14 @@ export default {
         {
           method: "PATCH",
           headers: { ...REST, "Content-Type": "application/json", "Prefer": "return=representation" },
-          // The typed third-party details are scrubbed the moment the lookup completes.
+          // The typed third-party details are scrubbed the moment the lookup completes. ONE exception (2026-09-20): for a MATCHED lookup
+          // only, the NAME the requester typed is kept in candidate_label so the requester can recognize the lookup later (a signed-in
+          // employer picks a past lookup to request a comparison from). It is the requester's own input, never the candidate's stored
+          // name, and it is cleared after 30 days by cleanup_expired_employer_lookups. Email and phone are still scrubbed. A non-match
+          // stores nothing, so the no-oracle guarantee is untouched.
           body: JSON.stringify({
             used_at: completedAt, result_exists: exists, matched_candidate_id: matched ? matched.id : null,
+            candidate_label: matched ? String(row.candidate_name || "").slice(0, 120) || null : null,
             candidate_name: null, candidate_email: null, candidate_phone: null,
           }),
         },

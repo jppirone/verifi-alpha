@@ -39,6 +39,19 @@ const corsHeaders = {
 // verified webhook (employer-stripe-events) is what updates the database. Owner handover and the owner leaving are
 // still deliberately not built: the owner cannot be removed and cannot leave.
 //
+// Comparisons (added 2026-09-20, Stage 2 of the comparison delivery; see migrations 20260920020000 and 20260920040000): list_lookups,
+// request_comparison, list_comparisons and open_comparison are all access "member" (they need an organization, whose live subscription
+// pays for them). Members run and open THEIR OWN requests; the owner can additionally LIST every request in the organization (who asked
+// and what state it is in) but cannot open someone else's: opening is bound to the person who asked.
+//   * The candidate is never named in a request: the caller picks one of their OWN matched Tier 1 lookups (their sign-in address is the
+//     address the lookup link went to), and create_comparison_request (SQL) applies every rule, returning one coarse "unavailable" for
+//     anything about the candidate's state.
+//   * What the employer sees of the outcome is deliberately undifferentiated: a decline, a timeout and a deactivation are all
+//     "not_authorized". "ready"/"opened"/"ended" only exist for requests the candidate approved.
+//   * METERING: open_comparison is the delivery point. The first successful open of an approved snapshot calls consume_org_lookup with
+//     reference = the request id (counted once no matter how often it is retried or re-opened); if the organization has no active
+//     subscription or no lookups left the open is refused (402) and nothing is consumed, and the approved snapshot simply waits until
+//     it is discarded (7 days). Re-opening an already-opened snapshot never consumes another lookup.
 // This is employer-side only. Candidate and staff endpoints are NOT changed by this and are still identified by
 // id in the request body (a separate, already-tracked cleanup).
 const REST = { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` };
@@ -93,6 +106,17 @@ function cleanName(v: unknown, min: number, max: number): string | null {
   if (typeof v !== "string") return null;
   const t = v.replace(/\s+/g, " ").trim();
   return t.length >= min && t.length <= max ? t : null;
+}
+
+const OPEN_ANSWER_STATUS_NOTE = "not_authorized";
+// What an employer is told about a request. A candidate's decline, a timeout and a deactivation are one and the same outcome.
+function employerStatus(r: any, hasSnapshot: boolean): string {
+  const now = Date.now();
+  if (r.status === "pending") return new Date(r.expires_at).getTime() > now ? "awaiting_candidate" : OPEN_ANSWER_STATUS_NOTE;
+  if (r.status === "declined") return OPEN_ANSWER_STATUS_NOTE;
+  if (r.status === "expired" && !r.approved_at) return OPEN_ANSWER_STATUS_NOTE;
+  if (r.status === "approved" && hasSnapshot) return r.first_delivered_at ? "opened" : "ready";
+  return "ended";
 }
 
 const ACTIONS: Record<string, Action> = {
@@ -429,6 +453,114 @@ const ACTIONS: Record<string, Action> = {
       }
       const s = await stripe("POST", "/v1/billing_portal/sessions", { customer: o.stripe_customer_id, return_url: `${RETURN_BASE}?billing=return`, configuration: configId! });
       return s.ok && s.data.url ? ok({ url: s.data.url }) : fail(502, "stripe_error");
+    },
+  },
+
+  // ---- comparisons (Stage 2) ----
+  list_lookups: {
+    access: "member",
+    run: async ({ user }) => {
+      const r = await rest("rpc/list_employer_lookups", { method: "POST", body: JSON.stringify({ p_email: user.email }) });
+      if (!r.ok) return fail(500, "list_failed");
+      const list = await r.json();
+      return ok({
+        lookups: (Array.isArray(list) ? list : []).map((l: any) => ({
+          lookup_id: l.lookup_id, candidate_label: l.candidate_label || "Candidate", completed_at: l.completed_at,
+          open_request_id: l.open_request_id || null,
+        })),
+      });
+    },
+  },
+  request_comparison: {
+    access: "member",
+    run: async ({ user, p }) => {
+      if (typeof p.lookup_id !== "string" || !UUID.test(p.lookup_id)) return fail(400, "lookup_id_invalid");
+      const attestation = typeof p.attestation === "string" ? p.attestation : "";
+      const r = await rest("rpc/create_comparison_request", { method: "POST", body: JSON.stringify({ p_lookup_id: p.lookup_id, p_method: "org", p_employer_user: user.id, p_attestation: attestation }) });
+      if (!r.ok) return fail(500, "request_failed");
+      const res = (await r.json())?.[0];
+      if (!res) return fail(500, "request_failed");
+      // `detail` (why the candidate was unavailable) is never forwarded.
+      if (!res.ok) {
+        if (res.reason === "attestation_invalid") return fail(400, "attestation_invalid");
+        if (res.reason === "subscription_required") return fail(402, "subscription_required");
+        if (res.reason === "rate_limited") return fail(429, "rate_limited");
+        if (res.reason === "already_open") return fail(409, "already_requested", { request_id: res.request_id });
+        return fail(409, "unavailable");
+      }
+      // Tell the candidate. Never fails the request: the candidate function's sweep retries an unsent notice.
+      let notified = false;
+      try {
+        const n = await fetch(`${SUPABASE_URL}/functions/v1/candidate-comparison-requests`, {
+          method: "POST", headers: { "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "notify_candidate", request_id: res.request_id }),
+        });
+        notified = n.ok && (await n.json().catch(() => ({})))?.sent === true;
+      } catch (_e) { /* the sweep retries */ }
+      return ok({ request_id: res.request_id, status: "awaiting_candidate", candidate_notified: notified });
+    },
+  },
+  list_comparisons: {
+    access: "member",
+    run: async ({ user, org }) => {
+      const scope = user.role === "owner" ? `org_id=eq.${org!.id}` : `employer_user_id=eq.${user.id}`;
+      const reqs = await rows(`comparison_requests?${scope}&select=id,status,created_at,expires_at,approved_at,snapshot_expires_at,first_delivered_at,employer_user_id,lookup_id,attestation&order=created_at.desc&limit=100`);
+      if (!reqs) return fail(500, "list_failed");
+      const ids = reqs.map((r) => r.id);
+      const snaps = ids.length ? await rows(`comparison_snapshots?request_id=in.(${ids.join(",")})&select=request_id`) : [];
+      const lookupIds = [...new Set(reqs.map((r) => r.lookup_id).filter(Boolean))];
+      const lookups = lookupIds.length ? await rows(`employer_lookup_requests?id=in.(${lookupIds.join(",")})&select=id,candidate_label`) : [];
+      const userIds = [...new Set(reqs.map((r) => r.employer_user_id).filter(Boolean))];
+      const users = user.role === "owner" && userIds.length ? await rows(`employer_users?id=in.(${userIds.join(",")})&select=id,name,email`) : [];
+      const hasSnap = new Set((snaps || []).map((s) => s.request_id));
+      return ok({
+        is_owner: user.role === "owner",
+        comparisons: reqs.map((r) => {
+          const status = employerStatus(r, hasSnap.has(r.id));
+          const lk = (lookups || []).find((l) => l.id === r.lookup_id);
+          const by = (users || []).find((u) => u.id === r.employer_user_id);
+          return {
+            id: r.id, status, candidate_label: lk?.candidate_label || "Candidate", requested_at: r.created_at,
+            answer_by: status === "awaiting_candidate" ? r.expires_at : null,
+            available_until: status === "ready" ? r.snapshot_expires_at : null,
+            opened_at: r.first_delivered_at, mine: r.employer_user_id === user.id,
+            can_open: r.employer_user_id === user.id && (status === "ready" || status === "opened"),
+            requested_by: user.role === "owner" ? (by ? (by.name || by.email) : "(former member)") : null,
+            attestation: r.employer_user_id === user.id ? r.attestation : null,
+          };
+        }),
+      });
+    },
+  },
+  open_comparison: {
+    access: "member",
+    run: async ({ user, org, p }) => {
+      if (typeof p.request_id !== "string" || !UUID.test(p.request_id)) return fail(400, "request_id_invalid");
+      // Only the person who asked can open it, and only while still in the organization the request was made for.
+      const r = (await rows(`comparison_requests?id=eq.${p.request_id}&employer_user_id=eq.${user.id}&select=id,status,org_id,first_delivered_at,snapshot_expires_at`))?.[0];
+      if (!r || r.org_id !== org!.id) return fail(404, "not_found");
+      if (r.status !== "approved") return fail(404, "not_available");
+      const snap = (await rows(`comparison_snapshots?request_id=eq.${r.id}&select=content,assembled_at`))?.[0];
+      if (!snap) return fail(404, "not_available");
+
+      let quota: { used: number; included: number; remaining: number } | null = null;
+      let metered = false;
+      if (!r.first_delivered_at) {
+        // DELIVERY: the first open. Spend one lookup from the organization's current period, keyed by this request so it counts once.
+        const mr = await rest("rpc/consume_org_lookup", { method: "POST", body: JSON.stringify({ p_org: r.org_id, p_user: user.id, p_reference: r.id }) });
+        if (!mr.ok) return fail(500, "metering_failed");
+        const m = (await mr.json())?.[0];
+        if (!m) return fail(500, "metering_failed");
+        if (!m.ok) {
+          // Nothing was consumed and nothing is delivered; the approved snapshot keeps waiting.
+          return fail(402, m.reason === "quota_exhausted" ? "quota_exhausted" : "no_active_subscription", { reason: m.reason, used: m.used, included: m.included });
+        }
+        metered = m.reason === "counted";
+        quota = { used: m.used, included: m.included, remaining: m.remaining };
+        // Stamp the first delivery once (a concurrent open that lost this race is still served: the lookup was counted once above).
+        await rest(`comparison_requests?id=eq.${r.id}&first_delivered_at=is.null`, { method: "PATCH", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ first_delivered_at: new Date().toISOString() }) });
+      }
+      return ok({ content: snap.content, assembled_at: snap.assembled_at, metered, quota, first_open: !r.first_delivered_at });
     },
   },
 };
