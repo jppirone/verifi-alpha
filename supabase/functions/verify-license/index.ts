@@ -132,11 +132,13 @@ const DBPR_ROW_CAP = 10;
 // Only "Current" (bare, or with Active) is a clean pass. "inactive" means definitively not a currently valid license.
 // Everything else is "indeterminate": a human decides, and it is never treated as a definitive negative. Any text this table
 // does not know (a new DBPR status, an unseen secondary) also lands there, deliberately: unknown is never guessed either way.
-// Every string below was seen on a live DBPR row unless marked otherwise.
+// Every string below was seen on a live DBPR row. Deliberately left indeterminate although seen live: "Probation, Active" (a valid
+// license on probation), "Closed" / "Closed for Upgrade" (occupational licenses, the holder may hold the replacement),
+// "Temporary Certificate", "Exam Eligible" and the other applicant stages.
 // @@classifier-start
 const DBPR_PRIMARY_DEAD = new Set([
   "null and void", "null & void", "voluntary null & void", "license expired", "revoked", "suspended", "relinquished",
-  "voluntary relinquishment", "license authority voided", "deceased", "retired", "involuntary inactive",
+  "voluntary relinquishment", "license authority voided", "deceased", "retired", "involuntary inactive", "cancelled",
   // application outcomes, not licenses: the person does not hold one (seen live only on rows with no license number)
   "denied entry", "application withdrawn",
 ]);
