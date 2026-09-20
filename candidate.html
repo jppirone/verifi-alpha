@@ -4609,6 +4609,9 @@ a:hover{color:var(--color-accent)}
           </sc-if>
 
           <sc-if value="{{ showUpgradeFlow }}" hint-placeholder-val="{{ false }}">
+            <sc-if value="{{ changePlanOpen }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">Changing your plan or payment method starts a new subscription. Your current subscription is cancelled automatically once the new payment succeeds, with no refund for the unused part of it. If you don't finish checkout, nothing changes.</div>
+            </sc-if>
             <div class="card-kicker" style="margin-top:var(--space-2)">Billing</div>
             <div class="seg" style="white-space:nowrap">
               <label class="seg-opt" style="white-space:nowrap"><input type="radio" name="billing" checked="{{ billingMonthly }}" sc-camel-on-change="{{ setBillingMonthly }}">$4.99/mo</label>
@@ -4640,7 +4643,7 @@ a:hover{color:var(--color-accent)}
           </sc-if>
           <sc-if value="{{ checkoutIncompleteNotice }}" hint-placeholder-val="{{ false }}">
             <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--color-divider);border-radius:6px">
-              <span style="font-size:12px;color:var(--color-neutral-300)">You haven't completed subscribing — your account remains on the Free plan.</span>
+              <span style="font-size:12px;color:var(--color-neutral-300)">{{ checkoutIncompleteText }}</span>
             </div>
           </sc-if>
           <sc-if value="{{ checkoutSuccessNotice }}" hint-placeholder-val="{{ false }}">
@@ -8944,11 +8947,19 @@ class Component extends DCLogic {
       res = await fetch(this.SUPABASE_FN_URL + '/test-stripe-checkout', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: s.resumeCandidateId, billing_cycle: billingCycle, product }),
+        // change_plan: only the "Change plan or payment method" flow (an already-paid candidate deliberately replacing their
+        // subscription) may start a Checkout while a live subscription exists; the server refuses every other request with 409.
+        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: s.resumeCandidateId, billing_cycle: billingCycle, product, change_plan: !fromSignupTiers && s.changePlanOpen && s.accountTier === 'paid' }),
       });
       data = await res.json().catch(() => ({}));
     } catch (e) {
       this.setState({ checkoutPending: false, checkoutError: "Couldn't reach the payment processor. Check your connection and try again." });
+      return;
+    }
+    if (res.status === 409 && data.error === 'already_subscribed') {
+      // The screen was out of date (another tab or device already subscribed): no second Checkout was started, so nothing was charged.
+      this.setState({ checkoutPending: false, checkoutError: "You already have an active subscription, so we didn't start a second checkout and nothing was charged. Your plan below has been refreshed." });
+      this.refreshBillingFacts();
       return;
     }
     if (!res.ok || !data.ok || !data.url) {
@@ -10518,6 +10529,12 @@ class Component extends DCLogic {
       checkoutPending: s.checkoutPending,
       checkoutError: s.checkoutError,
       checkoutIncompleteNotice: s.checkoutIncompleteNotice,
+      // A paid candidate who backs out of "Change plan or payment method" is still on the plan they had; this notice used to say
+      // "your account remains on the Free plan" to them too.
+      checkoutIncompleteText: s.accountTier === 'paid'
+        ? "Your plan change wasn't completed. Your current subscription is unchanged."
+        : "You haven't completed subscribing — your account remains on the Free plan.",
+      changePlanOpen: s.changePlanOpen,
       subscribeAbandonedNotice: s.subscribeAbandonedNotice && s.accountTier !== 'paid',
       checkoutAwaitingWebhook: s.checkoutAwaitingWebhook,
       checkoutSuccessNotice: s.checkoutSuccessNotice,

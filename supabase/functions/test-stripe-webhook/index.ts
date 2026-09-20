@@ -11,6 +11,11 @@ const corsHeaders = {
 // signature verification it (1) rejects a stale signed timestamp, (2) works out whether the event is an employer event
 // (metadata.product "employer_*" or an id that belongs to an employer row), (3) claims the event id so a re-delivery is
 // acknowledged without being processed again, and (4) forwards employer events to employer-stripe-events. Candidate
+// 2026-09-20 (one live subscription per candidate): a completed checkout now also CANCELS the subscription it replaces (the one
+// the row pointed at, plus test-stripe-checkout's metadata.replaces_subscription), after the new one is recorded; if that or the
+// candidate write fails the delivery answers 500 so Stripe retries. Known gap: if a cancel fails AND the row already points at
+// the new subscription, only the session's stamped id is retried, so a two-Checkouts-at-once race plus a failed cancel can still
+// leave the earlier one; every subscription is stamped with candidate_id in Stripe so it can be found.
 // events then run exactly the logic below, except that an explicit unrecognized product is no longer defaulted into
 // resume_pro. customer.subscription.updated is still not handled for candidates.
 //
@@ -94,6 +99,23 @@ async function verifyStripeSignature(payload: string, sigHeader: string, secret:
   const sigBuf = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(signedPayload));
   const computedHex = Array.from(new Uint8Array(sigBuf)).map((b) => b.toString(16).padStart(2, "0")).join("");
   return { valid: v1s.includes(computedHex), timestamp: t };
+}
+
+const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY");
+
+// One live subscription per candidate (2026-09-20). Cancels a Stripe subscription that a newly completed payment replaces.
+// Returns "cancelled" (Stripe accepted the cancel) or "already_gone" (Stripe has no such subscription, or it is already
+// cancelled: a retry after a partial success lands here). Anything else throws, so the caller can fail the delivery and let
+// Stripe retry rather than leave the old subscription billing.
+async function cancelReplacedSubscription(subId: string): Promise<"cancelled" | "already_gone"> {
+  if (!STRIPE_SECRET_KEY) throw new Error("STRIPE_SECRET_KEY not configured");
+  const auth = { "Authorization": "Bearer " + STRIPE_SECRET_KEY };
+  const del = await fetch(`https://api.stripe.com/v1/subscriptions/${encodeURIComponent(subId)}`, { method: "DELETE", headers: auth });
+  if (del.ok) return "cancelled";
+  const get = await fetch(`https://api.stripe.com/v1/subscriptions/${encodeURIComponent(subId)}`, { headers: auth });
+  if (get.status === 404) return "already_gone";
+  if (get.ok && (await get.json()).status === "canceled") return "already_gone";
+  throw new Error(`cancel ${subId} failed (${del.status})`);
 }
 
 const WEBHOOK_TOLERANCE_SECONDS = 300;
@@ -250,6 +272,9 @@ export default {
       }
     }
 
+    // Set when this delivery must be retried by Stripe (a write that must not be lost failed, or an old subscription could
+    // not be cancelled): checked after the checkout branch, which releases the claim and answers 500.
+    let retryReason: string | null = null;
     if (event.type === "checkout.session.completed") {
       const session = event.data?.object || {};
       summary.checkoutSession = {
@@ -285,6 +310,24 @@ export default {
         summary.tierUpdate = { attempted: false, reason: "unrecognized_product", product: rawProduct };
       } else if (candidateId && session.payment_status === "paid") {
         try {
+          // One live subscription per candidate (2026-09-20): read what the row points at BEFORE it is overwritten below.
+          // That, plus the id test-stripe-checkout stamped on the session (metadata.replaces_subscription), are the
+          // subscriptions this payment replaces. Reading the row here (not trusting only the metadata) is what also covers two
+          // Checkouts that were open at the same time: whichever completes second finds the first one's subscription here.
+          const newSubscriptionId: string | null = session.subscription || null;
+          const replaced = new Set<string>();
+          const prevRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${encodeURIComponent(candidateId)}&select=stripe_subscription_id,stripe_subscription_cancelled_at`, { headers: SB_HEADERS });
+          if (!prevRes.ok) throw new Error(`previous subscription lookup ${prevRes.status}`);
+          const prev = (await prevRes.json())[0];
+          if (prev && prev.stripe_subscription_id && !prev.stripe_subscription_cancelled_at) replaced.add(prev.stripe_subscription_id);
+          const stamped = session.metadata?.replaces_subscription;
+          if (typeof stamped === "string" && stamped.startsWith("sub_")) {
+            // never cancel a subscription another candidate's row owns
+            const ownerRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates?stripe_subscription_id=eq.${encodeURIComponent(stamped)}&id=neq.${encodeURIComponent(candidateId)}&select=id`, { headers: SB_HEADERS });
+            if (!ownerRes.ok) throw new Error(`owner lookup ${ownerRes.status}`);
+            if (((await ownerRes.json()) as unknown[]).length === 0) replaced.add(stamped);
+          }
+          if (newSubscriptionId) replaced.delete(newSubscriptionId);
           // Subscription cancellation gap (2026-09-18): session.subscription is the real Stripe
           // subscription id (sub_...) Stripe attaches to a completed subscription-mode Checkout
           // session -- distinct from session.id (the checkout SESSION, cs_..., already captured
@@ -331,16 +374,36 @@ export default {
             product,
             status: patchRes.status,
           };
+          // A server error while recording a payment that has already gone through must not be lost: retry the delivery.
+          if (patchRes.status >= 500) retryReason = `candidate write ${patchRes.status}`;
+          // Replace the old subscription, but only once the new one is recorded (a candidate must never end up with neither),
+          // and never for a payment whose candidate row does not exist.
+          if ((summary.tierUpdate as any).ok && replaced.size > 0) {
+            const outcomes: Record<string, string> = {};
+            for (const oldId of replaced) {
+              try { outcomes[oldId] = await cancelReplacedSubscription(oldId); }
+              catch (e) { outcomes[oldId] = "failed: " + String(e).slice(0, 120); retryReason = "could not cancel replaced subscription"; }
+            }
+            summary.replacedSubscriptions = outcomes;
+          }
         } catch (e) {
-          // Never fail the webhook response over this — Stripe retries a non-2xx, and a real
-          // delivery success (signature verified, event parsed) shouldn't be reported as failed to
-          // Stripe's own dashboard just because the downstream write hit a transient error. The
-          // failure is still visible here, in this function's own invocation log and response body.
+          // Nothing (or not everything) was written: safe to retry, and a payment must not be silently unrecorded.
+          retryReason = "checkout handler error: " + String(e).slice(0, 120);
+          // (Until 2026-09-20 this was swallowed and the delivery reported as a success, so a transient database error
+          // left a paid candidate unrecorded with nothing to retry it. The delivery now fails and Stripe retries; the
+          // failure is also visible in this function's response body.)
           summary.tierUpdate = { attempted: true, ok: false, candidateId, product, error: String(e) };
         }
       } else if (!candidateId) {
         summary.tierUpdate = { attempted: false, reason: "no_client_reference_id" };
       }
+    }
+
+    if (retryReason) {
+      await rpcDone("release_stripe_event", "candidate_retry:" + retryReason);
+      return new Response(JSON.stringify({ ...summary, ok: false, error: "retry_needed", detail: retryReason }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     // Subscription cancellation gap (2026-09-18): the real confirmation half of cancel-stripe-

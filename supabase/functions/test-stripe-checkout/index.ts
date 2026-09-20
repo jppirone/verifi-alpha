@@ -57,6 +57,25 @@ const PRODUCTS: Record<string, { monthly: string; annual: string; nameMonthly: s
   resume_pro: { monthly: "499", annual: "5000", nameMonthly: "Verifi Pro (monthly)", nameAnnual: "Verifi Pro (annual)" },
   license_tracking: { monthly: "999", annual: "9900", nameMonthly: "Verifi License Tracking (monthly)", nameAnnual: "Verifi License Tracking (annual)" },
 };
+// ---------------------------------------------------------------------------------------------------
+// ONE LIVE SUBSCRIPTION PER CANDIDATE (2026-09-20).
+// "Change plan or payment method" used to start a brand-new subscription-mode Checkout with no look at what the candidate
+// already had. Completing it made test-stripe-webhook overwrite candidates.stripe_subscription_id with the NEW subscription
+// and never touch the old one, so the old one kept billing with nothing in the database pointing at it. Two guards now:
+//   1. HERE, before a session is created: if the candidate already has a live Stripe subscription (checked with Stripe itself,
+//      not just the database column), then
+//        * a plain "start a subscription" request is REFUSED with 409 already_subscribed (the screen was stale: a second
+//          Checkout would double-bill someone who did not mean to change anything), and
+//        * an explicit change_plan request is allowed and the session is stamped metadata[replaces_subscription] = the live
+//          subscription's id. The old subscription is NOT cancelled here: cancelling before the new payment succeeds would
+//          leave a candidate who abandons Checkout with no plan at all.
+//      If Stripe cannot be asked whether a subscription is live, the request fails (502) rather than guessing.
+//   2. In test-stripe-webhook, when the replacement payment actually completes: the old subscription is cancelled as part
+//      of recording the new one (and any other subscription the row pointed at, which also covers two Checkouts open at once).
+// Every new subscription is also stamped with candidate_id and product (subscription_data[metadata]) so any subscription can
+// be attributed to a candidate directly in Stripe.
+// ---------------------------------------------------------------------------------------------------
+const LIVE_SUBSCRIPTION_STATUSES = new Set(["active", "trialing", "past_due", "unpaid", "incomplete"]);
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY")!;
 const RETURN_BASE_URL = "https://alpha.applitrust.com/candidate.html";
 
@@ -112,7 +131,7 @@ export default {
       const authBody = await req.clone().json().catch(() => ({}));
       const authDenied = await authGateCandidate(req, authBody);
       if (authDenied) return authDenied;
-      const { candidate_id, billing_cycle, product } = await req.json();
+      const { candidate_id, billing_cycle, product, change_plan } = await req.json();
       if (!candidate_id || typeof candidate_id !== "string") {
         return new Response(JSON.stringify({ ok: false, error: "candidate_id_required" }), {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -125,12 +144,51 @@ export default {
       const unitAmount = cycle === "annual" ? productConfig.annual : productConfig.monthly;
       const productName = cycle === "annual" ? productConfig.nameAnnual : productConfig.nameMonthly;
 
+      // Does this candidate already have a live subscription? Ask Stripe about the one the database names.
+      const sbHeaders = { "apikey": AUTH_SB_KEY, "Authorization": `Bearer ${AUTH_SB_KEY}` };
+      const candRes = await fetch(`${AUTH_SB_URL}/rest/v1/candidates?id=eq.${encodeURIComponent(candidate_id)}&select=stripe_subscription_id,stripe_subscription_cancelled_at`, { headers: sbHeaders });
+      if (!candRes.ok) {
+        return new Response(JSON.stringify({ ok: false, error: "candidate_lookup_failed" }), {
+          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const candRow = (await candRes.json())[0];
+      if (!candRow) {
+        return new Response(JSON.stringify({ ok: false, error: "candidate_not_found" }), {
+          status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      let liveSubscriptionId: string | null = null;
+      if (candRow.stripe_subscription_id && !candRow.stripe_subscription_cancelled_at) {
+        const subRes = await fetch(`https://api.stripe.com/v1/subscriptions/${encodeURIComponent(candRow.stripe_subscription_id)}`, {
+          headers: { "Authorization": "Bearer " + STRIPE_SECRET_KEY },
+        });
+        if (subRes.status === 404) {
+          liveSubscriptionId = null; // Stripe has no such subscription: nothing to replace
+        } else if (!subRes.ok) {
+          return new Response(JSON.stringify({ ok: false, error: "subscription_check_failed", status: subRes.status }), {
+            status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        } else {
+          const sub = await subRes.json();
+          if (LIVE_SUBSCRIPTION_STATUSES.has(sub.status)) liveSubscriptionId = sub.id;
+        }
+      }
+      if (liveSubscriptionId && change_plan !== true) {
+        return new Response(JSON.stringify({ ok: false, error: "already_subscribed" }), {
+          status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
       const body = new URLSearchParams();
       body.set("mode", "subscription");
       body.set("client_reference_id", candidate_id);
       body.set("success_url", `${RETURN_BASE_URL}?checkout=success&session_id={CHECKOUT_SESSION_ID}`);
       body.set("cancel_url", `${RETURN_BASE_URL}?checkout=cancel`);
       body.set("metadata[product]", productKey);
+      if (liveSubscriptionId) body.set("metadata[replaces_subscription]", liveSubscriptionId);
+      body.set("subscription_data[metadata][candidate_id]", candidate_id);
+      body.set("subscription_data[metadata][product]", productKey);
       body.set("line_items[0][quantity]", "1");
       body.set("line_items[0][price_data][currency]", "usd");
       body.set("line_items[0][price_data][unit_amount]", unitAmount);
@@ -160,6 +218,7 @@ export default {
         url: data.url,
         mode: data.mode,
         livemode: data.livemode,
+        replacesSubscription: liveSubscriptionId,
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
