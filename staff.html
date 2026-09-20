@@ -2295,6 +2295,7 @@ th.sortable{cursor:pointer;user-select:none}
     <button type="button" class="btn {{ tabQueueClass }}" onClick="{{ selectTabQueue }}">Queue</button>
     <sc-if value="{{ isAdmin }}" hint-placeholder-val="{{ false }}">
       <button type="button" class="btn {{ tabReportingClass }}" onClick="{{ selectTabReporting }}">Reporting</button>
+      <button type="button" class="btn {{ tabDocsClass }}" onClick="{{ selectTabDocs }}">Employer documents</button>
     </sc-if>
   </div>
 
@@ -2808,6 +2809,65 @@ th.sortable{cursor:pointer;user-select:none}
     </div>
   </sc-if>
 
+  <sc-if value="{{ tabIsDocs }}" hint-placeholder-val="{{ false }}">
+    <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+      <div class="card-title">Employer documents</div>
+      <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">For abuse investigation (admins only). Find a candidate by ID, name or email; this lists only the requests the candidate <b>approved</b> whose employer document is still stored. Pending, declined and unanswered requests, and requests without a document, do not appear. Files are deleted 21 days after the request and disappear from this list at the same moment. Every file you open is recorded with your name.</div>
+      <div style="display:flex;gap:var(--space-2);align-items:flex-end;flex-wrap:wrap">
+        <div class="field" style="flex:1;min-width:240px;max-width:420px">
+          <label for="doc-search">Candidate ID, name or email</label>
+          <input class="input" id="doc-search" value="{{ docQuery }}" onChange="{{ setDocQuery }}">
+        </div>
+        <button type="button" class="btn btn-primary" disabled="{{ docSearchDisabled }}" onClick="{{ runDocSearch }}">{{ docSearchLabel }}</button>
+      </div>
+      <sc-if value="{{ docError }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:12px;color:#b00020;line-height:1.6">{{ docError }}</div>
+      </sc-if>
+      <sc-if value="{{ docLinkOpen }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.6;border:1px dashed var(--color-divider);border-radius:var(--radius-md);padding:var(--space-3)">
+          {{ docNote }} <a href="{{ docLinkUrl }}" target="_blank" rel="noopener noreferrer">Open the file</a>
+        </div>
+      </sc-if>
+      <sc-if value="{{ docNoMatch }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:12px;color:var(--color-neutral-500)">No candidate matches that.</div>
+      </sc-if>
+      <sc-for list="{{ docCandidates }}" as="c" hint-placeholder-count="1">
+        <div style="border-top:1px solid var(--color-divider);padding-top:var(--space-3);display:flex;flex-direction:column;gap:var(--space-2)">
+          <div style="font-weight:500">{{ c.name }} <span style="font-weight:400;font-size:12px;color:var(--color-neutral-500)">{{ c.email }} · {{ c.id }}</span></div>
+          <sc-if value="{{ c.empty }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:var(--color-neutral-500)">No approved request with a stored document.</div>
+          </sc-if>
+          <sc-if value="{{ c.hasRows }}" hint-placeholder-val="{{ false }}">
+            <div style="overflow-x:auto">
+              <sc-raw-table class="table">
+                <sc-raw-thead>
+                  <sc-raw-tr>
+                    <sc-raw-th>Requester</sc-raw-th>
+                    <sc-raw-th>Requested</sc-raw-th>
+                    <sc-raw-th>Approved</sc-raw-th>
+                    <sc-raw-th>File</sc-raw-th>
+                    <sc-raw-th></sc-raw-th>
+                  </sc-raw-tr>
+                </sc-raw-thead>
+                <sc-raw-tbody>
+                  <sc-for list="{{ c.rows }}" as="r" hint-placeholder-count="1">
+                    <sc-raw-tr>
+                      <sc-raw-td><div style="font-weight:500">{{ r.requester }}</div><div style="font-size:11px;color:var(--color-neutral-500)">{{ r.requesterDetail }}</div></sc-raw-td>
+                      <sc-raw-td style="white-space:nowrap;font-size:12px;color:var(--color-neutral-400)">{{ r.requestedDisp }}</sc-raw-td>
+                      <sc-raw-td style="white-space:nowrap;font-size:12px;color:var(--color-neutral-400)">{{ r.approvedDisp }}<div style="font-size:11px">{{ r.kindLabel }}</div></sc-raw-td>
+                      <sc-raw-td style="font-size:12px;color:var(--color-neutral-400)">{{ r.fileLabel }}<div style="font-size:11px">Deleted {{ r.untilDisp }}</div></sc-raw-td>
+                      <sc-raw-td><button type="button" class="btn btn-ghost" style="font-size:12px" onClick="{{ r.onView }}">View file</button></sc-raw-td>
+                    </sc-raw-tr>
+                  </sc-for>
+                </sc-raw-tbody>
+              </sc-raw-table>
+            </div>
+          </sc-if>
+        </div>
+      </sc-for>
+    </div>
+  </sc-if>
+
 </div>
 </sc-if>
 
@@ -2969,6 +3029,8 @@ class Component extends DCLogic {
     // prior staff visibility. Loaded lazily, once, the first time the Reporting tab is opened —
     // see selectTabReporting.
     resumeFailures: [], resumeFailuresLoading: false, resumeFailuresLoaded: false, resumeFailuresError: false,
+    // Employer documents tab (admin only): see staff-employer-documents' own header.
+    docQuery: '', docBusy: false, docError: null, docCandidates: null, docLink: null, docLinkNote: '',
     // Item 12 (2026-09-07 wiring audit): the real staff roster (list-staff-users, see its own
     // header), replacing the hardcoded WORKERS array. Loaded once per session alongside loadItems —
     // see applyStaffSession.
@@ -3481,6 +3543,39 @@ class Component extends DCLogic {
     this.setState({ resumeFailuresLoading: false, resumeFailuresLoaded: true, resumeFailuresError: false, resumeFailures: data.items });
   }
 
+  // Employer documents tab (admin only; the server refuses anyone else with 403). The list shows only what the server says qualifies:
+  // approved requests whose document is still stored.
+  async runDocSearch() {
+    const q = (this.state.docQuery || '').trim();
+    if (this.state.docBusy || q.length < 2) return;
+    this.setState({ docBusy: true, docError: null, docLink: null });
+    let res, data;
+    try { res = await this.staffFetch('/staff-employer-documents', { action: 'search', query: q }); data = await res.json().catch(() => ({})); }
+    catch (e) { this.setState({ docBusy: false, docError: "Couldn't reach the server. Try again." }); return; }
+    if (!res.ok || !data.ok) {
+      this.setState({ docBusy: false, docError: res.status === 403 ? 'This page is for admins only.' : data.error === 'query_invalid' ? 'Enter at least 2 characters (a candidate ID, name or email).' : "Couldn't run that search. Try again." });
+      return;
+    }
+    this.setState({ docBusy: false, docCandidates: data.candidates || [] });
+  }
+
+  // The new tab is opened inside the click (a tab opened after an await is blocked as a pop-up); if the browser refuses it, the
+  // 60-second link is shown as a real link instead.
+  async openEmployerDocument(requestId) {
+    const w = window.open('', '_blank');
+    if (w) { try { w.opener = null; w.document.title = 'Employer document'; w.document.body.style.cssText = 'font-family:sans-serif;padding:24px'; w.document.body.textContent = 'Opening the document\u2026'; } catch (e) { /* still navigates below */ } }
+    let res, data;
+    try { res = await this.staffFetch('/staff-employer-documents', { action: 'link', request_id: requestId }); data = await res.json().catch(() => ({})); }
+    catch (e) { if (w) { try { w.close(); } catch (e2) {} } this.setState({ docError: "Couldn't reach the server. Try again." }); return; }
+    if (res.ok && data.ok && data.url) {
+      if (w) { w.location.href = data.url; this.setState({ docError: null, docLink: null }); }
+      else this.setState({ docError: null, docLink: data.url, docLinkNote: 'Your browser did not open a new tab. This link works for 60 seconds:' });
+      return;
+    }
+    if (w) { try { w.close(); } catch (e2) {} }
+    this.setState({ docLink: null, docError: res.status === 404 ? 'That document is no longer available (it was deleted, or the request no longer qualifies). Search again to refresh the list.' : res.status === 403 ? 'This page is for admins only.' : "Couldn't open the document. Try again." });
+  }
+
   // Tracks fields/timeline entries that failed to persist, per item id, so the UI can show
   // a visible "not saved" state and offer a real retry instead of only logging to console.
   // Shape: { [itemId]: { patchFields: { [field]: value }, entries: [entry, ...] } }
@@ -3836,6 +3931,31 @@ class Component extends DCLogic {
       tabIsReporting: s.tab === 'reporting',
       tabQueueClass: s.tab === 'queue' ? 'btn-secondary' : 'btn-ghost',
       tabReportingClass: s.tab === 'reporting' ? 'btn-secondary' : 'btn-ghost',
+      tabIsDocs: s.tab === 'docs' && isAdmin,
+      tabDocsClass: s.tab === 'docs' ? 'btn-secondary' : 'btn-ghost',
+      selectTabDocs: () => this.setState({ tab: 'docs', selectedId: null }),
+      docQuery: s.docQuery,
+      setDocQuery: (e) => this.setState({ docQuery: e.target.value }),
+      docSearchDisabled: s.docBusy || (s.docQuery || '').trim().length < 2,
+      docSearchLabel: s.docBusy ? 'Searching…' : 'Search',
+      runDocSearch: () => this.runDocSearch(),
+      docError: s.docError,
+      docLinkOpen: !!s.docLink, docLinkUrl: s.docLink || '', docNote: s.docLinkNote,
+      docNoMatch: Array.isArray(s.docCandidates) && s.docCandidates.length === 0,
+      docCandidates: (s.docCandidates || []).map(c => ({
+        name: c.name || '(no name)', email: c.email || '', id: c.candidate_id,
+        empty: c.rows.length === 0, hasRows: c.rows.length > 0,
+        rows: c.rows.map(r => ({
+          requester: r.requester_name || '(no name)',
+          requesterDetail: [r.requester_company, r.requester_email].filter(Boolean).join(' · '),
+          requestedDisp: this.fmtDateTime(r.requested_at),
+          approvedDisp: this.fmtDateTime(r.approved_at),
+          kindLabel: (r.kind === 'license_report' ? 'License status report' : 'Resume comparison') + (r.status === 'approved' ? '' : ' · employer access ended'),
+          fileLabel: (r.file_name || 'document') + ' · ' + (r.content_type === 'application/pdf' ? 'PDF' : r.content_type === 'image/png' ? 'PNG' : 'JPEG') + ' · ' + Math.max(1, Math.round((r.byte_size || 0) / 1024)) + ' KB',
+          untilDisp: this.fmtDateTime(r.available_until),
+          onView: () => this.openEmployerDocument(r.request_id),
+        })),
+      })),
       selectTabQueue: () => this.setState({ tab: 'queue' }),
       selectTabReporting: () => {
         this.setState({ tab: 'reporting', selectedId: null });
