@@ -535,7 +535,7 @@ export default {
 
       if (action === "list") {
         const [reqs, snaps, tier1, share] = await Promise.all([
-          rows(`comparison_requests?candidate_id=eq.${candidateId}&select=id,requester_email,requester_name,requester_company,requester_domain_type,attestation,status,created_at,expires_at,responded_at,approved_at,first_delivered_at,snapshot_expires_at,kind&order=created_at.desc&limit=100`),
+          rows(`comparison_requests?candidate_id=eq.${candidateId}&select=id,requester_email,requester_name,requester_company,requester_domain_type,attestation,status,created_at,expires_at,responded_at,approved_at,first_delivered_at,snapshot_expires_at,kind,access_method&order=created_at.desc&limit=100`),
           rows(`comparison_snapshots?candidate_id=eq.${candidateId}&select=request_id`),
           rows(`employer_lookup_requests?matched_candidate_id=eq.${candidateId}&result_exists=eq.true&select=id,requester_email,requester_company,used_at&order=used_at.desc&limit=100`),
           assembleSnapshot(candidateId),
@@ -546,7 +546,7 @@ export default {
           // a pending request past its window is closed even if the sweep has not run yet
           const status = r.status === "pending" && new Date(r.expires_at).getTime() < now ? "expired" : r.status;
           return {
-            id: r.id, kind: r.kind, status, created_at: r.created_at, expires_at: r.expires_at, responded_at: r.responded_at, approved_at: r.approved_at,
+            id: r.id, kind: r.kind, access_method: r.access_method, status, created_at: r.created_at, expires_at: r.expires_at, responded_at: r.responded_at, approved_at: r.approved_at,
             delivered: !!r.first_delivered_at, first_delivered_at: r.first_delivered_at, snapshot_available: hasSnap.has(r.id), snapshot_expires_at: r.snapshot_expires_at,
             requester: { name: r.requester_name, company: r.requester_company, email: r.requester_email, domain: String(r.requester_email).split("@")[1] || "", domain_type: r.requester_domain_type },
             attestation: r.attestation,

@@ -142,8 +142,9 @@ export default {
             : ps.some((p) => p.status === "needs_review") ? "payment_review" : "awaiting_payment";
         }
         // The kind of request is disclosed only once the candidate has approved it (before that, an employer must not be able to tell what sort of
-        // account the candidate has). "unavailable" covers pending, declined and expired alike, so it never carries one.
-        return json({ ok: true, state, kind: state === "unavailable" || state === "closed" ? null : (r.kind || "resume_comparison"), candidate_label: label, window_ends_at: windowEnds, available_until: state === "unavailable" || state === "closed" || state === "open" ? null : r.snapshot_expires_at, price: price ? { amount_cents: price.amount_cents, currency: price.currency } : null });
+        // account the candidate has). "unavailable" covers pending, declined and expired alike, so it never carries one. "closed" only happens after
+        // the guest opened it, so they have already seen what it was.
+        return json({ ok: true, state, kind: state === "unavailable" ? null : (r.kind || "resume_comparison"), candidate_label: label, window_ends_at: windowEnds, available_until: state === "unavailable" || state === "closed" || state === "open" ? null : r.snapshot_expires_at, price: price ? { amount_cents: price.amount_cents, currency: price.currency } : null });
       }
 
       if (action === "pay") {
@@ -178,16 +179,21 @@ export default {
         form.set("mode", "payment");
         form.set("customer_email", r.requester_email);
         form.set("client_reference_id", pay.id);
-        for (const [k, v] of Object.entries({ product: "employer_guest_comparison", payment_id: pay.id, comparison_request_id: r.id })) {
+        // The price is ONE row (employer_pricing.guest_comparison) for both kinds; what a payment was FOR is recorded by its request (kind) and stamped
+        // on the Stripe session and PaymentIntent, so a license report is never labeled as a comparison.
+        const lr = r.kind === "license_report";
+        for (const [k, v] of Object.entries({ product: "employer_guest_comparison", payment_id: pay.id, comparison_request_id: r.id, kind: r.kind || "resume_comparison" })) {
           form.set(`metadata[${k}]`, v);
           form.set(`payment_intent_data[metadata][${k}]`, v);
         }
-        form.set("payment_intent_data[description]", "Verifi comparison access (one-time view)");
+        form.set("payment_intent_data[description]", lr ? "Verifi license status report (one-time view)" : "Verifi comparison access (one-time view)");
         form.set("line_items[0][quantity]", "1");
         form.set("line_items[0][price_data][currency]", price.currency);
         form.set("line_items[0][price_data][unit_amount]", String(price.amount_cents));
-        form.set("line_items[0][price_data][product_data][name]", "Verifi comparison access");
-        form.set("line_items[0][price_data][product_data][description]", "One-time view of a candidate's verified record, available for 30 minutes once opened. Not a subscription.");
+        form.set("line_items[0][price_data][product_data][name]", lr ? "Verifi license status report" : "Verifi comparison access");
+        form.set("line_items[0][price_data][product_data][description]", lr
+          ? "One-time view of a candidate's license status report, available for 30 minutes once opened. Not a subscription."
+          : "One-time view of a candidate's verified record, available for 30 minutes once opened. Not a subscription.");
         form.set("success_url", `${RETURN_BASE}?comparison=${String(body.token).toLowerCase()}&payment=success`);
         form.set("cancel_url", `${RETURN_BASE}?comparison=${String(body.token).toLowerCase()}&payment=cancel`);
         const s = await stripe("POST", "/v1/checkout/sessions", form, `employer-guest-cmp-${pay.id}`);

@@ -52,6 +52,8 @@ async function sendReceipt(paymentId: string): Promise<string> {
   const claimed = claim.ok ? await claim.json() : [];
   if (!Array.isArray(claimed) || claimed.length === 0) return "receipt_already_sent";
   const dollars = (p.amount_cents / 100).toFixed(2);
+  const cr = p.comparison_request_id ? (await rows(`comparison_requests?id=eq.${p.comparison_request_id}&select=kind`))[0] : null;
+  const what = cr && cr.kind === "license_report" ? "a one-time license status report" : "one-time comparison access"; // same price, named for what was bought
   const when = new Date(p.paid_at || Date.now()).toUTCString();
   const link = p.receipt_url ? `<p><a href="${esc(p.receipt_url)}">View your Stripe receipt</a></p>` : "";
   const res = await fetch("https://api.resend.com/emails", {
@@ -61,7 +63,7 @@ async function sendReceipt(paymentId: string): Promise<string> {
       from: "Verifi <verify@applitrust.com>",
       to: p.payer_email,
       subject: "Your Verifi payment receipt",
-      html: `<p>Thank you. We received your payment for one-time comparison access.</p><p><b>Amount:</b> ${esc(p.currency.toUpperCase())} ${esc(dollars)}<br><b>Date:</b> ${esc(when)}<br><b>Reference:</b> ${esc(p.id)}</p>${link}<p>This is a one-time purchase: it is not a subscription and will not renew. If you have a question about this charge, reply with the reference above.</p>`,
+      html: `<p>Thank you. We received your payment for ${what}.</p><p><b>Amount:</b> ${esc(p.currency.toUpperCase())} ${esc(dollars)}<br><b>Date:</b> ${esc(when)}<br><b>Reference:</b> ${esc(p.id)}</p>${link}<p>This is a one-time purchase: it is not a subscription and will not renew. If you have a question about this charge, reply with the reference above.</p>`,
     }),
   });
   if (!res.ok) {

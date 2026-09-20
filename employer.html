@@ -2416,7 +2416,7 @@ const __ds_scope = {};
       </div>
 
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
-        <div class="card-kicker">Comparisons</div>
+        <div class="card-kicker">Verified record requests</div>
         <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Request the verified record of a candidate you looked up, using the address you are signed in with. The candidate decides. Depending on what they have on file, an approved request opens as a resume comparison or as a license status report; either way, opening it uses one lookup from your organization's plan.</div>
         <sc-if value="{{ cmpNote }}" hint-placeholder-val="{{ false }}">
           <div style="font-size:13px;color:var(--color-accent-300);line-height:1.6">{{ cmpNote }}</div>
@@ -2425,7 +2425,7 @@ const __ds_scope = {};
           <div style="font-size:13px;color:#e2735c;line-height:1.6">{{ cmpError }}</div>
         </sc-if>
         <sc-if value="{{ billingProblem }}" hint-placeholder-val="{{ false }}">
-          <div style="font-size:12px;color:#e2735c;line-height:1.6">Opening comparisons and starting requests are paused until the payment problem above is fixed. Nothing is used while they are paused.</div>
+          <div style="font-size:12px;color:#e2735c;line-height:1.6">Opening approved requests and starting new ones are paused until the payment problem above is fixed. Nothing is used while they are paused.</div>
         </sc-if>
 
         <div style="font-size:11px;letter-spacing:0.04em;text-transform:uppercase;color:var(--color-neutral-500)">Your lookups (last 30 days, matched)</div>
@@ -2548,7 +2548,7 @@ const __ds_scope = {};
         <span style="font-size:13px;color:var(--color-accent-300)">Free</span>
       </button>
       <button type="button" id="landing-compare" class="card elev-sm" style="flex:1;min-width:240px;text-align:left;cursor:pointer;display:flex;flex-direction:column;gap:var(--space-2);color:inherit;font:inherit" sc-camel-on-click="{{ openResumeComparison }}">
-        <span style="font-size:18px;font-family:var(--font-heading)">Resume comparison</span>
+        <span style="font-size:18px;font-family:var(--font-heading)">Verified records</span>
         <span style="font-size:13px;color:var(--color-accent-300)">Sign in or create account</span>
       </button>
     </div>
@@ -2684,7 +2684,7 @@ const __ds_scope = {};
     <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3)">
       <div class="card-kicker">Lookup result</div>
       <div style="font-size:17px;line-height:1.5">A record exists for {{ matchedName }} in our system.</div>
-      <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">Your free lookup confirms existence only. Documents, verification history, and the side-by-side comparison are part of paid access.</div>
+      <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">Your free lookup confirms existence only. What the candidate has verified is part of paid access, and only if they approve.</div>
     </div>
 
     <div style="display:flex;flex-direction:column;gap:var(--space-2);border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
@@ -2774,7 +2774,7 @@ const __ds_scope = {};
   <sc-if value="{{ isGuest }}" hint-placeholder-val="{{ false }}">
   <div style="max-width:520px;margin:0 auto;padding-top:56px;display:flex;flex-direction:column;gap:var(--space-4)">
     <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3)">
-      <div class="card-kicker">Comparison</div>
+      <div class="card-kicker">{{ guestKicker }}</div>
       <sc-if value="{{ guestLoading }}" hint-placeholder-val="{{ true }}">
         <div style="font-size:15px;line-height:1.5">Checking your link…</div>
       </sc-if>
@@ -2783,17 +2783,17 @@ const __ds_scope = {};
         <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">Open the link exactly as it appears in the email. If you no longer have it, the request would need to be made again.</div>
       </sc-if>
       <sc-if value="{{ guestUnavailable }}" hint-placeholder-val="{{ false }}">
-        <div style="font-size:17px;line-height:1.5">This comparison is no longer available.</div>
-        <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">It was not opened in time, or it has ended. Nothing further can be done with this link; a new comparison needs a new request to the candidate.</div>
+        <div style="font-size:17px;line-height:1.5">This request is no longer available.</div>
+        <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">It was not opened in time, or it has ended. Nothing further can be done with this link; a new request to the candidate would be needed.</div>
       </sc-if>
       <sc-if value="{{ guestClosed }}" hint-placeholder-val="{{ false }}">
         <div style="font-size:17px;line-height:1.5">This one-time view is closed.</div>
-        <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">It cannot be reopened, by you or by us, and nothing of it is kept for you. A new comparison would need a new request to the candidate.</div>
+        <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">{{ guestClosedText }}</div>
       </sc-if>
       <sc-if value="{{ guestAwaiting }}" hint-placeholder-val="{{ false }}">
         <div style="font-size:17px;line-height:1.5">{{ guestLabel }} approved your request.</div>
-        <div style="font-size:14px;line-height:1.6">Opening it is a <b>one-time view</b>: {{ guestPriceLabel }}, charged only when you pay below. Once you open it you can read it for 30 minutes. After that it is gone and cannot be reopened, by you or by us.</div>
-        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">You have no account, so nothing is stored for you. Have your own copy of the candidate's resume ready first: you can show it next to the record while it is open. This link stays valid until {{ guestAvailableUntil }} if you do not open it.</div>
+        <div style="font-size:14px;line-height:1.6">Opening {{ guestThe }} is a <b>one-time view</b>: {{ guestPriceLabel }}, charged only when you pay below. Once you open it you can read it for 30 minutes. After that it is gone and cannot be reopened, by you or by us.</div>
+        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">{{ guestAwaitingHint }}</div>
         <label style="display:flex;gap:var(--space-2);align-items:flex-start;font-size:12px;color:var(--color-neutral-300);line-height:1.6">
           <input type="checkbox" checked="{{ guestAck }}" sc-camel-on-change="{{ toggleGuestAck }}" style="accent-color:var(--color-accent);margin-top:3px">
           <span>I understand this is a one-time view that closes 30 minutes after I open it and cannot be reopened.</span>
@@ -2827,7 +2827,7 @@ const __ds_scope = {};
       </sc-if>
       <sc-if value="{{ guestReady }}" hint-placeholder-val="{{ false }}">
         <div style="font-size:17px;line-height:1.5">Payment confirmed.</div>
-        <div style="font-size:14px;line-height:1.6">Opening it now starts your 30 minutes. It cannot be reopened after that. Have your own copy ready, then open it.</div>
+        <div style="font-size:14px;line-height:1.6">{{ guestReadyText }}</div>
         <sc-if value="{{ guestError }}" hint-placeholder-val="{{ false }}">
           <div style="font-size:12px;color:#e2735c;line-height:1.6">{{ guestError }}</div>
         </sc-if>
@@ -3302,7 +3302,7 @@ class Component extends DCLogic {
     const lk = both[0].data, cm = both[1].data;
     this.setState({
       lookups: lk && lk.ok ? (lk.lookups || []) : [], comparisons: cm && cm.ok ? (cm.comparisons || []) : [], cmpLoaded: true,
-      cmpLoadErr: (lk && lk.ok && cm && cm.ok) ? null : "We couldn't load your comparisons. Please try again.",
+      cmpLoadErr: (lk && lk.ok && cm && cm.ok) ? null : "We couldn't load your requests. Please try again.",
     });
   }
 
@@ -3358,7 +3358,7 @@ class Component extends DCLogic {
       reqErr: code === 'attestation_invalid' ? 'Please say how you obtained the candidate\u2019s information (3 to 500 characters).'
         : code === 'rate_limited' ? 'You have sent several requests today. Please try again tomorrow.'
         : code === 'already_requested' ? 'You already have a request open for this candidate. Check your email for the link if it was approved.'
-        : "This comparison can't be requested right now.",
+        : "This request can't be made right now.",
     });
   }
 
@@ -3395,7 +3395,7 @@ class Component extends DCLogic {
     const d = r.data || {};
     if (d.ok && d.checkout_url) { window.location.href = d.checkout_url; return; } // Stripe's own hosted page
     if (d.ok) { this.setState({ guestBusy: false }); await this.refreshGuest(); return; }
-    this.setState({ guestBusy: false, guestErr: d.error === 'not_available' ? 'This comparison can no longer be paid for.' : d.error === 'payment_review' ? 'Your payment needs a manual check.' : "We couldn't start the payment. Please try again." });
+    this.setState({ guestBusy: false, guestErr: d.error === 'not_available' ? 'This can no longer be paid for.' : d.error === 'payment_review' ? 'Your payment needs a manual check.' : "We couldn't start the payment. Please try again." });
     await this.refreshGuest();
   }
 
@@ -3428,7 +3428,9 @@ class Component extends DCLogic {
   endGuestView() {
     if (this._guestTimer) { clearInterval(this._guestTimer); this._guestTimer = null; }
     if (this._copyUrl) { try { URL.revokeObjectURL(this._copyUrl); } catch (x) { /* ignore */ } this._copyUrl = null; }
-    this.setState({ screen: 'guest', compare: null, guest: { state: 'closed' } });
+    // keep the kind (the guest has just seen it) so the closed screen names what was closed
+    const seen = (this.state.compare && this.state.compare.content && this.state.compare.content.kind) || (this.state.guest && this.state.guest.kind) || null;
+    this.setState({ screen: 'guest', compare: null, guest: { state: 'closed', kind: seen } });
   }
 
   async closeGuestView() {
@@ -3456,7 +3458,7 @@ class Component extends DCLogic {
       reqBusy: false,
       reqErr: code === 'attestation_invalid' ? 'Please say how you obtained the candidate\u2019s information (3 to 500 characters).'
         : code === 'payment_problem' ? "Your organization's latest payment failed, so new requests are paused until it is paid. The owner can update the payment method under Billing; nothing was sent to the candidate."
-        : code === 'subscription_required' ? "Your organization needs an active subscription to request comparisons. The owner can start one under Billing."
+        : code === 'subscription_required' ? "Your organization needs an active subscription to request verified records. The owner can start one under Billing."
         : code === 'rate_limited' ? 'You have sent several requests today. Please try again tomorrow.'
         : code === 'already_requested' ? 'You already have a request open for this candidate. It is listed in your account.'
         : code === 'forbidden' ? 'Requests need an organization account.'
@@ -3554,7 +3556,7 @@ class Component extends DCLogic {
       billingProblem: !!(s.billing && s.billing.subscription && s.billing.subscription.payment_problem),
       billingProblemText: (() => {
         const owner = (s.realMembers || []).find(m => m.role === 'owner');
-        const base = 'The last payment for your organization\u2019s plan failed. Comparison lookups are paused until it is paid: nobody in the organization can open a comparison or start a new request, and no lookups are used while it is paused. Stripe also retries the card by itself, and lookups resume as soon as a payment goes through.';
+        const base = 'The last payment for your organization\u2019s plan failed. Lookups are paused until it is paid: nobody in the organization can open an approved request or start a new one, and no lookups are used while it is paused. Stripe also retries the card by itself, and lookups resume as soon as a payment goes through.';
         return (s.real && s.real.role === 'owner') ? base + ' Updating the payment method fixes it sooner.' : base + ' Ask the organization owner' + (owner ? ' (' + (owner.name || owner.email) + ')' : '') + ' to update the payment method under Billing.';
       })(),
       billingNotice: s.billingNote, billingError: s.billingErr, billingBusy: s.billingBusy,
@@ -3564,7 +3566,7 @@ class Component extends DCLogic {
       billingIsEnded: !!(s.billing && s.billing.subscription && !s.billing.subscription.live),
       billingCancelPending: !!(s.billing && s.billing.subscription && s.billing.subscription.cancel_at_period_end),
       billingCanCancel: !(s.billing && s.billing.subscription && s.billing.subscription.cancel_at_period_end),
-      billingPriceLine: s.billing && s.billing.pricing ? ('$' + (s.billing.pricing.amount_cents / 100).toFixed(2) + ' per month, including ' + s.billing.pricing.included_lookups + ' comparison lookups per billing period, shared by everyone in the organization. When the lookups are used up, no more are available until the next period.') : '',
+      billingPriceLine: s.billing && s.billing.pricing ? ('$' + (s.billing.pricing.amount_cents / 100).toFixed(2) + ' per month, including ' + s.billing.pricing.included_lookups + ' lookups per billing period, shared by everyone in the organization. When the lookups are used up, no more are available until the next period.') : '',
       billingStatusLine: (() => {
         const b = s.billing && s.billing.subscription;
         if (!b) return '';
@@ -3713,7 +3715,7 @@ class Component extends DCLogic {
       }),
       resultAccessNote: s.real
         ? (s.real.org ? 'Signed in as ' + s.real.user.email + '.' : 'You are signed in but not part of an organization yet.')
-        : 'You can request as a guest (a one-time view, paid per view) or sign in with an organization account, whose plan covers comparisons.',
+        : 'You can request as a guest (a one-time view, paid per view) or sign in with an organization account, whose plan covers these requests.',
       accessCandidateLabel: s.reqLookupLabel || 'the candidate',
       accessEmailMismatch: !!s.real && !!s.real.org && !!s.reqLookupRequesterEmail && s.reqLookupRequesterEmail.trim().toLowerCase() !== (s.real.user.email || '').toLowerCase() && !s.reqClaimToken,
       accessEmailNote: 'This lookup was confirmed with ' + (s.reqLookupRequesterEmail || 'another address') + ', so it can only be requested from an account signed in with that address. You are signed in as ' + (s.real && s.real.user ? s.real.user.email : '') + '.',
@@ -3742,6 +3744,19 @@ class Component extends DCLogic {
       guestStillOpen: !!s.guest && s.guest.state === 'open',
       guestWindowEnd: s.guest && s.guest.window_ends_at ? new Date(s.guest.window_ends_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '',
       guestLabel: (s.guest && s.guest.candidate_label) || 'The candidate',
+      // What the guest is about to receive. The server tells us only after the candidate approved (before that the screen says nothing about it).
+      guestKicker: (() => { const k = s.guest && s.guest.kind; return k === 'license_report' ? 'License status report' : k === 'resume_comparison' ? 'Comparison' : 'Verified record'; })(),
+      guestThe: (() => { const k = s.guest && s.guest.kind; return k === 'license_report' ? 'the license status report' : k === 'resume_comparison' ? 'the comparison' : 'it'; })(),
+      guestAwaitingHint: (() => {
+        const k = s.guest && s.guest.kind; const until = s.guest && s.guest.available_until ? this.fmtDate(s.guest.available_until) : '';
+        return k === 'license_report'
+          ? 'You have no account, so nothing is stored for you. The report lists each license on the candidate\u2019s account and whether it is verified. This link stays valid until ' + until + ' if you do not open it.'
+          : k === 'resume_comparison'
+            ? 'You have no account, so nothing is stored for you. Have your own copy of the candidate\u2019s resume ready first: you can show it next to the record while it is open. This link stays valid until ' + until + ' if you do not open it.'
+            : 'You have no account, so nothing is stored for you. This link stays valid until ' + until + ' if you do not open it.';
+      })(),
+      guestReadyText: (() => { const k = s.guest && s.guest.kind; return k === 'license_report' ? 'Opening the report now starts your 30 minutes. It cannot be reopened after that.' : k === 'resume_comparison' ? 'Opening it now starts your 30 minutes. It cannot be reopened after that. Have your own copy ready, then open it.' : 'Opening it now starts your 30 minutes. It cannot be reopened after that.'; })(),
+      guestClosedText: (() => { const k = s.guest && s.guest.kind; const what = k === 'license_report' ? 'license status report' : k === 'resume_comparison' ? 'comparison' : ''; return 'It cannot be reopened, by you or by us, and nothing of it is kept for you. ' + (what ? 'A new ' + what + ' would need a new request to the candidate.' : 'A new request to the candidate would be needed.'); })(),
       guestAvailableUntil: s.guest && s.guest.available_until ? this.fmtDate(s.guest.available_until) : '',
       guestAck: !!s.guestAck,
       toggleGuestAck: (e) => this.setState({ guestAck: !!e.target.checked }),
@@ -3751,12 +3766,12 @@ class Component extends DCLogic {
       guestPay: () => this.guestPayNow(),
       guestRecheck: () => this.refreshGuest(),
       guestOpen: () => this.guestOpenNow(),
-      guestOpenLabel: s.guestBusy ? 'Opening…' : 'Open the comparison (starts your 30 minutes)',
+      guestOpenLabel: s.guestBusy ? 'Opening…' : 'Open the ' + (s.guest && s.guest.kind === 'license_report' ? 'license report' : s.guest && s.guest.kind === 'resume_comparison' ? 'comparison' : 'record') + ' (starts your 30 minutes)',
       requestSentLine: s.requestSentLine,
       requestSentIsOrg: s.requestSentKind !== 'guest',
       requestSentIsGuest: s.requestSentKind === 'guest',
       requestSentDetail: s.requestSentKind === 'guest'
-        ? 'If they approve, we email a link to ' + (s.reqLookupRequesterEmail || 'the address you confirmed this lookup with') + '. That link is the only way in, so keep the email: opening the comparison is a one-time view (paid then, not before). If they decline, or do not answer within 72 hours, we email only that the request was not authorized: we do not say which, and you are not charged.'
+        ? 'If they approve, we email a link to ' + (s.reqLookupRequesterEmail || 'the address you confirmed this lookup with') + '. That link is the only way in, so keep the email: opening it is a one-time view (paid then, not before). If they decline, or do not answer within 72 hours, we email only that the request was not authorized: we do not say which, and you are not charged.'
         : 'You will get an email either way. If they approve, it says so and you open it from your account. If they decline, or do not answer within 72 hours, the email says only that the request was not authorized: we do not say which, and nothing is used from your plan.',
       cmpNote: s.cmpNote, cmpError: s.cmpErr || s.cmpLoadErr, cmpBusy: s.cmpBusy,
       noLookupRows: (s.lookups || []).length === 0,

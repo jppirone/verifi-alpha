@@ -7493,14 +7493,18 @@ class Component extends DCLogic {
       return {
         text: 'Approve ' + who + '? They will see a report of the licenses on your account, as checked against the state registry just now. This is exactly what they will see:',
         lines: ls.map(l => this.licenseLineText(l)),
-        foot: 'A license that is not verified is shown as not verified, with the reason. Nothing else about you is shown. If they never open it, it is discarded after 7 days; once opened it stays available to them for 30 days. You cannot undo an approval.',
+        foot: 'A license that is not verified is shown as not verified, with the reason. Nothing else about you is shown. ' + (e.access_method === 'guest'
+          ? 'They have no account: they can open it once, and only after paying for it. Once they open it they can read it for 30 minutes, and then it is gone and cannot be reopened. If they never open it, it is discarded after 7 days.'
+          : 'If they never open it, it is discarded after 7 days; once opened it stays available to them for 30 days.') + ' You cannot undo an approval.',
         canApprove: true,
       };
     }
     const what = this.empWouldShareText();
     if (!what) return { text: "You don't have any verified items yet, so there is nothing to share with " + who + '. You can decline, or wait until some of your items are verified.', lines: [], foot: '', canApprove: false };
     const nc = this.empNotClearedText();
-    return { text: 'Approve ' + who + '? They will see the items you confirmed that Verifi has verified, as they stand right now: ' + what + '.' + (nc ? ' They will also see, by name, ' + (nc.indexOf('; ') < 0 ? 'this item that was checked and did not clear' : 'these items that were checked and did not clear') + ': ' + nc + '.' : '') + ' Your other items are not shown or described. If they never open it, it is discarded after 7 days; once opened it stays available to them for up to 90 days. You cannot undo an approval.', lines: [], foot: '', canApprove: true };
+    return { text: 'Approve ' + who + '? They will see the items you confirmed that Verifi has verified, as they stand right now: ' + what + '.' + (nc ? ' They will also see, by name, ' + (nc.indexOf('; ') < 0 ? 'this item that was checked and did not clear' : 'these items that were checked and did not clear') + ': ' + nc + '.' : '') + ' Your other items are not shown or described. ' + (e.access_method === 'guest'
+      ? 'They have no account: they can open it once, and only after paying for it. Once they open it they can read it for 30 minutes, and then it is gone and cannot be reopened. If they never open it, it is discarded after 7 days.'
+      : 'If they never open it, it is discarded after 7 days; once opened it stays available to them for up to 90 days.') + ' You cannot undo an approval.', lines: [], foot: '', canApprove: true };
   }
 
   empWouldShareText() {
