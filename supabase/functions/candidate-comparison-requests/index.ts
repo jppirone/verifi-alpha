@@ -128,7 +128,7 @@ async function assembleSnapshot(candidateId: string): Promise<Assembled> {
     docList ? rows(`education_items?${base}&select=id,institution,degree,field_of_study,location,start_date,start_date_precision,end_date,end_date_precision,position&order=position.asc`) : Promise.resolve([]),
     docList ? rows(`certification_items?${base}&select=id,name,issuing_body,license_number,issue_date,issue_date_precision,position&order=position.asc`) : Promise.resolve([]),
     rows(`verification_items?candidate_id=eq.${candidateId}&status=eq.Confirmed&type=in.(Job%20Experience,Education,Certification,License)&select=id,type,source_item_id,status_changed_at`),
-    rows(`license_items?candidate_id=eq.${candidateId}&select=id,linked_certification_id,state,queue_item_id,verified_at`),
+    rows(`license_items?candidate_id=eq.${candidateId}&select=id,linked_certification_id,state,queue_item_id,verified_at,verification_outcome`),
   ]);
   const confirmedBySource = (type: string) => new Map(vis.filter((v) => v.type === type && v.source_item_id).map((v) => [v.source_item_id as string, v]));
   const jobV = confirmedBySource("Job Experience");
@@ -168,8 +168,10 @@ async function assembleSnapshot(candidateId: string): Promise<Assembled> {
     certOut.push(clean({
       name: c.name, issuer: c.issuing_body, license_number: c.license_number, license_state: lic ? lic.state : null,
       issued: partialDate(c.issue_date, c.issue_date_precision),
+      // A License queue row is 'Confirmed' either because the state registry matched (license_items.verification_outcome = 'verified')
+      // or because staff confirmed it by hand after an ambiguous or failed check. Only the first is a registry verification.
       verification: licQ
-        ? clean({ status: "verified", method: "state_registry", verified_on: dayOf(lic!.verified_at) || dayOf(licQ.status_changed_at) })
+        ? clean({ status: "verified", method: lic!.verification_outcome === "verified" ? "state_registry" : "verifi_review", verified_on: dayOf(lic!.verified_at) || dayOf(licQ.status_changed_at) })
         : clean({ status: "verified", method: "verifi_review", verified_on: dayOf(own.status_changed_at) }),
     }));
   }
