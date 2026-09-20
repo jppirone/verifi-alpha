@@ -18,9 +18,14 @@ const corsHeaders = {
 //
 // Actions (POST {action, ...}). The first three need the candidate's OWN live session (session_token + candidate_id, checked against
 // candidate_sessions on every call; every request is also scoped to that candidate, so another candidate's request id is a 404):
-//   list           pending requests, history, real Tier 1 lookups that matched this candidate, and how many verified items an approval
-//                  would share (counts only, never content)
+//   list           pending requests, history, real Tier 1 lookups that matched this candidate, and what an approval would share (for a resume
+//                  comparison: counts and the named not-cleared lines; for a LICENSE REPORT: the exact license lines, from the last stored checks)
+//   preview        same "what would be shared", but a license report is re-checked against the registry first (cached 10 minutes)
 //   respond        {request_id, decision: "approve" | "decline"}
+//
+// TWO KINDS of request (comparison_requests.kind), derived from the candidate's account type and never from anything a caller sends:
+//   resume_comparison  full-resume accounts: the assembler below (verified items + named not-cleared lines)
+//   license_report     license-only accounts (no resume to compare): one line per license (assembleLicenseReport), status re-checked live at approval
 //   view_snapshot  {request_id}: exactly what an approved request shared
 // Internal (never reachable by a candidate or an employer):
 //   notify_candidate  {request_id}: the "you have a request" email; service-role bearer only; sent at most once (claimed first)
@@ -116,7 +121,23 @@ const dayOf = (iso: unknown) => (typeof iso === "string" && iso.length >= 10 ? i
 const clean = (o: Record<string, unknown>) => { for (const k of Object.keys(o)) if (o[k] === null || o[k] === undefined || o[k] === "") delete o[k]; return o; };
 
 type NotCleared = { kind: "license" | "job" | "education" | "certification"; label: string; status: "not_verified" | "discrepancy"; reason?: string };
-type Assembled = { content: any; notCleared: NotCleared[]; counts: { work: { confirmed: number; verified: number }; education: { confirmed: number; verified: number }; certifications: { confirmed: number; verified: number }; verified_total: number; not_cleared_total: number } };
+// The kind of request is a fact about the CANDIDATE, never something a caller chooses: it is derived from the account type here and in
+// create_comparison_request (SQL), and an approval refuses if the two ever disagree.
+type Kind = "resume_comparison" | "license_report";
+const kindForAccount = (t: unknown): Kind | null => (t === "full_resume" ? "resume_comparison" : t === "license_only" ? "license_report" : null);
+
+// One license on a license report. Fields are a WHITELIST: nothing else from the registry, the queue or staff ever reaches an employer.
+type LicenseLine = {
+  label: string; state?: string;
+  status: "verified" | "not_verified" | "discrepancy";
+  check: "registry_live" | "registry_last_check" | "verifi_review" | "none";
+  checked_on?: string;          // date of the check the status rests on
+  license_type?: string;        // the registry's own type text, only when an exact-name record matched
+  expiry?: string;              // the registry's expiry (ISO date), only when an exact-name record matched
+  license_number?: string;      // ONLY when verified
+  reason?: string;              // one of LICENSE_REPORT_REASON, only when not verified
+};
+type Assembled = { kind: Kind; content: any; notCleared: NotCleared[]; licenses: LicenseLine[]; counts: Record<string, any> };
 
 // The ONLY sentences an employer can ever see about WHY a license did not clear. Keyed by license_items.verification_reason; anything
 // not listed gets the generic sentence. Deliberately says nothing about name changes, lookup failures, the registry's own status text,
@@ -130,14 +151,44 @@ const LICENSE_REASON_GENERIC = "The automatic check could not confirm this licen
 // checks that did not run to a result, or a clean result held for review: not "checked and did not clear", so never listed
 const LICENSE_NEVER_LISTED_REASONS = new Set(["lookup_failed", "recent_name_change"]);
 
-async function assembleSnapshot(candidateId: string): Promise<Assembled> {
+// LICENSE REPORT reasons: the resume-comparison sentences above plus the ones a report needs because it lists EVERY license, including ones no
+// check ran on. Still a closed set; never the registry's text, never a name change, never who a mismatched record belongs to.
+const LICENSE_REPORT_REASON: Record<string, string> = {
+  ...LICENSE_REASON,
+  generic: LICENSE_REASON_GENERIC,
+  no_registry_for_state: "No registry check is available for this state.",
+  not_checked: "This license has not been checked.",
+  under_review: "This license is under review and has not been verified.",
+};
+function reportReasonKey(outcome: unknown, reason: unknown): string {
+  if (outcome === "unsupported_jurisdiction") return "no_registry_for_state";
+  if (!outcome || outcome === "incomplete") return "not_checked";
+  if (outcome === "not_found") return "no_records";
+  if (reason === "no_exact_name_match" || reason === "exact_match_not_active") return String(reason);
+  if (reason === "lookup_failed" || reason === "recent_name_change") return "under_review";
+  return "generic";
+}
+const REPORT_FRESH_CHECK_CAP = 6; // live registry checks per report; the rest fall back to their last stored check
+
+const emptyAssembled = (kind: Kind): Assembled => ({
+  kind, content: null, notCleared: [], licenses: [],
+  counts: kind === "license_report"
+    ? { licenses: { total: 0, verified: 0, not_verified: 0, discrepancy: 0 }, verified_total: 0, not_cleared_total: 0 }
+    : { work: { confirmed: 0, verified: 0 }, education: { confirmed: 0, verified: 0 }, certifications: { confirmed: 0, verified: 0 }, verified_total: 0, not_cleared_total: 0 },
+});
+
+// The ONE entry point. What is assembled depends only on the candidate's account type; `opts.fresh` (license reports) asks the registry again.
+async function assembleSnapshot(candidateId: string, opts: { fresh?: boolean; maxAge?: number } = {}): Promise<Assembled> {
+  const cand = (await rows(`candidates?id=eq.${candidateId}&select=account_type,deletion_scheduled_at`))[0];
+  const kind = cand ? kindForAccount(cand.account_type) : null;
+  if (!cand || !kind || cand.deletion_scheduled_at) return emptyAssembled("resume_comparison");
+  return kind === "license_report" ? await assembleLicenseReport(candidateId, opts) : await assembleResumeSnapshot(candidateId);
+}
+
+async function assembleResumeSnapshot(candidateId: string): Promise<Assembled> {
   const empty = { confirmed: 0, verified: 0 };
   const cand = (await rows(`candidates?id=eq.${candidateId}&select=id,first_name,last_name,account_type,deletion_scheduled_at`))[0];
-  const emptyResult = (): Assembled => ({
-    content: null,
-    notCleared: [],
-    counts: { work: { ...empty }, education: { ...empty }, certifications: { ...empty }, verified_total: 0, not_cleared_total: 0 },
-  });
+  const emptyResult = (): Assembled => emptyAssembled("resume_comparison");
   if (!cand || cand.account_type !== "full_resume" || cand.deletion_scheduled_at) return emptyResult();
 
   // Only rows on a document the candidate has confirmed.
@@ -239,10 +290,13 @@ async function assembleSnapshot(candidateId: string): Promise<Assembled> {
   };
   const name = [cand.first_name, cand.last_name].filter(Boolean).join(" ");
   return {
+    kind: "resume_comparison",
     counts,
     notCleared,
+    licenses: [],
     content: {
       version: 2,
+      kind: "resume_comparison",
       assembled_at: new Date().toISOString(),
       candidate: { name },
       basis: "Items the candidate confirmed and that Verifi verified are shown as verified. Items where a check was run and did not clear are listed separately by name. Any other item that is not shown was not verified, for any reason; that is not evidence either way. This is the record as of the assembly time above.",
@@ -254,10 +308,110 @@ async function assembleSnapshot(candidateId: string): Promise<Assembled> {
 }
 
 // ---------------------------------------------------------------------------------------------------
+// LICENSE REPORT (kind 'license_report', license-only accounts; 2026-09-20). One line per license the account holds; nothing else.
+//   status
+//     verified      a registry pass (license_items.verification_outcome 'verified' AND a Confirmed License queue row), or a Confirmed queue row
+//                   that staff confirmed by hand.
+//     discrepancy   the License queue row is at Discrepancy (a human determination).
+//     not_verified  everything else, always with one fixed reason sentence (LICENSE_REPORT_REASON), including a license no check could be run
+//                   on (unsupported state, incomplete details, not yet checked).
+//   FRESHNESS: a registry pass is re-checked live when the candidate approves (opts.fresh). The live result can only DOWNGRADE (verified -> not
+//   verified, e.g. the license has since lapsed); it can never upgrade a license that is not verified, so it cannot get around the name-change
+//   hold or a staff determination. If the live check cannot be made (registry down, timeout), the line falls back to the last stored check and
+//   says so (check: registry_last_check, with that check's date).
+//   WHAT AN EMPLOYER CAN SEE per license: label (account's license name + state), state, status, how it was checked, the check date, the fixed
+//   reason if not verified, and -- only when an exact-name registry record matched -- the registry's type and expiry. The license NUMBER is shown only
+//   for a verified license. Never: registry status text, the registry's holder names, other people's records, staff notes, reason codes.
+// ---------------------------------------------------------------------------------------------------
+async function freshLicenseCheck(candidateId: string, licenseId: string, maxAge: number): Promise<any | null> {
+  try {
+    const r = await fetch(`${SUPABASE_URL}/functions/v1/verify-license`, {
+      method: "POST", headers: JSON_H,
+      body: JSON.stringify({ action: "status_report", candidate_id: candidateId, license_item_id: licenseId, max_age_seconds: maxAge }),
+      signal: AbortSignal.timeout(55_000),
+    });
+    const j = await r.json().catch(() => null);
+    return j && j.ok === true ? j : null; // null = the live check could not be made
+  } catch (_e) { return null; }
+}
+
+async function assembleLicenseReport(candidateId: string, opts: { fresh?: boolean; maxAge?: number }): Promise<Assembled> {
+  const cand = (await rows(`candidates?id=eq.${candidateId}&select=id,first_name,last_name,account_type,deletion_scheduled_at`))[0];
+  if (!cand || cand.account_type !== "license_only" || cand.deletion_scheduled_at) return emptyAssembled("license_report");
+  const [lics, certs, queue] = await Promise.all([
+    rows(`license_items?candidate_id=eq.${candidateId}&select=id,linked_certification_id,state,queue_item_id,verified_at,verification_outcome,verification_reason,verification_detail,verification_attempted_at&order=created_at.asc`),
+    rows(`certification_items?candidate_id=eq.${candidateId}&select=id,name,license_number`),
+    rows(`verification_items?candidate_id=eq.${candidateId}&type=eq.License&select=id,status,status_changed_at`),
+  ]);
+  const certById = new Map(certs.map((c: any) => [c.id as string, c]));
+  const queueById = new Map(queue.map((q: any) => [q.id as string, q]));
+  const items = lics.filter((l: any) => l.linked_certification_id && certById.has(l.linked_certification_id));
+  const isRegistryPass = (l: any) => l.verification_outcome === "verified" && (queueById.get(l.queue_item_id) as any)?.status === "Confirmed";
+
+  const freshById = new Map<string, any>();
+  if (opts.fresh) {
+    await Promise.all(items.filter(isRegistryPass).slice(0, REPORT_FRESH_CHECK_CAP).map(async (l: any) => { freshById.set(l.id, await freshLicenseCheck(candidateId, l.id, opts.maxAge ?? 0)); }));
+  }
+
+  const pick = (m: any) => ({ license_type: m && m.licenseType ? String(m.licenseType) : undefined, expiry: m && m.expiration ? String(m.expiration) : undefined });
+  const lines: LicenseLine[] = [];
+  for (const l of items as any[]) {
+    const c: any = certById.get(l.linked_certification_id);
+    const q: any = queueById.get(l.queue_item_id);
+    const base = String(c.name || "License").trim();
+    const label = `${/licen[sc]e/i.test(base) ? base : base + " license"}`;
+    const common = { label: l.state ? `${label} (${l.state})` : label, state: l.state || undefined };
+    const stored = l.verification_detail?.matched_record || null; // only present when an exact-name record matched
+    let line: LicenseLine;
+    if (isRegistryPass(l)) {
+      const f = freshById.get(l.id);
+      if (f && f.ok) {
+        line = f.outcome === "verified"
+          ? { ...common, status: "verified", check: "registry_live", checked_on: dayOf(f.checked_at) || undefined, ...pick(f.matched), license_number: c.license_number || undefined }
+          : { ...common, status: "not_verified", check: "registry_live", checked_on: dayOf(f.checked_at) || undefined, ...pick(f.matched), reason: LICENSE_REPORT_REASON[reportReasonKey(f.outcome, f.reason)] };
+      } else {
+        // no live result (not asked for, or the registry could not be reached): the last stored check, labeled as such
+        line = { ...common, status: "verified", check: "registry_last_check", checked_on: dayOf(l.verified_at) || dayOf(q?.status_changed_at) || undefined, ...pick(stored), license_number: c.license_number || undefined };
+      }
+    } else if (q && q.status === "Confirmed") {
+      line = { ...common, status: "verified", check: "verifi_review", checked_on: dayOf(q.status_changed_at) || undefined, license_number: c.license_number || undefined };
+    } else {
+      const checked = !!l.verification_outcome && l.verification_outcome !== "unsupported_jurisdiction";
+      line = {
+        ...common, status: q && q.status === "Discrepancy" ? "discrepancy" : "not_verified",
+        check: checked ? "registry_last_check" : "none", checked_on: checked ? dayOf(l.verification_attempted_at) || undefined : undefined,
+        ...pick(stored), reason: LICENSE_REPORT_REASON[reportReasonKey(l.verification_outcome, l.verification_reason)],
+      };
+    }
+    lines.push(clean(line as any) as LicenseLine);
+  }
+
+  const verified = lines.filter((x) => x.status === "verified").length;
+  const discrepancy = lines.filter((x) => x.status === "discrepancy").length;
+  const counts = { licenses: { total: lines.length, verified, not_verified: lines.length - verified - discrepancy, discrepancy }, verified_total: verified, not_cleared_total: lines.length - verified };
+  const name = [cand.first_name, cand.last_name].filter(Boolean).join(" ");
+  return {
+    kind: "license_report", counts, notCleared: [], licenses: lines,
+    content: {
+      version: 1, kind: "license_report", assembled_at: new Date().toISOString(), candidate: { name },
+      basis: "Every license on the candidate's account is listed with its status. Verified means Verifi checked it against the issuing state's registry, or Verifi staff confirmed it. Anything else says why it is not verified. Each license shows the date of the check its status rests on. This is the record as of the assembly time above.",
+      coverage: { licenses: { total: lines.length, verified } },
+      licenses: lines,
+    },
+  };
+}
+
+// What the candidate is shown before deciding, and gets back after approving: by kind. For a license report these ARE the lines an employer will
+// see (the number of a verified license included); "stored" means built from the last stored checks only, "live" means re-checked against the registry.
+const wouldShare = (a: Assembled, preview: "stored" | "live") => a.kind === "license_report"
+  ? { kind: a.kind, preview, ...a.counts, licenses: a.licenses }
+  : { kind: a.kind, ...a.counts, not_cleared: a.notCleared };
+
+// ---------------------------------------------------------------------------------------------------
 // EMAIL. Everything an employer typed (name, company, email, source) is escaped before it goes into HTML.
 // ---------------------------------------------------------------------------------------------------
 async function notifyCandidate(requestId: string): Promise<{ sent: boolean; reason?: string }> {
-  const r = (await rows(`comparison_requests?id=eq.${requestId}&select=id,candidate_id,requester_name,requester_company,requester_email,attestation,expires_at,status,candidate_notified_at`))[0];
+  const r = (await rows(`comparison_requests?id=eq.${requestId}&select=id,candidate_id,requester_name,requester_company,requester_email,attestation,expires_at,status,candidate_notified_at,kind`))[0];
   if (!r) return { sent: false, reason: "not_found" };
   if (r.status !== "pending") return { sent: false, reason: "not_pending" };
   const c = (await rows(`candidates?id=eq.${r.candidate_id}&select=email,first_name`))[0];
@@ -269,8 +423,10 @@ async function notifyCandidate(requestId: string): Promise<{ sent: boolean; reas
   const who = r.requester_company ? `${esc(r.requester_name || "Someone")} at ${esc(r.requester_company)}` : esc(r.requester_name || "Someone");
   const ok = await sendEmail(
     c.email,
-    "An employer asked to compare a resume with your verified record",
-    `<p>Hi${c.first_name ? " " + esc(c.first_name) : ""},</p><p>${who} (${esc(r.requester_email)}, confirmed by a link sent to that address) asked to compare their copy of your resume with your verified record on Verifi.</p><p><b>How they say they got your information:</b> ${esc(r.attestation)}</p><p><b>Nothing is shared unless you approve.</b> If you approve, they see the items you confirmed that Verifi has verified, plus the name and status of any item that was checked and did not clear (the approval screen lists exactly which, before you decide). Nothing else about your other items is shown. If you decline, or do nothing, they are told only that the request was not authorized.</p><p><a href="${SITE}/candidate.html">Sign in and open the Activity tab</a> to review it. The request closes automatically at ${esc(new Date(r.expires_at).toUTCString())}.</p>`,
+    r.kind === "license_report" ? "An employer asked for your license status" : "An employer asked to compare a resume with your verified record",
+    r.kind === "license_report"
+      ? `<p>Hi${c.first_name ? " " + esc(c.first_name) : ""},</p><p>${who} (${esc(r.requester_email)}, confirmed by a link sent to that address) asked for a report of the license status on your Verifi account.</p><p><b>How they say they got your information:</b> ${esc(r.attestation)}</p><p><b>Nothing is shared unless you approve.</b> If you approve, they see each license on your account and whether it is verified. For a verified license they also see its number; where the state registry matched your record they see the registry's license type and expiry date; and a license that is not verified is shown as not verified with a short reason. Before anything is shared, each verified license is checked against the state registry again so the status is current. The approval screen lists exactly what they will see before you decide. If you decline, or do nothing, they are told only that the request was not authorized.</p><p><a href="${SITE}/candidate.html">Sign in and open the Activity tab</a> to review it. The request closes automatically at ${esc(new Date(r.expires_at).toUTCString())}.</p>`
+      : `<p>Hi${c.first_name ? " " + esc(c.first_name) : ""},</p><p>${who} (${esc(r.requester_email)}, confirmed by a link sent to that address) asked to compare their copy of your resume with your verified record on Verifi.</p><p><b>How they say they got your information:</b> ${esc(r.attestation)}</p><p><b>Nothing is shared unless you approve.</b> If you approve, they see the items you confirmed that Verifi has verified, plus the name and status of any item that was checked and did not clear (the approval screen lists exactly which, before you decide). Nothing else about your other items is shown. If you decline, or do nothing, they are told only that the request was not authorized.</p><p><a href="${SITE}/candidate.html">Sign in and open the Activity tab</a> to review it. The request closes automatically at ${esc(new Date(r.expires_at).toUTCString())}.</p>`,
   );
   if (!ok) {
     await rest(`comparison_requests?id=eq.${requestId}`, { method: "PATCH", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ candidate_notified_at: null }) });
@@ -299,7 +455,7 @@ async function noticeRequesterNotAuthorized(requestId: string): Promise<boolean>
 // is stored on the request. The token is minted HERE, at send time, and only for a request whose link has never been sent, so a failed send
 // is simply retried by the sweep with a fresh token (nothing is lost, and a link that already went out is never invalidated).
 async function sendGuestLink(requestId: string): Promise<boolean> {
-  const r = (await rows(`comparison_requests?id=eq.${requestId}&select=id,access_method,status,requester_email,requester_name,first_delivered_at,guest_link_sent_at,snapshot_expires_at`))[0];
+  const r = (await rows(`comparison_requests?id=eq.${requestId}&select=id,access_method,status,requester_email,requester_name,first_delivered_at,guest_link_sent_at,snapshot_expires_at,kind`))[0];
   if (!r || r.access_method !== "guest" || r.status !== "approved" || r.first_delivered_at || r.guest_link_sent_at) return false;
   const token = Array.from(crypto.getRandomValues(new Uint8Array(32))).map((b) => b.toString(16).padStart(2, "0")).join("");
   const claim = await rest(`comparison_requests?id=eq.${requestId}&guest_link_sent_at=is.null&status=eq.approved`, {
@@ -310,23 +466,25 @@ async function sendGuestLink(requestId: string): Promise<boolean> {
   if (!Array.isArray(claimed) || claimed.length === 0) return false;
   const price = (await rows("employer_pricing?key=eq.guest_comparison&select=amount_cents,currency"))[0];
   const money = price ? new Intl.NumberFormat("en-US", { style: "currency", currency: String(price.currency || "usd").toUpperCase() }).format(price.amount_cents / 100) : "a one-time fee";
+  const lr = r.kind === "license_report";
   const ok = await sendEmail(
     r.requester_email,
-    "Your Verifi comparison request was approved",
-    `<p>Hi ${esc(r.requester_name || "there")},</p><p>The candidate approved your comparison request.</p><p><a href="${SITE}/employer.html?comparison=${token}">Open your comparison</a></p><p>This is a <b>one-time view</b>. Nothing is charged until you choose to open it: opening costs ${esc(money)}, and once you do you can read it for 30 minutes. After that it is gone and cannot be reopened, by you or by us. There is no account: this link is the only way in, so keep this email. The link works until ${esc(new Date(r.snapshot_expires_at).toUTCString())} if you do not open it.</p>`,
+    lr ? "Your Verifi license status request was approved" : "Your Verifi comparison request was approved",
+    `<p>Hi ${esc(r.requester_name || "there")},</p><p>The candidate approved your request. ${lr ? "What they shared is a license status report: each license on their account and whether it is verified." : "What they shared is a comparison of their verified record with your copy."}</p><p><a href="${SITE}/employer.html?comparison=${token}">${lr ? "Open your license status report" : "Open your comparison"}</a></p><p>This is a <b>one-time view</b>. Nothing is charged until you choose to open it: opening costs ${esc(money)}, and once you do you can read it for 30 minutes. After that it is gone and cannot be reopened, by you or by us. There is no account: this link is the only way in, so keep this email. The link works until ${esc(new Date(r.snapshot_expires_at).toUTCString())} if you do not open it.</p>`,
   );
   if (!ok) await rest(`comparison_requests?id=eq.${requestId}`, { method: "PATCH", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ guest_link_sent_at: null, guest_token_hash: null }) });
   return ok;
 }
 
 async function noticeRequesterApproved(requestId: string): Promise<boolean> {
-  const r = (await rows(`comparison_requests?id=eq.${requestId}&select=requester_email,requester_name,access_method,snapshot_expires_at`))[0];
+  const r = (await rows(`comparison_requests?id=eq.${requestId}&select=requester_email,requester_name,access_method,snapshot_expires_at,kind`))[0];
   if (r && r.access_method === "guest") return await sendGuestLink(requestId);
   if (!r || r.access_method !== "org") return false;
+  const lr = r.kind === "license_report";
   return await sendEmail(
     r.requester_email,
-    "Your Verifi comparison request was approved",
-    `<p>Hi ${esc(r.requester_name || "there")},</p><p>The candidate approved your comparison request. <a href="${SITE}/employer.html">Sign in to your Verifi employer account</a> to open it. It stays available until ${esc(new Date(r.snapshot_expires_at).toUTCString())}; opening it uses one lookup from your organization's plan.</p>`,
+    lr ? "Your Verifi license status request was approved" : "Your Verifi comparison request was approved",
+    `<p>Hi ${esc(r.requester_name || "there")},</p><p>The candidate approved your request${lr ? ": what they shared is a license status report (each license on their account and whether it is verified)" : ""}. <a href="${SITE}/employer.html">Sign in to your Verifi employer account</a> to open it. It stays available until ${esc(new Date(r.snapshot_expires_at).toUTCString())}; opening it uses one lookup from your organization's plan.</p>`,
   );
 }
 
@@ -376,7 +534,7 @@ export default {
 
       if (action === "list") {
         const [reqs, snaps, tier1, share] = await Promise.all([
-          rows(`comparison_requests?candidate_id=eq.${candidateId}&select=id,requester_email,requester_name,requester_company,requester_domain_type,attestation,status,created_at,expires_at,responded_at,approved_at,first_delivered_at,snapshot_expires_at&order=created_at.desc&limit=100`),
+          rows(`comparison_requests?candidate_id=eq.${candidateId}&select=id,requester_email,requester_name,requester_company,requester_domain_type,attestation,status,created_at,expires_at,responded_at,approved_at,first_delivered_at,snapshot_expires_at,kind&order=created_at.desc&limit=100`),
           rows(`comparison_snapshots?candidate_id=eq.${candidateId}&select=request_id`),
           rows(`employer_lookup_requests?matched_candidate_id=eq.${candidateId}&result_exists=eq.true&select=id,requester_email,requester_company,used_at&order=used_at.desc&limit=100`),
           assembleSnapshot(candidateId),
@@ -387,7 +545,7 @@ export default {
           // a pending request past its window is closed even if the sweep has not run yet
           const status = r.status === "pending" && new Date(r.expires_at).getTime() < now ? "expired" : r.status;
           return {
-            id: r.id, status, created_at: r.created_at, expires_at: r.expires_at, responded_at: r.responded_at, approved_at: r.approved_at,
+            id: r.id, kind: r.kind, status, created_at: r.created_at, expires_at: r.expires_at, responded_at: r.responded_at, approved_at: r.approved_at,
             delivered: !!r.first_delivered_at, first_delivered_at: r.first_delivered_at, snapshot_available: hasSnap.has(r.id), snapshot_expires_at: r.snapshot_expires_at,
             requester: { name: r.requester_name, company: r.requester_company, email: r.requester_email, domain: String(r.requester_email).split("@")[1] || "", domain_type: r.requester_domain_type },
             attestation: r.attestation,
@@ -398,15 +556,23 @@ export default {
           pending: shaped.filter((r) => r.status === "pending"),
           history: shaped.filter((r) => r.status !== "pending"),
           tier1: tier1.map((t) => ({ id: t.id, domain: String(t.requester_email).split("@")[1] || "", company: t.requester_company, date: t.used_at })),
-          would_share: { ...share.counts, not_cleared: share.notCleared },
+          would_share: wouldShare(share, "stored"),
         });
+      }
+
+      // What an approval would share RIGHT NOW, with a live registry check for a license report (cached for 10 minutes so a preview followed by an
+      // approval agrees and the registry is not asked repeatedly).
+      if (action === "preview") {
+        const share = await assembleSnapshot(candidateId, { fresh: true, maxAge: 600 });
+        if (!share.content) return json({ ok: false, error: "unavailable" }, 409);
+        return json({ ok: true, would_share: wouldShare(share, "live") });
       }
 
       if (action === "respond") {
         if (typeof body.request_id !== "string" || !UUID.test(body.request_id)) return json({ ok: false, error: "request_id_invalid" }, 400);
         if (body.decision !== "approve" && body.decision !== "decline") return json({ ok: false, error: "decision_invalid" }, 400);
         // scoped to THIS candidate: someone else's request is indistinguishable from one that does not exist
-        const r = (await rows(`comparison_requests?id=eq.${body.request_id}&candidate_id=eq.${candidateId}&select=id,status,expires_at,access_method`))[0];
+        const r = (await rows(`comparison_requests?id=eq.${body.request_id}&candidate_id=eq.${candidateId}&select=id,status,expires_at,access_method,kind`))[0];
         if (!r) return json({ ok: false, error: "not_found" }, 404);
         if (r.status !== "pending") return json({ ok: false, error: "not_pending" }, 409);
         if (new Date(r.expires_at).getTime() <= Date.now()) return json({ ok: false, error: "expired" }, 409);
@@ -421,9 +587,12 @@ export default {
         }
 
         // approve: assemble FIRST (nothing exists before this point), refuse an empty snapshot, store it, then flip the request atomically.
-        const snap = await assembleSnapshot(candidateId);
-        if (!snap.content) return json({ ok: false, error: "unavailable" }, 409);
-        if (snap.counts.verified_total === 0) return json({ ok: false, error: "nothing_to_share", would_share: snap.counts }, 409);
+        // A license report is re-checked live HERE (maxAge 0: at approval time, up to the 30 s registry floor). The kind is re-derived from the
+        // candidate's account type and must equal the request's own: if they ever disagree (account changed, row altered) nothing is shared.
+        const snap = await assembleSnapshot(candidateId, { fresh: true, maxAge: 0 });
+        if (!snap.content || snap.kind !== r.kind) return json({ ok: false, error: "unavailable" }, 409);
+        const nothing = snap.kind === "license_report" ? snap.counts.licenses.total === 0 : snap.counts.verified_total === 0;
+        if (nothing) return json({ ok: false, error: "nothing_to_share", would_share: wouldShare(snap, "live") }, 409);
         const ins = await rest("comparison_snapshots", { method: "POST", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ request_id: r.id, candidate_id: candidateId, content: snap.content, counts: snap.counts }) });
         if (ins.status === 409) return json({ ok: false, error: "not_pending" }, 409); // a simultaneous approval already stored one
         if (!ins.ok) return json({ ok: false, error: "assemble_failed" }, 500);
@@ -438,7 +607,7 @@ export default {
           return json({ ok: false, error: "not_pending" }, 409);
         }
         const notified = await noticeRequesterApproved(r.id);
-        return json({ ok: true, status: "approved", shared: { ...snap.counts, not_cleared: snap.notCleared }, employer_notified: notified });
+        return json({ ok: true, status: "approved", shared: wouldShare(snap, "live"), employer_notified: notified });
       }
 
       if (action === "view_snapshot") {

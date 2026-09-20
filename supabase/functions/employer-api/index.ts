@@ -514,7 +514,7 @@ const ACTIONS: Record<string, Action> = {
     run: async ({ user, org }) => {
       // A member sees their own requests made for THIS organization: leaving an organization cuts access to what was requested for it.
       const scope = user.role === "owner" ? `org_id=eq.${org!.id}` : `employer_user_id=eq.${user.id}&org_id=eq.${org!.id}`;
-      const reqs = await rows(`comparison_requests?${scope}&select=id,status,created_at,expires_at,approved_at,snapshot_expires_at,first_delivered_at,employer_user_id,lookup_id,attestation&order=created_at.desc&limit=100`);
+      const reqs = await rows(`comparison_requests?${scope}&select=id,status,created_at,expires_at,approved_at,snapshot_expires_at,first_delivered_at,employer_user_id,lookup_id,attestation,kind&order=created_at.desc&limit=100`);
       if (!reqs) return fail(500, "list_failed");
       const ids = reqs.map((r) => r.id);
       const snaps = ids.length ? await rows(`comparison_snapshots?request_id=in.(${ids.join(",")})&select=request_id`) : [];
@@ -530,7 +530,8 @@ const ACTIONS: Record<string, Action> = {
           const lk = (lookups || []).find((l) => l.id === r.lookup_id);
           const by = (users || []).find((u) => u.id === r.employer_user_id);
           return {
-            id: r.id, status, candidate_label: lk?.candidate_label || "Candidate", requested_at: r.created_at,
+            // the kind is disclosed only once the candidate approved (ready / opened): before that it would reveal the candidate's account type
+            id: r.id, status, kind: status === "ready" || status === "opened" ? (r.kind || "resume_comparison") : null, candidate_label: lk?.candidate_label || "Candidate", requested_at: r.created_at,
             answer_by: status === "awaiting_candidate" ? r.expires_at : null,
             available_until: status === "ready" ? r.snapshot_expires_at : null,
             opened_at: r.first_delivered_at, mine: r.employer_user_id === user.id,

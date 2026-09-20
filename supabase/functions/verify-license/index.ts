@@ -246,6 +246,50 @@ function outcomeText(adapter: JurisdictionAdapter, d: { outcome: Outcome; reason
   return [head[d.outcome] || d.outcome, ...lines].join("\n");
 }
 
+// ---------------------------------------------------------------------------------------------
+// status_report (license-status report, 2026-09-20). SERVICE-ONLY (our own candidate-comparison-requests calls it when a candidate previews or
+// approves a license report). A READ: one live registry lookup for one license, through the SAME adapter and decide() as the automatic check, so
+// the classifier lives in exactly one place. It never touches verification_outcome / the queue / timeline / correction state / notices, and it
+// ignores the name-change hold on purpose: it can only ever be used to DOWNGRADE what a report says, never to confirm anything.
+// Returns only a minimal summary of the ONE exact-name match (its status text, type and expiry), never the registry's row list.
+// The result is cached on license_items (status_check*) for a short time: it lets preview and approve agree and keeps anyone from making us hit
+// the registry more than once per MIN_AGE seconds for a license. A lookup that FAILS is not cached and comes back {ok:false} so the caller can fall
+// back to the last stored check.
+// ---------------------------------------------------------------------------------------------
+const STATUS_REPORT_MIN_AGE_SECONDS = 30;
+async function statusReport(supabase: any, candidateId: string, licenseItemId: string, requestedMaxAge: number): Promise<any> {
+  const maxAge = Math.max(STATUS_REPORT_MIN_AGE_SECONDS, Number.isFinite(requestedMaxAge) ? requestedMaxAge : STATUS_REPORT_MIN_AGE_SECONDS);
+  const { data: item } = await supabase.from("license_items").select("id, state, linked_certification_id, status_check_at, status_check").eq("id", licenseItemId).eq("candidate_id", candidateId).maybeSingle();
+  if (!item) return { ok: false, error: "license_item_not_found" };
+  if (item.status_check && item.status_check_at && Date.now() - Date.parse(item.status_check_at) <= maxAge * 1000) {
+    return { ok: true, cached: true, checked_at: item.status_check_at, ...item.status_check };
+  }
+  const state = normalizeState(item.state);
+  const adapter = state ? ADAPTERS[state] : undefined;
+  if (!state) return { ok: true, outcome: "incomplete", reason: "no_state", matched: null, checked_at: new Date().toISOString() };
+  if (!adapter) return { ok: true, outcome: "unsupported_jurisdiction", reason: `no_adapter_for_${state}`, matched: null, checked_at: new Date().toISOString() };
+  const { data: cert } = await supabase.from("certification_items").select("license_number").eq("id", item.linked_certification_id).eq("candidate_id", candidateId).maybeSingle();
+  const { data: cand } = await supabase.from("candidates").select("first_name, last_name, full_name").eq("id", candidateId).maybeSingle();
+  let firstName = (cand?.first_name || "").trim();
+  let lastName = (cand?.last_name || "").trim();
+  if (!lastName && cand?.full_name) { const parts = String(cand.full_name).trim().split(/\s+/); firstName = parts[0] || ""; lastName = parts.slice(1).join(" "); }
+  const licenseNumber = adapter.normalizeLicenseNumber((cert?.license_number || "").trim());
+  const have: Record<RequiredField, string> = { license_number: licenseNumber, first_name: firstName, last_name: lastName };
+  const missing = adapter.requiredFields.filter((f) => !have[f]);
+  if (missing.length) return { ok: true, outcome: "incomplete", reason: "missing_" + missing.join("_"), matched: null, checked_at: new Date().toISOString() };
+
+  const lookup = await adapter.lookup({ licenseNumber, firstName, lastName });
+  if (!lookup.ok) return { ok: false, error: "lookup_failed" };
+  const d = decide(lookup);
+  const checkedAt = new Date().toISOString();
+  const summary = {
+    outcome: d.outcome, reason: d.reason,
+    matched: d.matched ? { statusText: d.matched.statusText, standing: d.matched.standing, licenseType: d.matched.licenseType, expiration: d.matched.expiration } : null,
+  };
+  await supabase.from("license_items").update({ status_check_at: checkedAt, status_check: summary }).eq("id", licenseItemId);
+  return { ok: true, cached: false, checked_at: checkedAt, ...summary };
+}
+
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 
 function escHtml(s: unknown): string {
@@ -398,7 +442,7 @@ export default {
       // defer_notice and notify_corrections are only ever sent by our own functions (confirm-resume-data, update-license-details,
       // update-profile-name), so they need the service-role key. A plain candidate-triggered check (candidate_id +
       // license_item_id, idempotent and rate-limited by its cooldown) stays open, as before.
-      const serviceOnly = reqBody.after_correction === true || reqBody.defer_notice === true || reqBody.action === "notify_corrections";
+      const serviceOnly = reqBody.after_correction === true || reqBody.defer_notice === true || reqBody.action === "notify_corrections" || reqBody.action === "status_report";
       if (serviceOnly || reqBody.staff_rerun === true) {
         const caller = await authenticateStaffOrService(req, reqBody, { staff: !serviceOnly, service: true });
         if (!caller) return json({ ok: false, error: "unauthorized" }, 401);
@@ -424,6 +468,10 @@ export default {
       if (reqBody.action === "notify_corrections") {
         if (!candidate_id) return json({ ok: false, error: "candidate_id is required" }, 400);
         return json({ ok: true, notice: await sendCorrectionNotices(supabase, candidate_id) });
+      }
+      if (reqBody.action === "status_report") {
+        if (!candidate_id || !license_item_id) return json({ ok: false, error: "candidate_id and license_item_id are required" }, 400);
+        return json(await statusReport(supabase, candidate_id, license_item_id, Number(reqBody.max_age_seconds)));
       }
       const staffRerun = staff_rerun === true;
       const afterCorrection = after_correction === true;

@@ -141,7 +141,9 @@ export default {
             : ps.some((p) => p.status === "created") ? "payment_pending"
             : ps.some((p) => p.status === "needs_review") ? "payment_review" : "awaiting_payment";
         }
-        return json({ ok: true, state, candidate_label: label, window_ends_at: windowEnds, available_until: state === "unavailable" || state === "closed" || state === "open" ? null : r.snapshot_expires_at, price: price ? { amount_cents: price.amount_cents, currency: price.currency } : null });
+        // The kind of request is disclosed only once the candidate has approved it (before that, an employer must not be able to tell what sort of
+        // account the candidate has). "unavailable" covers pending, declined and expired alike, so it never carries one.
+        return json({ ok: true, state, kind: state === "unavailable" || state === "closed" ? null : (r.kind || "resume_comparison"), candidate_label: label, window_ends_at: windowEnds, available_until: state === "unavailable" || state === "closed" || state === "open" ? null : r.snapshot_expires_at, price: price ? { amount_cents: price.amount_cents, currency: price.currency } : null });
       }
 
       if (action === "pay") {
