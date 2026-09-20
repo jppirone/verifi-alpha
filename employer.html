@@ -2253,7 +2253,6 @@ const __ds_scope = {};
         <a href="#" style="font-size:12px" sc-camel-on-click="{{ openSignin }}">Sign in</a>
       </sc-if>
       <span class="tag tag-outline">Alpha prototype</span>
-      <button type="button" class="btn btn-ghost" style="font-size:11px;opacity:0.6" sc-camel-on-click="{{ resetAll }}">Demo: reset to default state</button>
     </div>
   </div>
 
@@ -2408,6 +2407,55 @@ const __ds_scope = {};
       </div>
 
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+        <div class="card-kicker">Comparisons</div>
+        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Request a comparison for a candidate you looked up, using the address you are signed in with. The candidate decides. Opening an approved comparison uses one lookup from your organization's plan.</div>
+        <sc-if value="{{ cmpNote }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:13px;color:var(--color-accent-300);line-height:1.6">{{ cmpNote }}</div>
+        </sc-if>
+        <sc-if value="{{ cmpError }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:13px;color:#e2735c;line-height:1.6">{{ cmpError }}</div>
+        </sc-if>
+
+        <div style="font-size:11px;letter-spacing:0.04em;text-transform:uppercase;color:var(--color-neutral-500)">Your lookups (last 30 days, matched)</div>
+        <sc-if value="{{ noLookupRows }}" hint-placeholder-val="{{ true }}">
+          <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">None. Run a check for a candidate with this email address; if a record exists, it appears here.</div>
+        </sc-if>
+        <sc-for list="{{ lookupRows }}" as="row" hint-placeholder-count="2">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap;font-size:13px">
+            <span>{{ row.label }} <span style="color:var(--color-neutral-500)">· looked up {{ row.dateLabel }}</span></span>
+            <sc-if value="{{ row.canRequest }}" hint-placeholder-val="{{ true }}">
+              <button type="button" class="btn btn-secondary" style="font-size:12px" sc-camel-on-click="{{ row.onRequest }}">Request comparison</button>
+            </sc-if>
+            <sc-if value="{{ row.inProgress }}" hint-placeholder-val="{{ false }}">
+              <span style="font-size:12px;color:var(--color-neutral-500)">Request in progress</span>
+            </sc-if>
+          </div>
+        </sc-for>
+
+        <div style="font-size:11px;letter-spacing:0.04em;text-transform:uppercase;color:var(--color-neutral-500);border-top:1px solid var(--color-divider);padding-top:var(--space-3)">{{ comparisonsHeading }}</div>
+        <sc-if value="{{ noComparisonRows }}" hint-placeholder-val="{{ true }}">
+          <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">No comparison requests yet.</div>
+        </sc-if>
+        <sc-for list="{{ comparisonRows }}" as="row" hint-placeholder-count="2">
+          <div style="display:flex;flex-direction:column;gap:4px;padding-bottom:var(--space-2);border-bottom:1px solid var(--color-divider)">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap;font-size:13px">
+              <span>{{ row.label }} <span style="color:var(--color-neutral-500)">· requested {{ row.requestedLabel }}</span></span>
+              <sc-if value="{{ row.canOpen }}" hint-placeholder-val="{{ false }}">
+                <button type="button" class="btn btn-primary" style="font-size:12px" disabled="{{ cmpBusy }}" sc-camel-on-click="{{ row.onOpen }}">{{ row.openLabel }}</button>
+              </sc-if>
+            </div>
+            <div style="font-size:12px;color:var(--color-neutral-400)">{{ row.statusLabel }}</div>
+            <sc-if value="{{ row.hasBy }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:11px;color:var(--color-neutral-500)">Requested by {{ row.by }}</div>
+            </sc-if>
+          </div>
+        </sc-for>
+        <sc-if value="{{ acctIsOwner }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">As the owner you see every request made for this organization and who made it. Only the person who asked can open a comparison.</div>
+        </sc-if>
+      </div>
+
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
         <div class="card-kicker">Billing</div>
         <sc-if value="{{ billingNotice }}" hint-placeholder-val="{{ false }}">
           <div style="font-size:13px;color:var(--color-accent-300);line-height:1.6">{{ billingNotice }}</div>
@@ -2475,17 +2523,6 @@ const __ds_scope = {};
         </div>
       </sc-if>
     </sc-if>
-  </div>
-  </sc-if>
-
-  <sc-if value="{{ isLoggedIn }}" hint-placeholder-val="{{ false }}">
-  <div style="max-width:1040px;margin:0 auto;display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;padding:10px 0;border-bottom:1px solid var(--color-divider);font-size:12px">
-    <a href="#" sc-camel-on-click="{{ openMyChecks }}">My checks</a>
-    <sc-if value="{{ isOrgAdmin }}" hint-placeholder-val="{{ false }}">
-      <a href="#" sc-camel-on-click="{{ openOrgChecks }}">Organization checks</a>
-    </sc-if>
-    <a href="#" sc-camel-on-click="{{ startOver }}">Start a new lookup</a>
-    <span style="margin-left:auto;color:var(--color-neutral-500)">{{ accountLine }}</span>
   </div>
   </sc-if>
 
@@ -2629,243 +2666,6 @@ const __ds_scope = {};
   </div>
   </sc-if>
 
-  <sc-if value="{{ isUpload }}" hint-placeholder-val="{{ false }}">
-  <div style="max-width:520px;margin:0 auto;padding-top:48px;display:flex;flex-direction:column;gap:var(--space-4)">
-    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-4);flex-wrap:wrap">
-      <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:24px;margin:0">Continue your comparison</h1>
-      <a href="#" style="font-size:12px" sc-camel-on-click="{{ backToAccess }}">Back to request</a>
-    </div>
-
-    <div style="display:flex;flex-wrap:wrap;gap:4px var(--space-4);font-size:12px;color:var(--color-neutral-400);border-top:1px solid var(--color-divider);border-bottom:1px solid var(--color-divider);padding:var(--space-3) 0">
-      <div><span style="color:var(--color-neutral-500)">Candidate</span> {{ matchedName }}</div>
-      <div><span style="color:var(--color-neutral-500)">Looked up by</span> {{ contactUsed }}</div>
-      <div><span style="color:var(--color-neutral-500)">Your email</span> {{ requesterEmail }}</div>
-    </div>
-
-    <sc-if value="{{ showSmallScreenWarn }}" hint-placeholder-val="{{ false }}">
-      <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3)">
-        <div class="card-kicker">Small screen</div>
-        <div style="font-size:15px;line-height:1.6">The side-by-side comparison needs more width than this screen has. It will be cramped and hard to read here.</div>
-        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Switching to a tablet or desktop is the better experience. You can carry on here if you prefer.</div>
-        <button type="button" class="btn btn-primary" style="align-self:flex-start" sc-camel-on-click="{{ ackSmallScreen }}">Continue anyway</button>
-      </div>
-    </sc-if>
-
-    <sc-if value="{{ showAccessChoice }}" hint-placeholder-val="{{ true }}">
-      <div style="display:flex;flex-direction:column;gap:var(--space-3)">
-        <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">Choose how you want to pay for this check. Nothing is charged until you open the comparison.</div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:var(--space-3);align-items:stretch">
-          <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
-            <div style="font-size:14px">Pay once, no account</div>
-            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">{{ priceLabel }} for a single view. Nothing is saved for you afterward.</div>
-            <button type="button" class="btn btn-primary" style="align-self:flex-start;font-size:12px;margin-top:auto" sc-camel-on-click="{{ chooseGuest }}">Pay once</button>
-          </div>
-          <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
-            <div style="font-size:14px">Log in with saved card</div>
-            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">{{ priceLabel }} per check on the card your account holds. Every check is saved to your history.</div>
-            <button type="button" class="btn btn-primary" style="align-self:flex-start;font-size:12px;margin-top:auto" sc-camel-on-click="{{ chooseSaved }}">Log in</button>
-          </div>
-          <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
-            <div style="font-size:14px">Log in with subscription</div>
-            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Uses one lookup from your plan. Every check is saved to your history.</div>
-            <button type="button" class="btn btn-primary" style="align-self:flex-start;font-size:12px;margin-top:auto" sc-camel-on-click="{{ chooseSub }}">Log in</button>
-          </div>
-        </div>
-      </div>
-    </sc-if>
-
-    <sc-if value="{{ showLogin }}" hint-placeholder-val="{{ false }}">
-      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-4)">
-        <div class="card-kicker">{{ loginKicker }}</div>
-        <div class="field">
-          <label for="lg-email">Email</label>
-          <input class="input" id="lg-email" value="{{ loginEmail }}" sc-camel-on-change="{{ setLoginEmail }}" placeholder="you@company.com">
-        </div>
-        <div class="field">
-          <label for="lg-pass">Password</label>
-          <input class="input" id="lg-pass" type="password" value="{{ loginPass }}" sc-camel-on-change="{{ setLoginPass }}">
-        </div>
-        <div style="display:flex;flex-direction:column;gap:var(--space-2);border-top:1px dashed var(--color-divider);padding-top:var(--space-3)">
-          <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Prototype only: no credentials are checked. Pick which kind of account this stands in for.</div>
-          <div class="seg" style="align-self:flex-start">
-            <label class="seg-opt"><input type="radio" name="sim-acct" checked="{{ segExistingAcct }}" sc-camel-on-change="{{ simExistingAcct }}">Existing account</label>
-            <label class="seg-opt"><input type="radio" name="sim-acct" checked="{{ segNewAcct }}" sc-camel-on-change="{{ simNewAcct }}">New account</label>
-          </div>
-          <sc-if value="{{ isSubLogin }}" hint-placeholder-val="{{ false }}">
-            <div class="seg" style="align-self:flex-start">
-              <label class="seg-opt"><input type="radio" name="sim-role" checked="{{ segRoleUser }}" sc-camel-on-change="{{ simRoleUser }}">Individual user</label>
-              <label class="seg-opt"><input type="radio" name="sim-role" checked="{{ segRoleAdmin }}" sc-camel-on-change="{{ simRoleAdmin }}">Organization admin</label>
-            </div>
-          </sc-if>
-        </div>
-        <div style="display:flex;gap:var(--space-4);align-items:center;flex-wrap:wrap">
-          <button type="button" class="btn btn-primary" disabled="{{ loginIncomplete }}" sc-camel-on-click="{{ doLogin }}">Log in</button>
-          <a href="#" style="font-size:12px" sc-camel-on-click="{{ backToAccessChoice }}">Choose another way to pay</a>
-        </div>
-      </div>
-    </sc-if>
-
-    <sc-if value="{{ showCardForm }}" hint-placeholder-val="{{ false }}">
-      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-4)">
-        <div class="card-kicker">{{ cardFormKicker }}</div>
-        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Prototype only: nothing is processed and no card details are kept. The card is not charged until you open the comparison.</div>
-        <div class="field">
-          <label for="cc-name">Name on card</label>
-          <input class="input" id="cc-name" value="{{ cardName }}" sc-camel-on-change="{{ setCardName }}">
-        </div>
-        <div class="field">
-          <label for="cc-num">Card number</label>
-          <input class="input" id="cc-num" value="{{ cardNumber }}" sc-camel-on-change="{{ setCardNumber }}" placeholder="4242 4242 4242 4242">
-        </div>
-        <div style="display:flex;gap:var(--space-3);flex-wrap:wrap">
-          <div class="field" style="flex:1;min-width:120px">
-            <label for="cc-exp">Expiry</label>
-            <input class="input" id="cc-exp" value="{{ cardExp }}" sc-camel-on-change="{{ setCardExp }}" placeholder="MM/YY">
-          </div>
-          <div class="field" style="flex:1;min-width:120px">
-            <label for="cc-cvc">Security code</label>
-            <input class="input" id="cc-cvc" value="{{ cardCvc }}" sc-camel-on-change="{{ setCardCvc }}" placeholder="123">
-          </div>
-        </div>
-        <div style="display:flex;gap:var(--space-4);align-items:center;flex-wrap:wrap">
-          <button type="button" class="btn btn-primary" disabled="{{ cardIncomplete }}" sc-camel-on-click="{{ saveCard }}">{{ cardSubmitLabel }}</button>
-          <a href="#" style="font-size:12px" sc-camel-on-click="{{ backToAccessChoice }}">Choose another way to pay</a>
-        </div>
-      </div>
-    </sc-if>
-
-    <sc-if value="{{ showAccountReady }}" hint-placeholder-val="{{ false }}">
-      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
-        <div class="card-kicker">Signed in</div>
-        <div style="font-size:14px;line-height:1.6">{{ accountReadyLine }}</div>
-        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">{{ accountReadyDetail }}</div>
-        <button type="button" class="btn btn-primary" style="align-self:flex-start" sc-camel-on-click="{{ accessReadyContinue }}">Continue to upload</button>
-      </div>
-    </sc-if>
-
-    <sc-if value="{{ uploadReachable }}" hint-placeholder-val="{{ false }}">
-    <p style="margin:0;font-size:13px;color:var(--color-neutral-400);line-height:1.6">Upload the document you received for {{ matchedName }}. It is stored with this check as a view-only render, and the candidate sees it as part of the comparison.</p>
-
-    <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-4)">
-      <div class="field">
-        <label for="up-file">Candidate's document (PDF or Word)</label>
-        <input class="input" id="up-file" type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/*" sc-camel-on-change="{{ onPickDoc }}">
-        <sc-if value="{{ hasDoc }}" hint-placeholder-val="{{ false }}">
-          <div style="font-size:12px;color:var(--color-neutral-300);margin-top:6px">Selected: {{ docName }}</div>
-        </sc-if>
-      </div>
-      <div class="field">
-        <label for="up-source">How did you obtain this candidate's information?</label>
-        <textarea class="input" id="up-source" rows="3" style="resize:vertical;font-family:var(--font-body);line-height:1.6" value="{{ attestation }}" sc-camel-on-change="{{ setAttestation }}" placeholder="e.g. LinkedIn, Indeed, recruiter name, direct candidate submission"></textarea>
-        <div style="font-size:11px;color:var(--color-neutral-500);margin-top:6px;line-height:1.6">Required. This text is stored with the check and shown to the candidate.</div>
-      </div>
-    </div>
-
-    <button type="button" class="btn btn-primary btn-block" disabled="{{ uploadIncomplete }}" sc-camel-on-click="{{ goConfirmDoc }}">Continue</button>
-    </sc-if>
-  </div>
-  </sc-if>
-
-  <sc-if value="{{ isConfirmDoc }}" hint-placeholder-val="{{ false }}">
-  <div style="max-width:480px;margin:0 auto;padding-top:72px;display:flex;flex-direction:column;gap:var(--space-4)">
-    <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3)">
-      <div class="card-kicker">Confirm before the check runs</div>
-      <div style="font-size:16px;line-height:1.6">This document will be shown to the candidate as part of the comparison. Confirm this is a clean copy.</div>
-      <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">{{ docName }}</div>
-      <button type="button" class="btn btn-primary" style="align-self:flex-start;margin-top:var(--space-2)" sc-camel-on-click="{{ confirmDoc }}">Confirm and continue</button>
-      <a href="#" style="font-size:12px" sc-camel-on-click="{{ backToUpload }}">Choose a different file</a>
-    </div>
-  </div>
-  </sc-if>
-
-  <sc-if value="{{ isCompare }}" hint-placeholder-val="{{ false }}">
-  <div style="max-width:1040px;margin:0 auto;padding-top:40px;display:flex;flex-direction:column;gap:var(--space-4)">
-    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-4);flex-wrap:wrap">
-      <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:24px;margin:0">{{ matchedName }}</h1>
-      <sc-if value="{{ isGuestView }}" hint-placeholder-val="{{ false }}">
-        <a href="#" style="font-size:12px" sc-camel-on-click="{{ closeGuestView }}">Close this one-time view</a>
-      </sc-if>
-      <sc-if value="{{ isAccountView }}" hint-placeholder-val="{{ true }}">
-        <a href="#" style="font-size:12px" sc-camel-on-click="{{ openMyChecks }}">My checks</a>
-      </sc-if>
-    </div>
-
-    <sc-if value="{{ isGuestView }}" hint-placeholder-val="{{ false }}">
-      <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">One-time view. Closing this ends it permanently, so read what you need while it is open.</div>
-    </sc-if>
-
-    <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
-      <div class="card-kicker">Validation results</div>
-      <div style="font-size:15px;line-height:1.6">{{ rolesCountLine }}</div>
-      <div style="font-size:15px;line-height:1.6">{{ credsCountLine }}</div>
-      <div style="font-size:12px">
-        <a href="#" sc-camel-on-click="{{ openDetail }}">View full details</a>
-      </div>
-      <div style="display:grid;grid-template-columns:auto 1fr;gap:var(--space-2) var(--space-4);font-size:12px;align-items:baseline;border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
-        <div style="color:var(--color-neutral-500)">Check ID</div><div>{{ checkId }}</div>
-        <div style="color:var(--color-neutral-500)">Run</div><div>{{ checkDateLabel }}</div>
-        <div style="color:var(--color-neutral-500)">Requesting employer</div><div>{{ checkRequester }}</div>
-        <div style="color:var(--color-neutral-500)">Disclosed domain</div><div>{{ checkDomainLine }}</div>
-        <div style="color:var(--color-neutral-500)">Stated source</div><div style="line-height:1.6">{{ checkAttestation }}</div>
-      </div>
-    </div>
-
-    <div class="card elev-md" style="border:1px solid var(--color-accent-700);padding:var(--space-6)">
-      <div style="font-size:15px;line-height:1.6;color:var(--color-neutral-100)">This shows the candidate's current data as of right now. Your copy may differ, if so, that's worth a conversation with the candidate before drawing conclusions.</div>
-    </div>
-
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:var(--space-4);align-items:start">
-
-      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
-        <div class="card-kicker">Your uploaded document</div>
-        <div style="font-size:12px;color:var(--color-neutral-400)">{{ docLabel }}</div>
-        <div style="width:100%;aspect-ratio:8.5 / 11;background:#ffffff;border-radius:2px;box-shadow:var(--shadow-lg);overflow:auto;pointer-events:none">
-          <sc-if value="{{ docIsImage }}" hint-placeholder-val="{{ false }}">
-            {{ docRender }}
-          </sc-if>
-          <sc-if value="{{ docNotImage }}" hint-placeholder-val="{{ true }}">
-            <div style="height:100%;display:flex;align-items:center;justify-content:center;text-align:center;padding:12%">
-              <div style="font-size:12px;color:#5b5b66;line-height:1.7;max-width:260px">Page image not available. This file type needs the document rasterization pipeline, which is not built yet. The file is stored with this check as a view-only record of what you uploaded.</div>
-            </div>
-          </sc-if>
-        </div>
-        <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">This is a view-only render of the uploaded document, tied to this check. The original file is retained as part of this check's record but is not offered here in its native format.</div>
-      </div>
-
-      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
-        <div class="card-kicker">Candidate's record as of this check</div>
-        <div style="font-size:12px;color:var(--color-neutral-400)">Generated document, built from the candidate's data</div>
-        <div id="resume-doc-container" style="width:100%;aspect-ratio:8.5 / 11;background:#ffffff;border-radius:2px;box-shadow:var(--shadow-lg);overflow:auto;pointer-events:none"></div>
-        <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Generated from the candidate's data as it stood when this check ran. Item-by-item verification status is not shown on the document. See the full details view above.</div>
-      </div>
-    </div>
-
-    <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Both panels above are frozen as of this check and will not change if the candidate later edits their profile.</div>
-  </div>
-  </sc-if>
-
-  <sc-if value="{{ isDetail }}" hint-placeholder-val="{{ false }}">
-  <div style="max-width:640px;margin:0 auto;padding-top:40px;display:flex;flex-direction:column;gap:var(--space-4)">
-    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-4);flex-wrap:wrap">
-      <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:22px;margin:0">Verification detail</h1>
-      <a href="#" style="font-size:12px" sc-camel-on-click="{{ backToCompare }}">Back to comparison</a>
-    </div>
-    <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">Read-only. This mirrors what {{ matchedName }} sees on their own verification status for these items, as it stood when check {{ checkId }} was run.</div>
-    <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-6)">
-      <sc-for list="{{ detailRows }}" as="row" hint-placeholder-count="4">
-        <div style="display:flex;flex-direction:column;gap:6px;padding-bottom:var(--space-4);border-bottom:1px solid var(--color-divider)">
-          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap">
-            <div style="font-size:14px">{{ row.label }}</div>
-            <span class="tag tag-outline" style="white-space:nowrap">{{ row.status }}</span>
-          </div>
-          <div style="font-size:12px;color:var(--color-neutral-500)">{{ row.meta }}</div>
-          <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">{{ row.note }}</div>
-        </div>
-      </sc-for>
-    </div>
-  </div>
-  </sc-if>
-
   <sc-if value="{{ isResult }}" hint-placeholder-val="{{ false }}">
   <div style="max-width:520px;margin:0 auto;padding-top:56px;display:flex;flex-direction:column;gap:var(--space-4)">
 
@@ -2887,20 +2687,10 @@ const __ds_scope = {};
 
     <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
       <div class="card-kicker">Full comparison access</div>
-      <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">Comparing your copy against the candidate's record is a separate request. The candidate is asked by text message and decides whether to allow it.</div>
-      <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Your name, company, and confirmed email are shown to the candidate with that request. Requests expire after {{ responseWindowLabel }} without a response.</div>
-      <label style="display:flex;gap:var(--space-2);align-items:flex-start;font-size:12px;color:var(--color-neutral-300);line-height:1.6">
-        <input type="checkbox" checked="{{ smsOptIn }}" sc-camel-on-change="{{ toggleSmsOptIn }}" style="accent-color:var(--color-accent);margin-top:3px">
-        <span>Also text me when the candidate responds. The text is a notification only and carries no link.</span>
-      </label>
-      <sc-if value="{{ smsOptIn }}" hint-placeholder-val="{{ false }}">
-        <div class="field">
-          <label for="el-sms-phone">Mobile number for that text</label>
-          <input class="input" id="el-sms-phone" value="{{ smsPhone }}" sc-camel-on-change="{{ setSmsPhone }}" placeholder="(555) 000-0000">
-          <div style="font-size:11px;color:var(--color-neutral-500);margin-top:6px;line-height:1.6">Required for the text. We use it for this request only and do not keep it, so you will be asked again next time.</div>
-        </div>
-      </sc-if>
-      <button type="button" class="btn btn-primary" style="align-self:flex-start" disabled="{{ accessRequestBlocked }}" sc-camel-on-click="{{ requestAccess }}">Request full comparison access</button>
+      <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">Comparing your copy against the candidate's record is a separate request. The candidate decides whether to allow it. If they approve, you see only the items they confirmed that Verifi has verified.</div>
+      <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Your name, company, and confirmed email are shown to the candidate with the request, along with how you say you obtained their information. Requests close after 72 hours without an answer.</div>
+      <button type="button" class="btn btn-primary" style="align-self:flex-start" sc-camel-on-click="{{ requestAccess }}">Request full comparison access</button>
+      <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">{{ resultAccessNote }}</div>
     </div>
 
     <div style="text-align:center;font-size:12px;color:var(--color-neutral-500)">
@@ -2911,152 +2701,112 @@ const __ds_scope = {};
 
   <sc-if value="{{ isAccess }}" hint-placeholder-val="{{ false }}">
   <div style="max-width:520px;margin:0 auto;padding-top:56px;display:flex;flex-direction:column;gap:var(--space-4)">
+    <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3)">
+      <div class="card-kicker">Request a comparison</div>
+      <div style="font-size:17px;line-height:1.5">{{ accessCandidateLabel }}</div>
+      <sc-if value="{{ accessNeedsSignin }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">Comparison requests are sent from a signed-in organization account with an active subscription, using the same email address you confirmed this lookup with. Pay-once guest access is not available yet.</div>
+        <button type="button" class="btn btn-primary" style="align-self:flex-start" sc-camel-on-click="{{ goSigninFromAccess }}">Sign in</button>
+      </sc-if>
+      <sc-if value="{{ accessNeedsOrg }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">You are signed in but not part of an organization. Comparisons are paid for by an organization's plan: create or join one in your account first.</div>
+        <button type="button" class="btn btn-primary" style="align-self:flex-start" sc-camel-on-click="{{ openAccount }}">Go to my account</button>
+      </sc-if>
+      <sc-if value="{{ accessEmailMismatch }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">{{ accessEmailNote }}</div>
+      </sc-if>
+      <sc-if value="{{ accessCanRequest }}" hint-placeholder-val="{{ true }}">
+        <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">The candidate is asked to approve. Nothing is prepared or shown to you before they do. Opening an approved comparison uses one lookup from your organization's plan; a request that is declined, or that nobody answers, uses none.</div>
+        <div class="field">
+          <label for="rq-att">How did you obtain this candidate's information?</label>
+          <textarea class="input" id="rq-att" rows="3" style="resize:vertical;font-family:var(--font-body);line-height:1.6" value="{{ attestationDraft }}" sc-camel-on-change="{{ setAttestationDraft }}" placeholder="e.g. LinkedIn, Indeed, recruiter name, direct candidate submission"></textarea>
+          <div style="font-size:11px;color:var(--color-neutral-500);margin-top:6px;line-height:1.6">Required (3 to 500 characters). The candidate sees this text with your name, company and confirmed email.</div>
+        </div>
+        <sc-if value="{{ reqError }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:#e2735c;line-height:1.6">{{ reqError }}</div>
+        </sc-if>
+        <button type="button" class="btn btn-primary" style="align-self:flex-start" disabled="{{ sendRequestDisabled }}" sc-camel-on-click="{{ sendRequest }}">{{ sendRequestLabel }}</button>
+      </sc-if>
+    </div>
+    <div style="text-align:center;font-size:12px;color:var(--color-neutral-500)">
+      <a href="#" sc-camel-on-click="{{ backFromAccess }}">Back</a>
+    </div>
+  </div>
+  </sc-if>
 
+  <sc-if value="{{ isRequestSent }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:520px;margin:0 auto;padding-top:56px;display:flex;flex-direction:column;gap:var(--space-4)">
     <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3)">
       <div class="card-kicker">Request sent</div>
-      <div style="font-size:17px">Check your email for next steps.</div>
-      <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">We asked {{ matchedName }} for approval and will email {{ requesterEmail }} as soon as there is an answer, either way. Nothing to wait on here. Requests close after {{ responseWindowLabel }} without a response.</div>
-      <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">If they approve, the email carries a link that brings you back here to continue. If they decline, or the request times out, the email says so plainly and carries no link, because there is nothing further to do.</div>
-      <div style="border-top:1px dashed var(--color-divider);padding-top:var(--space-3);display:flex;flex-direction:column;gap:var(--space-2)">
-        <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Nothing is actually delivered in this prototype. The button below stands in for opening the approval email.</div>
-        <button type="button" class="btn btn-primary" style="align-self:flex-start" sc-camel-on-click="{{ continueAsApproved }}">(prototype only) Continue as if approved</button>
-      </div>
+      <div style="font-size:17px;line-height:1.5">We asked the candidate for approval.</div>
+      <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">{{ requestSentLine }}</div>
+      <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">You will get an email either way. If they approve, it says so and you open the comparison from your account. If they decline, or do not answer within 72 hours, the email says only that the request was not authorized: we do not say which, and nothing is used from your plan.</div>
+      <button type="button" class="btn btn-primary" style="align-self:flex-start" sc-camel-on-click="{{ openAccount }}">Go to my account</button>
     </div>
+  </div>
+  </sc-if>
 
-    <sc-if value="{{ isNotAuthorized }}" hint-placeholder-val="{{ false }}">
-      <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3)">
-        <div class="card-kicker">Request closed</div>
-        <div style="font-size:17px">Not authorized</div>
-        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">The email to {{ requesterEmail }} says the same thing and carries no link, because there is nothing to open.</div>
-        <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">This request did not result in access. That outcome reflects the candidate's own choice, which we do not control or influence.</div>
-        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">If you believe this result is in error, <a href="#" sc-camel-on-click="{{ noop }}">contact support</a> and someone can look into it. Support can review how the request was handled. They cannot tell you anything further about the candidate or their reasons.</div>
-      </div>
-    </sc-if>
+  <sc-if value="{{ isCompare }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:1040px;margin:0 auto;padding-top:40px;display:flex;flex-direction:column;gap:var(--space-4)">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-4);flex-wrap:wrap">
+      <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:24px;margin:0">{{ compareName }}</h1>
+      <a href="#" style="font-size:12px" sc-camel-on-click="{{ closeCompare }}">Back to your account</a>
+    </div>
 
     <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
-      <div class="card-kicker">Your request record</div>
-      <div style="display:grid;grid-template-columns:auto 1fr;gap:var(--space-2) var(--space-4);font-size:13px;align-items:baseline">
-        <div style="color:var(--color-neutral-500)">Request ID</div><div>{{ requestId }}</div>
-        <div style="color:var(--color-neutral-500)">Domain check</div><div>{{ domainType }}</div>
-        <div style="color:var(--color-neutral-500)">Sent</div><div>{{ sentLabel }}</div>
-        <div style="color:var(--color-neutral-500)">Status</div><div><span class="tag tag-neutral">{{ statusLabel }}</span></div>
+      <div class="card-kicker">Verification coverage</div>
+      <sc-for list="{{ coverageLines }}" as="line" hint-placeholder-count="3">
+        <div style="font-size:15px;line-height:1.6">{{ line }}</div>
+      </sc-for>
+      <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">An item that is not shown was not verified, for any reason. That is not evidence either way. Job descriptions are not part of what is verified, so they are not shown.</div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:var(--space-2) var(--space-4);font-size:12px;align-items:baseline;border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
+        <div style="color:var(--color-neutral-500)">Record as of</div><div>{{ compareAsOf }}</div>
+        <div style="color:var(--color-neutral-500)">Approved</div><div>{{ compareApproved }}</div>
+        <div style="color:var(--color-neutral-500)">Your plan</div><div>{{ compareMeterLine }}</div>
       </div>
     </div>
 
-    <div style="display:flex;justify-content:center;gap:var(--space-4);font-size:12px;color:var(--color-neutral-500)">
-      <a href="#" sc-camel-on-click="{{ backToResult }}">Back to lookup result</a>
-      <a href="#" sc-camel-on-click="{{ startOver }}">Start another lookup</a>
+    <div class="card elev-md" style="border:1px solid var(--color-accent-700);padding:var(--space-6)">
+      <div style="font-size:15px;line-height:1.6;color:var(--color-neutral-100)">This is the candidate's verified record as of the time above, frozen at that moment. Your copy may differ. If it does, that is worth a conversation with the candidate before drawing conclusions.</div>
     </div>
-  </div>
-  </sc-if>
 
-  <sc-if value="{{ isCharge }}" hint-placeholder-val="{{ false }}">
-  <div style="max-width:480px;margin:0 auto;padding-top:72px;display:flex;flex-direction:column;gap:var(--space-4)">
-    <sc-if value="{{ isGuestCharge }}" hint-placeholder-val="{{ true }}">
-      <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3);border:1px solid var(--color-accent-700)">
-        <div class="card-kicker">Read this before you open it</div>
-        <div style="font-size:16px;line-height:1.6">This is a one-time view, and opening it charges {{ priceLabel }} to your card now.</div>
-        <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">You have no account, so nothing is stored for you. Once you close the comparison it is gone permanently: the emailed link stops working and the view cannot be reopened, by you or by us.</div>
-        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Read it fully while it is open, and take your own notes if you need them.</div>
-        <label style="display:flex;gap:var(--space-2);align-items:flex-start;font-size:12px;color:var(--color-neutral-300);line-height:1.6">
-          <input type="checkbox" checked="{{ guestAck }}" sc-camel-on-change="{{ toggleGuestAck }}" style="accent-color:var(--color-accent);margin-top:3px">
-          <span>I understand this view cannot be reopened after I close it.</span>
-        </label>
-        <div style="display:flex;align-items:baseline;gap:var(--space-3);flex-wrap:wrap;font-size:12px;color:var(--color-neutral-400);border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
-          <span>Charging: {{ guestCardLabel }}</span>
-          <a href="#" sc-camel-on-click="{{ changeCard }}">Change card</a>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:var(--space-4);align-items:start">
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+        <div class="card-kicker">Your copy (optional)</div>
+        <div class="field">
+          <label for="cp-file">Choose the copy you received</label>
+          <input class="input" id="cp-file" type="file" accept=".pdf,image/*" sc-camel-on-change="{{ onPickCopy }}">
         </div>
-        <button type="button" class="btn btn-primary" style="align-self:flex-start" disabled="{{ guestChargeBlocked }}" sc-camel-on-click="{{ confirmCharge }}">Charge {{ priceLabel }} and open the comparison</button>
-        <a href="#" style="font-size:12px" sc-camel-on-click="{{ backToUpload }}">Not yet, go back</a>
+        <div id="employer-copy-container" style="width:100%;aspect-ratio:8.5 / 11;background:#ffffff;border-radius:2px;box-shadow:var(--shadow-lg);overflow:auto"></div>
+        <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Shown only in this browser, next to the record. It is not uploaded, stored, or visible to the candidate, and nothing is compared automatically: you read the two side by side. PDF and image files can be previewed; other types cannot.</div>
       </div>
-    </sc-if>
-    <sc-if value="{{ isAccountCharge }}" hint-placeholder-val="{{ false }}">
-      <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3)">
-        <div class="card-kicker">Confirm</div>
-        <div style="font-size:16px;line-height:1.6">{{ accountChargeLine }}</div>
-        <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">This check is saved to your account permanently. You can return to it from My checks whenever you like.</div>
-        <button type="button" class="btn btn-primary" style="align-self:flex-start" sc-camel-on-click="{{ confirmCharge }}">Open the comparison</button>
-        <a href="#" style="font-size:12px" sc-camel-on-click="{{ backToUpload }}">Not yet, go back</a>
-      </div>
-    </sc-if>
-  </div>
-  </sc-if>
 
-  <sc-if value="{{ isClosed }}" hint-placeholder-val="{{ false }}">
-  <div style="max-width:460px;margin:0 auto;padding-top:72px;display:flex;flex-direction:column;gap:var(--space-4)">
-    <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3)">
-      <div class="card-kicker">View closed</div>
-      <div style="font-size:16px;line-height:1.6">This one-time view is closed and cannot be reopened.</div>
-      <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">The check ran and the charge stands, but it was not attached to an account, so there is nothing left to return to. A new comparison would need a new request to the candidate.</div>
-    </div>
-    <button type="button" class="btn btn-primary" style="align-self:flex-start" sc-camel-on-click="{{ startOver }}">Start another lookup</button>
-  </div>
-  </sc-if>
-
-  <sc-if value="{{ isMyChecks }}" hint-placeholder-val="{{ false }}">
-  <div style="max-width:720px;margin:0 auto;padding-top:48px;display:flex;flex-direction:column;gap:var(--space-4)">
-    <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:24px;margin:0">My checks</h1>
-    <p style="margin:0;font-size:13px;color:var(--color-neutral-400);line-height:1.6">Every check run under {{ accountEmail }}. These are saved permanently: open any one of them again at any time.</p>
-    <sc-if value="{{ hasHistory }}" hint-placeholder-val="{{ true }}">
-      <table class="table">
-        <thead>
-          <tr><th>Candidate</th><th>Check ID</th><th>Run</th><th></th></tr>
-        </thead>
-        <tbody>
-          <sc-for list="{{ historyRows }}" as="row" hint-placeholder-count="2">
-            <tr>
-              <td>{{ row.candidateName }}</td>
-              <td style="color:var(--color-neutral-400)">{{ row.id }}</td>
-              <td style="color:var(--color-neutral-400)">{{ row.dateLabel }}</td>
-              <td style="text-align:right"><button type="button" class="btn btn-ghost" style="font-size:12px" sc-camel-on-click="{{ row.open }}">Open</button></td>
-            </tr>
-          </sc-for>
-        </tbody>
-      </table>
-    </sc-if>
-    <sc-if value="{{ noHistory }}" hint-placeholder-val="{{ false }}">
-      <div class="card elev-sm" style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">No checks yet. A check appears here once you open its comparison.</div>
-    </sc-if>
-  </div>
-  </sc-if>
-
-  <sc-if value="{{ isOrgChecks }}" hint-placeholder-val="{{ false }}">
-  <div style="max-width:860px;margin:0 auto;padding-top:48px;display:flex;flex-direction:column;gap:var(--space-4)">
-    <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:24px;margin:0">Organization checks</h1>
-    <p style="margin:0;font-size:13px;color:var(--color-neutral-400);line-height:1.6">Admin view for {{ orgName }}: every check run by anyone on the plan, not only your own. {{ orgSeatLine }}</p>
-    <table class="table">
-      <thead>
-        <tr><th>Run by</th><th>Candidate</th><th>Check ID</th><th>Run</th><th>Status</th></tr>
-      </thead>
-      <tbody>
-        <sc-for list="{{ orgRows }}" as="row" hint-placeholder-count="5">
-          <tr>
-            <td>{{ row.user }}</td>
-            <td>{{ row.candidateName }}</td>
-            <td style="color:var(--color-neutral-400)">{{ row.id }}</td>
-            <td style="color:var(--color-neutral-400)">{{ row.dateLabel }}</td>
-            <td><span class="tag tag-outline">{{ row.status }}</span></td>
-          </tr>
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+        <div class="card-kicker">Candidate's verified record</div>
+        <sc-if value="{{ compareEmpty }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:13px;color:var(--color-neutral-400)">No items to show.</div>
+        </sc-if>
+        <sc-for list="{{ verifiedRows }}" as="row" hint-placeholder-count="4">
+          <div style="display:flex;flex-direction:column;gap:4px;padding-bottom:var(--space-3);border-bottom:1px solid var(--color-divider)">
+            <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap">
+              <div style="font-size:14px;line-height:1.5">{{ row.headline }}</div>
+              <span class="tag tag-outline" style="white-space:nowrap">Verified</span>
+            </div>
+            <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.6">{{ row.detail }}</div>
+            <div style="font-size:11px;color:var(--color-neutral-500)">{{ row.kind }} · {{ row.how }}</div>
+          </div>
         </sc-for>
-      </tbody>
-    </table>
-    <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Admins see that a check was run and by whom. Opening another user's comparison is a separate permission and is not part of this view.</div>
+      </div>
+    </div>
   </div>
   </sc-if>
 </div>
 
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props="{&quot;hasPaidAccess&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Prototype&quot;},&quot;pricePerCheck&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:10,&quot;min&quot;:9,&quot;max&quot;:99,&quot;step&quot;:5,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Policy&quot;},&quot;responseWindowHours&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:72,&quot;min&quot;:24,&quot;max&quot;:168,&quot;step&quot;:24,&quot;unit&quot;:&quot;h&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Policy&quot;}}">
+<script type="text/x-dc" data-dc-script data-props="{}">
 class Component extends DCLogic {
   SUPABASE_FN_URL = 'https://ihmypoduvrzymasgactc.supabase.co/functions/v1';
   SUPABASE_ANON_KEY = 'sb_publishable_o3S1LP0utVvxTXPRb2aZxg_Fz2FWwBj';
-
-  ORG_CHECKS = [
-    { user: 'dana.reyes@northwindtalent.com', candidateName: 'Priya Raman', id: 'CHK-448120', dateLabel: 'Aug 21, 3:40 PM', status: 'Opened' },
-    { user: 'dana.reyes@northwindtalent.com', candidateName: 'Alan Whitfield', id: 'CHK-447903', dateLabel: 'Aug 19, 11:05 AM', status: 'Opened' },
-    { user: 'sam.okafor@northwindtalent.com', candidateName: 'Jordan Avery', id: 'CHK-447511', dateLabel: 'Aug 14, 9:22 AM', status: 'Opened' },
-    { user: 'sam.okafor@northwindtalent.com', candidateName: 'Marcus Delgado', id: 'CHK-446980', dateLabel: 'Aug 8, 4:57 PM', status: 'Request closed, no access' },
-  ];
 
   FREE_EMAIL_DOMAINS = ['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'icloud.com', 'aol.com'];
 
@@ -3070,255 +2820,15 @@ class Component extends DCLogic {
       lookupToken: null,
       lookup: null,
       request: null,
-      response: 'pending',
-      smsOptIn: false, smsPhone: '',
-      smallScreenAck: false, vw: 0,
-      accessStep: 'choose', accessMethod: null, accessReady: false,
-      loginEmail: '', loginPass: '', loginNewAccount: false, loginRole: 'user',
-      cardName: '', cardNumber: '', cardExp: '', cardCvc: '',
-      account: null,
-      history: [],
-      accessLinkSpent: false,
-      guestAck: false, cardReturnToCharge: false,
-      hasPaidAccess: false,
-      docName: '', docType: '', docUrl: null,
-      attestation: '',
-      check: null,
       lookupSending: false, lookupFormError: null,
+      // comparison request form
+      reqLookupId: null, reqLookupLabel: '', reqLookupRequesterEmail: '', reqAttestation: '', reqBusy: false, reqErr: null, requestSentLine: '', accessBack: 'result',
+      // an opened comparison
+      compare: null,
     };
-  }
-
-  onPickDoc(e) {
-    const f = e.target.files && e.target.files[0];
-    if (!f) return;
-    if (/^image\//.test(f.type)) {
-      const rd = new FileReader();
-      rd.onload = () => this.setState({ docName: f.name, docType: f.type, docUrl: rd.result });
-      rd.readAsDataURL(f);
-    } else {
-      this.setState({ docName: f.name, docType: f.type || 'document', docUrl: null });
-    }
-  }
-
-  runCheck() {
-    const s = this.state;
-    const r = s.request || {};
-    const cand = r.candidate || {};
-    const clone = (o) => JSON.parse(JSON.stringify(o || []));
-    const acct = s.account;
-    const check = {
-        guest: !acct,
-        id: 'CHK-' + String(Date.now()).slice(-6),
-        timestamp: new Date().toISOString(),
-        attestation: (s.attestation || '').trim(),
-        docName: s.docName,
-        docType: s.docType,
-        docUrl: s.docUrl,
-        requesterCompany: r.requesterCompany || r.requesterName,
-        requesterDomain: (r.requesterEmail || '').split('@')[1] || 'no domain on file',
-        domainType: r.domainType,
-        candidateName: r.candidateName,
-        profile: clone({
-          headline: cand.headline, location: cand.location, email: cand.email, phone: cand.phone,
-          competencies: cand.competencies || [],
-        }),
-        roles: clone(cand.roles),
-        credentials: clone(cand.credentials),
-    };
-    this.setState({
-      screen: 'compare',
-      check: check,
-      accessLinkSpent: true,
-      history: acct ? [{ id: check.id, candidateName: check.candidateName, timestamp: check.timestamp, check: check }].concat(s.history || []) : (s.history || []),
-    });
-  }
-
-  countLine(items, unit) {
-    const n = items.length;
-    if (!n) return '';
-    const v = items.filter(i => i.status === 'Verified').length;
-    const u = items.filter(i => i.status === 'Unable to Verify').length;
-    const c = items.filter(i => i.status === 'Candidate-stated').length;
-    const parts = [v + ' of ' + n + ' ' + unit + ' verified'];
-    if (u) parts.push(u + ' unable to verify');
-    if (c) parts.push(c + ' candidate-stated');
-    return parts.join(', ');
-  }
-
-
-  sanitizeDoc(v) {
-    return String(v == null ? '' : v)
-      .replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"')
-      .replace(/[\u2013\u2014]/g, '-').replace(/\u00b7/g, '-')
-      .replace(/[^\x20-\x7E]/g, '');
-  }
-
-  wrapText(text, max) {
-    const words = this.sanitizeDoc(text).split(/\s+/).filter(Boolean);
-    const out = [];
-    let line = '';
-    words.forEach(w => {
-      if (!line.length) { line = w; return; }
-      if ((line + ' ' + w).length <= max) { line += ' ' + w; return; }
-      out.push(line); line = w;
-    });
-    if (line.length) out.push(line);
-    return out.length ? out : [''];
-  }
-
-  buildResumeLines(chk) {
-    const prof = chk.profile || {};
-    const lines = [];
-    const push = (text, bold) => lines.push({ text: this.sanitizeDoc(text), bold: !!bold });
-    push(chk.candidateName || '', true);
-    if (prof.headline) push(prof.headline);
-    const contact = [prof.location, prof.email, prof.phone].filter(Boolean).join(' - ');
-    if (contact) push(contact);
-    push('');
-    if ((prof.competencies || []).length) {
-      push('CORE COMPETENCIES', true);
-      this.wrapText((prof.competencies || []).join(', '), 88).forEach(w => push(w));
-      push('');
-    }
-    const roles = chk.roles || [];
-    if (roles.length) {
-      push('PROFESSIONAL EXPERIENCE', true);
-      roles.forEach(r => {
-        push(r.title + ', ' + r.company, true);
-        push(r.dates);
-        this.wrapText(r.responsibilities, 88).forEach(w => push(w));
-        push('');
-      });
-    }
-    const creds = chk.credentials || [];
-    const edu = creds.filter(c => c.kind === 'education');
-    const certs = creds.filter(c => c.kind !== 'education');
-    if (edu.length) {
-      push('EDUCATION', true);
-      edu.forEach(c => { push(c.label + ', ' + c.issuer); push(c.dates); push(''); });
-    }
-    if (certs.length) {
-      push('CERTIFICATIONS', true);
-      certs.forEach(c => { push(c.label + ', ' + c.issuer); push(c.dates); push(''); });
-    }
-    return lines;
-  }
-
-  buildResumePdfBytes(lines) {
-    const pageWidth = 612, pageHeight = 792, marginX = 54, marginTop = 54, marginBottom = 54;
-    const fontSize = 11, leading = 15;
-    const linesPerPage = Math.max(1, Math.floor((pageHeight - marginTop - marginBottom) / leading));
-    const pages = [];
-    for (let i = 0; i < lines.length; i += linesPerPage) pages.push(lines.slice(i, i + linesPerPage));
-    if (pages.length === 0) pages.push([]);
-    const esc = (str) => str.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
-    const fontRegularNum = 3, fontBoldNum = 4;
-    let nextNum = 5;
-    const pageObjNums = [], contentObjNums = [];
-    pages.forEach(() => { pageObjNums.push(nextNum++); contentObjNums.push(nextNum++); });
-    const pageBodies = pages.map(pageLines => {
-      let y = pageHeight - marginTop;
-      let body = 'BT\n';
-      let curFont = null;
-      pageLines.forEach(line => {
-        const font = line.bold ? '/F2' : '/F1';
-        if (font !== curFont) { body += font + ' ' + fontSize + ' Tf\n'; curFont = font; }
-        body += '1 0 0 1 ' + marginX + ' ' + y.toFixed(2) + ' Tm\n';
-        body += '(' + esc(line.text) + ') Tj\n';
-        y -= leading;
-      });
-      body += 'ET';
-      return body;
-    });
-    let out = '%PDF-1.4\n';
-    const offsets = [];
-    const push = (str) => { offsets.push(out.length); out += str; };
-    push('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n');
-    push('2 0 obj\n<< /Type /Pages /Kids [' + pageObjNums.map(n => n + ' 0 R').join(' ') + '] /Count ' + pages.length + ' >>\nendobj\n');
-    push(fontRegularNum + ' 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n');
-    push(fontBoldNum + ' 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>\nendobj\n');
-    pages.forEach((pageLines, idx) => {
-      const pnum = pageObjNums[idx], cnum = contentObjNums[idx];
-      const streamData = pageBodies[idx] + '\n';
-      push(pnum + ' 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + pageWidth + ' ' + pageHeight + '] /Resources << /Font << /F1 ' + fontRegularNum + ' 0 R /F2 ' + fontBoldNum + ' 0 R >> >> /Contents ' + cnum + ' 0 R >>\nendobj\n');
-      push(cnum + ' 0 obj\n<< /Length ' + streamData.length + ' >>\nstream\n' + streamData + 'endstream\nendobj\n');
-    });
-    const xrefStart = out.length;
-    const totalObjs = 4 + pages.length * 2;
-    out += 'xref\n0 ' + (totalObjs + 1) + '\n0000000000 65535 f \n';
-    offsets.forEach(off => { out += String(off).padStart(10, '0') + ' 00000 n \n'; });
-    out += 'trailer\n<< /Size ' + (totalObjs + 1) + ' /Root 1 0 R >>\nstartxref\n' + xrefStart + '\n%%EOF';
-    return out;
-  }
-
-  renderResumeDoc() {
-    if (this.state.screen !== 'compare' || !this.state.check) return;
-    const container = document.getElementById('resume-doc-container');
-    if (!container) { requestAnimationFrame(() => this.renderResumeDoc()); return; }
-    try {
-      const lines = this.buildResumeLines(this.state.check);
-      const pdfText = this.buildResumePdfBytes(lines);
-      const bytes = new Uint8Array(pdfText.length);
-      for (let i = 0; i < pdfText.length; i++) bytes[i] = pdfText.charCodeAt(i);
-      container.innerHTML = '';
-      if (!window.pdfjsLib) {
-        const msg = document.createElement('div');
-        msg.style.cssText = 'color:#5b5b66;font-size:12px;padding:24px;text-align:center';
-        msg.textContent = 'Building document render';
-        container.appendChild(msg);
-        setTimeout(() => this.renderResumeDoc(), 300);
-        return;
-      }
-      if (window.pdfjsLib.GlobalWorkerOptions && !window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
-        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-      }
-      window.pdfjsLib.getDocument({ data: bytes }).promise.then(pdf => {
-        const renderPage = (pageNum) => {
-          pdf.getPage(pageNum).then(page => {
-            const viewport = page.getViewport({ scale: 2 });
-            const canvas = document.createElement('canvas');
-            canvas.width = viewport.width;
-            canvas.height = viewport.height;
-            canvas.style.cssText = 'width:100%;display:block;background:#fff';
-            container.appendChild(canvas);
-            page.render({ canvasContext: canvas.getContext('2d'), viewport });
-            if (pageNum < pdf.numPages) renderPage(pageNum + 1);
-          }).catch(e2 => { console.error('resume page render error', String(e2)); });
-        };
-        renderPage(1);
-      }).catch(e => {
-        console.error('resume getDocument error', String(e));
-        container.innerHTML = '';
-        const err = document.createElement('div');
-        err.style.cssText = 'color:#5b5b66;font-size:12px;padding:24px;text-align:center';
-        err.textContent = 'Document render unavailable.';
-        container.appendChild(err);
-      });
-      this._resumeDocKey = this.state.check.id;
-    } catch (e) {
-      console.error('renderResumeDoc sync error', String(e), e && e.stack);
-    }
-  }
-
-  cardLabelFor(num) {
-    const d = String(num || '').replace(/\D/g, '');
-    if (!d) return 'the card you entered';
-    const brand = d[0] === '4' ? 'Visa' : (d[0] === '5' ? 'Mastercard' : (d[0] === '3' ? 'Amex' : (d[0] === '6' ? 'Discover' : 'Card')));
-    return brand + ' ending ' + d.slice(-4);
-  }
-
-  measureWidth() {
-    let outer = 0;
-    try { if (window.top && window.top.innerWidth) outer = window.top.innerWidth; } catch (e) { outer = 0; }
-    const screenW = (window.screen && (window.screen.availWidth || window.screen.width)) || 0;
-    return Math.max(outer, screenW, window.innerWidth || 0, document.documentElement.clientWidth || 0);
   }
 
   componentDidMount() {
-    this.renderResumeDoc();
-    this._onResize = () => this.setState({ vw: this.measureWidth() });
-    window.addEventListener('resize', this._onResize);
-    this._onResize();
     // Landing from the emailed confirmation link: the lookup runs now, on the server, gated by the token.
     let token = '';
     try { token = new URLSearchParams(window.location.search).get('lookup_token') || ''; } catch (e) { token = ''; }
@@ -3343,13 +2853,7 @@ class Component extends DCLogic {
   }
 
   componentWillUnmount() {
-    if (this._onResize) window.removeEventListener('resize', this._onResize);
-  }
-
-  componentDidUpdate() {
-    const chk = this.state.check;
-    if (this.state.screen === 'compare' && chk && this._resumeDocKey !== chk.id) this.renderResumeDoc();
-    if (this.state.screen !== 'compare') this._resumeDocKey = null;
+    if (this._copyUrl) { try { URL.revokeObjectURL(this._copyUrl); } catch (e) { /* ignore */ } }
   }
 
   // The landing choice (2026-09-19): the first screen used to be the Tier 1 lookup form alone, with the real sign-in only a
@@ -3422,6 +2926,7 @@ class Component extends DCLogic {
 
   realBlank() {
     return {
+      lookups: [], comparisons: [], cmpLoaded: false, cmpNote: null, cmpErr: null, cmpBusy: false,
       realToken: null, real: null, realMembers: [], realOrgInvites: [], billing: null, billingBusy: false, billingNote: null, billingErr: null,
       signinEmail: '', signinName: '', signinBusy: false, signinErr: null, signinProblem: null, signinSentTo: '',
       acctNameDraft: '', orgNameDraft: '', newOrgNameDraft: '', inviteEmailDraft: '', acctNotice: null, acctErr: null, acctBusy: false,
@@ -3459,6 +2964,7 @@ class Component extends DCLogic {
     }
     let billing = null;
     if (me.data.org) { const bs = await this.empCall('billing_status'); if (bs.data.ok) billing = bs.data; }
+    if (me.data.org) await this.loadComparisons();
     this.setState({
       real: me.data, realMembers: members, realOrgInvites: invites, billing: billing,
       acctNameDraft: (me.data.user && me.data.user.name) || '', orgNameDraft: (me.data.org && me.data.org.name) || '',
@@ -3612,6 +3118,7 @@ class Component extends DCLogic {
       pendingEmail: reqEmail,
       lookup: {
         id: 'LKP-' + String(data.lookup_id || '').replace(/-/g, '').slice(0, 6).toUpperCase(),
+        rawId: data.lookup_id || '',
         // check-existence never returns candidate details; the name shown back is what the requester
         // typed, which the server has just matched against the record.
         candidateName: data.candidate_name || '',
@@ -3628,49 +3135,117 @@ class Component extends DCLogic {
   }
 
 
-  requestAccess() {
-    const lk = this.state.lookup;
-    if (!lk) return;
+  // ===== Comparisons (Stage 2 of the comparison delivery): real, server-enforced requests from a signed-in organization member =====
+  async loadComparisons() {
+    const both = await Promise.all([this.empCall('list_lookups'), this.empCall('list_comparisons')]);
+    const lk = both[0].data, cm = both[1].data;
     this.setState({
-      screen: 'access',
-      accessLinkSpent: false,
-      smsPhone: '',
-      response: 'pending',
-      request: {
-        id: 'EVR-' + String(Date.now()).slice(-6),
-        candidateName: lk.candidateName,
-        candidateStatus: lk.candidateStatus,
-        candidate: lk.candidate,
-        contactUsed: lk.contactUsed,
-        smsOptIn: !!this.state.smsOptIn,
-        smsSentTo: this.state.smsOptIn ? (this.state.smsPhone || '').trim() : '',
-        requesterName: lk.requesterName,
-        requesterCompany: lk.requesterCompany,
-        requesterEmail: lk.requesterEmail,
-        domainType: lk.domainType,
-        timestamp: new Date().toISOString(),
-      },
+      lookups: lk && lk.ok ? (lk.lookups || []) : [], comparisons: cm && cm.ok ? (cm.comparisons || []) : [], cmpLoaded: true,
+      cmpErr: (lk && lk.ok && cm && cm.ok) ? null : "We couldn't load your comparisons. Please try again.",
     });
   }
 
-  segStyle(on) {
-    return on ? 'background:var(--color-accent-800);color:var(--color-accent-100)' : '';
+  // From the lookup result screen (same browser, straight after the check) or from a past lookup in the account.
+  requestAccess() {
+    const s = this.state;
+    const lk = s.lookup;
+    if (!lk) return;
+    this.setState({ reqLookupId: lk.rawId, reqLookupLabel: lk.candidateName || 'the candidate', reqLookupRequesterEmail: lk.requesterEmail || '', reqAttestation: '', reqErr: null, accessBack: 'result', screen: 'access' });
+  }
+
+  async sendComparisonRequest() {
+    const s = this.state;
+    if (s.reqBusy || !s.reqLookupId) return;
+    this.setState({ reqBusy: true, reqErr: null });
+    const r = await this.empCall('request_comparison', { lookup_id: s.reqLookupId, attestation: s.reqAttestation });
+    if (r.status === 401) { this.setState({ reqBusy: false }); return; }
+    if (r.data && r.data.ok) {
+      await this.loadComparisons();
+      this.setState({
+        reqBusy: false, reqLookupId: null, reqAttestation: '', screen: 'requestSent',
+        requestSentLine: r.data.candidate_notified ? 'They have been emailed and can answer from their account.' : "We couldn't email them just now; we will keep trying, and they will also see it in their account.",
+      });
+      return;
+    }
+    const code = r.data && r.data.error;
+    this.setState({
+      reqBusy: false,
+      reqErr: code === 'attestation_invalid' ? 'Please say how you obtained the candidate\u2019s information (3 to 500 characters).'
+        : code === 'subscription_required' ? "Your organization needs an active subscription to request comparisons. The owner can start one under Billing."
+        : code === 'rate_limited' ? 'You have sent several requests today. Please try again tomorrow.'
+        : code === 'already_requested' ? 'You already have a request open for this candidate. It is listed in your account.'
+        : code === 'forbidden' ? 'Comparisons need an organization account.'
+        : "This comparison can't be requested right now.",
+    });
+  }
+
+  async openComparison(id) {
+    if (this.state.cmpBusy) return;
+    this.setState({ cmpBusy: true, cmpNote: null, cmpErr: null });
+    const r = await this.empCall('open_comparison', { request_id: id });
+    if (r.status === 401) { this.setState({ cmpBusy: false }); return; }
+    const d = r.data || {};
+    if (d.ok) {
+      const c = (this.state.comparisons || []).find(x => x.id === id) || {};
+      this.setState({ cmpBusy: false, screen: 'compare', compare: { id: id, label: c.candidate_label || 'Candidate', content: d.content, assembledAt: d.assembled_at, metered: !!d.metered, firstOpen: !!d.first_open, quota: d.quota || null } });
+      this.loadReal(); // the plan's usage line now includes this open
+      return;
+    }
+    const code = d.error;
+    this.setState({
+      cmpBusy: false,
+      cmpErr: code === 'quota_exhausted' ? 'Your organization has used all ' + d.included + ' lookups for this billing period, so this comparison was not opened and nothing was used. It stays available until it expires; open it again when the next period starts.'
+        : code === 'no_active_subscription' ? "Your organization's subscription is not active (it may have a payment problem, or it ended), so this comparison was not opened and nothing was used. It stays available until it expires; open it again once the subscription is active."
+        : code === 'not_found' || code === 'not_available' ? 'That comparison is no longer available.'
+        : "We couldn't open that comparison. Please try again.",
+    });
+    await this.loadComparisons();
+  }
+
+  // The employer's own copy is shown ONLY in this browser (an object URL); it is never sent anywhere.
+  onPickCopy(e) {
+    const f = e.target.files && e.target.files[0];
+    if (this._copyUrl) { try { URL.revokeObjectURL(this._copyUrl); } catch (x) { /* ignore */ } this._copyUrl = null; }
+    const box = document.getElementById('employer-copy-container');
+    if (!box) return;
+    box.innerHTML = '';
+    if (!f) return;
+    const note = (t) => { const d = document.createElement('div'); d.style.cssText = 'color:#5b5b66;font-size:12px;padding:24px;text-align:center;line-height:1.6'; d.textContent = t; box.appendChild(d); };
+    if (f.type === 'application/pdf') {
+      this._copyUrl = URL.createObjectURL(f);
+      const em = document.createElement('embed');
+      em.type = 'application/pdf'; em.src = this._copyUrl; em.style.cssText = 'width:100%;height:100%;border:0';
+      box.appendChild(em);
+    } else if (/^image\//.test(f.type)) {
+      this._copyUrl = URL.createObjectURL(f);
+      const im = document.createElement('img');
+      im.src = this._copyUrl; im.alt = 'Your copy'; im.style.cssText = 'width:100%;display:block';
+      box.appendChild(im);
+    } else {
+      note('This file type cannot be previewed here (only PDF and image files can). The file stays on your computer.');
+    }
+  }
+
+  fmtDate(iso) {
+    return iso ? new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+  }
+  fmtDateTime(iso) {
+    return iso ? new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+  }
+
+  comparisonStatusLabel(c) {
+    return c.status === 'awaiting_candidate' ? 'Waiting for the candidate to answer (they have until ' + this.fmtDate(c.answer_by) + ')'
+      : c.status === 'not_authorized' ? 'Not authorized. No comparison is available and nothing was used from your plan.'
+      : c.status === 'ready' ? 'Approved. Ready to open until ' + this.fmtDate(c.available_until) + '. Opening uses one lookup.'
+      : c.status === 'opened' ? 'Opened ' + this.fmtDate(c.opened_at) + '. You can open it again; that uses no more lookups.'
+      : 'Access has ended.';
   }
 
   renderVals() {
     const s = this.state;
     const lk = s.lookup || {};
-    const r = s.request || lk;
-    const hours = this.props.responseWindowHours ?? 72;
-    const sent = r.timestamp ? new Date(r.timestamp) : null;
-    const paid = s.hasPaidAccess || (this.props.hasPaidAccess ?? false);
-    const cand = r.candidate || {};
-    const chk = s.check || {};
-    const prof = chk.profile || {};
-    const vw = this.measureWidth();
-    const warnSmall = s.screen === 'upload' && vw < 768 && !s.smallScreenAck;
-    const statusLabel = s.response === 'approved' ? 'Approved'
-      : (s.response === 'pending' ? 'Awaiting candidate response' : 'Closed, not authorized');
+    const cmp = s.compare || {};
+    const content = cmp.content || {};
     return {
       isPaymentReturn: s.screen === 'paymentReturn',
       paymentReturnKicker: s.paymentReturnKind === 'success' ? 'Payment submitted' : 'No payment made',
@@ -3803,220 +3378,74 @@ class Component extends DCLogic {
       startOver: (e) => {
         if (e && e.preventDefault) e.preventDefault();
         this.clearTokenFromUrl();
-        this.setState(Object.assign(this.blank(), { account: s.account, history: s.history || [] }));
+        this.setState(this.blank());
       },
       abandonConfirmation: () => { this.clearTokenFromUrl(); this.setState({ screen: 'lookup', pendingEmail: '', lookupResult: null, lookup: null, request: null, lookupToken: null }); },
       requestAccess: () => this.requestAccess(),
       lookupId: lk.id || '',
       lookupSentLabel: lk.timestamp ? new Date(lk.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '',
 
-      isPending: s.response === 'pending',
-      isResolved: s.response !== 'pending',
-      isApproved: s.response === 'approved',
-      isNotAuthorized: s.response === 'declined' || s.response === 'expired',
-      isUpload: s.screen === 'upload',
-      isConfirmDoc: s.screen === 'confirmDoc',
-      isCompare: s.screen === 'compare',
-      isDetail: s.screen === 'detail',
-      continueAsApproved: () => {
-        if (s.accessLinkSpent) { this.setState({ screen: s.account ? 'myChecks' : 'closed' }); return; }
-        this.setState({ response: 'approved', screen: 'upload', vw: this.measureWidth() });
-      },
-      openCompare: () => {
-        if (s.accessLinkSpent) { this.setState({ screen: s.account ? 'myChecks' : 'closed' }); return; }
-        this.setState({ screen: 'upload', vw: this.measureWidth() });
-      },
-      linkStillActive: !s.accessLinkSpent,
-      linkSpent: !!s.accessLinkSpent,
-      linkSpentLine: s.account
-        ? 'This link has been used. The check it opened is saved to your account under My checks.'
-        : 'This link has been used. The one-time view it opened is closed and cannot be reopened.',
-      canOpenEmailLink: s.response === 'approved' && !s.accessLinkSpent,
-      notifyEmailLine: s.response === 'approved'
-        ? 'Email to ' + (r.requesterEmail || 'your address') + ', carrying a reusable link into this request.'
-        : 'Email to ' + (r.requesterEmail || 'your address') + ', closing the request out. No link: there is nothing to open.',
-
-      priceLabel: '$' + (this.props.pricePerCheck ?? 39),
-      showAccessChoice: s.screen === 'upload' && !warnSmall && !s.accessReady && s.accessStep === 'choose',
-      showLogin: s.screen === 'upload' && !warnSmall && !s.accessReady && s.accessStep === 'login',
-      showCardForm: s.screen === 'upload' && !warnSmall && !s.accessReady && s.accessStep === 'card',
-      showAccountReady: s.screen === 'upload' && !warnSmall && !s.accessReady && s.accessStep === 'ready',
-      chooseGuest: () => this.setState({ accessMethod: 'guest', accessStep: 'card' }),
-      chooseSaved: () => this.setState({ accessMethod: 'saved', accessStep: 'login' }),
-      chooseSub: () => this.setState({ accessMethod: 'sub', accessStep: 'login' }),
-      backToAccessChoice: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ accessStep: 'choose', accessMethod: null, account: null }); },
-      loginKicker: s.accessMethod === 'sub' ? 'Log in with subscription' : 'Log in with saved card',
-      isSubLogin: s.accessMethod === 'sub',
-      loginEmail: s.loginEmail,
-      loginPass: s.loginPass,
-      setLoginEmail: (e) => this.setState({ loginEmail: e.target.value }),
-      setLoginPass: (e) => this.setState({ loginPass: e.target.value }),
-      loginIncomplete: !((s.loginEmail || '').trim() && (s.loginPass || '').trim()),
-      segExistingAcct: !s.loginNewAccount,
-      segNewAcct: !!s.loginNewAccount,
-      simExistingAcct: () => this.setState({ loginNewAccount: false }),
-      simNewAcct: () => this.setState({ loginNewAccount: true }),
-      segRoleUser: s.loginRole !== 'admin',
-      segRoleAdmin: s.loginRole === 'admin',
-      simRoleUser: () => this.setState({ loginRole: 'user' }),
-      simRoleAdmin: () => this.setState({ loginRole: 'admin' }),
-      doLogin: () => {
-        const kind = s.accessMethod === 'sub' ? 'sub' : 'saved';
-        const isNew = !!s.loginNewAccount;
-        const account = {
-          email: (s.loginEmail || '').trim(),
-          kind: kind,
-          role: kind === 'sub' ? s.loginRole : 'user',
-          isNew: isNew,
-          cardLabel: isNew ? '' : 'Visa ending 4242',
-          org: kind === 'sub' ? 'Northwind Talent Group' : '',
-        };
-        this.setState({ account: account, accessStep: (kind === 'saved' && isNew) ? 'card' : 'ready' });
-      },
-      cardFormKicker: s.accessMethod === 'guest' ? 'Pay once, no account' : 'Add a card to your account',
-      cardName: s.cardName, cardNumber: s.cardNumber, cardExp: s.cardExp, cardCvc: s.cardCvc,
-      setCardName: (e) => this.setState({ cardName: e.target.value }),
-      setCardNumber: (e) => this.setState({ cardNumber: e.target.value }),
-      setCardExp: (e) => this.setState({ cardExp: e.target.value }),
-      setCardCvc: (e) => this.setState({ cardCvc: e.target.value }),
-      cardIncomplete: !((s.cardName || '').trim() && (s.cardNumber || '').trim() && (s.cardExp || '').trim() && (s.cardCvc || '').trim()),
-      cardSubmitLabel: s.accessMethod === 'guest' ? 'Continue' : 'Save card and continue',
-      guestCardLabel: this.cardLabelFor(s.cardNumber),
-      changeCard: (e) => {
-        if (e && e.preventDefault) e.preventDefault();
-        this.setState({ screen: 'upload', accessStep: 'card', accessReady: false, cardReturnToCharge: true });
-      },
-      saveCard: () => {
-        if (s.accessMethod === 'guest') {
-          if (s.cardReturnToCharge) { this.setState({ accessReady: true, screen: 'charge', cardReturnToCharge: false }); return; }
-          this.setState({ accessReady: true });
-          return;
-        }
-        const acct = Object.assign({}, s.account, { cardLabel: 'card ending ' + (s.cardNumber || '').replace(/\D/g, '').slice(-4) });
-        this.setState({ account: acct, accessStep: 'ready' });
-      },
-      accountReadyLine: s.account
-        ? (s.account.kind === 'sub'
-            ? 'Subscription account: ' + (s.account.org || '') + (s.account.role === 'admin' ? ', organization admin' : '')
-            : 'Account: ' + s.account.email)
-        : '',
-      accountReadyDetail: s.account
-        ? (s.account.kind === 'sub'
-            ? 'This check uses one lookup from the plan and is saved to your history.'
-            : (s.account.cardLabel ? 'Saved card on file: ' + s.account.cardLabel + '. Charged when you open the comparison.' : 'No card on file yet.'))
-        : '',
-      accessReadyContinue: () => this.setState({ accessReady: true }),
-      isLoggedIn: !!s.account,
-      isOrgAdmin: !!(s.account && s.account.role === 'admin'),
-      accountEmail: (s.account || {}).email || '',
-      accountLine: s.account ? ((s.account.email || '') + (s.account.kind === 'sub' ? ' (subscription)' : ' (saved card)')) : '',
-      openMyChecks: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'myChecks' }); },
-      openOrgChecks: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'orgChecks' }); },
-      isMyChecks: s.screen === 'myChecks',
-      isOrgChecks: s.screen === 'orgChecks',
-      hasHistory: (s.history || []).length > 0,
-      noHistory: (s.history || []).length === 0,
-      historyRows: (s.history || []).map(h => ({
-        id: h.id,
-        candidateName: h.candidateName,
-        dateLabel: new Date(h.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }),
-        open: () => this.setState({ screen: 'compare', check: h.check }),
+      matchedName: lk.candidateName || '',
+      domainType: lk.domainType || '',
+      requesterEmail: lk.requesterEmail || '',
+      // ---- comparisons ----
+      isRequestSent: s.screen === 'requestSent',
+      isCompare: s.screen === 'compare' && !!s.compare,
+      resultAccessNote: s.real
+        ? (s.real.org ? 'Signed in as ' + s.real.user.email + '.' : 'You are signed in but not part of an organization yet.')
+        : 'Comparison requests are sent from a signed-in organization account with an active subscription. Pay-once guest access is not available yet.',
+      accessCandidateLabel: s.reqLookupLabel || 'the candidate',
+      accessNeedsSignin: !s.real,
+      accessNeedsOrg: !!s.real && !s.real.org,
+      accessEmailMismatch: !!s.real && !!s.real.org && !!s.reqLookupRequesterEmail && s.reqLookupRequesterEmail.trim().toLowerCase() !== (s.real.user.email || '').toLowerCase(),
+      accessEmailNote: 'This lookup was confirmed with ' + (s.reqLookupRequesterEmail || 'another address') + ', so it can only be requested from an account signed in with that address. You are signed in as ' + (s.real && s.real.user ? s.real.user.email : '') + '.',
+      accessCanRequest: !!s.real && !!s.real.org && !(!!s.reqLookupRequesterEmail && s.reqLookupRequesterEmail.trim().toLowerCase() !== (s.real.user.email || '').toLowerCase()),
+      attestationDraft: s.reqAttestation,
+      setAttestationDraft: (e) => this.setState({ reqAttestation: e.target.value }),
+      reqError: s.reqErr,
+      sendRequestDisabled: s.reqBusy || (s.reqAttestation || '').trim().length < 3,
+      sendRequestLabel: s.reqBusy ? 'Sending…' : 'Send request',
+      sendRequest: () => this.sendComparisonRequest(),
+      goSigninFromAccess: () => this.setState({ screen: 'signin', signinErr: null }),
+      backFromAccess: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: s.accessBack === 'acct' ? 'acct' : 'result' }); },
+      requestSentLine: s.requestSentLine,
+      cmpNote: s.cmpNote, cmpError: s.cmpErr, cmpBusy: s.cmpBusy,
+      noLookupRows: (s.lookups || []).length === 0,
+      lookupRows: (s.lookups || []).map(l => ({
+        label: l.candidate_label, dateLabel: this.fmtDate(l.completed_at), canRequest: !l.open_request_id, inProgress: !!l.open_request_id,
+        onRequest: () => this.setState({ reqLookupId: l.lookup_id, reqLookupLabel: l.candidate_label, reqLookupRequesterEmail: (s.real && s.real.user && s.real.user.email) || '', reqAttestation: '', reqErr: null, accessBack: 'acct', screen: 'access' }),
       })),
-      orgName: (s.account || {}).org || 'your organization',
-      orgSeatLine: 'Plan usage this month: ' + (this.ORG_CHECKS.length + (s.history || []).length) + ' of 50 lookups.',
-      orgRows: (s.history || []).map(h => ({
-        user: ((s.account || {}).email || 'you') + ' (you)',
-        candidateName: h.candidateName,
-        id: h.id,
-        dateLabel: new Date(h.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }),
-        status: 'Opened',
-      })).concat(this.ORG_CHECKS),
-
-      isCharge: s.screen === 'charge',
-      isGuestCharge: s.screen === 'charge' && !s.account,
-      isAccountCharge: s.screen === 'charge' && !!s.account,
-      accountChargeLine: s.account
-        ? (s.account.kind === 'sub'
-            ? 'Opening this comparison uses one lookup from your subscription.'
-            : 'Opening this comparison charges ' + '$' + (this.props.pricePerCheck ?? 39) + ' to your ' + (s.account.cardLabel || 'saved card') + '.')
-        : '',
-      guestAck: !!s.guestAck,
-      toggleGuestAck: (e) => this.setState({ guestAck: !!e.target.checked }),
-      guestChargeBlocked: !s.guestAck,
-      confirmCharge: () => this.runCheck(),
-      isClosed: s.screen === 'closed',
-      isGuestView: s.screen === 'compare' && !!chk.guest,
-      isAccountView: s.screen === 'compare' && !chk.guest,
-      closeGuestView: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'closed', check: null }); },
-      contactUsed: r.contactUsed || lk.contactUsed || '',
-      smsOptIn: !!s.smsOptIn,
-      toggleSmsOptIn: (e) => this.setState({ smsOptIn: !!e.target.checked, smsPhone: '' }),
-      smsPhone: s.smsPhone || '',
-      setSmsPhone: (e) => this.setState({ smsPhone: e.target.value }),
-      accessRequestBlocked: !!(s.smsOptIn && this.digits(s.smsPhone).length < 10),
-      smsNotified: !!(r.smsOptIn),
-      smsNotNotified: !r.smsOptIn,
-      showSmallScreenWarn: warnSmall,
-      uploadReachable: s.screen === 'upload' && !warnSmall && s.accessReady,
-      ackSmallScreen: () => this.setState({ smallScreenAck: true }),
-      openDetail: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'detail' }); },
-      backToCompare: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'compare' }); },
-      backToResult: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'result' }); },
-      backToAccess: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'access' }); },
-      backToUpload: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'upload' }); },
-
-      onPickDoc: (e) => this.onPickDoc(e),
-      docName: s.docName,
-      hasDoc: !!s.docName,
-      attestation: s.attestation,
-      setAttestation: (e) => this.setState({ attestation: e.target.value }),
-      uploadIncomplete: !(s.docName && (s.attestation || '').trim()),
-      goConfirmDoc: () => this.setState({ screen: 'confirmDoc' }),
-      confirmDoc: () => this.setState({ screen: 'charge', guestAck: false }),
-
-      checkId: chk.id || '',
-      docLabel: chk.docName || '',
-      docIsImage: !!chk.docUrl,
-      docNotImage: !chk.docUrl,
-      docRender: chk.docUrl ? React.createElement('img', {
-        src: chk.docUrl,
-        alt: 'View-only render of the uploaded document',
-        draggable: false,
-        style: { width: '100%', display: 'block' },
-      }) : null,
-      checkAttestation: chk.attestation || '',
-      checkDateLabel: chk.timestamp ? new Date(chk.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '',
-      checkRequester: chk.requesterCompany || '',
-      checkDomainLine: chk.requesterDomain ? chk.requesterDomain + ' (' + chk.domainType + ')' : '',
-      rolesCountLine: this.countLine(chk.roles || [], 'work history entries'),
-      credsCountLine: this.countLine(chk.credentials || [], 'education and certification entries'),
-      detailRows: [].concat(
-        (chk.roles || cand.roles || []).map(r2 => ({ label: r2.title + ' at ' + r2.company, meta: r2.dates, status: r2.status, note: r2.note })),
-        (chk.credentials || cand.credentials || []).map(c => ({ label: c.label + ', ' + c.issuer, meta: c.dates, status: c.status, note: c.note }))
-      ),
-      isPaidAccess: paid,
-      isFreeAccess: !paid,
-      simulateUpgrade: () => this.setState({ hasPaidAccess: true }),
-      matchedName: r.candidateName || '',
-      requestId: (s.request || {}).id || '',
-      requesterLine: r.requesterCompany ? r.requesterName + ' at ' + r.requesterCompany : (r.requesterName || ''),
-      requesterEmail: r.requesterEmail || '',
-      domainType: r.domainType || '',
-      sentLabel: sent ? sent.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '',
-      statusLabel: statusLabel,
-      responseWindowLabel: hours + ' hours',
-
-      segPendingOn: s.response === 'pending',
-      segApprovedOn: s.response === 'approved',
-      segDeclinedOn: s.response === 'declined',
-      segExpiredOn: s.response === 'expired',
-      simPending: () => this.setState({ response: 'pending' }),
-      simApproved: () => this.setState({ response: 'approved' }),
-      simDeclined: () => this.setState({ response: 'declined' }),
-      simExpired: () => this.setState({ response: 'expired' }),
+      comparisonsHeading: s.real && s.real.role === 'owner' ? 'Comparison requests (whole organization)' : 'Your comparison requests',
+      noComparisonRows: (s.comparisons || []).length === 0,
+      comparisonRows: (s.comparisons || []).map(c => ({
+        label: c.candidate_label, requestedLabel: this.fmtDate(c.requested_at), statusLabel: this.comparisonStatusLabel(c),
+        canOpen: !!c.can_open, openLabel: c.status === 'opened' ? 'Open again' : 'Open comparison',
+        hasBy: !!c.requested_by && !c.mine, by: c.requested_by || '',
+        onOpen: () => this.openComparison(c.id),
+      })),
+      compareName: (content.candidate && content.candidate.name) || cmp.label || '',
+      coverageLines: (() => {
+        const cv = content.coverage || {};
+        const line = (x, one, many) => x ? (x.verified + ' of ' + x.confirmed + ' ' + (x.confirmed === 1 ? one : many) + ' verified') : '';
+        return [line(cv.work, 'job', 'jobs'), line(cv.education, 'education entry', 'education entries'), line(cv.certifications, 'certification or license', 'certifications and licenses')].filter(Boolean);
+      })(),
+      compareAsOf: this.fmtDateTime(cmp.assembledAt),
+      compareApproved: 'The candidate approved this request; you opened it ' + (cmp.firstOpen ? 'just now.' : 'before.'),
+      compareMeterLine: cmp.metered && cmp.quota ? 'This used 1 lookup (' + cmp.quota.remaining + ' of ' + cmp.quota.included + ' left this period).' : 'No lookup used by this view (it was counted when first opened).',
+      compareEmpty: !(content.work || []).length && !(content.education || []).length && !(content.certifications || []).length,
+      verifiedRows: (() => {
+        const how = (x) => (x.verification && x.verification.method === 'state_registry' ? 'checked against the state registry' : 'verified by Verifi review') + (x.verification && x.verification.verified_on ? ', ' + x.verification.verified_on : '');
+        const range = (a, b, cur) => [a, cur ? 'present' : b].filter(Boolean).join(' - ');
+        const out = [];
+        (content.work || []).forEach(w => out.push({ kind: 'Job', headline: [w.title, w.employer].filter(Boolean).join(' at '), detail: [w.location, range(w.start, w.end, w.current)].filter(Boolean).join(' · '), how: how(w) }));
+        (content.education || []).forEach(e => out.push({ kind: 'Education', headline: [e.degree, e.field_of_study].filter(Boolean).join(', ') || e.institution || '', detail: [e.institution, e.location, range(e.start, e.end)].filter(Boolean).join(' · '), how: how(e) }));
+        (content.certifications || []).forEach(x => out.push({ kind: 'Certification', headline: x.name || '', detail: [x.issuer, x.license_number ? 'Lic #' + x.license_number : '', x.license_state, x.issued].filter(Boolean).join(' · '), how: how(x) }));
+        return out;
+      })(),
+      onPickCopy: (e) => this.onPickCopy(e),
+      closeCompare: (e) => { if (e && e.preventDefault) e.preventDefault(); if (this._copyUrl) { try { URL.revokeObjectURL(this._copyUrl); } catch (x) { /* ignore */ } this._copyUrl = null; } this.setState({ screen: 'acct', compare: null }); this.loadReal(); },
 
       backToLookup: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'lookup', lookupResult: null, lookup: null, request: null, pendingEmail: '' }); },
-      resetAll: () => { this.clearTokenFromUrl(); this.setState(Object.assign(this.blank(), { screen: 'landing' })); },
       isLanding: s.screen === 'landing',
       goHome: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'landing' }); },
       openCheckForAccount: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'lookup' }); },
