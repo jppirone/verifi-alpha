@@ -485,13 +485,17 @@ const ACTIONS: Record<string, Action> = {
     run: async ({ user, p }) => {
       if (typeof p.lookup_id !== "string" || !UUID.test(p.lookup_id)) return fail(400, "lookup_id_invalid");
       const attestation = typeof p.attestation === "string" ? p.attestation : "";
-      const r = await rest("rpc/create_comparison_request", { method: "POST", body: JSON.stringify({ p_lookup_id: p.lookup_id, p_method: "org", p_employer_user: user.id, p_attestation: attestation }) });
+      // the employer's own document, uploaded first through employer-document; create_comparison_request binds it to the request atomically
+      const documentId = typeof p.document_id === "string" && UUID.test(p.document_id) ? p.document_id : null;
+      const r = await rest("rpc/create_comparison_request", { method: "POST", body: JSON.stringify({ p_lookup_id: p.lookup_id, p_method: "org", p_employer_user: user.id, p_attestation: attestation, p_document_id: documentId }) });
       if (!r.ok) return fail(500, "request_failed");
       const res = (await r.json())?.[0];
       if (!res) return fail(500, "request_failed");
       // `detail` (why the candidate was unavailable) is never forwarded.
       if (!res.ok) {
         if (res.reason === "attestation_invalid") return fail(400, "attestation_invalid");
+        if (res.reason === "document_required") return fail(400, "document_required");
+        if (res.reason === "document_invalid") return fail(400, "document_invalid");
         if (res.reason === "subscription_required") return fail(402, (await hasPaymentProblem(user.org_id!)) ? "payment_problem" : "subscription_required");
         if (res.reason === "rate_limited") return fail(429, "rate_limited");
         if (res.reason === "already_open") return fail(409, "already_requested", { request_id: res.request_id });

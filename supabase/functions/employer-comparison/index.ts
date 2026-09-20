@@ -93,11 +93,13 @@ export default {
       if (action === "request") {
         if (typeof body.lookup_id !== "string" || !UUID.test(body.lookup_id) || typeof body.claim_token !== "string" || !TOKEN.test(body.claim_token)) return json({ ok: false, error: "unavailable" }, 409);
         const claimHash = await sha256Hex(body.claim_token.toLowerCase());
-        const res = (await rpc("create_comparison_request", { p_lookup_id: body.lookup_id, p_method: "guest", p_employer_user: null, p_attestation: typeof body.attestation === "string" ? body.attestation : "", p_claim_hash: claimHash }))?.[0];
+        const res = (await rpc("create_comparison_request", { p_lookup_id: body.lookup_id, p_method: "guest", p_employer_user: null, p_attestation: typeof body.attestation === "string" ? body.attestation : "", p_claim_hash: claimHash, p_document_id: typeof body.document_id === "string" && UUID.test(body.document_id) ? body.document_id : null }))?.[0];
         if (!res) return json({ ok: false, error: "request_failed" }, 500);
         // \`detail\` (why a candidate was unavailable) is never forwarded.
         if (!res.ok) {
           if (res.reason === "attestation_invalid") return json({ ok: false, error: "attestation_invalid" }, 400);
+          if (res.reason === "document_required") return json({ ok: false, error: "document_required" }, 400);
+          if (res.reason === "document_invalid") return json({ ok: false, error: "document_invalid" }, 400);
           if (res.reason === "rate_limited") return json({ ok: false, error: "rate_limited" }, 429);
           if (res.reason === "already_open") return json({ ok: false, error: "already_requested" }, 409);
           return json({ ok: false, error: "unavailable" }, 409);

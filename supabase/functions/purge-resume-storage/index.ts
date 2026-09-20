@@ -23,10 +23,17 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 //     stray from a failed upload sits in a LIVE signup's folder, and that signup row is never deleted, so the strict rule would protect it
 //     forever. That is safe here because a file with no document row cannot be reached by anything in the app. Every deletion is recorded in
 //     resume_storage_purge_queue as an already-purged audit row. dry_run:true only reports. At most 500 files per run.
-// Only the resume-documents bucket is ever touched.
+// Two buckets are ever touched: resume-documents (everything above) and employer-documents (2026-09-20: the employer's own document that
+// travels with a request for a candidate's record; see 20260920090000_employer_documents.sql). The employer bucket uses the SAME queue
+// (resume_storage_purge_queue, bucket = 'employer-documents') and the SAME rules: a queued file is removed only after re-checking that no
+// comparison_request_documents row names it (a row that came back drops the queue entry instead), only paths of the exact
+// <uuid>.(pdf|png|jpg) layout are ever passed to Storage, and any doubt (a failed lookup) counts as "still referenced". Its stray-file sweep
+// removes files nothing references, older than the minimum age, one at a time after a fresh re-check.
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const BUCKET = "resume-documents";
+const EMP_BUCKET = "employer-documents";
+const EMP_PATH = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(pdf|png|jpg)$/;
 const REST = { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}` };
 const MAX_PER_RUN = 500;
 const BATCH = 100;
@@ -55,6 +62,70 @@ async function stillReferenced(path: string): Promise<boolean> {
   const r = await fetch(`${SUPABASE_URL}/rest/v1/resume_documents?or=(original_storage_path.eq."${path}",sanitized_render_path.eq."${path}",id.eq.${docId})&select=id&limit=1`, { headers: REST });
   if (!r.ok) return true;
   return ((await r.json()) as unknown[]).length > 0;
+}
+
+async function empReferenced(path: string): Promise<boolean> {
+  if (!EMP_PATH.test(path)) return true; // not our layout: never delete
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/comparison_request_documents?storage_path=eq.${encodeURIComponent(path)}&select=id&limit=1`, { headers: REST });
+  if (!r.ok) return true;
+  return ((await r.json()) as unknown[]).length > 0;
+}
+
+// Queue mode for the employer bucket: same steps as the resume queue above.
+async function drainEmployerQueue(): Promise<Record<string, unknown>> {
+  const storage = createClient(SUPABASE_URL, SERVICE_KEY).storage.from(EMP_BUCKET);
+  const qRes = await fetch(`${SUPABASE_URL}/rest/v1/resume_storage_purge_queue?purged_at=is.null&bucket=eq.${EMP_BUCKET}&select=id,path&order=queued_at.asc&limit=${MAX_PER_RUN}`, { headers: REST });
+  if (!qRes.ok) return { error: "queue_read_failed" };
+  const rows = (await qRes.json()) as { id: string; path: string }[];
+  const toRemove: { id: string; path: string }[] = [];
+  let skippedReferenced = 0, skippedUnsafe = 0;
+  for (const row of rows) {
+    if (!EMP_PATH.test(row.path)) { skippedUnsafe++; continue; }
+    if (await empReferenced(row.path)) {
+      skippedReferenced++;
+      await fetch(`${SUPABASE_URL}/rest/v1/resume_storage_purge_queue?id=eq.${row.id}`, { method: "DELETE", headers: REST });
+      continue;
+    }
+    toRemove.push(row);
+  }
+  let removed = 0;
+  for (let i = 0; i < toRemove.length; i += BATCH) {
+    const batch = toRemove.slice(i, i + BATCH);
+    const { error } = await storage.remove(batch.map((b) => b.path));
+    if (error) return { error: "storage_remove_failed", detail: error.message, removed };
+    await fetch(`${SUPABASE_URL}/rest/v1/resume_storage_purge_queue?id=in.(${batch.map((b) => b.id).join(",")})`, {
+      method: "PATCH", headers: { ...REST, "Content-Type": "application/json" }, body: JSON.stringify({ purged_at: new Date().toISOString() }),
+    });
+    removed += batch.length;
+  }
+  return { pending_seen: rows.length, removed, skipped_referenced: skippedReferenced, skipped_unsafe_path: skippedUnsafe };
+}
+
+// Sweep for the employer bucket: files no comparison_request_documents row names, older than the minimum age.
+async function sweepEmployer(dryRun: boolean, minAgeHours: number): Promise<Record<string, unknown>> {
+  const oRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/list_orphan_employer_objects`, {
+    method: "POST", headers: { ...REST, "Content-Type": "application/json" }, body: JSON.stringify({ p_min_age: `${minAgeHours} hours` }),
+  });
+  if (!oRes.ok) return { error: "orphan_listing_failed" };
+  const found = (await oRes.json()) as { name: string; standard_layout: boolean }[];
+  const cands = found.filter((o) => o.standard_layout && EMP_PATH.test(o.name)).slice(0, MAX_PER_RUN);
+  const toDelete: string[] = [];
+  for (const o of cands) if (!(await empReferenced(o.name))) toDelete.push(o.name);
+  let deleted = 0;
+  if (!dryRun && toDelete.length) {
+    const storage = createClient(SUPABASE_URL, SERVICE_KEY).storage.from(EMP_BUCKET);
+    for (let i = 0; i < toDelete.length; i += BATCH) {
+      const batch = toDelete.slice(i, i + BATCH);
+      const { error } = await storage.remove(batch);
+      if (error) return { error: "storage_remove_failed", detail: error.message, deleted };
+      deleted += batch.length;
+      await fetch(`${SUPABASE_URL}/rest/v1/resume_storage_purge_queue?on_conflict=bucket,path`, {
+        method: "POST", headers: { ...REST, "Content-Type": "application/json", "Prefer": "resolution=ignore-duplicates,return=minimal" },
+        body: JSON.stringify(batch.map((path) => ({ bucket: EMP_BUCKET, path, purged_at: new Date().toISOString() }))),
+      });
+    }
+  }
+  return { unreferenced_found: found.length, deleted, would_delete: dryRun ? toDelete.length : undefined };
 }
 
 export default {
@@ -101,7 +172,9 @@ export default {
             });
           }
         }
+        const employerDocuments = await sweepEmployer(dryRun, minAgeHours);
         return json({
+          employer_documents: employerDocuments,
           ok: true, mode: "sweep", dry_run: dryRun, min_age_hours: minAgeHours, unreferenced_found: found.length, stray_candidates: candidates.length,
           considered: batchToConsider.length, skipped_referenced_at_recheck: skippedReferenced, left_nonstandard_layout: leftNonstandard,
           deleted, would_delete: dryRun ? toDelete.length : undefined, deleted_names: (dryRun ? toDelete : toDelete.slice(0, deleted)).slice(0, 20),
@@ -137,7 +210,7 @@ export default {
         }
         // housekeeping: purged queue rows are only an audit trail
         await fetch(`${SUPABASE_URL}/rest/v1/resume_storage_purge_queue?purged_at=lt.${encodeURIComponent(new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString())}`, { method: "DELETE", headers: REST });
-        return json({ ok: true, mode: "queue", pending_seen: rows.length, removed, skipped_referenced: skippedReferenced, skipped_unsafe_path: skippedUnsafe });
+        return json({ ok: true, mode: "queue", pending_seen: rows.length, removed, skipped_referenced: skippedReferenced, skipped_unsafe_path: skippedUnsafe, employer_documents: await drainEmployerQueue() });
       }
 
       // ---- reconcile mode

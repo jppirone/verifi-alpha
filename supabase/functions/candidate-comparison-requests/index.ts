@@ -23,6 +23,7 @@ const corsHeaders = {
 //   preview        same "what would be shared", but a license report is re-checked against the registry first (cached 10 minutes)
 //   respond        {request_id, decision: "approve" | "decline"}
 //   view_snapshot  {request_id}: exactly what an approved request shared
+//   document_link  {request_id}: a 60-second signed link to the employer's own document for one of THIS candidate's requests (private bucket, file unmodified)
 //
 // TWO KINDS of request (comparison_requests.kind), derived from the candidate's account type and never from anything a caller sends:
 //   resume_comparison  full-resume accounts: the assembler below (verified items + named not-cleared lines)
@@ -421,13 +422,12 @@ async function notifyCandidate(requestId: string): Promise<{ sent: boolean; reas
   const claim = await rest(`comparison_requests?id=eq.${requestId}&candidate_notified_at=is.null`, { method: "PATCH", headers: { "Prefer": "return=representation" }, body: JSON.stringify({ candidate_notified_at: new Date().toISOString() }) });
   const claimed = claim.ok ? await claim.json() : [];
   if (!Array.isArray(claimed) || claimed.length === 0) return { sent: false, reason: "already_sent" };
-  const who = r.requester_company ? `${esc(r.requester_name || "Someone")} at ${esc(r.requester_company)}` : esc(r.requester_name || "Someone");
+  // Deliberately content-free (2026-09-20): an email preview can show up on a lock screen or a watch, so nothing about who is asking, what
+  // they say, or what they sent is in the subject or the body. Everything is behind the sign-in.
   const ok = await sendEmail(
     c.email,
-    r.kind === "license_report" ? "An employer asked for your license status" : "An employer asked to compare a resume with your verified record",
-    r.kind === "license_report"
-      ? `<p>Hi${c.first_name ? " " + esc(c.first_name) : ""},</p><p>${who} (${esc(r.requester_email)}, confirmed by a link sent to that address) asked for a report of the license status on your Verifi account.</p><p><b>How they say they got your information:</b> ${esc(r.attestation)}</p><p><b>Nothing is shared unless you approve.</b> If you approve, they see each license on your account and whether it is verified. For a verified license they also see its number; where the state registry matched your record they see the registry's license type and expiry date; and a license that is not verified is shown as not verified with a short reason. Before anything is shared, each verified license is checked against the state registry again so the status is current. The approval screen lists exactly what they will see before you decide. If you decline, or do nothing, they are told only that the request was not authorized.</p><p><a href="${SITE}/candidate.html">Sign in and open the Activity tab</a> to review it. The request closes automatically at ${esc(new Date(r.expires_at).toUTCString())}.</p>`
-      : `<p>Hi${c.first_name ? " " + esc(c.first_name) : ""},</p><p>${who} (${esc(r.requester_email)}, confirmed by a link sent to that address) asked to compare their copy of your resume with your verified record on Verifi.</p><p><b>How they say they got your information:</b> ${esc(r.attestation)}</p><p><b>Nothing is shared unless you approve.</b> If you approve, they see the items you confirmed that Verifi has verified, plus the name and status of any item that was checked and did not clear (the approval screen lists exactly which, before you decide). Nothing else about your other items is shown. If you decline, or do nothing, they are told only that the request was not authorized.</p><p><a href="${SITE}/candidate.html">Sign in and open the Activity tab</a> to review it. The request closes automatically at ${esc(new Date(r.expires_at).toUTCString())}.</p>`,
+    "A request is waiting on Verifi",
+    `<p>A request is waiting for your response on Verifi.</p><p>For your privacy the details are not in this email. Sign in and open the Activity tab to see who is asking, how they say they got your information, the document they sent, and exactly what would be shared, then approve or decline. It is best reviewed on a computer.</p><p><a href="${SITE}/candidate.html">Sign in to view the request</a></p><p>The request closes automatically at ${esc(new Date(r.expires_at).toUTCString())} if you do nothing. Nothing is shared unless you approve.</p>`,
   );
   if (!ok) {
     await rest(`comparison_requests?id=eq.${requestId}`, { method: "PATCH", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ candidate_notified_at: null }) });
@@ -535,12 +535,16 @@ export default {
 
       if (action === "list") {
         const [reqs, snaps, tier1, share] = await Promise.all([
-          rows(`comparison_requests?candidate_id=eq.${candidateId}&select=id,requester_email,requester_name,requester_company,requester_domain_type,attestation,status,created_at,expires_at,responded_at,approved_at,first_delivered_at,snapshot_expires_at,kind,access_method&order=created_at.desc&limit=100`),
+          rows(`comparison_requests?candidate_id=eq.${candidateId}&select=id,requester_email,requester_name,requester_company,requester_domain_type,attestation,status,created_at,expires_at,responded_at,approved_at,first_delivered_at,snapshot_expires_at,kind,access_method,document_required&order=created_at.desc&limit=100`),
           rows(`comparison_snapshots?candidate_id=eq.${candidateId}&select=request_id`),
           rows(`employer_lookup_requests?matched_candidate_id=eq.${candidateId}&result_exists=eq.true&select=id,requester_email,requester_company,used_at&order=used_at.desc&limit=100`),
           assembleSnapshot(candidateId),
         ]);
         const hasSnap = new Set(snaps.map((s) => s.request_id));
+        // The employer's document for each request: only what the candidate needs to decide whether to open it. The file itself is reached
+        // only through action "document_link".
+        const docs = reqs.length ? await rows(`comparison_request_documents?request_id=in.(${reqs.map((r) => r.id).join(",")})&select=request_id,file_name,content_type,byte_size,purge_after`) : [];
+        const docByRequest = new Map(docs.filter((d) => new Date(d.purge_after).getTime() > Date.now()).map((d) => [d.request_id, d]));
         const now = Date.now();
         const shaped = reqs.map((r) => {
           // a pending request past its window is closed even if the sweep has not run yet
@@ -550,6 +554,9 @@ export default {
             delivered: !!r.first_delivered_at, first_delivered_at: r.first_delivered_at, snapshot_available: hasSnap.has(r.id), snapshot_expires_at: r.snapshot_expires_at,
             requester: { name: r.requester_name, company: r.requester_company, email: r.requester_email, domain: String(r.requester_email).split("@")[1] || "", domain_type: r.requester_domain_type },
             attestation: r.attestation,
+            // 'available' now; 'deleted' = the 21 days ended (or the account was deactivated); 'none' = a request from before documents were required
+            document_state: docByRequest.has(r.id) ? "available" : (r.document_required ? "deleted" : "none"),
+            document: docByRequest.has(r.id) ? { file_name: docByRequest.get(r.id).file_name, content_type: docByRequest.get(r.id).content_type, byte_size: docByRequest.get(r.id).byte_size, available_until: docByRequest.get(r.id).purge_after } : null,
           };
         });
         return json({
@@ -559,6 +566,20 @@ export default {
           tier1: tier1.map((t) => ({ id: t.id, domain: String(t.requester_email).split("@")[1] || "", company: t.requester_company, date: t.used_at })),
           would_share: wouldShare(share, "stored"),
         });
+      }
+
+      // A 60-second signed link to the employer's document for one of THIS candidate's requests. The file is served unmodified by Storage from a
+      // private bucket; nothing else can reach it. Someone else's request is indistinguishable from one that does not exist.
+      if (action === "document_link") {
+        if (typeof body.request_id !== "string" || !UUID.test(body.request_id)) return json({ ok: false, error: "request_id_invalid" }, 400);
+        const own = (await rows(`comparison_requests?id=eq.${body.request_id}&candidate_id=eq.${candidateId}&select=id`))[0];
+        if (!own) return json({ ok: false, error: "not_found" }, 404);
+        const d = (await rows(`comparison_request_documents?request_id=eq.${own.id}&select=storage_path,file_name,content_type,purge_after`))[0];
+        if (!d || new Date(d.purge_after).getTime() <= Date.now() || !/^[0-9a-f-]{36}\.(pdf|png|jpg)$/.test(d.storage_path)) return json({ ok: false, error: "document_unavailable" }, 404);
+        const sres = await fetch(`${SUPABASE_URL}/storage/v1/object/sign/employer-documents/${d.storage_path}`, { method: "POST", headers: JSON_H, body: JSON.stringify({ expiresIn: 60 }) });
+        const sj = sres.ok ? await sres.json().catch(() => null) : null;
+        if (!sj || typeof sj.signedURL !== "string") return json({ ok: false, error: "link_failed" }, 502);
+        return json({ ok: true, url: `${SUPABASE_URL}/storage/v1${sj.signedURL}`, expires_in: 60, file_name: d.file_name, content_type: d.content_type });
       }
 
       // What an approval would share RIGHT NOW, with a live registry check for a license report (cached for 10 minutes so a preview followed by an

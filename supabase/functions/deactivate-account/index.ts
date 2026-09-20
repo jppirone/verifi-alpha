@@ -120,6 +120,20 @@ export default {
         });
       }
 
+      // The database trigger has just deleted every employer document of this candidate's requests (rows, immediately) and queued the files.
+      // Run the purge now so the files are gone within seconds instead of at the next 15-minute run. Best effort: the cron run still catches them.
+      try {
+        const sec = await fetch(`${SUPABASE_URL}/rest/v1/internal_job_secrets?name=eq.purge_resume_storage&select=value`, { headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } });
+        const secret = sec.ok ? ((await sec.json())[0]?.value ?? "") : "";
+        if (secret) {
+          await fetch(`${SUPABASE_URL}/functions/v1/purge-resume-storage`, {
+            method: "POST", signal: AbortSignal.timeout(15000),
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "x-purge-secret": secret },
+            body: JSON.stringify({ mode: "queue" }),
+          });
+        }
+      } catch (_e) { /* the scheduled purge still runs */ }
+
       const deletionDate = new Date(now);
       deletionDate.setDate(deletionDate.getDate() + 30);
 

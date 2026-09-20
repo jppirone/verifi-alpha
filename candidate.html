@@ -4768,6 +4768,13 @@ a:hover{color:var(--color-accent)}
             <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3);border:1px solid var(--color-accent-700)">
               <div class="card-kicker">Confirm</div>
               <div style="font-size:13px;color:var(--color-neutral-200);line-height:1.6">{{ empConfirmText }}</div>
+              <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.6"><b>How they say they got your information:</b> {{ empConfirmSource }}</div>
+              <sc-if value="{{ empConfirmHasDoc }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:12px;line-height:1.6"><a href="#" sc-camel-on-click="{{ viewConfirmDocument }}">View the employer's document</a> <span style="color:var(--color-neutral-500)">(best reviewed on a computer)</span></div>
+              </sc-if>
+              <sc-if value="{{ empConfirmNoDoc }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">No document is available for this request.</div>
+              </sc-if>
               <sc-for list="{{ empConfirmLines }}" as="cline" hint-placeholder-count="2">
                 <div style="font-size:13px;color:var(--color-neutral-100);line-height:1.6;padding:var(--space-2) var(--space-3);border-left:2px solid var(--color-accent-700)">{{ cline }}</div>
               </sc-for>
@@ -4818,7 +4825,16 @@ a:hover{color:var(--color-accent)}
                 <sc-raw-tr>
                   <sc-raw-td>{{ row.domain }}</sc-raw-td>
                   <sc-raw-td style="white-space:nowrap;color:var(--color-neutral-400)">{{ row.dateLabel }}</sc-raw-td>
-                  <sc-raw-td style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">{{ row.attestation }}</sc-raw-td>
+                  <sc-raw-td style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">
+                    {{ row.attestation }}
+                    <sc-if value="{{ row.hasDocument }}" hint-placeholder-val="{{ false }}">
+                      <div style="margin-top:6px"><a href="#" sc-camel-on-click="{{ row.onViewDocument }}">View the employer's document</a></div>
+                      <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.5">Best reviewed on a computer. Kept until {{ row.documentUntil }}.</div>
+                    </sc-if>
+                    <sc-if value="{{ row.documentGone }}" hint-placeholder-val="{{ false }}">
+                      <div style="margin-top:6px;font-size:11px;color:var(--color-neutral-500);line-height:1.5">The employer's document has been deleted (they are kept for 21 days).</div>
+                    </sc-if>
+                  </sc-raw-td>
                   <sc-raw-td>{{ row.statusLabel }}</sc-raw-td>
                   <sc-raw-td>
                     <sc-if value="{{ row.isPending }}" hint-placeholder-val="{{ false }}">
@@ -4896,6 +4912,13 @@ a:hover{color:var(--color-accent)}
             <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3);border:1px solid var(--color-accent-700)">
               <div class="card-kicker">Confirm</div>
               <div style="font-size:13px;color:var(--color-neutral-200);line-height:1.6">{{ empConfirmText }}</div>
+              <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.6"><b>How they say they got your information:</b> {{ empConfirmSource }}</div>
+              <sc-if value="{{ empConfirmHasDoc }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:12px;line-height:1.6"><a href="#" sc-camel-on-click="{{ viewConfirmDocument }}">View the employer's document</a> <span style="color:var(--color-neutral-500)">(best reviewed on a computer)</span></div>
+              </sc-if>
+              <sc-if value="{{ empConfirmNoDoc }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">No document is available for this request.</div>
+              </sc-if>
               <div style="display:flex;gap:var(--space-3)">
                 <button type="button" class="btn btn-primary" style="font-size:12px" disabled="{{ empBusy }}" sc-camel-on-click="{{ confirmEmpAllow }}">{{ empApproveLabel }}</button>
                 <button type="button" class="btn btn-ghost" style="font-size:12px" disabled="{{ empBusy }}" sc-camel-on-click="{{ cancelEmpAllow }}">Cancel</button>
@@ -4943,7 +4966,16 @@ a:hover{color:var(--color-accent)}
                   <sc-raw-td>{{ row.domain }}</sc-raw-td>
                   <sc-raw-td style="white-space:nowrap;color:var(--color-neutral-400)">{{ row.dateLabel }}</sc-raw-td>
                   <sc-raw-td>{{ row.typeLabel }}</sc-raw-td>
-                  <sc-raw-td style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">{{ row.attestation }}</sc-raw-td>
+                  <sc-raw-td style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">
+                    {{ row.attestation }}
+                    <sc-if value="{{ row.hasDocument }}" hint-placeholder-val="{{ false }}">
+                      <div style="margin-top:6px"><a href="#" sc-camel-on-click="{{ row.onViewDocument }}">View the employer's document</a></div>
+                      <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.5">Best reviewed on a computer. Kept until {{ row.documentUntil }}.</div>
+                    </sc-if>
+                    <sc-if value="{{ row.documentGone }}" hint-placeholder-val="{{ false }}">
+                      <div style="margin-top:6px;font-size:11px;color:var(--color-neutral-500);line-height:1.5">The employer's document has been deleted (they are kept for 21 days).</div>
+                    </sc-if>
+                  </sc-raw-td>
                   <sc-raw-td>
                     <div style="display:flex;flex-direction:column;gap:4px">
                       <span>{{ row.statusLabel }}</span>
@@ -7530,6 +7562,7 @@ class Component extends DCLogic {
         return {
           id: item.id, domain: (t.company ? t.company + ' \u00b7 ' : '') + t.domain, dateLabel: this.empDateLabel(t.date),
           typeLabel: 'Existence lookup', attestation: '', statusLabel: 'Confirmed that a record exists for you', trail: '', hasTrail: false,
+          hasDocument: false, documentGone: false, documentUntil: '', onViewDocument: () => {},
           isPending: false, isApproved: false, onApprove: () => {}, onDecline: () => {}, onOpenSnapshot: () => {},
         };
       }
@@ -7542,12 +7575,27 @@ class Component extends DCLogic {
       return {
         id: r.id, domain: this.empRequesterLabel(r.requester), dateLabel: this.empDateLabel(r.created_at),
         typeLabel: r.kind === 'license_report' ? 'License status request' : 'Comparison request', attestation: r.attestation || '', statusLabel: statusLabel, trail: '', hasTrail: false,
+        hasDocument: r.document_state === 'available', documentGone: r.document_state === 'deleted',
+        documentUntil: r.document && r.document.available_until ? this.empDateLabel(r.document.available_until) : '',
+        onViewDocument: (ev) => { if (ev && ev.preventDefault) ev.preventDefault(); this.viewEmployerDocument(r.id); },
         isPending: r.status === 'pending', isApproved: r.status === 'approved' && r.snapshot_available,
         onApprove: () => (r.kind === 'license_report' ? this.startLicenseApprove(r.id) : this.setState({ empConfirmId: r.id })),
         onDecline: () => this.respondToRequest(r.id, 'decline'),
         onOpenSnapshot: (ev) => { if (ev && ev.preventDefault) ev.preventDefault(); this.openSnapshot(r); },
       };
     });
+  }
+
+  // "View the employer's document": the file is served unmodified, from a private bucket, through a 60-second signed link minted for THIS
+  // candidate's own request. The tab is opened inside the click (a tab opened after an await is treated as a pop-up and blocked).
+  async viewEmployerDocument(id) {
+    const w = window.open('', '_blank');
+    if (!w) { this.setState({ empNotice: 'Your browser blocked the new tab. Allow pop-ups for this site and try again.' }); return; }
+    try { w.opener = null; w.document.title = 'Employer document'; w.document.body.style.cssText = 'font-family:sans-serif;padding:24px'; w.document.body.textContent = 'Opening the document\u2026'; } catch (e) { /* the tab still navigates below */ }
+    const res = await this.comparisonCall({ action: 'document_link', request_id: id });
+    if (res.data && res.data.ok && res.data.url) { w.location.href = res.data.url; return; }
+    try { w.close(); } catch (e) { /* ignore */ }
+    this.setState({ empNotice: "That document is no longer available. Employer documents are deleted 21 days after the request." });
   }
 
   // The license-only Activity tab lists only the requests (the existence lookups are already shown by the read-only activity list below it).
@@ -11431,6 +11479,11 @@ class Component extends DCLogic {
       empNoNext: s.empPage >= this.empPageCount() - 1,
       empPrevPage: () => this.setState({ empPage: Math.max(0, s.empPage - 1) }),
       empNextPage: () => this.setState({ empPage: Math.min(this.empPageCount() - 1, s.empPage + 1) }),
+      // the approval card restates what the employer said about how they got the candidate's information, and offers their document
+      empConfirmSource: (() => { const e = s.comparison.pending.find(x => x.id === s.empConfirmId); return e ? (e.attestation || '') : ''; })(),
+      empConfirmHasDoc: (() => { const e = s.comparison.pending.find(x => x.id === s.empConfirmId); return !!e && e.document_state === 'available'; })(),
+      empConfirmNoDoc: (() => { const e = s.comparison.pending.find(x => x.id === s.empConfirmId); return !!e && e.document_state !== 'available'; })(),
+      viewConfirmDocument: (ev) => { if (ev && ev.preventDefault) ev.preventDefault(); if (s.empConfirmId) this.viewEmployerDocument(s.empConfirmId); },
       empConfirmOpen: !!s.empConfirmId,
       empConfirmText: this.empConfirmView().text,
       empConfirmLines: this.empConfirmView().lines,

@@ -2720,8 +2720,31 @@ const __ds_scope = {};
         <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">The candidate is asked to approve. Nothing is prepared or shown to you before they do, and a request that is declined or not answered costs nothing. If they approve, we email a link to {{ guestEmailLine }}. Opening it is a <b>one-time view</b>: {{ guestPriceLabel }}, charged only when you choose to open it, and you can then read it for 30 minutes. After that it is gone and cannot be reopened, by you or by us.</div>
         <div class="field">
           <label for="rq-att-g">How did you obtain this candidate's information?</label>
-          <textarea class="input" id="rq-att-g" rows="3" style="resize:vertical;font-family:var(--font-body);line-height:1.6" value="{{ attestationDraft }}" sc-camel-on-change="{{ setAttestationDraft }}" placeholder="e.g. LinkedIn, Indeed, recruiter name, direct candidate submission"></textarea>
-          <div style="font-size:11px;color:var(--color-neutral-500);margin-top:6px;line-height:1.6">Required (3 to 500 characters). The candidate sees this text with your name, company and confirmed email.</div>
+          <textarea class="input" id="rq-att-g" rows="3" style="resize:vertical;font-family:var(--font-body);line-height:1.6" value="{{ attestationDraft }}" sc-camel-on-change="{{ setAttestationDraft }}" placeholder="e.g. Applied through LinkedIn on Sep 3; recruiter Jane Smith sent me this resume"></textarea>
+          <div style="font-size:11px;color:var(--color-neutral-500);margin-top:6px;line-height:1.6">Required (10 to 500 characters). The candidate sees this text with your name, company and confirmed email.</div>
+        </div>
+        <div class="field">
+          <label for="rq-doc">Your document</label>
+          <input class="input" id="rq-doc" type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" sc-camel-on-change="{{ onPickRequestDoc }}">
+          <div style="font-size:11px;color:var(--color-neutral-500);margin-top:6px;line-height:1.6">Required. A PDF, PNG or JPEG of up to 10 MB. We check it for scripts and other active content before it is stored; a file that fails is refused and nothing is kept.</div>
+          <sc-if value="{{ reqDocHasName }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:var(--color-neutral-300);margin-top:6px">Selected: {{ reqDocName }}</div>
+          </sc-if>
+          <sc-if value="{{ reqDocErr }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:#e2735c;margin-top:6px;line-height:1.6">{{ reqDocErr }}</div>
+          </sc-if>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:var(--space-2);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:var(--space-3)">
+          <div style="font-size:13px;color:var(--color-neutral-200);line-height:1.6"><b>Before you upload</b></div>
+          <ul style="margin:0;padding-left:18px;font-size:12px;color:var(--color-neutral-300);line-height:1.7">
+            <li>The candidate will be able to see this exact file.</li>
+            <li>It is stored for 21 days from your request, then deleted.</li>
+            <li>It should be your own copy of the candidate's resume or application, containing nothing about other people.</li>
+          </ul>
+          <label style="display:flex;gap:var(--space-2);align-items:flex-start;font-size:12px;color:var(--color-neutral-300);line-height:1.6">
+            <input type="checkbox" checked="{{ reqConsent }}" sc-camel-on-change="{{ toggleReqConsent }}" style="accent-color:var(--color-accent);margin-top:3px">
+            <span>I understand and agree to the three points above.</span>
+          </label>
         </div>
         <sc-if value="{{ reqError }}" hint-placeholder-val="{{ false }}">
           <div style="font-size:12px;color:#e2735c;line-height:1.6">{{ reqError }}</div>
@@ -2739,8 +2762,31 @@ const __ds_scope = {};
         <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">The candidate is asked to approve. Nothing is prepared or shown to you before they do. Opening an approved request uses one lookup from your organization's plan; a request that is declined, or that nobody answers, uses none.</div>
         <div class="field">
           <label for="rq-att">How did you obtain this candidate's information?</label>
-          <textarea class="input" id="rq-att" rows="3" style="resize:vertical;font-family:var(--font-body);line-height:1.6" value="{{ attestationDraft }}" sc-camel-on-change="{{ setAttestationDraft }}" placeholder="e.g. LinkedIn, Indeed, recruiter name, direct candidate submission"></textarea>
-          <div style="font-size:11px;color:var(--color-neutral-500);margin-top:6px;line-height:1.6">Required (3 to 500 characters). The candidate sees this text with your name, company and confirmed email.</div>
+          <textarea class="input" id="rq-att" rows="3" style="resize:vertical;font-family:var(--font-body);line-height:1.6" value="{{ attestationDraft }}" sc-camel-on-change="{{ setAttestationDraft }}" placeholder="e.g. Applied through LinkedIn on Sep 3; recruiter Jane Smith sent me this resume"></textarea>
+          <div style="font-size:11px;color:var(--color-neutral-500);margin-top:6px;line-height:1.6">Required (10 to 500 characters). The candidate sees this text with your name, company and confirmed email.</div>
+        </div>
+        <div class="field">
+          <label for="rq-doc">Your document</label>
+          <input class="input" id="rq-doc" type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" sc-camel-on-change="{{ onPickRequestDoc }}">
+          <div style="font-size:11px;color:var(--color-neutral-500);margin-top:6px;line-height:1.6">Required. A PDF, PNG or JPEG of up to 10 MB. We check it for scripts and other active content before it is stored; a file that fails is refused and nothing is kept.</div>
+          <sc-if value="{{ reqDocHasName }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:var(--color-neutral-300);margin-top:6px">Selected: {{ reqDocName }}</div>
+          </sc-if>
+          <sc-if value="{{ reqDocErr }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:#e2735c;margin-top:6px;line-height:1.6">{{ reqDocErr }}</div>
+          </sc-if>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:var(--space-2);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:var(--space-3)">
+          <div style="font-size:13px;color:var(--color-neutral-200);line-height:1.6"><b>Before you upload</b></div>
+          <ul style="margin:0;padding-left:18px;font-size:12px;color:var(--color-neutral-300);line-height:1.7">
+            <li>The candidate will be able to see this exact file.</li>
+            <li>It is stored for 21 days from your request, then deleted.</li>
+            <li>It should be your own copy of the candidate's resume or application, containing nothing about other people.</li>
+          </ul>
+          <label style="display:flex;gap:var(--space-2);align-items:flex-start;font-size:12px;color:var(--color-neutral-300);line-height:1.6">
+            <input type="checkbox" checked="{{ reqConsent }}" sc-camel-on-change="{{ toggleReqConsent }}" style="accent-color:var(--color-accent);margin-top:3px">
+            <span>I understand and agree to the three points above.</span>
+          </label>
         </div>
         <sc-if value="{{ reqError }}" hint-placeholder-val="{{ false }}">
           <div style="font-size:12px;color:#e2735c;line-height:1.6">{{ reqError }}</div>
@@ -2978,7 +3024,7 @@ class Component extends DCLogic {
       request: null,
       lookupSending: false, lookupFormError: null,
       // comparison request form
-      reqLookupId: null, reqLookupLabel: '', reqLookupRequesterEmail: '', reqClaimToken: '', reqAttestation: '', reqBusy: false, reqErr: null, requestSentLine: '', requestSentKind: 'org', accessBack: 'result',
+      reqLookupId: null, reqLookupLabel: '', reqLookupRequesterEmail: '', reqClaimToken: '', reqAttestation: '', reqDocName: '', reqDocErr: null, reqConsent: false, reqBusy: false, reqErr: null, requestSentLine: '', requestSentKind: 'org', accessBack: 'result',
       // guest path (no account): the emailed link's token, what the server says about that request, and the price it reports
       guestToken: null, guest: null, guestBusy: false, guestErr: null, guestAck: false, guestPrice: null, guestTick: 0,
       // an opened comparison
@@ -3311,7 +3357,8 @@ class Component extends DCLogic {
     const s = this.state;
     const lk = s.lookup;
     if (!lk) return;
-    this.setState({ reqLookupId: lk.rawId, reqLookupLabel: lk.candidateName || 'the candidate', reqLookupRequesterEmail: lk.requesterEmail || '', reqClaimToken: lk.claimToken || '', reqAttestation: '', reqErr: null, accessBack: 'result', screen: 'access' });
+    this.setState({ reqLookupId: lk.rawId, reqLookupLabel: lk.candidateName || 'the candidate', reqLookupRequesterEmail: lk.requesterEmail || '', reqClaimToken: lk.claimToken || '', reqAttestation: '', reqDocName: '', reqDocErr: null, reqConsent: false, reqErr: null, accessBack: 'result', screen: 'access' });
+    this._reqDoc = null; this._reqDocUp = null;
     this.loadGuestPrice();
   }
 
@@ -3340,14 +3387,56 @@ class Component extends DCLogic {
     try { return new Intl.NumberFormat('en-US', { style: 'currency', currency: String(p.currency || 'usd').toUpperCase() }).format(p.cents / 100); } catch (e) { return (p.cents / 100).toFixed(2); }
   }
 
+  // The employer's own document travels with every request (2026-09-20). It is uploaded first (employer-document: signature check, scan for
+  // active content, exact bytes stored) and the request then names it; the server refuses a request that does not.
+  onPickRequestDoc(e) {
+    const f = e && e.target && e.target.files && e.target.files[0];
+    this._reqDocUp = null;
+    let err = null;
+    this._reqDoc = f || null;
+    if (f && f.size > 10 * 1024 * 1024) { err = 'That file is over 10 MB.'; this._reqDoc = null; }
+    else if (f && f.size === 0) { err = 'That file is empty.'; this._reqDoc = null; }
+    this.setState({ reqDocName: this._reqDoc ? this._reqDoc.name : '', reqDocErr: err, reqErr: null });
+  }
+
+  async uploadRequestDocument(mode) {
+    const s = this.state, f = this._reqDoc;
+    if (!f) return { error: 'Please choose your document first.' };
+    if (this._reqDocUp && this._reqDocUp.file === f && Date.now() - this._reqDocUp.at < 50 * 60 * 1000) return { id: this._reqDocUp.id }; // already stored (a retry)
+    const fd = new FormData();
+    fd.append('mode', mode); fd.append('consent', 'true'); fd.append('file', f, f.name);
+    if (mode === 'org') fd.append('session_token', s.realToken || ''); else { fd.append('lookup_id', s.reqLookupId); fd.append('claim_token', s.reqClaimToken); }
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/employer-document', { method: 'POST', headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY }, body: fd });
+      data = await res.json().catch(() => ({}));
+    } catch (e) { return { error: "We couldn't upload the document. Check your connection and try again." }; }
+    if (res.status === 401 && mode === 'org') { this.dropRealSession(true); return { error: 'Your session ended. Please sign in again.' }; }
+    if (data && data.ok) { this._reqDocUp = { file: f, id: data.document_id, at: Date.now() }; return { id: data.document_id }; }
+    const code = data && data.error;
+    return { error: code === 'scan_failed' ? (data.message || 'That file was rejected.')
+      : code === 'consent_required' ? 'Please confirm the three points above before sending.'
+      : code === 'too_many_uploads' ? 'You have uploaded several documents in the last hour. Please wait a little and try again.'
+      : code === 'unavailable' ? "This request can't be made right now."
+      : "We couldn't store the document. Please try again." };
+  }
+
+  reqDocErrorFor(code) {
+    if (code === 'document_required' || code === 'document_invalid') { this._reqDocUp = null; return 'Your document was not accepted with this request. Please choose it again and resend.'; }
+    return null;
+  }
+
   async sendGuestRequest() {
     const s = this.state;
     if (s.reqBusy || !s.reqLookupId || !s.reqClaimToken) return;
     this.setState({ reqBusy: true, reqErr: null });
-    const r = await this.gcall({ action: 'request', lookup_id: s.reqLookupId, claim_token: s.reqClaimToken, attestation: s.reqAttestation });
+    const up = await this.uploadRequestDocument('guest');
+    if (up.error) { this.setState({ reqBusy: false, reqErr: up.error }); return; }
+    const r = await this.gcall({ action: 'request', lookup_id: s.reqLookupId, claim_token: s.reqClaimToken, attestation: s.reqAttestation, document_id: up.id });
     if (r.data && r.data.ok) {
+      this._reqDoc = null; this._reqDocUp = null;
       this.setState({
-        reqBusy: false, reqLookupId: null, reqClaimToken: '', reqAttestation: '', screen: 'requestSent', requestSentKind: 'guest',
+        reqBusy: false, reqLookupId: null, reqClaimToken: '', reqAttestation: '', reqDocName: '', reqConsent: false, screen: 'requestSent', requestSentKind: 'guest',
         requestSentLine: r.data.candidate_notified ? 'They have been emailed and can answer from their account.' : "We couldn't email them just now; we will keep trying, and they will also see it in their account.",
       });
       return;
@@ -3355,10 +3444,10 @@ class Component extends DCLogic {
     const code = r.data && r.data.error;
     this.setState({
       reqBusy: false,
-      reqErr: code === 'attestation_invalid' ? 'Please say how you obtained the candidate\u2019s information (3 to 500 characters).'
+      reqErr: this.reqDocErrorFor(code) || (code === 'attestation_invalid' ? 'Please say how you obtained the candidate\u2019s information (10 to 500 characters).'
         : code === 'rate_limited' ? 'You have sent several requests today. Please try again tomorrow.'
         : code === 'already_requested' ? 'You already have a request open for this candidate. Check your email for the link if it was approved.'
-        : "This request can't be made right now.",
+        : "This request can't be made right now."),
     });
   }
 
@@ -3443,12 +3532,15 @@ class Component extends DCLogic {
     const s = this.state;
     if (s.reqBusy || !s.reqLookupId) return;
     this.setState({ reqBusy: true, reqErr: null });
-    const r = await this.empCall('request_comparison', { lookup_id: s.reqLookupId, attestation: s.reqAttestation });
+    const up = await this.uploadRequestDocument('org');
+    if (up.error) { this.setState({ reqBusy: false, reqErr: up.error }); return; }
+    const r = await this.empCall('request_comparison', { lookup_id: s.reqLookupId, attestation: s.reqAttestation, document_id: up.id });
     if (r.status === 401) { this.setState({ reqBusy: false }); return; }
     if (r.data && r.data.ok) {
       await this.loadComparisons();
+      this._reqDoc = null; this._reqDocUp = null;
       this.setState({
-        reqBusy: false, reqLookupId: null, reqAttestation: '', screen: 'requestSent',
+        reqBusy: false, reqLookupId: null, reqAttestation: '', reqDocName: '', reqConsent: false, screen: 'requestSent',
         requestSentLine: r.data.candidate_notified ? 'They have been emailed and can answer from their account.' : "We couldn't email them just now; we will keep trying, and they will also see it in their account.",
       });
       return;
@@ -3456,13 +3548,13 @@ class Component extends DCLogic {
     const code = r.data && r.data.error;
     this.setState({
       reqBusy: false,
-      reqErr: code === 'attestation_invalid' ? 'Please say how you obtained the candidate\u2019s information (3 to 500 characters).'
+      reqErr: this.reqDocErrorFor(code) || (code === 'attestation_invalid' ? 'Please say how you obtained the candidate\u2019s information (10 to 500 characters).'
         : code === 'payment_problem' ? "Your organization's latest payment failed, so new requests are paused until it is paid. The owner can update the payment method under Billing; nothing was sent to the candidate."
         : code === 'subscription_required' ? "Your organization needs an active subscription to request verified records. The owner can start one under Billing."
         : code === 'rate_limited' ? 'You have sent several requests today. Please try again tomorrow.'
         : code === 'already_requested' ? 'You already have a request open for this candidate. It is listed in your account.'
         : code === 'forbidden' ? 'Requests need an organization account.'
-        : "This request can't be made right now.",
+        : "This request can't be made right now."),
     });
   }
 
@@ -3727,7 +3819,11 @@ class Component extends DCLogic {
       attestationDraft: s.reqAttestation,
       setAttestationDraft: (e) => this.setState({ reqAttestation: e.target.value }),
       reqError: s.reqErr,
-      sendRequestDisabled: s.reqBusy || (s.reqAttestation || '').trim().length < 3,
+      reqDocHasName: !!s.reqDocName, reqDocName: s.reqDocName, reqDocErr: s.reqDocErr,
+      reqConsent: !!s.reqConsent,
+      toggleReqConsent: (e) => this.setState({ reqConsent: !!e.target.checked, reqErr: null }),
+      onPickRequestDoc: (e) => this.onPickRequestDoc(e),
+      sendRequestDisabled: s.reqBusy || (s.reqAttestation || '').trim().length < 10 || !s.reqDocName || !s.reqConsent,
       sendRequestLabel: s.reqBusy ? 'Sending…' : 'Send request',
       sendRequest: () => (this.orgFormOk() ? this.sendComparisonRequest() : this.sendGuestRequest()),
       goSigninFromAccess: () => this.setState({ screen: 'signin', signinErr: null }),
@@ -3777,7 +3873,7 @@ class Component extends DCLogic {
       noLookupRows: (s.lookups || []).length === 0,
       lookupRows: (s.lookups || []).map(l => ({
         label: l.candidate_label, dateLabel: this.fmtDate(l.completed_at), canRequest: !l.open_request_id, inProgress: !!l.open_request_id,
-        onRequest: () => this.setState({ reqLookupId: l.lookup_id, reqLookupLabel: l.candidate_label, reqLookupRequesterEmail: (s.real && s.real.user && s.real.user.email) || '', reqClaimToken: '', reqAttestation: '', reqErr: null, accessBack: 'acct', screen: 'access' }),
+        onRequest: () => this.setState({ reqDocName: '', reqDocErr: null, reqConsent: false, reqLookupId: l.lookup_id, reqLookupLabel: l.candidate_label, reqLookupRequesterEmail: (s.real && s.real.user && s.real.user.email) || '', reqClaimToken: '', reqAttestation: '', reqErr: null, accessBack: 'acct', screen: 'access' }),
       })),
       comparisonsHeading: s.real && s.real.role === 'owner' ? 'Requests (whole organization)' : 'Your requests',
       noComparisonRows: (s.comparisons || []).length === 0,
