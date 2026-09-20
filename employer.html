@@ -2324,6 +2324,15 @@ const __ds_scope = {};
     <sc-if value="{{ acctErr }}" hint-placeholder-val="{{ false }}">
       <div class="card elev-sm" style="font-size:13px;color:#e2735c">{{ acctErr }}</div>
     </sc-if>
+    <sc-if value="{{ billingProblem }}" hint-placeholder-val="{{ false }}">
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2);border:1px solid #e2735c">
+        <div class="card-kicker" style="color:#e2735c">Payment problem</div>
+        <div style="font-size:14px;line-height:1.6">{{ billingProblemText }}</div>
+        <sc-if value="{{ acctIsOwner }}" hint-placeholder-val="{{ false }}">
+          <button type="button" class="btn btn-primary" style="align-self:flex-start" disabled="{{ billingBusy }}" sc-camel-on-click="{{ openBillingPortal }}">Update payment method</button>
+        </sc-if>
+      </div>
+    </sc-if>
 
     <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
       <div class="card-kicker">You</div>
@@ -2414,6 +2423,9 @@ const __ds_scope = {};
         </sc-if>
         <sc-if value="{{ cmpError }}" hint-placeholder-val="{{ false }}">
           <div style="font-size:13px;color:#e2735c;line-height:1.6">{{ cmpError }}</div>
+        </sc-if>
+        <sc-if value="{{ billingProblem }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:#e2735c;line-height:1.6">Opening comparisons and starting requests are paused until the payment problem above is fixed. Nothing is used while they are paused.</div>
         </sc-if>
 
         <div style="font-size:11px;letter-spacing:0.04em;text-transform:uppercase;color:var(--color-neutral-500)">Your lookups (last 30 days, matched)</div>
@@ -3381,6 +3393,7 @@ class Component extends DCLogic {
     this.setState({
       reqBusy: false,
       reqErr: code === 'attestation_invalid' ? 'Please say how you obtained the candidate\u2019s information (3 to 500 characters).'
+        : code === 'payment_problem' ? "Your organization's latest payment failed, so new requests are paused until it is paid. The owner can update the payment method under Billing; nothing was sent to the candidate."
         : code === 'subscription_required' ? "Your organization needs an active subscription to request comparisons. The owner can start one under Billing."
         : code === 'rate_limited' ? 'You have sent several requests today. Please try again tomorrow.'
         : code === 'already_requested' ? 'You already have a request open for this candidate. It is listed in your account.'
@@ -3404,7 +3417,8 @@ class Component extends DCLogic {
     const code = d.error;
     this.setState({
       cmpBusy: false,
-      cmpErr: code === 'quota_exhausted' ? 'Your organization has used all ' + d.included + ' lookups for this billing period, so this comparison was not opened and nothing was used. It stays available until it expires; open it again when the next period starts.'
+      cmpErr: code === 'payment_problem' ? "Your organization's latest payment failed, so opening comparisons is paused. This comparison was not opened and nothing was used; it stays available until it expires. Once the payment is fixed (the owner can update the payment method under Billing), open it again."
+        : code === 'quota_exhausted' ? 'Your organization has used all ' + d.included + ' lookups for this billing period, so this comparison was not opened and nothing was used. It stays available until it expires; open it again when the next period starts.'
         : code === 'no_active_subscription' ? "Your organization's subscription is not active (it may have a payment problem, or it ended), so this comparison was not opened and nothing was used. It stays available until it expires; open it again once the subscription is active."
         : code === 'not_found' || code === 'not_available' ? 'That comparison is no longer available.'
         : "We couldn't open that comparison. Please try again.",
@@ -3468,6 +3482,12 @@ class Component extends DCLogic {
       paymentReturnBody: s.paymentReturnKind === 'success'
         ? 'Stripe confirms the payment to us directly, and a receipt is emailed to the address you paid with once it does. You can close this page.'
         : 'You left the payment page without paying. Start again whenever you are ready.',
+      billingProblem: !!(s.billing && s.billing.subscription && s.billing.subscription.payment_problem),
+      billingProblemText: (() => {
+        const owner = (s.realMembers || []).find(m => m.role === 'owner');
+        const base = 'The last payment for your organization\u2019s plan failed. Comparison lookups are paused until it is paid: nobody in the organization can open a comparison or start a new request, and no lookups are used while it is paused. Stripe also retries the card by itself, and lookups resume as soon as a payment goes through.';
+        return (s.real && s.real.role === 'owner') ? base + ' Updating the payment method fixes it sooner.' : base + ' Ask the organization owner' + (owner ? ' (' + (owner.name || owner.email) + ')' : '') + ' to update the payment method under Billing.';
+      })(),
       billingNotice: s.billingNote, billingError: s.billingErr, billingBusy: s.billingBusy,
       billingNoSub: !!s.billing && !s.billing.subscription,
       billingHasSub: !!(s.billing && s.billing.subscription),

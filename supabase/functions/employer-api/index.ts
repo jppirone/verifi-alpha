@@ -99,6 +99,12 @@ async function stripe(method: string, path: string, form?: Record<string, string
   });
   return { ok: r.ok, status: r.status, data: await r.json().catch(() => ({})) };
 }
+// A live subscription whose last renewal could not be charged: lookups are paused until it is paid (see employer-stripe-events).
+const PAYMENT_PROBLEM_STATUSES = ["past_due", "unpaid"];
+async function hasPaymentProblem(orgId: string): Promise<boolean> {
+  const s = (await rows(`employer_org_subscriptions?org_id=eq.${orgId}&select=status,payment_failed_at&order=created_at.desc&limit=1`))?.[0];
+  return !!s && (PAYMENT_PROBLEM_STATUSES.includes(s.status) || (LIVE_STATUSES.includes(s.status) && !!s.payment_failed_at));
+}
 async function liveSubscription(orgId: string): Promise<any | null> {
   return (await rows(`employer_org_subscriptions?org_id=eq.${orgId}&status=in.(${LIVE_STATUSES.join(",")})&select=*&order=created_at.desc&limit=1`))?.[0] || null;
 }
@@ -344,6 +350,9 @@ const ACTIONS: Record<string, Action> = {
           cancel_at_period_end: sub.cancel_at_period_end, canceled_at: sub.canceled_at,
           included_lookups: sub.included_lookups, unit_amount_cents: sub.unit_amount_cents, currency: sub.currency,
           used, remaining: Math.max(sub.included_lookups - used, 0), live: LIVE_STATUSES.includes(sub.status),
+          // the last renewal could not be charged: lookups are paused until it is paid
+          payment_problem: LIVE_STATUSES.includes(sub.status) && (PAYMENT_PROBLEM_STATUSES.includes(sub.status) || !!sub.payment_failed_at),
+          payment_failed_at: sub.payment_failed_at || null,
         } : null,
       });
     },
@@ -483,7 +492,7 @@ const ACTIONS: Record<string, Action> = {
       // `detail` (why the candidate was unavailable) is never forwarded.
       if (!res.ok) {
         if (res.reason === "attestation_invalid") return fail(400, "attestation_invalid");
-        if (res.reason === "subscription_required") return fail(402, "subscription_required");
+        if (res.reason === "subscription_required") return fail(402, (await hasPaymentProblem(user.org_id!)) ? "payment_problem" : "subscription_required");
         if (res.reason === "rate_limited") return fail(429, "rate_limited");
         if (res.reason === "already_open") return fail(409, "already_requested", { request_id: res.request_id });
         return fail(409, "unavailable");
@@ -554,6 +563,7 @@ const ACTIONS: Record<string, Action> = {
         if (!m) return fail(500, "metering_failed");
         if (!m.ok) {
           // Nothing was consumed and nothing is delivered; the approved snapshot keeps waiting.
+          if (m.reason !== "quota_exhausted" && await hasPaymentProblem(r.org_id)) return fail(402, "payment_problem", { reason: m.reason });
           return fail(402, m.reason === "quota_exhausted" ? "quota_exhausted" : "no_active_subscription", { reason: m.reason, used: m.used, included: m.included });
         }
         metered = m.reason === "counted";

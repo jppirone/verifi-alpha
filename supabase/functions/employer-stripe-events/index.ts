@@ -23,7 +23,9 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 //   payment_intent.payment_failed              guest payment: mark failed (only while still unpaid)
 //   charge.refunded                            guest payment: mark refunded when FULLY refunded
 //   customer.subscription.created|updated|deleted   org subscription: upsert status, period, cancel flag
-// Everything else (invoice.*, etc.) is acknowledged and ignored.
+//   invoice.payment_failed                     org subscription RENEWAL failed: record it (banner), email the org owner ONCE per invoice
+//   invoice.paid                               org subscription invoice paid: clear the failure record
+// Everything else is acknowledged and ignored.
 const REST = { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` };
 const JSON_H = { ...REST, "Content-Type": "application/json" };
 const GUEST = "employer_guest_comparison";
@@ -151,6 +153,81 @@ async function syncSubscription(sub: any, eventCreated: number, deleted: boolean
   throw new Error(`subscription insert ${ins.status}`);
 }
 
+// ---------- failed renewals (Stage 4, 2026-09-20) ----------
+// The subscription STATUS (past_due, then active again) is still driven only by customer.subscription.*; these two events add the parts
+// status cannot say: which invoice failed, since when, and whether the owner has been told. A failed FIRST payment
+// (billing_reason subscription_create) is not tracked: the hosted Checkout page already told the person, and no plan existed yet.
+const SITE = "https://alpha.applitrust.com";
+function invoiceSubscriptionId(inv: any): string | null {
+  // this account's API version keeps it under parent.subscription_details; older versions have it on the invoice
+  const s = inv?.subscription ?? inv?.parent?.subscription_details?.subscription ?? null;
+  return typeof s === "string" ? s : (s && typeof s.id === "string" ? s.id : null);
+}
+const enc = encodeURIComponent;
+
+async function invoiceFailed(inv: any, eventCreated: number): Promise<string> {
+  if (inv?.billing_reason === "subscription_create") return "first_invoice_failure_not_tracked";
+  const subId = invoiceSubscriptionId(inv);
+  if (!subId || typeof inv?.id !== "string") return "invoice_without_subscription";
+  const sub = (await rows(`employer_org_subscriptions?stripe_subscription_id=eq.${enc(subId)}&select=id,org_id,payment_failed_at,last_failed_invoice_id,failure_notified_invoice_id,last_invoice_event_created`))[0];
+  if (!sub) return "invoice_for_unknown_subscription";
+  if (Number(sub.last_invoice_event_created) > eventCreated) return "stale_event_ignored";
+
+  const nowIso = new Date().toISOString();
+  const sameInvoice = sub.last_failed_invoice_id === inv.id && sub.payment_failed_at;
+  const upd = await rest(`employer_org_subscriptions?id=eq.${sub.id}&last_invoice_event_created=lte.${eventCreated}`, {
+    method: "PATCH", headers: { "Prefer": "return=minimal" },
+    body: JSON.stringify({ payment_failed_at: sameInvoice ? sub.payment_failed_at : nowIso, last_failed_invoice_id: inv.id, last_invoice_event_created: eventCreated, updated_at: nowIso }),
+  });
+  if (!upd.ok) throw new Error(`record failed invoice ${upd.status}`);
+
+  // Claim the email for THIS invoice first, so a retry of the same invoice (or a duplicate event) can never send a second one.
+  const claim = await rest(`employer_org_subscriptions?id=eq.${sub.id}&or=(failure_notified_invoice_id.is.null,failure_notified_invoice_id.neq.${enc(inv.id)})`, {
+    method: "PATCH", headers: { "Prefer": "return=representation" }, body: JSON.stringify({ failure_notified_invoice_id: inv.id }),
+  });
+  const claimed = claim.ok ? await claim.json() : [];
+  if (!Array.isArray(claimed) || claimed.length === 0) return "payment_failed_recorded:already_emailed";
+
+  const owner = (await rows(`employer_users?org_id=eq.${sub.org_id}&role=eq.owner&select=email,name`))[0];
+  const org = (await rows(`employer_orgs?id=eq.${sub.org_id}&select=name`))[0];
+  if (!owner) return "payment_failed_recorded:no_owner";
+  const money = typeof inv.amount_due === "number" ? new Intl.NumberFormat("en-US", { style: "currency", currency: String(inv.currency || "usd").toUpperCase() }).format(inv.amount_due / 100) : "the renewal";
+  const retry = typeof inv.next_payment_attempt === "number" ? new Date(inv.next_payment_attempt * 1000).toUTCString() : null;
+  const pay = typeof inv.hosted_invoice_url === "string" && inv.hosted_invoice_url.startsWith("https://") ? inv.hosted_invoice_url : null;
+  const payLine = pay ? `, or <a href="${esc(pay)}">pay this invoice directly</a>` : "";
+  const retryLine = retry ? `Stripe will also try the card again on ${esc(retry)}. ` : "";
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${RESEND_API_KEY}` },
+    body: JSON.stringify({
+      from: "Verifi <verify@applitrust.com>",
+      to: owner.email,
+      subject: "Payment failed for your Verifi employer plan",
+      html: `<p>Hi ${esc(owner.name || "there")},</p><p>We could not collect the renewal (${esc(money)}) for <b>${esc(org?.name || "your organization")}</b>'s Verifi employer plan.</p><p><b>Until it is paid, your organization's comparison lookups are paused:</b> nobody in the organization can open a comparison or start a new request. Nothing already opened is affected, and no lookups are used while it is paused.</p><p>To fix it, <a href="${SITE}/employer.html">sign in</a> and use Change payment method under Billing${payLine}. ${retryLine}Lookups resume by themselves once the payment goes through.</p>`,
+    }),
+  });
+  if (!res.ok) {
+    // Undo the claim and fail the event so Stripe delivers it again: the owner must not silently miss this.
+    await rest(`employer_org_subscriptions?id=eq.${sub.id}&failure_notified_invoice_id=eq.${enc(inv.id)}`, { method: "PATCH", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ failure_notified_invoice_id: sub.failure_notified_invoice_id }) });
+    throw new Error("failure_email_failed");
+  }
+  return "payment_failed_recorded:owner_emailed";
+}
+
+async function invoicePaid(inv: any, eventCreated: number): Promise<string> {
+  const subId = invoiceSubscriptionId(inv);
+  if (!subId) return "invoice_without_subscription";
+  const sub = (await rows(`employer_org_subscriptions?stripe_subscription_id=eq.${enc(subId)}&select=id,payment_failed_at,last_invoice_event_created`))[0];
+  if (!sub) return "invoice_for_unknown_subscription";
+  if (Number(sub.last_invoice_event_created) > eventCreated) return "stale_event_ignored";
+  const r = await rest(`employer_org_subscriptions?id=eq.${sub.id}&last_invoice_event_created=lte.${eventCreated}`, {
+    method: "PATCH", headers: { "Prefer": "return=minimal" },
+    body: JSON.stringify({ payment_failed_at: null, last_failed_invoice_id: null, failure_notified_invoice_id: null, last_invoice_event_created: eventCreated, updated_at: new Date().toISOString() }),
+  });
+  if (!r.ok) throw new Error(`clear failed invoice ${r.status}`);
+  return sub.payment_failed_at ? "invoice_paid:failure_cleared" : "invoice_paid:nothing_to_clear";
+}
+
 // ---------- dispatch ----------
 async function handle(event: any): Promise<string> {
   const obj = event?.data?.object || {};
@@ -179,6 +256,10 @@ async function handle(event: any): Promise<string> {
       const changed = r.ok ? await r.json() : [];
       return Array.isArray(changed) && changed.length ? "payment_refunded" : "refund_no_matching_payment";
     }
+    case "invoice.payment_failed":
+      return await invoiceFailed(obj, Number(event.created) || 0);
+    case "invoice.paid":
+      return await invoicePaid(obj, Number(event.created) || 0);
     case "customer.subscription.created":
     case "customer.subscription.updated":
     case "customer.subscription.deleted":
