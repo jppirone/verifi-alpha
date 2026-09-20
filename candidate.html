@@ -7513,7 +7513,7 @@ class Component extends DCLogic {
     const n = (st) => all.filter(e => e.status === st).length;
     const pending = c.pending.length;
     return [
-      n('approved') + ' approved, ' + n('declined') + ' declined, ' + all.filter(e => e.status === 'expired' && !e.approved_at).length + ' closed with no response, ' + all.filter(e => e.status === 'expired' && e.approved_at).length + ' approved, where the employer\u2019s access has since expired.',
+      n('approved') + ' approved and still available to the employer, ' + n('declined') + ' declined, ' + all.filter(e => e.status === 'expired' && !e.approved_at).length + ' closed with no response, ' + all.filter(e => e.status === 'expired' && e.approved_at).length + ' approved but the employer\u2019s access has since expired.',
       pending === 1 ? '1 request is waiting on your answer.' : pending + ' requests are waiting on your answer.',
     ];
   }
