@@ -2926,7 +2926,7 @@ class Component extends DCLogic {
 
   realBlank() {
     return {
-      lookups: [], comparisons: [], cmpLoaded: false, cmpNote: null, cmpErr: null, cmpBusy: false,
+      lookups: [], comparisons: [], cmpLoaded: false, cmpNote: null, cmpErr: null, cmpLoadErr: null, cmpBusy: false,
       realToken: null, real: null, realMembers: [], realOrgInvites: [], billing: null, billingBusy: false, billingNote: null, billingErr: null,
       signinEmail: '', signinName: '', signinBusy: false, signinErr: null, signinProblem: null, signinSentTo: '',
       acctNameDraft: '', orgNameDraft: '', newOrgNameDraft: '', inviteEmailDraft: '', acctNotice: null, acctErr: null, acctBusy: false,
@@ -3141,7 +3141,7 @@ class Component extends DCLogic {
     const lk = both[0].data, cm = both[1].data;
     this.setState({
       lookups: lk && lk.ok ? (lk.lookups || []) : [], comparisons: cm && cm.ok ? (cm.comparisons || []) : [], cmpLoaded: true,
-      cmpErr: (lk && lk.ok && cm && cm.ok) ? null : "We couldn't load your comparisons. Please try again.",
+      cmpLoadErr: (lk && lk.ok && cm && cm.ok) ? null : "We couldn't load your comparisons. Please try again.",
     });
   }
 
@@ -3409,7 +3409,7 @@ class Component extends DCLogic {
       goSigninFromAccess: () => this.setState({ screen: 'signin', signinErr: null }),
       backFromAccess: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: s.accessBack === 'acct' ? 'acct' : 'result' }); },
       requestSentLine: s.requestSentLine,
-      cmpNote: s.cmpNote, cmpError: s.cmpErr, cmpBusy: s.cmpBusy,
+      cmpNote: s.cmpNote, cmpError: s.cmpErr || s.cmpLoadErr, cmpBusy: s.cmpBusy,
       noLookupRows: (s.lookups || []).length === 0,
       lookupRows: (s.lookups || []).map(l => ({
         label: l.candidate_label, dateLabel: this.fmtDate(l.completed_at), canRequest: !l.open_request_id, inProgress: !!l.open_request_id,
