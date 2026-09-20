@@ -2699,7 +2699,7 @@ const __ds_scope = {};
 
     <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
       <div class="card-kicker">Full comparison access</div>
-      <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">Comparing your copy against the candidate's record is a separate request. The candidate decides whether to allow it. If they approve, you see only the items they confirmed that Verifi has verified.</div>
+      <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">Comparing your copy against the candidate's record is a separate request. The candidate decides whether to allow it. If they approve, you see the items they confirmed that Verifi has verified, and the name and status of any item that was checked and did not clear.</div>
       <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Your name, company, and confirmed email are shown to the candidate with the request, along with how you say you obtained their information. Requests close after 72 hours without an answer.</div>
       <button type="button" class="btn btn-primary" style="align-self:flex-start" sc-camel-on-click="{{ requestAccess }}">Request full comparison access</button>
       <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">{{ resultAccessNote }}</div>
@@ -2852,7 +2852,7 @@ const __ds_scope = {};
       <sc-for list="{{ coverageLines }}" as="line" hint-placeholder-count="3">
         <div style="font-size:15px;line-height:1.6">{{ line }}</div>
       </sc-for>
-      <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">An item that is not shown was not verified, for any reason. That is not evidence either way. Job descriptions are not part of what is verified, so they are not shown.</div>
+      <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">Anything listed under "Checked, not verified" had a check that did not clear. Any other item that is not shown was not verified, for any reason; that is not evidence either way. Job descriptions are not part of what is verified, so they are not shown.</div>
       <div style="display:grid;grid-template-columns:auto 1fr;gap:var(--space-2) var(--space-4);font-size:12px;align-items:baseline;border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
         <div style="color:var(--color-neutral-500)">Record as of</div><div>{{ compareAsOf }}</div>
         <div style="color:var(--color-neutral-500)">Approved</div><div>{{ compareApproved }}</div>
@@ -2890,6 +2890,22 @@ const __ds_scope = {};
             <div style="font-size:11px;color:var(--color-neutral-500)">{{ row.kind }} · {{ row.how }}</div>
           </div>
         </sc-for>
+        <sc-if value="{{ hasNotCleared }}" hint-placeholder-val="{{ false }}">
+          <div class="card-kicker" style="margin-top:var(--space-3)">Checked, not verified</div>
+          <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">A check was run on each of these and did not clear. That is a fact about the check, not a finding about the candidate: the reason line says what the check found.</div>
+          <sc-for list="{{ notClearedRows }}" as="nc" hint-placeholder-count="1">
+            <div style="display:flex;flex-direction:column;gap:4px;padding-bottom:var(--space-3);border-bottom:1px solid var(--color-divider)">
+              <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap">
+                <div style="font-size:14px;line-height:1.5">{{ nc.headline }}</div>
+                <span class="tag tag-outline" style="white-space:nowrap;color:#b26a00;border-color:#b26a00">{{ nc.statusLabel }}</span>
+              </div>
+              <sc-if value="{{ nc.hasReason }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.6">{{ nc.reason }}</div>
+              </sc-if>
+              <div style="font-size:11px;color:var(--color-neutral-500)">{{ nc.kind }} · not verified</div>
+            </div>
+          </sc-for>
+        </sc-if>
       </div>
     </div>
   </div>
@@ -3711,6 +3727,14 @@ class Component extends DCLogic {
         (content.certifications || []).forEach(x => out.push({ kind: 'Certification', headline: x.name || '', detail: [x.issuer, x.license_number ? 'Lic #' + x.license_number : '', x.license_state, x.issued].filter(Boolean).join(' · '), how: how(x) }));
         return out;
       })(),
+      // snapshot version 2+: items a check was run on that did not clear (older snapshots have none)
+      hasNotCleared: (content.not_cleared || []).length > 0,
+      notClearedRows: (content.not_cleared || []).map(n => ({
+        headline: n.label || '',
+        statusLabel: n.status === 'discrepancy' ? 'Discrepancy' : 'Not verified',
+        hasReason: !!n.reason, reason: n.reason || '',
+        kind: ({ license: 'License', job: 'Job', education: 'Education', certification: 'Certification' })[n.kind] || 'Item',
+      })),
       onPickCopy: (e) => this.onPickCopy(e),
       closeCompare: (e) => { if (e && e.preventDefault) e.preventDefault(); if (cmp.guest) { this.closeGuestView(); return; } if (this._copyUrl) { try { URL.revokeObjectURL(this._copyUrl); } catch (x) { /* ignore */ } this._copyUrl = null; } this.setState({ screen: 'acct', compare: null }); this.loadReal(); },
 

@@ -7369,6 +7369,15 @@ class Component extends DCLogic {
     return [part(w.work.verified, 'job', 'jobs'), part(w.education.verified, 'education entry', 'education entries'), part(w.certifications.verified, 'certification or license', 'certifications and licenses')].filter(Boolean).join(', ');
   }
 
+  // Items a check was run on that did not clear: an approval shares their NAME and status (never the number or registry detail). The
+  // server returns the exact lines it would share; this is that list as one sentence, shown before the candidate decides.
+  empNotClearedText() {
+    const w = this.state.comparison.would;
+    const n = (w && w.not_cleared) || [];
+    if (!n.length) return '';
+    return n.map(x => x.label + ': ' + (x.status === 'discrepancy' ? 'discrepancy' : 'not verified') + (x.reason ? ' (' + String(x.reason).replace(/\.$/, '') + ')' : '')).join('; ');
+  }
+
   async respondToRequest(id, decision) {
     if (this.state.empBusy) return;
     const r = this.state.comparison.pending.find(x => x.id === id);
@@ -7407,6 +7416,7 @@ class Component extends DCLogic {
     (c.work || []).forEach(w => lines.push('Job: ' + [w.title, w.employer, w.location].filter(Boolean).join(', ') + (range(w.start, w.end, w.current) ? ' (' + range(w.start, w.end, w.current) + ')' : '') + ' \u2014 ' + how(w)));
     (c.education || []).forEach(e => lines.push('Education: ' + [e.degree, e.field_of_study, e.institution, e.location].filter(Boolean).join(', ') + (range(e.start, e.end) ? ' (' + range(e.start, e.end) + ')' : '') + ' \u2014 ' + how(e)));
     (c.certifications || []).forEach(x => lines.push('Certification: ' + [x.name, x.issuer, x.license_number ? 'Lic #' + x.license_number : '', x.license_state, x.issued].filter(Boolean).join(', ') + ' \u2014 ' + how(x)));
+    (c.not_cleared || []).forEach(n => lines.push('Checked, not verified: ' + n.label + ' \u2014 ' + (n.status === 'discrepancy' ? 'discrepancy' : 'not verified') + (n.reason ? ' (' + n.reason + ')' : '')));
     return lines;
   }
 
@@ -11186,7 +11196,8 @@ class Component extends DCLogic {
         if (!e) return '';
         const what = this.empWouldShareText();
         if (!what) return "You don't have any verified items yet, so there is nothing to share with " + this.empRequesterLabel(e.requester) + '. You can decline, or wait until some of your items are verified.';
-        return 'Approve ' + this.empRequesterLabel(e.requester) + '? They will see only items you confirmed that Verifi has verified, as they stand right now: ' + what + '. Your other items are not shown or described. If they never open it, it is discarded after 7 days; once opened it stays available to them for up to 90 days. You cannot undo an approval.';
+        const nc = this.empNotClearedText();
+        return 'Approve ' + this.empRequesterLabel(e.requester) + '? They will see the items you confirmed that Verifi has verified, as they stand right now: ' + what + '.' + (nc ? ' They will also see, by name, ' + (nc.indexOf('; ') < 0 ? 'this item that was checked and did not clear' : 'these items that were checked and did not clear') + ': ' + nc + '.' : '') + ' Your other items are not shown or described. If they never open it, it is discarded after 7 days; once opened it stays available to them for up to 90 days. You cannot undo an approval.';
       })(),
       empApproveLabel: s.empBusy ? 'Approving…' : 'Approve and share',
       empBusy: s.empBusy,

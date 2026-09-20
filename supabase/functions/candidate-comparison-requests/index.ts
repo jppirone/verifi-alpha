@@ -38,8 +38,15 @@ const corsHeaders = {
 //                                whose verification_items row (type 'License') is 'Confirmed'.
 //   Excluded, always: statuses New, In Progress, Awaiting Response, Needs Reconciliation, Discrepancy, Unable to Verify; rows of type
 //   'Needs Review'; items with no queue row (candidate-stated); job responsibilities (not part of what staff verify); skills, summary,
-//   hobbies and other sections; contact details. Non-included items are reported only as counts ("confirmed" vs "verified"), never by
-//   status, so an employer cannot tell "unable to verify" from "still in review" from "not submitted".
+//   hobbies and other sections; contact details. Non-included items are reported as counts ("confirmed" vs "verified"), so an employer
+//   cannot tell "unable to verify" from "still in review" from "not submitted", with ONE bounded exception (2026-09-20, snapshot
+//   version 2): an item where a check was actually run and did not clear is also listed by name in content.not_cleared, with a fixed-
+//   vocabulary status and, for licenses, a fixed one-sentence reason. That is: a Job / Education / Certification queue row at
+//   'Discrepancy' or 'Unable to Verify', or a license whose automatic check came back ambiguous / not found / inactive (queue row
+//   'Needs Reconciliation', 'Discrepancy' or 'Unable to Verify'). NEVER listed: rows still New / In Progress / Awaiting Response,
+//   'Needs Review' rows, a license whose check could not run (lookup_failed) or was held (recent_name_change), candidate-stated
+//   licenses with no check. Never included in a line: staff notes, the registry's own text, license numbers, other people's names.
+//   The candidate sees the exact same lines in the approval card BEFORE approving (would_share.not_cleared).
 //
 // Deletion rules live in the migration (expire_comparison_requests, purge_candidate_comparisons + the deactivation trigger).
 const REST = { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` };
@@ -108,14 +115,28 @@ function partialDate(date: unknown, precision: unknown): string | null {
 const dayOf = (iso: unknown) => (typeof iso === "string" && iso.length >= 10 ? iso.slice(0, 10) : null);
 const clean = (o: Record<string, unknown>) => { for (const k of Object.keys(o)) if (o[k] === null || o[k] === undefined || o[k] === "") delete o[k]; return o; };
 
-type Assembled = { content: any; counts: { work: { confirmed: number; verified: number }; education: { confirmed: number; verified: number }; certifications: { confirmed: number; verified: number }; verified_total: number } };
+type NotCleared = { kind: "license" | "job" | "education" | "certification"; label: string; status: "not_verified" | "discrepancy"; reason?: string };
+type Assembled = { content: any; notCleared: NotCleared[]; counts: { work: { confirmed: number; verified: number }; education: { confirmed: number; verified: number }; certifications: { confirmed: number; verified: number }; verified_total: number; not_cleared_total: number } };
+
+// The ONLY sentences an employer can ever see about WHY a license did not clear. Keyed by license_items.verification_reason; anything
+// not listed gets the generic sentence. Deliberately says nothing about name changes, lookup failures, the registry's own status text,
+// or who the registry says the license belongs to.
+const LICENSE_REASON: Record<string, string> = {
+  no_exact_name_match: "The state registry record for this license number is under a different name than the one on this account.",
+  exact_match_not_active: "Found in the state registry, but not currently active.",
+  no_records: "No record was found in the state registry for this license number.",
+};
+const LICENSE_REASON_GENERIC = "The automatic check could not confirm this license.";
+// checks that did not run to a result, or a clean result held for review: not "checked and did not clear", so never listed
+const LICENSE_NEVER_LISTED_REASONS = new Set(["lookup_failed", "recent_name_change"]);
 
 async function assembleSnapshot(candidateId: string): Promise<Assembled> {
   const empty = { confirmed: 0, verified: 0 };
   const cand = (await rows(`candidates?id=eq.${candidateId}&select=id,first_name,last_name,account_type,deletion_scheduled_at`))[0];
   const emptyResult = (): Assembled => ({
     content: null,
-    counts: { work: { ...empty }, education: { ...empty }, certifications: { ...empty }, verified_total: 0 },
+    notCleared: [],
+    counts: { work: { ...empty }, education: { ...empty }, certifications: { ...empty }, verified_total: 0, not_cleared_total: 0 },
   });
   if (!cand || cand.account_type !== "full_resume" || cand.deletion_scheduled_at) return emptyResult();
 
@@ -123,12 +144,14 @@ async function assembleSnapshot(candidateId: string): Promise<Assembled> {
   const docs = await rows(`resume_documents?candidate_id=eq.${candidateId}&confirmed_at=not.is.null&select=id`);
   const docList = docs.map((d) => d.id).join(",");
   const base = `candidate_id=eq.${candidateId}&candidate_confirmed=eq.true&resume_document_id=in.(${docList})`; // only used when docList is non-empty
-  const [work, edu, certs, vis, lics] = await Promise.all([
+  const [work, edu, certs, vis, lics, notClearedQ] = await Promise.all([
     docList ? rows(`work_history_items?${base}&select=id,company,title,location,start_date,start_date_precision,end_date,end_date_precision,position&order=position.asc`) : Promise.resolve([]),
     docList ? rows(`education_items?${base}&select=id,institution,degree,field_of_study,location,start_date,start_date_precision,end_date,end_date_precision,position&order=position.asc`) : Promise.resolve([]),
     docList ? rows(`certification_items?${base}&select=id,name,issuing_body,license_number,issue_date,issue_date_precision,position&order=position.asc`) : Promise.resolve([]),
     rows(`verification_items?candidate_id=eq.${candidateId}&status=eq.Confirmed&type=in.(Job%20Experience,Education,Certification,License)&select=id,type,source_item_id,status_changed_at`),
-    rows(`license_items?candidate_id=eq.${candidateId}&select=id,linked_certification_id,state,queue_item_id,verified_at,verification_outcome`),
+    rows(`license_items?candidate_id=eq.${candidateId}&select=id,linked_certification_id,state,queue_item_id,verified_at,verification_outcome,verification_reason`),
+    // rows where a check was run and did not clear (see the header: only these can ever become a named line)
+    rows(`verification_items?candidate_id=eq.${candidateId}&status=in.(Discrepancy,Unable%20to%20Verify,Needs%20Reconciliation)&type=in.(Job%20Experience,Education,Certification,License)&select=id,type,status,source_item_id`),
   ]);
   const confirmedBySource = (type: string) => new Map(vis.filter((v) => v.type === type && v.source_item_id).map((v) => [v.source_item_id as string, v]));
   const jobV = confirmedBySource("Job Experience");
@@ -160,11 +183,13 @@ async function assembleSnapshot(candidateId: string): Promise<Assembled> {
     }));
   }
   const certOut: any[] = [];
+  const verifiedCertIds = new Set<string>();
   for (const c of certs) {
     const own = certV.get(c.id);
     const lic = licByCert.get(c.id);
     const licQ = lic && lic.queue_item_id ? licenseQueueV.get(lic.queue_item_id) : null;
     if (!own && !licQ) continue;
+    verifiedCertIds.add(c.id);
     certOut.push(clean({
       name: c.name, issuer: c.issuing_body, license_number: c.license_number, license_state: lic ? lic.state : null,
       issued: partialDate(c.issue_date, c.issue_date_precision),
@@ -176,22 +201,54 @@ async function assembleSnapshot(candidateId: string): Promise<Assembled> {
     }));
   }
 
+  // ---- checked and did not clear: named lines (bounded; see the header) ----
+  const notCleared: NotCleared[] = [];
+  const ncBySource = (type: string) => new Map(notClearedQ.filter((v) => v.type === type && v.source_item_id).map((v) => [v.source_item_id as string, v]));
+  const ncById = new Map(notClearedQ.filter((v) => v.type === "License").map((v) => [v.id as string, v]));
+  const statusOf = (queueStatus: string): "not_verified" | "discrepancy" => (queueStatus === "Discrepancy" ? "discrepancy" : "not_verified");
+  const certById = new Map(certs.map((c) => [c.id as string, c]));
+  const licenseCertIds = new Set<string>();
+  for (const l of lics) {
+    const q = l.queue_item_id ? ncById.get(l.queue_item_id) : null;
+    const c = l.linked_certification_id ? certById.get(l.linked_certification_id) : null;
+    if (!q || !c || verifiedCertIds.has(c.id)) continue;
+    licenseCertIds.add(c.id);
+    // a Needs Reconciliation row is only a "did not clear" when the automatic check produced a result; Discrepancy / Unable to Verify are
+    // human determinations and always listed
+    if (q.status === "Needs Reconciliation" && (LICENSE_NEVER_LISTED_REASONS.has(String(l.verification_reason)) || (l.verification_outcome !== "ambiguous" && l.verification_outcome !== "not_found"))) continue;
+    const base = String(c.name || "License").trim();
+    notCleared.push({
+      kind: "license",
+      label: `${/licen[sc]e/i.test(base) ? base : base + " license"}${l.state ? ` (${l.state})` : ""}`,
+      status: statusOf(q.status),
+      reason: LICENSE_REASON[String(l.verification_reason)] || LICENSE_REASON_GENERIC,
+    });
+  }
+  const humanOnly = (q: any) => q && (q.status === "Discrepancy" || q.status === "Unable to Verify");
+  const jobN = ncBySource("Job Experience"), eduN = ncBySource("Education"), certN = ncBySource("Certification");
+  for (const w of work) { const q = jobN.get(w.id); if (humanOnly(q)) notCleared.push({ kind: "job", label: [w.title, w.company].filter(Boolean).join(" at ") || "Job", status: statusOf(q!.status) }); }
+  for (const e of edu) { const q = eduN.get(e.id); if (humanOnly(q)) notCleared.push({ kind: "education", label: [[e.degree, e.field_of_study].filter(Boolean).join(", "), e.institution].filter(Boolean).join(" - ") || "Education", status: statusOf(q!.status) }); }
+  for (const c of certs) { const q = certN.get(c.id); if (humanOnly(q) && !verifiedCertIds.has(c.id) && !licenseCertIds.has(c.id)) notCleared.push({ kind: "certification", label: String(c.name || "Certification"), status: statusOf(q!.status) }); }
+
   const counts = {
     work: { confirmed: work.length, verified: workOut.length },
     education: { confirmed: edu.length, verified: eduOut.length },
     certifications: { confirmed: certs.length, verified: certOut.length },
     verified_total: workOut.length + eduOut.length + certOut.length,
+    not_cleared_total: notCleared.length,
   };
   const name = [cand.first_name, cand.last_name].filter(Boolean).join(" ");
   return {
     counts,
+    notCleared,
     content: {
-      version: 1,
+      version: 2,
       assembled_at: new Date().toISOString(),
       candidate: { name },
-      basis: "Only items the candidate confirmed and that Verifi verified are shown. An item that is not shown was not verified, for any reason; that is not evidence either way. This is the record as of the assembly time above.",
+      basis: "Items the candidate confirmed and that Verifi verified are shown as verified. Items where a check was run and did not clear are listed separately by name. Any other item that is not shown was not verified, for any reason; that is not evidence either way. This is the record as of the assembly time above.",
       coverage: { work: counts.work, education: counts.education, certifications: counts.certifications },
       work: workOut, education: eduOut, certifications: certOut,
+      not_cleared: notCleared,
     },
   };
 }
@@ -213,7 +270,7 @@ async function notifyCandidate(requestId: string): Promise<{ sent: boolean; reas
   const ok = await sendEmail(
     c.email,
     "An employer asked to compare a resume with your verified record",
-    `<p>Hi${c.first_name ? " " + esc(c.first_name) : ""},</p><p>${who} (${esc(r.requester_email)}, confirmed by a link sent to that address) asked to compare their copy of your resume with your verified record on Verifi.</p><p><b>How they say they got your information:</b> ${esc(r.attestation)}</p><p><b>Nothing is shared unless you approve.</b> If you approve, they see only the items you confirmed that Verifi has verified. If you decline, or do nothing, they are told only that the request was not authorized.</p><p><a href="${SITE}/candidate.html">Sign in and open the Activity tab</a> to review it. The request closes automatically at ${esc(new Date(r.expires_at).toUTCString())}.</p>`,
+    `<p>Hi${c.first_name ? " " + esc(c.first_name) : ""},</p><p>${who} (${esc(r.requester_email)}, confirmed by a link sent to that address) asked to compare their copy of your resume with your verified record on Verifi.</p><p><b>How they say they got your information:</b> ${esc(r.attestation)}</p><p><b>Nothing is shared unless you approve.</b> If you approve, they see the items you confirmed that Verifi has verified, plus the name and status of any item that was checked and did not clear (the approval screen lists exactly which, before you decide). Nothing else about your other items is shown. If you decline, or do nothing, they are told only that the request was not authorized.</p><p><a href="${SITE}/candidate.html">Sign in and open the Activity tab</a> to review it. The request closes automatically at ${esc(new Date(r.expires_at).toUTCString())}.</p>`,
   );
   if (!ok) {
     await rest(`comparison_requests?id=eq.${requestId}`, { method: "PATCH", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ candidate_notified_at: null }) });
@@ -341,7 +398,7 @@ export default {
           pending: shaped.filter((r) => r.status === "pending"),
           history: shaped.filter((r) => r.status !== "pending"),
           tier1: tier1.map((t) => ({ id: t.id, domain: String(t.requester_email).split("@")[1] || "", company: t.requester_company, date: t.used_at })),
-          would_share: share.counts,
+          would_share: { ...share.counts, not_cleared: share.notCleared },
         });
       }
 
@@ -381,7 +438,7 @@ export default {
           return json({ ok: false, error: "not_pending" }, 409);
         }
         const notified = await noticeRequesterApproved(r.id);
-        return json({ ok: true, status: "approved", shared: snap.counts, employer_notified: notified });
+        return json({ ok: true, status: "approved", shared: { ...snap.counts, not_cleared: snap.notCleared }, employer_notified: notified });
       }
 
       if (action === "view_snapshot") {
