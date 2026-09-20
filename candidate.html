@@ -4804,6 +4804,9 @@ a:hover{color:var(--color-accent)}
             <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2);border:1px dashed var(--color-divider)">
               <div class="card-kicker">Update</div>
               <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.6">{{ empNoticeText }}</div>
+              <sc-if value="{{ empDocLinkOpen }}" hint-placeholder-val="{{ false }}">
+                <a href="{{ empDocLinkUrl }}" target="_blank" rel="noopener noreferrer" style="font-size:13px">Open the document</a>
+              </sc-if>
               <a href="#" style="font-size:12px" sc-camel-on-click="{{ dismissEmpNotice }}">Dismiss</a>
             </div>
           </sc-if>
@@ -4945,6 +4948,9 @@ a:hover{color:var(--color-accent)}
             <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2);border:1px dashed var(--color-divider)">
               <div class="card-kicker">Update</div>
               <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.6">{{ empNoticeText }}</div>
+              <sc-if value="{{ empDocLinkOpen }}" hint-placeholder-val="{{ false }}">
+                <a href="{{ empDocLinkUrl }}" target="_blank" rel="noopener noreferrer" style="font-size:13px">Open the document</a>
+              </sc-if>
               <a href="#" style="font-size:12px" sc-camel-on-click="{{ dismissEmpNotice }}">Dismiss</a>
             </div>
           </sc-if>
@@ -7376,7 +7382,7 @@ class Component extends DCLogic {
     activityStart: this.defaultActivityStart(), activityEnd: this.defaultActivityEnd(),
     activityLog: this.seedActivityLog(),
     comparison: { loaded: false, loading: false, error: false, pending: [], history: [], tier1: [], would: null },
-    empPage: 0, empConfirmId: null, empNotice: null, empBusy: false, snapshotView: null, empPreview: null,
+    empPage: 0, empConfirmId: null, empNotice: null, empDocLink: null, empBusy: false, snapshotView: null, empPreview: null,
     // Item A (2026-09-08 regression session): these all start genuinely blank — no real email/phone
     // exists yet at getInitialState() time (before signup/login even happens), so nothing safe can
     // be seeded here. seedContactFromAccount() (see its own header) fills these in for real, once,
@@ -7590,7 +7596,13 @@ class Component extends DCLogic {
   // candidate's own request. The tab is opened inside the click (a tab opened after an await is treated as a pop-up and blocked).
   async viewEmployerDocument(id) {
     const w = window.open('', '_blank');
-    if (!w) { this.setState({ empNotice: 'Your browser blocked the new tab. Allow pop-ups for this site and try again.' }); return; }
+    if (!w) {
+      // A pop-up blocker (or an embedded browser) refused the new tab: mint the link anyway and show it as a real link, which a direct click can always open.
+      const res0 = await this.comparisonCall({ action: 'document_link', request_id: id });
+      if (res0.data && res0.data.ok && res0.data.url) this.setState({ empNotice: 'Your browser did not open a new tab. Use this link instead; it works for 60 seconds.', empDocLink: res0.data.url });
+      else this.setState({ empNotice: "That document is no longer available. Employer documents are deleted 21 days after the request.", empDocLink: null });
+      return;
+    }
     try { w.opener = null; w.document.title = 'Employer document'; w.document.body.style.cssText = 'font-family:sans-serif;padding:24px'; w.document.body.textContent = 'Opening the document\u2026'; } catch (e) { /* the tab still navigates below */ }
     const res = await this.comparisonCall({ action: 'document_link', request_id: id });
     if (res.data && res.data.ok && res.data.url) { w.location.href = res.data.url; return; }
@@ -11496,9 +11508,10 @@ class Component extends DCLogic {
       empBusy: s.empBusy,
       confirmEmpAllow: () => { if (this.empConfirmView().canApprove) this.respondToRequest(s.empConfirmId, 'approve'); else this.setState({ empConfirmId: null, empPreview: null }); },
       cancelEmpAllow: () => this.setState({ empConfirmId: null, empPreview: null }),
+      empDocLinkOpen: !!s.empDocLink, empDocLinkUrl: s.empDocLink || '',
       empNoticeOpen: !!s.empNotice,
       empNoticeText: s.empNotice || '',
-      dismissEmpNotice: (e) => { pd(e); this.setState({ empNotice: null }); },
+      dismissEmpNotice: (e) => { pd(e); this.setState({ empNotice: null, empDocLink: null }); },
       empLoadError: !!s.comparison.error,
       retryEmpLoad: (e) => { pd(e); this.ensureComparisonLoaded(true); },
       snapshotOpen: !!s.snapshotView,
