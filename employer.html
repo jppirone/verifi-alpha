@@ -2704,13 +2704,21 @@ const __ds_scope = {};
     <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3)">
       <div class="card-kicker">Request a comparison</div>
       <div style="font-size:17px;line-height:1.5">{{ accessCandidateLabel }}</div>
-      <sc-if value="{{ accessNeedsSignin }}" hint-placeholder-val="{{ false }}">
-        <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">Comparison requests are sent from a signed-in organization account with an active subscription, using the same email address you confirmed this lookup with. Pay-once guest access is not available yet.</div>
-        <button type="button" class="btn btn-primary" style="align-self:flex-start" sc-camel-on-click="{{ goSigninFromAccess }}">Sign in</button>
+      <sc-if value="{{ accessGuestForm }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">The candidate is asked to approve. Nothing is prepared or shown to you before they do, and a request that is declined or not answered costs nothing. If they approve, we email a link to {{ guestEmailLine }}. Opening it is a <b>one-time view</b>: {{ guestPriceLabel }}, charged only when you choose to open it, and you can then read it for 30 minutes. After that it is gone and cannot be reopened, by you or by us.</div>
+        <div class="field">
+          <label for="rq-att-g">How did you obtain this candidate's information?</label>
+          <textarea class="input" id="rq-att-g" rows="3" style="resize:vertical;font-family:var(--font-body);line-height:1.6" value="{{ attestationDraft }}" sc-camel-on-change="{{ setAttestationDraft }}" placeholder="e.g. LinkedIn, Indeed, recruiter name, direct candidate submission"></textarea>
+          <div style="font-size:11px;color:var(--color-neutral-500);margin-top:6px;line-height:1.6">Required (3 to 500 characters). The candidate sees this text with your name, company and confirmed email.</div>
+        </div>
+        <sc-if value="{{ reqError }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:#e2735c;line-height:1.6">{{ reqError }}</div>
+        </sc-if>
+        <button type="button" class="btn btn-primary" style="align-self:flex-start" disabled="{{ sendRequestDisabled }}" sc-camel-on-click="{{ sendRequest }}">{{ sendRequestLabel }}</button>
+        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Have an organization plan instead? <a href="#" sc-camel-on-click="{{ goSigninFromAccess }}">Sign in</a>. Its lookups cover comparisons with no per-view charge.</div>
       </sc-if>
-      <sc-if value="{{ accessNeedsOrg }}" hint-placeholder-val="{{ false }}">
-        <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">You are signed in but not part of an organization. Comparisons are paid for by an organization's plan: create or join one in your account first.</div>
-        <button type="button" class="btn btn-primary" style="align-self:flex-start" sc-camel-on-click="{{ openAccount }}">Go to my account</button>
+      <sc-if value="{{ accessNoOption }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">This request can't be started from here. Run a new lookup, then request from its result screen.</div>
       </sc-if>
       <sc-if value="{{ accessEmailMismatch }}" hint-placeholder-val="{{ false }}">
         <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">{{ accessEmailNote }}</div>
@@ -2740,8 +2748,74 @@ const __ds_scope = {};
       <div class="card-kicker">Request sent</div>
       <div style="font-size:17px;line-height:1.5">We asked the candidate for approval.</div>
       <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">{{ requestSentLine }}</div>
-      <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">You will get an email either way. If they approve, it says so and you open the comparison from your account. If they decline, or do not answer within 72 hours, the email says only that the request was not authorized: we do not say which, and nothing is used from your plan.</div>
-      <button type="button" class="btn btn-primary" style="align-self:flex-start" sc-camel-on-click="{{ openAccount }}">Go to my account</button>
+      <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">{{ requestSentDetail }}</div>
+      <sc-if value="{{ requestSentIsOrg }}" hint-placeholder-val="{{ false }}">
+        <button type="button" class="btn btn-primary" style="align-self:flex-start" sc-camel-on-click="{{ openAccount }}">Go to my account</button>
+      </sc-if>
+      <sc-if value="{{ requestSentIsGuest }}" hint-placeholder-val="{{ false }}">
+        <button type="button" class="btn btn-primary" style="align-self:flex-start" sc-camel-on-click="{{ startOver }}">Start another lookup</button>
+      </sc-if>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isGuest }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:520px;margin:0 auto;padding-top:56px;display:flex;flex-direction:column;gap:var(--space-4)">
+    <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3)">
+      <div class="card-kicker">Comparison</div>
+      <sc-if value="{{ guestLoading }}" hint-placeholder-val="{{ true }}">
+        <div style="font-size:15px;line-height:1.5">Checking your link…</div>
+      </sc-if>
+      <sc-if value="{{ guestNotFound }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:17px;line-height:1.5">This link isn't valid.</div>
+        <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">Open the link exactly as it appears in the email. If you no longer have it, the request would need to be made again.</div>
+      </sc-if>
+      <sc-if value="{{ guestUnavailable }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:17px;line-height:1.5">This comparison is no longer available.</div>
+        <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">It was not opened in time, or it has ended. Nothing further can be done with this link; a new comparison needs a new request to the candidate.</div>
+      </sc-if>
+      <sc-if value="{{ guestClosed }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:17px;line-height:1.5">This one-time view is closed.</div>
+        <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">It cannot be reopened, by you or by us, and nothing of it is kept for you. A new comparison would need a new request to the candidate.</div>
+      </sc-if>
+      <sc-if value="{{ guestAwaiting }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:17px;line-height:1.5">{{ guestLabel }} approved your request.</div>
+        <div style="font-size:14px;line-height:1.6">Opening it is a <b>one-time view</b>: {{ guestPriceLabel }}, charged only when you pay below. Once you open it you can read it for 30 minutes. After that it is gone and cannot be reopened, by you or by us.</div>
+        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">You have no account, so nothing is stored for you. Have your own copy of the candidate's resume ready first: you can show it next to the record while it is open. This link stays valid until {{ guestAvailableUntil }} if you do not open it.</div>
+        <label style="display:flex;gap:var(--space-2);align-items:flex-start;font-size:12px;color:var(--color-neutral-300);line-height:1.6">
+          <input type="checkbox" checked="{{ guestAck }}" sc-camel-on-change="{{ toggleGuestAck }}" style="accent-color:var(--color-accent);margin-top:3px">
+          <span>I understand this is a one-time view that closes 30 minutes after I open it and cannot be reopened.</span>
+        </label>
+        <sc-if value="{{ guestError }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:#e2735c;line-height:1.6">{{ guestError }}</div>
+        </sc-if>
+        <button type="button" class="btn btn-primary" style="align-self:flex-start" disabled="{{ guestPayDisabled }}" sc-camel-on-click="{{ guestPay }}">{{ guestPayLabel }}</button>
+        <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Payment is taken on Stripe's own page; card details never touch this site. A receipt is emailed to the address this link went to.</div>
+      </sc-if>
+      <sc-if value="{{ guestPending }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:17px;line-height:1.5">Confirming your payment with Stripe…</div>
+        <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">This usually takes a few seconds. Nothing has been opened, and your 30 minutes have not started.</div>
+        <sc-if value="{{ guestError }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:#e2735c;line-height:1.6">{{ guestError }}</div>
+        </sc-if>
+        <button type="button" class="btn btn-secondary" style="align-self:flex-start" disabled="{{ guestBusy }}" sc-camel-on-click="{{ guestRecheck }}">Check again</button>
+        <button type="button" class="btn btn-ghost" style="align-self:flex-start;font-size:12px" disabled="{{ guestBusy }}" sc-camel-on-click="{{ guestPay }}">Return to the payment page</button>
+      </sc-if>
+      <sc-if value="{{ guestReview }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:17px;line-height:1.5">Your payment needs a manual check.</div>
+        <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">We have your payment but could not confirm it automatically. Reply to your receipt email with the reference and we will sort it out; nothing has been opened.</div>
+      </sc-if>
+      <sc-if value="{{ guestReady }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:17px;line-height:1.5">Payment confirmed.</div>
+        <div style="font-size:14px;line-height:1.6">Opening it now starts your 30 minutes. It cannot be reopened after that. Have your own copy ready, then open it.</div>
+        <sc-if value="{{ guestError }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:#e2735c;line-height:1.6">{{ guestError }}</div>
+        </sc-if>
+        <button type="button" class="btn btn-primary" style="align-self:flex-start" disabled="{{ guestBusy }}" sc-camel-on-click="{{ guestOpen }}">{{ guestOpenLabel }}</button>
+      </sc-if>
+    </div>
+    <div style="text-align:center;font-size:12px;color:var(--color-neutral-500)">
+      <a href="#" sc-camel-on-click="{{ goHome }}">Home</a>
     </div>
   </div>
   </sc-if>
@@ -2750,7 +2824,7 @@ const __ds_scope = {};
   <div style="max-width:1040px;margin:0 auto;padding-top:40px;display:flex;flex-direction:column;gap:var(--space-4)">
     <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-4);flex-wrap:wrap">
       <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:24px;margin:0">{{ compareName }}</h1>
-      <a href="#" style="font-size:12px" sc-camel-on-click="{{ closeCompare }}">Back to your account</a>
+      <a href="#" style="font-size:12px" sc-camel-on-click="{{ closeCompare }}">{{ compareBackLabel }}</a>
     </div>
 
     <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
@@ -2762,7 +2836,7 @@ const __ds_scope = {};
       <div style="display:grid;grid-template-columns:auto 1fr;gap:var(--space-2) var(--space-4);font-size:12px;align-items:baseline;border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
         <div style="color:var(--color-neutral-500)">Record as of</div><div>{{ compareAsOf }}</div>
         <div style="color:var(--color-neutral-500)">Approved</div><div>{{ compareApproved }}</div>
-        <div style="color:var(--color-neutral-500)">Your plan</div><div>{{ compareMeterLine }}</div>
+        <div style="color:var(--color-neutral-500)">{{ compareMeterLabel }}</div><div>{{ compareMeterLine }}</div>
       </div>
     </div>
 
@@ -2822,7 +2896,9 @@ class Component extends DCLogic {
       request: null,
       lookupSending: false, lookupFormError: null,
       // comparison request form
-      reqLookupId: null, reqLookupLabel: '', reqLookupRequesterEmail: '', reqAttestation: '', reqBusy: false, reqErr: null, requestSentLine: '', accessBack: 'result',
+      reqLookupId: null, reqLookupLabel: '', reqLookupRequesterEmail: '', reqClaimToken: '', reqAttestation: '', reqBusy: false, reqErr: null, requestSentLine: '', requestSentKind: 'org', accessBack: 'result',
+      // guest path (no account): the emailed link's token, what the server says about that request, and the price it reports
+      guestToken: null, guest: null, guestBusy: false, guestErr: null, guestAck: false, guestPrice: null, guestTick: 0,
       // an opened comparison
       compare: null,
     };
@@ -2841,10 +2917,11 @@ class Component extends DCLogic {
     // succeeds simply replaces the session.
     let stored = null;
     try { stored = localStorage.getItem(this.EMP_TOKEN_KEY); } catch (e) { stored = null; }
-    let billingReturn = '', paymentReturn = '';
-    try { const q = new URLSearchParams(window.location.search); billingReturn = q.get('billing') || ''; paymentReturn = q.get('payment') || ''; } catch (e) { /* ignore */ }
-    if (billingReturn || paymentReturn) { try { window.history.replaceState(null, '', window.location.pathname); } catch (e) { /* not critical */ } }
-    if (paymentReturn) this.setState({ screen: 'paymentReturn', paymentReturnKind: paymentReturn });
+    let billingReturn = '', paymentReturn = '', comparisonToken = '';
+    try { const q = new URLSearchParams(window.location.search); billingReturn = q.get('billing') || ''; paymentReturn = q.get('payment') || ''; comparisonToken = (q.get('comparison') || '').toLowerCase(); } catch (e) { /* ignore */ }
+    if (billingReturn || paymentReturn || comparisonToken) { try { window.history.replaceState(null, '', window.location.pathname); } catch (e) { /* not critical */ } }
+    if (comparisonToken) this.enterGuest(comparisonToken, paymentReturn);
+    else if (paymentReturn) this.setState({ screen: 'paymentReturn', paymentReturnKind: paymentReturn });
     if (stored && !token) { this.setState({ realToken: stored }, async () => { await this.loadReal(); if (billingReturn && !paymentReturn) this.afterBillingReturn(billingReturn); }); }
     if (loginToken) {
       try { window.history.replaceState(null, '', window.location.pathname); } catch (e) { /* not critical */ }
@@ -2862,6 +2939,7 @@ class Component extends DCLogic {
   initialScreen() {
     try {
       const q = new URLSearchParams(window.location.search);
+      if (q.get('comparison')) return 'guest';
       if (q.get('lookup_token') || q.get('employer_login') || q.get('payment') || q.get('billing')) return 'lookup';
     } catch (e) { /* fall through */ }
     return 'landing';
@@ -3119,6 +3197,7 @@ class Component extends DCLogic {
       lookup: {
         id: 'LKP-' + String(data.lookup_id || '').replace(/-/g, '').slice(0, 6).toUpperCase(),
         rawId: data.lookup_id || '',
+        claimToken: data.claim_token || '',
         // check-existence never returns candidate details; the name shown back is what the requester
         // typed, which the server has just matched against the record.
         candidateName: data.candidate_name || '',
@@ -3150,7 +3229,130 @@ class Component extends DCLogic {
     const s = this.state;
     const lk = s.lookup;
     if (!lk) return;
-    this.setState({ reqLookupId: lk.rawId, reqLookupLabel: lk.candidateName || 'the candidate', reqLookupRequesterEmail: lk.requesterEmail || '', reqAttestation: '', reqErr: null, accessBack: 'result', screen: 'access' });
+    this.setState({ reqLookupId: lk.rawId, reqLookupLabel: lk.candidateName || 'the candidate', reqLookupRequesterEmail: lk.requesterEmail || '', reqClaimToken: lk.claimToken || '', reqAttestation: '', reqErr: null, accessBack: 'result', screen: 'access' });
+    this.loadGuestPrice();
+  }
+
+  // ===== Guest path (no account): request with the claim token from the lookup, then pay once and view once from the emailed link =====
+  async gcall(body) {
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/employer-comparison', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) { return { status: 0, data: { ok: false, error: 'network' } }; }
+    return { status: res.status, data: data || {} };
+  }
+
+  // The page never carries a price of its own: it asks the server.
+  async loadGuestPrice() {
+    const r = await this.gcall({ action: 'price' });
+    if (r.data && r.data.ok) this.setState({ guestPrice: { cents: r.data.amount_cents, currency: r.data.currency } });
+  }
+
+  money(p) {
+    if (!p) return 'a one-time fee';
+    try { return new Intl.NumberFormat('en-US', { style: 'currency', currency: String(p.currency || 'usd').toUpperCase() }).format(p.cents / 100); } catch (e) { return (p.cents / 100).toFixed(2); }
+  }
+
+  async sendGuestRequest() {
+    const s = this.state;
+    if (s.reqBusy || !s.reqLookupId || !s.reqClaimToken) return;
+    this.setState({ reqBusy: true, reqErr: null });
+    const r = await this.gcall({ action: 'request', lookup_id: s.reqLookupId, claim_token: s.reqClaimToken, attestation: s.reqAttestation });
+    if (r.data && r.data.ok) {
+      this.setState({
+        reqBusy: false, reqLookupId: null, reqClaimToken: '', reqAttestation: '', screen: 'requestSent', requestSentKind: 'guest',
+        requestSentLine: r.data.candidate_notified ? 'They have been emailed and can answer from their account.' : "We couldn't email them just now; we will keep trying, and they will also see it in their account.",
+      });
+      return;
+    }
+    const code = r.data && r.data.error;
+    this.setState({
+      reqBusy: false,
+      reqErr: code === 'attestation_invalid' ? 'Please say how you obtained the candidate\u2019s information (3 to 500 characters).'
+        : code === 'rate_limited' ? 'You have sent several requests today. Please try again tomorrow.'
+        : code === 'already_requested' ? 'You already have a request open for this candidate. Check your email for the link if it was approved.'
+        : "This comparison can't be requested right now.",
+    });
+  }
+
+  // Landing from the emailed link (?comparison=TOKEN), or back from Stripe (&payment=success|cancel).
+  async enterGuest(token, paymentReturn) {
+    this.setState({ screen: 'guest', guestToken: token, guest: null, guestErr: null, guestAck: false, compare: null });
+    try { window.sessionStorage.setItem('verifi_guest_cmp', token); } catch (e) { /* the emailed link still works */ }
+    this.loadGuestPrice();
+    await this.refreshGuest();
+    if (paymentReturn === 'success') {
+      // Stripe confirms the payment to the server, not to this browser: wait for the server to say so.
+      const until = Date.now() + 45000;
+      while (this.state.screen === 'guest' && this.state.guest && (this.state.guest.state === 'payment_pending' || this.state.guest.state === 'awaiting_payment') && Date.now() < until) {
+        await new Promise(r => setTimeout(r, 2500));
+        await this.refreshGuest();
+      }
+    } else if (paymentReturn === 'cancel') {
+      this.setState({ guestErr: 'You left the payment page without paying. Nothing was charged.' });
+    }
+  }
+
+  async refreshGuest() {
+    const r = await this.gcall({ action: 'status', token: this.state.guestToken });
+    if (r.status === 404) { this.setState({ guest: { state: 'not_found' } }); return; }
+    if (!r.data || !r.data.ok) { this.setState({ guest: this.state.guest || { state: 'error' }, guestErr: "We couldn't reach the server. Please try again." }); return; }
+    this.setState({ guest: r.data, guestPrice: r.data.price ? { cents: r.data.price.amount_cents, currency: r.data.price.currency } : this.state.guestPrice });
+  }
+
+  async guestPayNow() {
+    const s = this.state;
+    if (s.guestBusy) return;
+    this.setState({ guestBusy: true, guestErr: null });
+    const r = await this.gcall({ action: 'pay', token: s.guestToken });
+    const d = r.data || {};
+    if (d.ok && d.checkout_url) { window.location.href = d.checkout_url; return; } // Stripe's own hosted page
+    if (d.ok) { this.setState({ guestBusy: false }); await this.refreshGuest(); return; }
+    this.setState({ guestBusy: false, guestErr: d.error === 'not_available' ? 'This comparison can no longer be paid for.' : d.error === 'payment_review' ? 'Your payment needs a manual check.' : "We couldn't start the payment. Please try again." });
+    await this.refreshGuest();
+  }
+
+  async guestOpenNow() {
+    const s = this.state;
+    if (s.guestBusy) return;
+    this.setState({ guestBusy: true, guestErr: null });
+    const r = await this.gcall({ action: 'open', token: s.guestToken });
+    const d = r.data || {};
+    if (d.ok) {
+      this.setState({ guestBusy: false, screen: 'compare', compare: { id: 'guest', label: (s.guest && s.guest.candidate_label) || 'Candidate', content: d.content, assembledAt: d.assembled_at, guest: true, windowEnds: d.window_ends_at, firstOpen: !!d.first_open } });
+      this.startGuestTimer();
+      return;
+    }
+    this.setState({ guestBusy: false, guestErr: d.error === 'payment_required' ? 'Payment has not been confirmed yet.' : d.error === 'window_closed' ? null : "We couldn't open it. Please try again." });
+    await this.refreshGuest();
+  }
+
+  // The 30 minute window: the page counts it down and drops the record the moment it ends (the server refuses a reopen regardless).
+  startGuestTimer() {
+    if (this._guestTimer) clearInterval(this._guestTimer);
+    this._guestTimer = setInterval(() => {
+      const c = this.state.compare;
+      if (!c || !c.guest) { clearInterval(this._guestTimer); this._guestTimer = null; return; }
+      if (Date.now() >= new Date(c.windowEnds).getTime()) { this.endGuestView(); return; }
+      this.setState({ guestTick: Date.now() });
+    }, 5000);
+  }
+
+  endGuestView() {
+    if (this._guestTimer) { clearInterval(this._guestTimer); this._guestTimer = null; }
+    if (this._copyUrl) { try { URL.revokeObjectURL(this._copyUrl); } catch (x) { /* ignore */ } this._copyUrl = null; }
+    this.setState({ screen: 'guest', compare: null, guest: { state: 'closed' } });
+  }
+
+  async closeGuestView() {
+    const t = this.state.guestToken;
+    this.endGuestView();
+    if (t) await this.gcall({ action: 'close', token: t });
   }
 
   async sendComparisonRequest() {
@@ -3224,6 +3426,11 @@ class Component extends DCLogic {
     } else {
       note('This file type cannot be previewed here (only PDF and image files can). The file stays on your computer.');
     }
+  }
+
+  orgFormOk() {
+    const s = this.state;
+    return !!s.real && !!s.real.org && !(!!s.reqLookupRequesterEmail && s.reqLookupRequesterEmail.trim().toLowerCase() !== (s.real.user.email || '').toLowerCase() && !!s.reqClaimToken);
   }
 
   fmtDate(iso) {
@@ -3393,27 +3600,54 @@ class Component extends DCLogic {
       isCompare: s.screen === 'compare' && !!s.compare,
       resultAccessNote: s.real
         ? (s.real.org ? 'Signed in as ' + s.real.user.email + '.' : 'You are signed in but not part of an organization yet.')
-        : 'Comparison requests are sent from a signed-in organization account with an active subscription. Pay-once guest access is not available yet.',
+        : 'You can request as a guest (a one-time view, paid per view) or sign in with an organization account, whose plan covers comparisons.',
       accessCandidateLabel: s.reqLookupLabel || 'the candidate',
-      accessNeedsSignin: !s.real,
-      accessNeedsOrg: !!s.real && !s.real.org,
-      accessEmailMismatch: !!s.real && !!s.real.org && !!s.reqLookupRequesterEmail && s.reqLookupRequesterEmail.trim().toLowerCase() !== (s.real.user.email || '').toLowerCase(),
+      accessEmailMismatch: !!s.real && !!s.real.org && !!s.reqLookupRequesterEmail && s.reqLookupRequesterEmail.trim().toLowerCase() !== (s.real.user.email || '').toLowerCase() && !s.reqClaimToken,
       accessEmailNote: 'This lookup was confirmed with ' + (s.reqLookupRequesterEmail || 'another address') + ', so it can only be requested from an account signed in with that address. You are signed in as ' + (s.real && s.real.user ? s.real.user.email : '') + '.',
-      accessCanRequest: !!s.real && !!s.real.org && !(!!s.reqLookupRequesterEmail && s.reqLookupRequesterEmail.trim().toLowerCase() !== (s.real.user.email || '').toLowerCase()),
+      accessCanRequest: this.orgFormOk(),
+      accessGuestForm: !this.orgFormOk() && !!s.reqClaimToken,
+      accessNoOption: !this.orgFormOk() && !s.reqClaimToken && !(!!s.real && !!s.real.org),
+      guestEmailLine: s.reqLookupRequesterEmail || 'the address you confirmed this lookup with',
+      guestPriceLabel: this.money(s.guestPrice),
       attestationDraft: s.reqAttestation,
       setAttestationDraft: (e) => this.setState({ reqAttestation: e.target.value }),
       reqError: s.reqErr,
       sendRequestDisabled: s.reqBusy || (s.reqAttestation || '').trim().length < 3,
       sendRequestLabel: s.reqBusy ? 'Sending…' : 'Send request',
-      sendRequest: () => this.sendComparisonRequest(),
+      sendRequest: () => (this.orgFormOk() ? this.sendComparisonRequest() : this.sendGuestRequest()),
       goSigninFromAccess: () => this.setState({ screen: 'signin', signinErr: null }),
       backFromAccess: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: s.accessBack === 'acct' ? 'acct' : 'result' }); },
+      isGuest: s.screen === 'guest',
+      guestLoading: !s.guest,
+      guestNotFound: !!s.guest && s.guest.state === 'not_found',
+      guestUnavailable: !!s.guest && (s.guest.state === 'unavailable' || s.guest.state === 'error'),
+      guestClosed: !!s.guest && s.guest.state === 'closed',
+      guestAwaiting: !!s.guest && s.guest.state === 'awaiting_payment',
+      guestPending: !!s.guest && s.guest.state === 'payment_pending',
+      guestReview: !!s.guest && s.guest.state === 'payment_review',
+      guestReady: !!s.guest && s.guest.state === 'ready_to_open',
+      guestLabel: (s.guest && s.guest.candidate_label) || 'The candidate',
+      guestAvailableUntil: s.guest && s.guest.available_until ? this.fmtDate(s.guest.available_until) : '',
+      guestAck: !!s.guestAck,
+      toggleGuestAck: (e) => this.setState({ guestAck: !!e.target.checked }),
+      guestError: s.guestErr, guestBusy: s.guestBusy,
+      guestPayDisabled: s.guestBusy || !s.guestAck,
+      guestPayLabel: s.guestBusy ? 'Opening the payment page…' : 'Pay ' + this.money(s.guestPrice) + ' and continue',
+      guestPay: () => this.guestPayNow(),
+      guestRecheck: () => this.refreshGuest(),
+      guestOpen: () => this.guestOpenNow(),
+      guestOpenLabel: s.guestBusy ? 'Opening…' : 'Open the comparison (starts your 30 minutes)',
       requestSentLine: s.requestSentLine,
+      requestSentIsOrg: s.requestSentKind !== 'guest',
+      requestSentIsGuest: s.requestSentKind === 'guest',
+      requestSentDetail: s.requestSentKind === 'guest'
+        ? 'If they approve, we email a link to ' + (s.reqLookupRequesterEmail || 'the address you confirmed this lookup with') + '. That link is the only way in, so keep the email: opening the comparison is a one-time view (paid then, not before). If they decline, or do not answer within 72 hours, we email only that the request was not authorized: we do not say which, and you are not charged.'
+        : 'You will get an email either way. If they approve, it says so and you open the comparison from your account. If they decline, or do not answer within 72 hours, the email says only that the request was not authorized: we do not say which, and nothing is used from your plan.',
       cmpNote: s.cmpNote, cmpError: s.cmpErr || s.cmpLoadErr, cmpBusy: s.cmpBusy,
       noLookupRows: (s.lookups || []).length === 0,
       lookupRows: (s.lookups || []).map(l => ({
         label: l.candidate_label, dateLabel: this.fmtDate(l.completed_at), canRequest: !l.open_request_id, inProgress: !!l.open_request_id,
-        onRequest: () => this.setState({ reqLookupId: l.lookup_id, reqLookupLabel: l.candidate_label, reqLookupRequesterEmail: (s.real && s.real.user && s.real.user.email) || '', reqAttestation: '', reqErr: null, accessBack: 'acct', screen: 'access' }),
+        onRequest: () => this.setState({ reqLookupId: l.lookup_id, reqLookupLabel: l.candidate_label, reqLookupRequesterEmail: (s.real && s.real.user && s.real.user.email) || '', reqClaimToken: '', reqAttestation: '', reqErr: null, accessBack: 'acct', screen: 'access' }),
       })),
       comparisonsHeading: s.real && s.real.role === 'owner' ? 'Comparison requests (whole organization)' : 'Your comparison requests',
       noComparisonRows: (s.comparisons || []).length === 0,
@@ -3431,7 +3665,11 @@ class Component extends DCLogic {
       })(),
       compareAsOf: this.fmtDateTime(cmp.assembledAt),
       compareApproved: 'The candidate approved this request; you opened it ' + (cmp.firstOpen ? 'just now.' : 'before.'),
-      compareMeterLine: cmp.metered && cmp.quota ? 'This used 1 lookup (' + cmp.quota.remaining + ' of ' + cmp.quota.included + ' left this period).' : 'No lookup used by this view (it was counted when first opened).',
+      compareMeterLabel: cmp.guest ? 'One-time view' : 'Your plan',
+      compareMeterLine: cmp.guest
+        ? 'Paid. ' + (() => { const ms = new Date(cmp.windowEnds).getTime() - Date.now(); const m = Math.max(0, Math.ceil(ms / 60000)); return 'Closes at ' + new Date(cmp.windowEnds).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) + ' (about ' + m + ' minute' + (m === 1 ? '' : 's') + ' left). After that it cannot be reopened.'; })()
+        : (cmp.metered && cmp.quota ? 'This used 1 lookup (' + cmp.quota.remaining + ' of ' + cmp.quota.included + ' left this period).' : 'No lookup used by this view (it was counted when first opened).'),
+      compareBackLabel: cmp.guest ? 'Close this one-time view' : 'Back to your account',
       compareEmpty: !(content.work || []).length && !(content.education || []).length && !(content.certifications || []).length,
       verifiedRows: (() => {
         const how = (x) => (x.verification && x.verification.method === 'state_registry' ? 'checked against the state registry' : 'verified by Verifi review') + (x.verification && x.verification.verified_on ? ', ' + x.verification.verified_on : '');
@@ -3443,7 +3681,7 @@ class Component extends DCLogic {
         return out;
       })(),
       onPickCopy: (e) => this.onPickCopy(e),
-      closeCompare: (e) => { if (e && e.preventDefault) e.preventDefault(); if (this._copyUrl) { try { URL.revokeObjectURL(this._copyUrl); } catch (x) { /* ignore */ } this._copyUrl = null; } this.setState({ screen: 'acct', compare: null }); this.loadReal(); },
+      closeCompare: (e) => { if (e && e.preventDefault) e.preventDefault(); if (cmp.guest) { this.closeGuestView(); return; } if (this._copyUrl) { try { URL.revokeObjectURL(this._copyUrl); } catch (x) { /* ignore */ } this._copyUrl = null; } this.setState({ screen: 'acct', compare: null }); this.loadReal(); },
 
       backToLookup: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'lookup', lookupResult: null, lookup: null, request: null, pendingEmail: '' }); },
       isLanding: s.screen === 'landing',

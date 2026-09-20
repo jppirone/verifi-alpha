@@ -141,7 +141,7 @@ export default {
             : ps.some((p) => p.status === "created") ? "payment_pending"
             : ps.some((p) => p.status === "needs_review") ? "payment_review" : "awaiting_payment";
         }
-        return json({ ok: true, state, candidate_label: label, window_ends_at: windowEnds, available_until: state === "unavailable" || state === "closed" ? null : r.snapshot_expires_at, price: price ? { amount_cents: price.amount_cents, currency: price.currency } : null });
+        return json({ ok: true, state, candidate_label: label, window_ends_at: windowEnds, available_until: state === "unavailable" || state === "closed" || state === "open" ? null : r.snapshot_expires_at, price: price ? { amount_cents: price.amount_cents, currency: price.currency } : null });
       }
 
       if (action === "pay") {
