@@ -7624,17 +7624,20 @@ class Component extends DCLogic {
       certificates = ex.certifications.map(c => {
         const li = (ex.license_items || []).find(x => x.linked_certification_id === c.id);
         const lic = li ? licenses.find(l => l.id === li.id) : null;
+        // a certification with its own queue row is reported by it, with the license's registry check alongside; a licence-only account's
+        // licence has no such row, and there the licence check IS its verification
+        const own = bySource.get(c.id);
         return clean({
           name: c.name, issuer: c.issuing_body,
           date: this.isoPartialDate(c.issue_date, c.issue_date_precision),
           expirationDate: this.isoPartialDate(c.expiration_date, c.expiration_date_precision),
           licenseNumber: c.license_number, licenseState: li ? li.state : undefined,
-          verification: tally(verificationFor(bySource.get(c.id))),
-          licenseCheck: lic ? licenseCheck(lic) : undefined,
+          verification: tally(own ? verificationFor(own) : (lic ? licenseCheck(lic) : verificationFor(undefined))),
+          licenseCheck: own && lic ? licenseCheck(lic) : undefined,
         });
       });
     } else {
-      // licence-only accounts have no resume: their licences come from the verification payload, and the licence check IS the verification
+      // fallback (should not normally be reached): licences straight from the verification payload
       certificates = licenses.map(l => clean({
         name: l.name, issuer: l.issuingBody, licenseNumber: l.licenseNumber, licenseState: l.state,
         verification: tally(licenseCheck(l)),
@@ -7694,7 +7697,14 @@ class Component extends DCLogic {
       return data;
     };
     let ex, ver, sums;
-    try { [ex, ver, sums] = await Promise.all([s.accountType === 'license_only' ? Promise.resolve({}) : post('get-resume-extraction'), post('list-candidate-verification-items'), post('list-candidate-summaries')]); } catch (e) { fail(); return; }
+    // a licence-only account has no resume: its licences (with dates) come from list-candidate-licenses, shaped like the resume payload
+    const exSource = s.accountType === 'license_only'
+      ? post('list-candidate-licenses').then(d => ({
+          certifications: d.licenses || [],
+          license_items: (d.licenses || []).filter(c => c.verification).map(c => ({ id: c.verification.license_item_id, linked_certification_id: c.id, state: c.verification.state })),
+        }))
+      : post('get-resume-extraction');
+    try { [ex, ver, sums] = await Promise.all([exSource, post('list-candidate-verification-items'), post('list-candidate-summaries')]); } catch (e) { fail(); return; }
     const data = this.buildDataExport(ex, Object.assign({}, ver, { summaries: sums.summaries || [] }), {
       first: s.savedFirst, last: s.savedLast, email: s.email, phone: s.confirmedPhoneNumber || s.printedPhone, phoneConfirmed: !!s.confirmedPhoneNumber, kycVerifiedAt: s.kycVerifiedAt, location: s.savedPersonalLocation,
     });
