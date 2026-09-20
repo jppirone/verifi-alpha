@@ -3507,7 +3507,8 @@ class Component extends DCLogic {
       billingUsageLine: (() => {
         const b = s.billing && s.billing.subscription;
         if (!b || !b.live) return '';
-        return b.used + ' of ' + b.included_lookups + ' lookups used this period (' + b.remaining + ' left).';
+        const usage = b.used + ' of ' + b.included_lookups + ' lookups used this period (' + b.remaining + ' left).';
+        return b.payment_problem ? 'Lookups are paused until the payment is fixed. ' + usage : usage;
       })(),
       startSubscription: () => this.billingAct('start_subscription'),
       openBillingPortal: () => this.billingAct('billing_portal'),
