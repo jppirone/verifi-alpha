@@ -4048,8 +4048,8 @@ a:hover{color:var(--color-accent)}
         </sc-if>
 
         <div style="display:flex;align-items:center;gap:8px;padding-top:var(--space-2);border-top:1px solid var(--color-divider)">
-          <a href="#" sc-camel-on-click="{{ exportVerifiedDataLink }}" style="font-size:12px">Export my verified data</a>
-          <span style="font-size:11px;color:var(--color-neutral-600)">(full record, JSON Resume format, available anytime on every tier)</span>
+          <a href="#" sc-camel-on-click="{{ exportVerifiedDataLink }}" style="font-size:12px">Export my data</a>
+          <span style="font-size:11px;color:var(--color-neutral-600)">(everything stored for your account, JSON Resume format, with each item's current verification status as shown above; available anytime on every tier)</span>
         </div>
       </div>
       </sc-if>
@@ -4396,7 +4396,7 @@ a:hover{color:var(--color-accent)}
     </sc-if>
 
     <sc-if value="{{ tabIsViews }}" hint-placeholder-val="{{ false }}">
-      <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6;margin-bottom:var(--space-4)">A single ATS-safe PDF preview, built from your verified data, never the originally uploaded document. Content selections are edited on Customization, not here.</div>
+      <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6;margin-bottom:var(--space-4)">A single ATS-safe PDF preview, built from the resume content you confirmed (your own confirmed details, not verification results, and it carries no verification marks), never the originally uploaded document. Content selections are edited on Customization, not here.</div>
 
       <div class="field" style="max-width:280px;margin-bottom:var(--space-4)">
         <label for="views-select">Delivery target</label>
@@ -4753,7 +4753,7 @@ a:hover{color:var(--color-accent)}
       </sc-if>
       <sc-if value="{{ isFullResumeAccount }}" hint-placeholder-val="{{ true }}">
       <div style="display:flex;flex-direction:column;gap:var(--space-4)">
-        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Export your verification-status history and sharing/delivery activity as a two-column CSV (Activity, Timestamp). No on-screen table, just a date-ranged download.</div>
+        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Download the actions you take during this visit (for example an export, or a confirmation you complete) as a two-column CSV (Activity, Timestamp). This list starts empty each time you sign in and is not a saved history of your account. No on-screen table, just a date-ranged download.</div>
         <div style="display:flex;gap:var(--space-4);flex-wrap:wrap">
           <div class="field" style="max-width:200px">
             <label for="act-start">Start date</label>
@@ -7171,16 +7171,10 @@ class Component extends DCLogic {
   }
 
   seedActivityLog() {
-    const day = 24 * 60 * 60 * 1000;
-    const ts = (daysAgo) => new Date(Date.now() - daysAgo * day).toISOString();
-    return [
-      { activity: 'Logged in', timestamp: ts(18) },
-      { activity: 'Identity verification completed', timestamp: ts(17) },
-      { activity: 'Sharing preferences saved', timestamp: ts(17) },
-      { activity: 'Connected LinkedIn account', timestamp: ts(12) },
-      { activity: 'Profile Info preferences saved', timestamp: ts(6) },
-      { activity: 'Logged off', timestamp: ts(6) },
-    ];
+    // Used to return six invented entries ("Identity verification completed" 17 days ago, "Connected LinkedIn account" 12 days ago, ...)
+    // that then went out in the Activity CSV as if they were this candidate's real history. The log is now only what actually happened
+    // in this session (addActivityLog); there is no server-side activity history for full-resume accounts to seed it from.
+    return [];
   }
 
   deliveredSkills() {
@@ -7556,114 +7550,151 @@ class Component extends DCLogic {
     };
   }
 
-  buildVerifiedCoreResume(target) {
-    const s = this.state;
-    const expCat = this.getCzCategories().find(c => c.key === 'experience');
-    const contact = this.resolveDeliveredContact();
-    const descFor = (key) => this.roleDescription(key);
-    const workItem = (name, position, location, startDate, endDate, verification, key) => ({
-      name, position, location, startDate, endDate, summary: descFor(key), verification,
-    });
-    return {
-      $schema: 'https://raw.githubusercontent.com/jsonresume/resume-schema/master/schema.json',
-      basics: {
-        name: [s.savedFirst, s.savedLast].filter(Boolean).join(' '),
-        phone: contact.phone.value,
-        email: contact.email.value,
-        summary: this.getSummaryText(target || ''),
-        location: { city: 'Denver', region: 'CO', countryCode: 'US' },
-        verification: {
-          kycStatus: s.kycVerified ? 'verified' : 'unverified',
-          phone: { status: contact.phone.state, verifiedValueOnFile: contact.phone.verifiedOnFile, statement: contact.phone.statement },
-          email: { status: contact.email.state, verifiedValueOnFile: contact.email.verifiedOnFile, statement: contact.email.statement },
-        },
-      },
-      work: [
-        workItem('Gamma LLC', 'Operations Manager', 'Columbus, OH', '2017-04-01', '2019-05-01', {
-          status: 'unable_to_verify',
-          statedValue: '2017-04-01 to 2019-05-01',
-          verifiedValue: null,
-          reason: "No independent source could be checked: Gamma LLC's HR contact never responded to verification attempts.",
-        }, 'gamma'),
-        workItem('Acme Inc.', 'Software Engineer', 'San Francisco, CA', '2019-06-01', '2021-07-01', {
-          status: 'confirmed',
-          statedValue: '2019-06-01 to 2021-07-01',
-          verifiedValue: '2019-06-01 to 2021-07-01',
-        }, 'acme'),
-        workItem('Northwind Retail', 'Client Success Associate', 'Chicago, IL', '2021-08-01', '2022-06-01', s.epsilonReopened ? {
-          status: 'pending_reverification',
-          statedValue: '2021-08-01 to 2022-06-01',
-          verifiedValue: null,
-          note: 'Candidate provided the requested clarification; back under active review.',
-        } : {
-          status: 'closed_no_response',
-          statedValue: '2021-08-01 to 2022-06-01',
-          verifiedValue: null,
-          reason: 'Candidate did not respond within the verification window; reopenable at any time by providing the missing information.',
-        }, 'epsilon'),
-        workItem('Beta Corp', 'Marketing Lead', 'Austin, TX', '2022-04-01', '2023-06-01', {
-          status: 'discrepancy',
-          statedValue: '2022-04-01 to 2023-06-01',
-          verifiedValue: '2022-04-01 to 2023-04-01',
-          note: 'Independent verification with the employer succeeded and found a different end date than the candidate stated; the candidate chose not to correct it.',
-        }, 'beta'),
-        workItem('Delta Ventures', 'Contract Consultant', 'Denver, CO', '2023-07-01', null, {
-          status: 'unable_to_verify',
-          statedValue: '2023-07-01 to present',
-          verifiedValue: null,
-          reason: "No independent source could be checked: the source document's end date was illegible and no other record exists to confirm the candidate's stated end date.",
-        }, 'delta'),
-      ],
-      education: [{
-        institution: 'State University',
-        area: 'Computer Science',
-        studyType: 'B.S.',
-        endDate: '2019-05-01',
-        verification: {
-          status: 'confirmed',
-          statedValue: 'B.S. Computer Science, State University, graduated 2019-05-01',
-          verifiedValue: 'B.S. Computer Science, State University, graduated 2019-05-01',
-        },
-      }],
-      skills: this.deliveredSkills().map(name => ({ name })),
-      certificates: [
-        {
-          name: 'AWS Certified Solutions Architect',
-          issuer: 'Amazon Web Services',
-          date: '2022-01',
-          verification: {
-            status: 'confirmed',
-            statedValue: 'AWS Certified Solutions Architect, Amazon Web Services, issued 2022-01',
-            verifiedValue: 'AWS Certified Solutions Architect, Amazon Web Services, issued 2022-01',
-          },
-        },
-      ],
-      interests: [
-        { name: 'Rock climbing' },
-        { name: 'Woodworking', keywords: ['Amateur'] },
-        { name: 'Community coding workshops' },
-      ],
-      meta: {
-        version: '1.0.0',
-        lastModified: new Date().toISOString(),
-        canonicalName: 'JSON Resume',
-        scope: 'Full verified core, not a partner-tailored view',
-      },
-    };
+  // "Export my data" (2026-09-20). This used to build the download from hardcoded fixtures (fake employers "Gamma LLC", "Acme Inc.",
+  // "Northwind Retail", "Beta Corp", "Delta Ventures", a "State University" degree, an AWS certificate, Denver CO, three hobbies) and fake
+  // verification outcomes, under the candidate's real name. It now builds ONLY from this candidate's own stored data, fetched fresh when the
+  // link is clicked (so it cannot be stale or half-loaded): get-resume-extraction (the resume content as they confirmed it) and
+  // list-candidate-verification-items (their real verification rows). Nothing is filled in: a field with no stored value is simply absent.
+  //
+  // Verification wording is the SAME allowlist the Verification Status tab uses (verificationSafeLabel), never a raw internal status:
+  // Confirmed -> verified; Unable to Verify -> unable_to_verify; Discrepancy -> under_review; any other queue state -> submitted_pending_review;
+  // a flagged freeform blurb -> flagged_not_submitted; an item with NO verification row -> not_submitted. Nothing is called "verified" unless
+  // staff/the registry check actually confirmed it. Identity, phone and email verification are described truthfully (identity and phone
+  // verification are not real in this version, so nothing claims they happened).
+
+  // JSON Resume dates are ISO partial dates. Keep exactly the precision the source printed (year / month / day), never invent a month or day.
+  isoPartialDate(date, precision) {
+    const m = String(date || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return undefined;
+    let p = precision;
+    if (p !== 'year' && p !== 'month' && p !== 'day') p = (m[2] === '01' && m[3] === '01') ? 'year' : (m[3] === '01' ? 'month' : 'day');
+    return p === 'year' ? m[1] : (p === 'month' ? m[1] + '-' + m[2] : m[0]);
   }
 
-  exportVerifiedData() {
-    const resume = this.buildVerifiedCoreResume(this.state.accountTier === 'paid' ? this.state.viewsTabPartner : '');
-    const blob = new Blob([JSON.stringify(resume, null, 2)], { type: 'application/json' });
+  // Pure builder (fetched data in, export object out) so what it produces can be checked against the database row by row.
+  buildDataExport(ex, ver, profile) {
+    ex = ex || {};
+    const items = (ver && ver.items) || [];
+    const licenses = (ver && ver.licenses) || [];
+    const clean = (o) => { Object.keys(o).forEach(k => { if (o[k] === undefined || o[k] === null || o[k] === '') delete o[k]; }); return o; };
+    const statusKey = (it) => it.type === 'Needs Review' ? 'flagged_not_submitted'
+      : ({ 'Confirmed': 'verified', 'Unable to Verify': 'unable_to_verify', 'Discrepancy': 'under_review' })[it.status] || 'submitted_pending_review';
+    const verificationFor = (it) => it
+      ? clean({
+          status: statusKey(it),
+          label: it.type === 'Needs Review' ? 'Flagged, not submitted' : this.verificationSafeLabel(it.status),
+          submittedClaim: it.claim,
+          submittedAt: it.createdAt,
+          staffNote: it.status === 'Discrepancy' ? it.note : undefined,
+        })
+      : { status: 'not_submitted', label: 'No verification submitted' };
+    const bySource = new Map();
+    items.forEach(it => { if (it.sourceItemId && !bySource.has(it.sourceItemId)) bySource.set(it.sourceItemId, it); });
+    const counts = {};
+    const tally = (v) => { counts[v.status] = (counts[v.status] || 0) + 1; return v; };
+
+    const work = (ex.work_history || []).map(w => clean({
+      name: w.company, position: w.title, location: w.location,
+      startDate: this.isoPartialDate(w.start_date, w.start_date_precision),
+      endDate: w.end_date_precision === 'present' ? undefined : this.isoPartialDate(w.end_date, w.end_date_precision),
+      current: w.end_date_precision === 'present' ? true : undefined,
+      summary: w.job_responsibilities,
+      verification: tally(verificationFor(bySource.get(w.id))),
+    }));
+    const education = (ex.education || []).map(e => clean({
+      institution: e.institution, area: e.field_of_study, studyType: e.degree, location: e.location,
+      startDate: this.isoPartialDate(e.start_date, e.start_date_precision),
+      endDate: this.isoPartialDate(e.end_date, e.end_date_precision),
+      verification: tally(verificationFor(bySource.get(e.id))),
+    }));
+    let certificates;
+    if ((ex.certifications || []).length) {
+      certificates = ex.certifications.map(c => {
+        const lic = (ex.license_items || []).find(l => l.linked_certification_id === c.id);
+        // a license's automatic registry check lives on its own queue row; prefer it, else the certification's own row
+        const row = (lic && items.find(i => i.type === 'License' && i.sourceItemId === lic.id)) || bySource.get(c.id);
+        return clean({
+          name: c.name, issuer: c.issuing_body,
+          date: this.isoPartialDate(c.issue_date, c.issue_date_precision),
+          expirationDate: this.isoPartialDate(c.expiration_date, c.expiration_date_precision),
+          licenseNumber: c.license_number, licenseState: lic ? lic.state : undefined,
+          verification: tally(verificationFor(row)),
+        });
+      });
+    } else {
+      // licence-only accounts have no resume: their licences come from the verification payload
+      certificates = licenses.map(l => clean({
+        name: l.name, issuer: l.issuingBody, licenseNumber: l.licenseNumber, licenseState: l.state,
+        verification: tally(verificationFor(items.find(i => i.type === 'License' && i.sourceItemId === l.id))),
+      }));
+    }
+    // the candidate's own saved (generic) summary if they have one, else the summary printed on their resume; partner-specific saved versions are listed separately
+    const sums = (ver && ver.summaries) || [];
+    const genericSummary = sums.find(su => su.partner_key === '');
+    const summaryRow = genericSummary ? { content: genericSummary.content } : (ex.freeform || []).find(f => f.section_type === 'summary');
+    const partnerSummaries = sums.filter(su => su.partner_key !== '' && su.content).map(su => ({ partner: su.partner_key, content: su.content }));
+    const otherSections = (ex.freeform || []).filter(f => f.section_type !== 'summary').map(f => clean({
+      heading: (f.heading || '').trim(), content: f.content, flaggedForReview: f.section_type === 'needs_review' ? true : undefined,
+    }));
+    const name = [profile.first, profile.last].filter(Boolean).join(' ');
+    return clean({
+      $schema: 'https://raw.githubusercontent.com/jsonresume/resume-schema/master/schema.json',
+      basics: clean({
+        name, email: profile.email, phone: profile.phone,
+        summary: summaryRow ? summaryRow.content : undefined,
+        location: profile.location ? { address: profile.location } : undefined,
+        // Same honesty as the in-app banners: the phone and identity steps are simulated in this alpha (no code is sent or checked, no identity check runs)
+        accountVerification: {
+          email: 'Address confirmed with an emailed link.',
+          phone: profile.phone ? 'Number entered and confirmation step completed in Verifi (simulated in this alpha; no code was sent or checked).' : 'Not confirmed.',
+          identity: profile.kycVerifiedAt ? 'Identity step completed (simulated in this alpha; no identity check was performed).' : 'Not completed.',
+        },
+      }),
+      work, education,
+      skills: (ex.skills || []).map(x => ({ name: x.skill_text })).filter(x => x.name),
+      certificates,
+      partnerSummaries: partnerSummaries.length ? partnerSummaries : undefined,
+      otherSections: otherSections.length ? otherSections : undefined,
+      verificationSummary: counts,
+      meta: {
+        exportedAt: new Date().toISOString(),
+        format: 'JSON Resume (jsonresume.org), with Verifi verification blocks added',
+        source: 'Your Verifi account data as stored at the moment of export. Nothing is filled in: anything with no stored value is left out.',
+        verificationNote: 'Statuses use the same wording as your Verification Status tab and reflect the state at export time. "not_submitted" means no verification was requested for that item. A status is a snapshot, not a certificate.',
+      },
+    });
+  }
+
+  async exportVerifiedData() {
+    const s = this.state;
+    const id = s.resumeCandidateId;
+    const fail = () => window.alert("We couldn't load your data to build the export, so nothing was downloaded. Please try again.");
+    if (!id) { fail(); return; }
+    const post = async (fn) => {
+      const res = await fetch(this.SUPABASE_FN_URL + '/' + fn, {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) throw new Error(fn + ' failed');
+      return data;
+    };
+    let ex, ver, sums;
+    try { [ex, ver, sums] = await Promise.all([s.accountType === 'license_only' ? Promise.resolve({}) : post('get-resume-extraction'), post('list-candidate-verification-items'), post('list-candidate-summaries')]); } catch (e) { fail(); return; }
+    const data = this.buildDataExport(ex, Object.assign({}, ver, { summaries: sums.summaries || [] }), {
+      first: s.savedFirst, last: s.savedLast, email: s.email, phone: s.confirmedPhoneNumber, kycVerifiedAt: s.kycVerifiedAt, location: s.savedPersonalLocation,
+    });
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'verified-core.json';
+    a.download = 'verifi-my-data.json';
     document.body.appendChild(a);
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
-    this.addActivityLog('Exported verified data (JSON Resume)');
+    this.addActivityLog('Exported your data (JSON Resume)');
   }
 
   exportActivityCsv() {
