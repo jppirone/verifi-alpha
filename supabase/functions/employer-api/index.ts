@@ -503,7 +503,8 @@ const ACTIONS: Record<string, Action> = {
   list_comparisons: {
     access: "member",
     run: async ({ user, org }) => {
-      const scope = user.role === "owner" ? `org_id=eq.${org!.id}` : `employer_user_id=eq.${user.id}`;
+      // A member sees their own requests made for THIS organization: leaving an organization cuts access to what was requested for it.
+      const scope = user.role === "owner" ? `org_id=eq.${org!.id}` : `employer_user_id=eq.${user.id}&org_id=eq.${org!.id}`;
       const reqs = await rows(`comparison_requests?${scope}&select=id,status,created_at,expires_at,approved_at,snapshot_expires_at,first_delivered_at,employer_user_id,lookup_id,attestation&order=created_at.desc&limit=100`);
       if (!reqs) return fail(500, "list_failed");
       const ids = reqs.map((r) => r.id);
