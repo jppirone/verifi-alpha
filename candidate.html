@@ -7658,7 +7658,8 @@ class Component extends DCLogic {
         // Same honesty as the in-app banners: the phone and identity steps are simulated in this alpha (no code is sent or checked, no identity check runs)
         accountVerification: {
           email: 'Address confirmed with an emailed link.',
-          phone: profile.phone ? 'Number entered and confirmation step completed in Verifi (simulated in this alpha; no code was sent or checked).' : 'Not confirmed.',
+          phone: profile.phoneConfirmed ? 'Number entered and confirmation step completed in Verifi (simulated in this alpha; no code was sent or checked).'
+            : (profile.phone ? 'As you entered it; not confirmed.' : 'None on file.'),
           identity: profile.kycVerifiedAt ? 'Identity step completed (simulated in this alpha; no identity check was performed).' : 'Not completed.',
         },
       }),
@@ -7695,7 +7696,7 @@ class Component extends DCLogic {
     let ex, ver, sums;
     try { [ex, ver, sums] = await Promise.all([s.accountType === 'license_only' ? Promise.resolve({}) : post('get-resume-extraction'), post('list-candidate-verification-items'), post('list-candidate-summaries')]); } catch (e) { fail(); return; }
     const data = this.buildDataExport(ex, Object.assign({}, ver, { summaries: sums.summaries || [] }), {
-      first: s.savedFirst, last: s.savedLast, email: s.email, phone: s.confirmedPhoneNumber, kycVerifiedAt: s.kycVerifiedAt, location: s.savedPersonalLocation,
+      first: s.savedFirst, last: s.savedLast, email: s.email, phone: s.confirmedPhoneNumber || s.printedPhone, phoneConfirmed: !!s.confirmedPhoneNumber, kycVerifiedAt: s.kycVerifiedAt, location: s.savedPersonalLocation,
     });
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
