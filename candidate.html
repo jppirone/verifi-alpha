@@ -4707,7 +4707,90 @@ a:hover{color:var(--color-accent)}
     <sc-if value="{{ tabIsActivity }}" hint-placeholder-val="{{ false }}">
       <sc-if value="{{ isLicenseOnlyAccount }}" hint-placeholder-val="{{ false }}">
       <div style="display:flex;flex-direction:column;gap:var(--space-4)">
-        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Everything here is read from your account's saved records: your license checks, the correction emails we sent you, name changes, and employer lookups that matched you. For each license you see its latest state and the check results recorded for it, not every intermediate attempt.</div>
+        <div id="license-requests" style="display:flex;flex-direction:column;gap:var(--space-4);border-bottom:1px solid var(--color-divider);padding-bottom:var(--space-5)">
+          <div style="display:flex;flex-direction:column;gap:var(--space-2)">
+            <div style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:17px">Employer requests</div>
+            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Employers who asked for a report of your license status. Nothing is shared unless you approve, and before you approve you see exactly what they will see, checked against the state registry just now.</div>
+          </div>
+          <div class="card elev-sm" style="display:flex;flex-direction:column;gap:6px">
+            <div class="card-kicker">License status requests</div>
+            <sc-for list="{{ employerSummaryLines }}" as="line" hint-placeholder-count="2">
+              <div style="font-size:13px;color:var(--color-neutral-300)">{{ line }}</div>
+            </sc-for>
+          </div>
+          <sc-if value="{{ empConfirmOpen }}" hint-placeholder-val="{{ false }}">
+            <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3);border:1px solid var(--color-accent-700)">
+              <div class="card-kicker">Confirm</div>
+              <div style="font-size:13px;color:var(--color-neutral-200);line-height:1.6">{{ empConfirmText }}</div>
+              <sc-for list="{{ empConfirmLines }}" as="cline" hint-placeholder-count="2">
+                <div style="font-size:13px;color:var(--color-neutral-100);line-height:1.6;padding:var(--space-2) var(--space-3);border-left:2px solid var(--color-accent-700)">{{ cline }}</div>
+              </sc-for>
+              <sc-if value="{{ empConfirmHasFoot }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">{{ empConfirmFoot }}</div>
+              </sc-if>
+              <div style="display:flex;gap:var(--space-3)">
+                <button type="button" class="btn btn-primary" style="font-size:12px" disabled="{{ empApproveDisabled }}" sc-camel-on-click="{{ confirmEmpAllow }}">{{ empApproveLabel }}</button>
+                <button type="button" class="btn btn-ghost" style="font-size:12px" disabled="{{ empBusy }}" sc-camel-on-click="{{ cancelEmpAllow }}">Cancel</button>
+              </div>
+            </div>
+          </sc-if>
+          <sc-if value="{{ empLoadError }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:#e2735c;line-height:1.6">We couldn't load your employer requests. <a href="#" sc-camel-on-click="{{ retryEmpLoad }}">Try again</a></div>
+          </sc-if>
+          <sc-if value="{{ snapshotOpen }}" hint-placeholder-val="{{ false }}">
+            <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
+              <div class="card-kicker">What was shared</div>
+              <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.6">{{ snapshotHeading }}</div>
+              <sc-for list="{{ snapshotLines }}" as="line" hint-placeholder-count="3">
+                <div style="font-size:13px;color:var(--color-neutral-200);line-height:1.6">{{ line }}</div>
+              </sc-for>
+              <a href="#" style="font-size:12px" sc-camel-on-click="{{ closeSnapshot }}">Close</a>
+            </div>
+          </sc-if>
+          <sc-if value="{{ empNoticeOpen }}" hint-placeholder-val="{{ false }}">
+            <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2);border:1px dashed var(--color-divider)">
+              <div class="card-kicker">Update</div>
+              <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.6">{{ empNoticeText }}</div>
+              <a href="#" style="font-size:12px" sc-camel-on-click="{{ dismissEmpNotice }}">Dismiss</a>
+            </div>
+          </sc-if>
+          <sc-if value="{{ licenseRequestsEmpty }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:13px;color:var(--color-neutral-500)">No employer has asked for your license status.</div>
+          </sc-if>
+          <sc-raw-table class="table">
+            <sc-raw-thead>
+              <sc-raw-tr>
+                <sc-raw-th>Employer</sc-raw-th>
+                <sc-raw-th>Date</sc-raw-th>
+                <sc-raw-th>Stated source</sc-raw-th>
+                <sc-raw-th>Status</sc-raw-th>
+                <sc-raw-th></sc-raw-th>
+              </sc-raw-tr>
+            </sc-raw-thead>
+            <sc-raw-tbody>
+              <sc-for list="{{ licenseRequestRows }}" as="row" hint-placeholder-count="2">
+                <sc-raw-tr>
+                  <sc-raw-td>{{ row.domain }}</sc-raw-td>
+                  <sc-raw-td style="white-space:nowrap;color:var(--color-neutral-400)">{{ row.dateLabel }}</sc-raw-td>
+                  <sc-raw-td style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">{{ row.attestation }}</sc-raw-td>
+                  <sc-raw-td>{{ row.statusLabel }}</sc-raw-td>
+                  <sc-raw-td>
+                    <sc-if value="{{ row.isPending }}" hint-placeholder-val="{{ false }}">
+                      <div style="display:flex;gap:var(--space-2)">
+                        <button type="button" class="btn btn-ghost" style="font-size:12px" sc-camel-on-click="{{ row.onApprove }}">Approve</button>
+                        <button type="button" class="btn btn-ghost" style="font-size:12px" sc-camel-on-click="{{ row.onDecline }}">Decline</button>
+                      </div>
+                    </sc-if>
+                    <sc-if value="{{ row.isApproved }}" hint-placeholder-val="{{ false }}">
+                      <a href="#" style="font-size:12px" sc-camel-on-click="{{ row.onOpenSnapshot }}">See what was shared</a>
+                    </sc-if>
+                  </sc-raw-td>
+                </sc-raw-tr>
+              </sc-for>
+            </sc-raw-tbody>
+          </sc-raw-table>
+        </div>
+        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Everything below is read from your account's saved records: your license checks, the correction emails we sent you, name changes, and employer lookups that matched you. For each license you see its latest state and the check results recorded for it, not every intermediate attempt.</div>
         <div style="display:flex;gap:var(--space-4);flex-wrap:wrap;align-items:flex-end">
           <div class="field" style="max-width:200px">
             <label for="la-start">From (optional)</label>
@@ -7160,7 +7243,7 @@ class Component extends DCLogic {
     activityStart: this.defaultActivityStart(), activityEnd: this.defaultActivityEnd(),
     activityLog: this.seedActivityLog(),
     comparison: { loaded: false, loading: false, error: false, pending: [], history: [], tier1: [], would: null },
-    empPage: 0, empConfirmId: null, empNotice: null, empBusy: false, snapshotView: null,
+    empPage: 0, empConfirmId: null, empNotice: null, empBusy: false, snapshotView: null, empPreview: null,
     // Item A (2026-09-08 regression session): these all start genuinely blank — no real email/phone
     // exists yet at getInitialState() time (before signup/login even happens), so nothing safe can
     // be seeded here. seedContactFromAccount() (see its own header) fills these in for real, once,
@@ -7295,7 +7378,7 @@ class Component extends DCLogic {
 
   ensureComparisonLoaded(force) {
     const s = this.state;
-    if (!s.resumeCandidateId || s.accountType === 'license_only' || s.comparison.loading) return;
+    if (!s.resumeCandidateId || s.comparison.loading) return;
     if (!force && s.comparison.loaded) return;
     this.loadComparison();
   }
@@ -7336,7 +7419,11 @@ class Component extends DCLogic {
 
   getEmployerRows() {
     const start = this.state.empPage * 5;
-    return this.employerSorted().slice(start, start + 5).map(item => {
+    return this.getEmployerRowsFor(this.employerSorted().slice(start, start + 5));
+  }
+
+  getEmployerRowsFor(items) {
+    return items.map(item => {
       if (item.kind === 'lookup') {
         const t = item.t;
         return {
@@ -7353,13 +7440,67 @@ class Component extends DCLogic {
         : (r.approved_at ? 'Approved; access has ended' : 'Closed, no response');
       return {
         id: r.id, domain: this.empRequesterLabel(r.requester), dateLabel: this.empDateLabel(r.created_at),
-        typeLabel: 'Comparison request', attestation: r.attestation || '', statusLabel: statusLabel, trail: '', hasTrail: false,
+        typeLabel: r.kind === 'license_report' ? 'License status request' : 'Comparison request', attestation: r.attestation || '', statusLabel: statusLabel, trail: '', hasTrail: false,
         isPending: r.status === 'pending', isApproved: r.status === 'approved' && r.snapshot_available,
-        onApprove: () => this.setState({ empConfirmId: r.id }),
+        onApprove: () => (r.kind === 'license_report' ? this.startLicenseApprove(r.id) : this.setState({ empConfirmId: r.id })),
         onDecline: () => this.respondToRequest(r.id, 'decline'),
         onOpenSnapshot: (ev) => { if (ev && ev.preventDefault) ev.preventDefault(); this.openSnapshot(r); },
       };
     });
+  }
+
+  // The license-only Activity tab lists only the requests (the existence lookups are already shown by the read-only activity list below it).
+  getLicenseRequestRows() {
+    return this.getEmployerRowsFor(this.state.comparison.pending.concat(this.state.comparison.history).map(r => ({ kind: 'compare', id: r.id, date: r.created_at, r: r })).sort((x, y) => (x.date < y.date ? 1 : -1)).slice(0, 20));
+  }
+
+  // One line of a license report exactly as the employer will see it (the number of a verified license included). The same text is used in the
+  // approval card and in "See what was shared".
+  licenseLineText(l) {
+    const st = l.status === 'verified' ? 'Verified' : l.status === 'discrepancy' ? 'Discrepancy' : 'Not verified';
+    const parts = [l.label + ' — ' + st + '.'];
+    if (l.license_number) parts.push('License number ' + l.license_number + '.');
+    const reg = [l.license_type ? 'Registry type: ' + l.license_type : '', l.expiry ? 'expires ' + l.expiry : ''].filter(Boolean).join('; ');
+    if (reg) parts.push(reg + '.');
+    if (l.reason) parts.push(l.reason);
+    if (l.check === 'registry_live') parts.push('Checked against the state registry on ' + l.checked_on + '.');
+    else if (l.check === 'registry_last_check') parts.push('Last checked against the state registry on ' + l.checked_on + (l.status === 'verified' ? ' (a live check was not available just now).' : '.'));
+    else if (l.check === 'verifi_review') parts.push('Confirmed by Verifi review on ' + l.checked_on + '.');
+    return parts.join(' ');
+  }
+
+  // Approve on a license report: first a LIVE preview (the server re-checks each verified license against the registry), so the candidate approves
+  // exactly what the employer will get. If the preview cannot be made the candidate cannot approve blind: the card says so.
+  async startLicenseApprove(id) {
+    this.setState({ empConfirmId: id, empPreview: { id, loading: true, error: false, would: null }, empNotice: null });
+    const res = await this.comparisonCall({ action: 'preview' });
+    if (this.state.empConfirmId !== id) return; // cancelled while the check ran
+    this.setState({ empPreview: { id, loading: false, error: !res.data.ok, would: res.data.ok ? res.data.would_share : null } });
+  }
+
+  // The Confirm card, by request kind: { text, lines, foot, canApprove }
+  empConfirmView() {
+    const s = this.state;
+    const e = s.comparison.pending.find(x => x.id === s.empConfirmId);
+    if (!e) return { text: '', lines: [], foot: '', canApprove: false };
+    const who = this.empRequesterLabel(e.requester);
+    if (e.kind === 'license_report') {
+      const p = s.empPreview;
+      if (!p || p.id !== e.id || p.loading) return { text: 'Checking your licenses against the state registry, so that what you approve is current…', lines: [], foot: '', canApprove: false };
+      if (p.error || !p.would) return { text: "We couldn't check your licenses just now, so we can't show you what would be shared. Cancel and try again in a moment.", lines: [], foot: '', canApprove: false };
+      const ls = p.would.licenses || [];
+      if (!ls.length) return { text: "You don't have any licenses on your account, so there is nothing to share with " + who + '. You can decline.', lines: [], foot: '', canApprove: false };
+      return {
+        text: 'Approve ' + who + '? They will see a report of the licenses on your account, as checked against the state registry just now. This is exactly what they will see:',
+        lines: ls.map(l => this.licenseLineText(l)),
+        foot: 'A license that is not verified is shown as not verified, with the reason. Nothing else about you is shown. If they never open it, it is discarded after 7 days; once opened it stays available to them for 30 days. You cannot undo an approval.',
+        canApprove: true,
+      };
+    }
+    const what = this.empWouldShareText();
+    if (!what) return { text: "You don't have any verified items yet, so there is nothing to share with " + who + '. You can decline, or wait until some of your items are verified.', lines: [], foot: '', canApprove: false };
+    const nc = this.empNotClearedText();
+    return { text: 'Approve ' + who + '? They will see the items you confirmed that Verifi has verified, as they stand right now: ' + what + '.' + (nc ? ' They will also see, by name, ' + (nc.indexOf('; ') < 0 ? 'this item that was checked and did not clear' : 'these items that were checked and did not clear') + ': ' + nc + '.' : '') + ' Your other items are not shown or described. If they never open it, it is discarded after 7 days; once opened it stays available to them for up to 90 days. You cannot undo an approval.', lines: [], foot: '', canApprove: true };
   }
 
   empWouldShareText() {
@@ -7391,12 +7532,12 @@ class Component extends DCLogic {
         : 'Declined. ' + (res.data.employer_notified ? 'They were emailed that the request was not authorized, with no reason given.' : 'They will be emailed that the request was not authorized, with no reason given.');
       this.addActivityLog('Comparison request ' + (decision === 'approve' ? 'approved' : 'declined') + (r ? ' for ' + r.requester.email : ''));
     } else {
-      notice = code === 'nothing_to_share' ? "You don't have any verified items yet, so there is nothing to share. You can decline, or wait until some of your items are verified."
+      notice = code === 'nothing_to_share' ? (r && r.kind === 'license_report' ? "You don't have any licenses on your account, so there is nothing to share. You can decline." : "You don't have any verified items yet, so there is nothing to share. You can decline, or wait until some of your items are verified.")
         : code === 'expired' ? 'That request closed before you answered.'
         : code === 'not_pending' ? 'That request was already answered.'
         : "That didn't work. Please try again.";
     }
-    this.setState({ empBusy: false, empConfirmId: null, empNotice: notice });
+    this.setState({ empBusy: false, empConfirmId: null, empPreview: null, empNotice: notice });
     await this.loadComparison();
   }
 
@@ -7410,6 +7551,7 @@ class Component extends DCLogic {
     const v = this.state.snapshotView;
     if (!v || !v.content) return [];
     const c = v.content;
+    if (c.kind === 'license_report') return (c.licenses || []).map(l => this.licenseLineText(l));
     const how = (x) => (x.verification && x.verification.method === 'state_registry' ? 'checked against the state registry' : 'verified by Verifi review') + (x.verification && x.verification.verified_on ? ', ' + x.verification.verified_on : '');
     const range = (a, b, cur) => [a, cur ? 'present' : b].filter(Boolean).join(' - ');
     const lines = [];
@@ -7525,7 +7667,7 @@ class Component extends DCLogic {
     }
     this._lastAccountTab = tabNow;
     if (this.state.screen === 'tiers' || this.isLicenseProfileTabOpen()) this.ensureDiscoverableLoaded();
-    if (this.state.screen === 'account' && this.state.accountType === 'license_only' && this.state.accountTab === 'activity') this.ensureLicenseActivityLoaded();
+    if (this.state.screen === 'account' && this.state.accountType === 'license_only' && this.state.accountTab === 'activity') { this.ensureLicenseActivityLoaded(); this.ensureComparisonLoaded(); }
     if (prevState && this.state.tourActive && (prevState.tourStep !== this.state.tourStep || !prevState.tourActive)) {
       this.measureTourTarget();
     }
@@ -11191,18 +11333,17 @@ class Component extends DCLogic {
       empPrevPage: () => this.setState({ empPage: Math.max(0, s.empPage - 1) }),
       empNextPage: () => this.setState({ empPage: Math.min(this.empPageCount() - 1, s.empPage + 1) }),
       empConfirmOpen: !!s.empConfirmId,
-      empConfirmText: (() => {
-        const e = s.comparison.pending.find(x => x.id === s.empConfirmId);
-        if (!e) return '';
-        const what = this.empWouldShareText();
-        if (!what) return "You don't have any verified items yet, so there is nothing to share with " + this.empRequesterLabel(e.requester) + '. You can decline, or wait until some of your items are verified.';
-        const nc = this.empNotClearedText();
-        return 'Approve ' + this.empRequesterLabel(e.requester) + '? They will see the items you confirmed that Verifi has verified, as they stand right now: ' + what + '.' + (nc ? ' They will also see, by name, ' + (nc.indexOf('; ') < 0 ? 'this item that was checked and did not clear' : 'these items that were checked and did not clear') + ': ' + nc + '.' : '') + ' Your other items are not shown or described. If they never open it, it is discarded after 7 days; once opened it stays available to them for up to 90 days. You cannot undo an approval.';
-      })(),
+      empConfirmText: this.empConfirmView().text,
+      empConfirmLines: this.empConfirmView().lines,
+      empConfirmFoot: this.empConfirmView().foot,
+      empConfirmHasFoot: !!this.empConfirmView().foot,
+      empApproveDisabled: s.empBusy || !this.empConfirmView().canApprove,
+      licenseRequestRows: this.getLicenseRequestRows(),
+      licenseRequestsEmpty: (s.comparison.pending.length + s.comparison.history.length) === 0,
       empApproveLabel: s.empBusy ? 'Approving…' : 'Approve and share',
       empBusy: s.empBusy,
-      confirmEmpAllow: () => { if (this.empWouldShareText()) this.respondToRequest(s.empConfirmId, 'approve'); else this.setState({ empConfirmId: null }); },
-      cancelEmpAllow: () => this.setState({ empConfirmId: null }),
+      confirmEmpAllow: () => { if (this.empConfirmView().canApprove) this.respondToRequest(s.empConfirmId, 'approve'); else this.setState({ empConfirmId: null, empPreview: null }); },
+      cancelEmpAllow: () => this.setState({ empConfirmId: null, empPreview: null }),
       empNoticeOpen: !!s.empNotice,
       empNoticeText: s.empNotice || '',
       dismissEmpNotice: (e) => { pd(e); this.setState({ empNotice: null }); },
@@ -11212,7 +11353,7 @@ class Component extends DCLogic {
       snapshotHeading: s.snapshotView ? ('What ' + this.empRequesterLabel(s.snapshotView.requester) + ' was shown, as of ' + this.empDateLabel(s.snapshotView.assembledAt) + ':') : '',
       snapshotLines: this.getSnapshotLines(),
       closeSnapshot: (e) => { pd(e); this.setState({ snapshotView: null }); },
-      tabActivityLabel: 'Activity' + (s.accountType !== 'license_only' && s.comparison.pending.length ? ' (' + s.comparison.pending.length + ')' : ''),
+      tabActivityLabel: 'Activity' + (s.comparison.pending.length ? ' (' + s.comparison.pending.length + ')' : ''),
       exportVerifiedData: () => this.exportVerifiedData(),
       exportVerifiedDataLink: (e) => { pd(e); this.exportVerifiedData(); },
       tabIsSharing: s.accountTab === 'sharing',
@@ -11268,7 +11409,7 @@ class Component extends DCLogic {
       }),
       selectTabSharing: () => this.guardedNav(() => this.setState({ accountTab: 'sharing' })),
       selectTabSubscription: () => this.guardedNav(() => this.setState({ accountTab: 'subscription' })),
-      selectTabActivity: () => this.guardedNav(() => { this.setState({ accountTab: 'activity' }); if (s.accountType === 'license_only') this.ensureLicenseActivityLoaded(true); else this.ensureComparisonLoaded(true); }),
+      selectTabActivity: () => this.guardedNav(() => { this.setState({ accountTab: 'activity' }); if (s.accountType === 'license_only') { this.ensureLicenseActivityLoaded(true); this.ensureComparisonLoaded(true); } else this.ensureComparisonLoaded(true); }),
       selectTabDeactivation: () => this.guardedNav(() => this.setState({ accountTab: 'deactivation' })),
       mobileNavOpen: s.mobileNavOpen,
       mobileNavOpenStr: s.mobileNavOpen ? 'true' : 'false',

@@ -22,11 +22,11 @@ const corsHeaders = {
 //                  comparison: counts and the named not-cleared lines; for a LICENSE REPORT: the exact license lines, from the last stored checks)
 //   preview        same "what would be shared", but a license report is re-checked against the registry first (cached 10 minutes)
 //   respond        {request_id, decision: "approve" | "decline"}
+//   view_snapshot  {request_id}: exactly what an approved request shared
 //
 // TWO KINDS of request (comparison_requests.kind), derived from the candidate's account type and never from anything a caller sends:
 //   resume_comparison  full-resume accounts: the assembler below (verified items + named not-cleared lines)
 //   license_report     license-only accounts (no resume to compare): one line per license (assembleLicenseReport), status re-checked live at approval
-//   view_snapshot  {request_id}: exactly what an approved request shared
 // Internal (never reachable by a candidate or an employer):
 //   notify_candidate  {request_id}: the "you have a request" email; service-role bearer only; sent at most once (claimed first)
 //   sweep             cron: expire what timed out (expire_comparison_requests), send the undifferentiated "not authorized" emails,
@@ -173,7 +173,7 @@ const REPORT_FRESH_CHECK_CAP = 6; // live registry checks per report; the rest f
 const emptyAssembled = (kind: Kind): Assembled => ({
   kind, content: null, notCleared: [], licenses: [],
   counts: kind === "license_report"
-    ? { licenses: { total: 0, verified: 0, not_verified: 0, discrepancy: 0 }, verified_total: 0, not_cleared_total: 0 }
+    ? { summary: { total: 0, verified: 0, not_verified: 0, discrepancy: 0 }, verified_total: 0, not_cleared_total: 0 }
     : { work: { confirmed: 0, verified: 0 }, education: { confirmed: 0, verified: 0 }, certifications: { confirmed: 0, verified: 0 }, verified_total: 0, not_cleared_total: 0 },
 });
 
@@ -388,7 +388,8 @@ async function assembleLicenseReport(candidateId: string, opts: { fresh?: boolea
 
   const verified = lines.filter((x) => x.status === "verified").length;
   const discrepancy = lines.filter((x) => x.status === "discrepancy").length;
-  const counts = { licenses: { total: lines.length, verified, not_verified: lines.length - verified - discrepancy, discrepancy }, verified_total: verified, not_cleared_total: lines.length - verified };
+  // counts.summary (NOT counts.licenses): wouldShare() spreads counts next to the `licenses` line list, and a same-named key used to be overwritten by it
+  const counts = { summary: { total: lines.length, verified, not_verified: lines.length - verified - discrepancy, discrepancy }, verified_total: verified, not_cleared_total: lines.length - verified };
   const name = [cand.first_name, cand.last_name].filter(Boolean).join(" ");
   return {
     kind: "license_report", counts, notCleared: [], licenses: lines,
@@ -591,7 +592,7 @@ export default {
         // candidate's account type and must equal the request's own: if they ever disagree (account changed, row altered) nothing is shared.
         const snap = await assembleSnapshot(candidateId, { fresh: true, maxAge: 0 });
         if (!snap.content || snap.kind !== r.kind) return json({ ok: false, error: "unavailable" }, 409);
-        const nothing = snap.kind === "license_report" ? snap.counts.licenses.total === 0 : snap.counts.verified_total === 0;
+        const nothing = snap.kind === "license_report" ? snap.counts.summary.total === 0 : snap.counts.verified_total === 0;
         if (nothing) return json({ ok: false, error: "nothing_to_share", would_share: wouldShare(snap, "live") }, 409);
         const ins = await rest("comparison_snapshots", { method: "POST", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ request_id: r.id, candidate_id: candidateId, content: snap.content, counts: snap.counts }) });
         if (ins.status === 409) return json({ ok: false, error: "not_pending" }, 409); // a simultaneous approval already stored one

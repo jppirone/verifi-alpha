@@ -2417,7 +2417,7 @@ const __ds_scope = {};
 
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
         <div class="card-kicker">Comparisons</div>
-        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Request a comparison for a candidate you looked up, using the address you are signed in with. The candidate decides. Opening an approved comparison uses one lookup from your organization's plan.</div>
+        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Request the verified record of a candidate you looked up, using the address you are signed in with. The candidate decides. Depending on what they have on file, an approved request opens as a resume comparison or as a license status report; either way, opening it uses one lookup from your organization's plan.</div>
         <sc-if value="{{ cmpNote }}" hint-placeholder-val="{{ false }}">
           <div style="font-size:13px;color:var(--color-accent-300);line-height:1.6">{{ cmpNote }}</div>
         </sc-if>
@@ -2436,7 +2436,7 @@ const __ds_scope = {};
           <div style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap;font-size:13px">
             <span>{{ row.label }} <span style="color:var(--color-neutral-500)">· looked up {{ row.dateLabel }}</span></span>
             <sc-if value="{{ row.canRequest }}" hint-placeholder-val="{{ true }}">
-              <button type="button" class="btn btn-secondary" style="font-size:12px" sc-camel-on-click="{{ row.onRequest }}">Request comparison</button>
+              <button type="button" class="btn btn-secondary" style="font-size:12px" sc-camel-on-click="{{ row.onRequest }}">Request verified record</button>
             </sc-if>
             <sc-if value="{{ row.inProgress }}" hint-placeholder-val="{{ false }}">
               <span style="font-size:12px;color:var(--color-neutral-500)">Request in progress</span>
@@ -2446,7 +2446,7 @@ const __ds_scope = {};
 
         <div style="font-size:11px;letter-spacing:0.04em;text-transform:uppercase;color:var(--color-neutral-500);border-top:1px solid var(--color-divider);padding-top:var(--space-3)">{{ comparisonsHeading }}</div>
         <sc-if value="{{ noComparisonRows }}" hint-placeholder-val="{{ true }}">
-          <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">No comparison requests yet.</div>
+          <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">No requests yet.</div>
         </sc-if>
         <sc-for list="{{ comparisonRows }}" as="row" hint-placeholder-count="2">
           <div style="display:flex;flex-direction:column;gap:4px;padding-bottom:var(--space-2);border-bottom:1px solid var(--color-divider)">
@@ -2463,7 +2463,7 @@ const __ds_scope = {};
           </div>
         </sc-for>
         <sc-if value="{{ acctIsOwner }}" hint-placeholder-val="{{ false }}">
-          <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">As the owner you see every request made for this organization and who made it. Only the person who asked can open a comparison.</div>
+          <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">As the owner you see every request made for this organization and who made it. Only the person who asked can open it.</div>
         </sc-if>
       </div>
 
@@ -2698,10 +2698,10 @@ const __ds_scope = {};
     </div>
 
     <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
-      <div class="card-kicker">Full comparison access</div>
-      <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">Comparing your copy against the candidate's record is a separate request. The candidate decides whether to allow it. If they approve, you see the items they confirmed that Verifi has verified, and the name and status of any item that was checked and did not clear.</div>
+      <div class="card-kicker">Verified record access</div>
+      <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">Requesting the candidate's verified record is a separate step, and the candidate decides whether to allow it. If they approve, you receive one of two things, depending on what they have on file: a comparison of their verified record with your copy (the items they confirmed that Verifi has verified, and the name and status of any item that was checked and did not clear), or a status report of their licenses.</div>
       <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Your name, company, and confirmed email are shown to the candidate with the request, along with how you say you obtained their information. Requests close after 72 hours without an answer.</div>
-      <button type="button" class="btn btn-primary" style="align-self:flex-start" sc-camel-on-click="{{ requestAccess }}">Request full comparison access</button>
+      <button type="button" class="btn btn-primary" style="align-self:flex-start" sc-camel-on-click="{{ requestAccess }}">Request the verified record</button>
       <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">{{ resultAccessNote }}</div>
     </div>
 
@@ -2714,7 +2714,7 @@ const __ds_scope = {};
   <sc-if value="{{ isAccess }}" hint-placeholder-val="{{ false }}">
   <div style="max-width:520px;margin:0 auto;padding-top:56px;display:flex;flex-direction:column;gap:var(--space-4)">
     <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3)">
-      <div class="card-kicker">Request a comparison</div>
+      <div class="card-kicker">Request the verified record</div>
       <div style="font-size:17px;line-height:1.5">{{ accessCandidateLabel }}</div>
       <sc-if value="{{ accessGuestForm }}" hint-placeholder-val="{{ false }}">
         <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">The candidate is asked to approve. Nothing is prepared or shown to you before they do, and a request that is declined or not answered costs nothing. If they approve, we email a link to {{ guestEmailLine }}. Opening it is a <b>one-time view</b>: {{ guestPriceLabel }}, charged only when you choose to open it, and you can then read it for 30 minutes. After that it is gone and cannot be reopened, by you or by us.</div>
@@ -2727,7 +2727,7 @@ const __ds_scope = {};
           <div style="font-size:12px;color:#e2735c;line-height:1.6">{{ reqError }}</div>
         </sc-if>
         <button type="button" class="btn btn-primary" style="align-self:flex-start" disabled="{{ sendRequestDisabled }}" sc-camel-on-click="{{ sendRequest }}">{{ sendRequestLabel }}</button>
-        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Have an organization plan instead? <a href="#" sc-camel-on-click="{{ goSigninFromAccess }}">Sign in</a>. Its lookups cover comparisons with no per-view charge.</div>
+        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Have an organization plan instead? <a href="#" sc-camel-on-click="{{ goSigninFromAccess }}">Sign in</a>. Its lookups cover these requests with no per-view charge.</div>
       </sc-if>
       <sc-if value="{{ accessNoOption }}" hint-placeholder-val="{{ false }}">
         <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">This request can't be started from here. Run a new lookup, then request from its result screen.</div>
@@ -2736,7 +2736,7 @@ const __ds_scope = {};
         <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">{{ accessEmailNote }}</div>
       </sc-if>
       <sc-if value="{{ accessCanRequest }}" hint-placeholder-val="{{ true }}">
-        <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">The candidate is asked to approve. Nothing is prepared or shown to you before they do. Opening an approved comparison uses one lookup from your organization's plan; a request that is declined, or that nobody answers, uses none.</div>
+        <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">The candidate is asked to approve. Nothing is prepared or shown to you before they do. Opening an approved request uses one lookup from your organization's plan; a request that is declined, or that nobody answers, uses none.</div>
         <div class="field">
           <label for="rq-att">How did you obtain this candidate's information?</label>
           <textarea class="input" id="rq-att" rows="3" style="resize:vertical;font-family:var(--font-body);line-height:1.6" value="{{ attestationDraft }}" sc-camel-on-change="{{ setAttestationDraft }}" placeholder="e.g. LinkedIn, Indeed, recruiter name, direct candidate submission"></textarea>
@@ -2908,6 +2908,52 @@ const __ds_scope = {};
         </sc-if>
       </div>
     </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isLicenseReport }}" hint-placeholder-val="{{ false }}">
+  <div id="license-report" style="max-width:720px;margin:0 auto;padding-top:40px;display:flex;flex-direction:column;gap:var(--space-4)">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-4);flex-wrap:wrap">
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <div class="card-kicker">License status report</div>
+        <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:24px;margin:0">{{ compareName }}</h1>
+      </div>
+      <a href="#" style="font-size:12px" sc-camel-on-click="{{ closeCompare }}">{{ compareBackLabel }}</a>
+    </div>
+
+    <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+      <div style="font-size:18px;line-height:1.5">{{ licenseCoverageLine }}</div>
+      <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">{{ licenseBasis }}</div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:var(--space-2) var(--space-4);font-size:12px;align-items:baseline;border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
+        <div style="color:var(--color-neutral-500)">Report as of</div><div>{{ compareAsOf }}</div>
+        <div style="color:var(--color-neutral-500)">Approved</div><div>{{ compareApproved }}</div>
+        <div style="color:var(--color-neutral-500)">{{ compareMeterLabel }}</div><div>{{ compareMeterLine }}</div>
+      </div>
+    </div>
+
+    <sc-for list="{{ licenseRows }}" as="lic" hint-placeholder-count="2">
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap">
+          <div style="font-size:16px;line-height:1.5">{{ lic.headline }}</div>
+          <sc-if value="{{ lic.isVerified }}" hint-placeholder-val="{{ true }}">
+            <span class="tag tag-accent" style="white-space:nowrap">{{ lic.statusLabel }}</span>
+          </sc-if>
+          <sc-if value="{{ lic.isNotVerified }}" hint-placeholder-val="{{ false }}">
+            <span class="tag tag-outline" style="white-space:nowrap;color:#b26a00;border-color:#b26a00">{{ lic.statusLabel }}</span>
+          </sc-if>
+        </div>
+        <sc-if value="{{ lic.hasReason }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:13px;color:var(--color-neutral-200);line-height:1.6">{{ lic.reason }}</div>
+        </sc-if>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <sc-for list="{{ lic.facts }}" as="fact" hint-placeholder-count="3">
+            <div style="font-size:13px;line-height:1.6"><span style="color:var(--color-neutral-500)">{{ fact.k }}</span> &nbsp;{{ fact.v }}</div>
+          </sc-for>
+        </div>
+      </div>
+    </sc-for>
+
+    <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">This report is frozen at the time above. A license can change status afterwards; each license shows the date of the check its status rests on.</div>
   </div>
   </sc-if>
 </div>
@@ -3413,8 +3459,8 @@ class Component extends DCLogic {
         : code === 'subscription_required' ? "Your organization needs an active subscription to request comparisons. The owner can start one under Billing."
         : code === 'rate_limited' ? 'You have sent several requests today. Please try again tomorrow.'
         : code === 'already_requested' ? 'You already have a request open for this candidate. It is listed in your account.'
-        : code === 'forbidden' ? 'Comparisons need an organization account.'
-        : "This comparison can't be requested right now.",
+        : code === 'forbidden' ? 'Requests need an organization account.'
+        : "This request can't be made right now.",
     });
   }
 
@@ -3431,13 +3477,14 @@ class Component extends DCLogic {
       return;
     }
     const code = d.error;
+    const noun = ((this.state.comparisons || []).find(x => x.id === id) || {}).kind === 'license_report' ? 'license report' : 'comparison';
     this.setState({
       cmpBusy: false,
-      cmpErr: code === 'payment_problem' ? "Your organization's latest payment failed, so opening comparisons is paused. This comparison was not opened and nothing was used; it stays available until it expires. Once the payment is fixed (the owner can update the payment method under Billing), open it again."
-        : code === 'quota_exhausted' ? 'Your organization has used all ' + d.included + ' lookups for this billing period, so this comparison was not opened and nothing was used. It stays available until it expires; open it again when the next period starts.'
-        : code === 'no_active_subscription' ? "Your organization's subscription is not active (it may have a payment problem, or it ended), so this comparison was not opened and nothing was used. It stays available until it expires; open it again once the subscription is active."
-        : code === 'not_found' || code === 'not_available' ? 'That comparison is no longer available.'
-        : "We couldn't open that comparison. Please try again.",
+      cmpErr: code === 'payment_problem' ? "Your organization's latest payment failed, so opening requests is paused. This " + noun + " was not opened and nothing was used; it stays available until it expires. Once the payment is fixed (the owner can update the payment method under Billing), open it again."
+        : code === 'quota_exhausted' ? 'Your organization has used all ' + d.included + ' lookups for this billing period, so this ' + noun + ' was not opened and nothing was used. It stays available until it expires; open it again when the next period starts.'
+        : code === 'no_active_subscription' ? "Your organization's subscription is not active (it may have a payment problem, or it ended), so this " + noun + " was not opened and nothing was used. It stays available until it expires; open it again once the subscription is active."
+        : code === 'not_found' || code === 'not_available' ? 'That ' + noun + ' is no longer available.'
+        : "We couldn't open that " + noun + ". Please try again.",
     });
     await this.loadComparisons();
   }
@@ -3478,9 +3525,15 @@ class Component extends DCLogic {
     return iso ? new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
   }
 
+  // A date-only value (YYYY-MM-DD) shown as that calendar day, never shifted by the viewer's time zone.
+  fmtDay(iso) {
+    const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : '';
+  }
+
   comparisonStatusLabel(c) {
     return c.status === 'awaiting_candidate' ? 'Waiting for the candidate to answer (they have until ' + this.fmtDate(c.answer_by) + ')'
-      : c.status === 'not_authorized' ? 'Not authorized. No comparison is available and nothing was used from your plan.'
+      : c.status === 'not_authorized' ? 'Not authorized. Nothing is available and nothing was used from your plan.'
       : c.status === 'ready' ? 'Approved. Ready to open until ' + this.fmtDate(c.available_until) + '. Opening uses one lookup.'
       : c.status === 'opened' ? 'Opened ' + this.fmtDate(c.opened_at) + '. You can open it again; that uses no more lookups.'
       : 'Access has ended.';
@@ -3642,7 +3695,22 @@ class Component extends DCLogic {
       requesterEmail: lk.requesterEmail || '',
       // ---- comparisons ----
       isRequestSent: s.screen === 'requestSent',
-      isCompare: s.screen === 'compare' && !!s.compare,
+      isCompare: s.screen === 'compare' && !!s.compare && content.kind !== 'license_report',
+      isLicenseReport: s.screen === 'compare' && !!s.compare && content.kind === 'license_report',
+      licenseCoverageLine: (() => { const cv = (content.coverage && content.coverage.licenses) || {}; return (cv.verified || 0) + ' of ' + (cv.total || 0) + ((cv.total || 0) === 1 ? ' license' : ' licenses') + ' verified'; })(),
+      licenseBasis: content.basis || '',
+      licenseRows: (content.licenses || []).map(l => {
+        const verified = l.status === 'verified';
+        const facts = [];
+        if (l.license_number) facts.push({ k: 'License number', v: l.license_number });
+        if (l.license_type) facts.push({ k: 'Registry type', v: l.license_type });
+        if (l.expiry) facts.push({ k: 'Registry expiry', v: this.fmtDay(l.expiry) });
+        facts.push({ k: 'How this was checked', v: l.check === 'registry_live' ? 'Checked against the state registry on ' + this.fmtDay(l.checked_on)
+          : l.check === 'registry_last_check' ? 'Last checked against the state registry on ' + this.fmtDay(l.checked_on) + (verified ? ' (a live check was not available when this report was made)' : '')
+          : l.check === 'verifi_review' ? 'Confirmed by Verifi review on ' + this.fmtDay(l.checked_on)
+          : 'Not checked' });
+        return { headline: l.label || 'License', isVerified: verified, isNotVerified: !verified, statusLabel: verified ? 'Verified' : l.status === 'discrepancy' ? 'Discrepancy' : 'Not verified', hasReason: !!l.reason, reason: l.reason || '', facts };
+      }),
       resultAccessNote: s.real
         ? (s.real.org ? 'Signed in as ' + s.real.user.email + '.' : 'You are signed in but not part of an organization yet.')
         : 'You can request as a guest (a one-time view, paid per view) or sign in with an organization account, whose plan covers comparisons.',
@@ -3689,18 +3757,18 @@ class Component extends DCLogic {
       requestSentIsGuest: s.requestSentKind === 'guest',
       requestSentDetail: s.requestSentKind === 'guest'
         ? 'If they approve, we email a link to ' + (s.reqLookupRequesterEmail || 'the address you confirmed this lookup with') + '. That link is the only way in, so keep the email: opening the comparison is a one-time view (paid then, not before). If they decline, or do not answer within 72 hours, we email only that the request was not authorized: we do not say which, and you are not charged.'
-        : 'You will get an email either way. If they approve, it says so and you open the comparison from your account. If they decline, or do not answer within 72 hours, the email says only that the request was not authorized: we do not say which, and nothing is used from your plan.',
+        : 'You will get an email either way. If they approve, it says so and you open it from your account. If they decline, or do not answer within 72 hours, the email says only that the request was not authorized: we do not say which, and nothing is used from your plan.',
       cmpNote: s.cmpNote, cmpError: s.cmpErr || s.cmpLoadErr, cmpBusy: s.cmpBusy,
       noLookupRows: (s.lookups || []).length === 0,
       lookupRows: (s.lookups || []).map(l => ({
         label: l.candidate_label, dateLabel: this.fmtDate(l.completed_at), canRequest: !l.open_request_id, inProgress: !!l.open_request_id,
         onRequest: () => this.setState({ reqLookupId: l.lookup_id, reqLookupLabel: l.candidate_label, reqLookupRequesterEmail: (s.real && s.real.user && s.real.user.email) || '', reqClaimToken: '', reqAttestation: '', reqErr: null, accessBack: 'acct', screen: 'access' }),
       })),
-      comparisonsHeading: s.real && s.real.role === 'owner' ? 'Comparison requests (whole organization)' : 'Your comparison requests',
+      comparisonsHeading: s.real && s.real.role === 'owner' ? 'Requests (whole organization)' : 'Your requests',
       noComparisonRows: (s.comparisons || []).length === 0,
       comparisonRows: (s.comparisons || []).map(c => ({
         label: c.candidate_label, requestedLabel: this.fmtDate(c.requested_at), statusLabel: this.comparisonStatusLabel(c),
-        canOpen: !!c.can_open, openLabel: c.status === 'opened' ? 'Open again' : 'Open comparison',
+        canOpen: !!c.can_open, openLabel: c.status === 'opened' ? 'Open again' : (c.kind === 'license_report' ? 'Open license report' : 'Open comparison'),
         hasBy: !!c.requested_by && !c.mine, by: c.requested_by || '',
         onOpen: () => this.openComparison(c.id),
       })),
