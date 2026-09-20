@@ -73,6 +73,113 @@ async function authGateCandidate(req: Request, body: any): Promise<Response | nu
   return UNAUTHORIZED();
 }
 
+// ---------------------------------------------------------------------------------------------------
+// EDUCATION EDIT + NOTE (2026-09-20). A candidate whose Education row is waiting in review (typically a blank resume template:
+// "[Field of Study], [Institution Name]") could neither fix it nor explain it. action "education_resubmit" lets them do either or both:
+//   * edit the four printed fields (degree, field of study, institution, location) on their own education_items row, which rewrites the
+//     queue claim exactly as confirm-resume-data builds it (dates untouched) and returns a non-New item to "New" so staff look again;
+//   * leave a note (max 1000 chars) for staff, kept on verification_items.candidate_note (latest) and in the timeline (every one).
+// Only an OPEN Education item of the caller's own can be touched: not one that is Confirmed / Unable to Verify (a result was reached) and
+// not one at Discrepancy (that has its own respond flow above). Nothing is ever deleted; a blank-everything edit is refused.
+// ---------------------------------------------------------------------------------------------------
+const EDU_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function eduPrintDate(date: string | null | undefined, precision: string | null | undefined): string {
+  if (precision === "present") return "Present";
+  if (!date) return "";
+  const m = String(date).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return "";
+  const p = precision === "year" || precision === "month" || precision === "day" ? precision
+    : (m[2] === "01" && m[3] === "01" ? "year" : m[3] === "01" ? "month" : "day");
+  if (p === "year") return m[1];
+  const mon = EDU_MONTHS[Number(m[2]) - 1] ?? "";
+  return p === "month" ? `${mon} ${m[1]}` : `${mon} ${Number(m[3])}, ${m[1]}`;
+}
+// Same shape as claimForEducation in confirm-resume-data.
+function eduClaim(e: any): string {
+  const dates = [eduPrintDate(e.start_date, e.start_date_precision), eduPrintDate(e.end_date, e.end_date_precision)].filter(Boolean).join(" – ");
+  return [e.degree, e.field_of_study, e.institution, e.location, dates].filter(Boolean).join(", ");
+}
+const EDU_OPEN_STATUSES = new Set(["New", "In Progress", "Awaiting Response", "Needs Reconciliation"]);
+const EDU_FIELD_MAX = 200;
+const EDU_NOTE_MAX = 1000;
+const EDU_CANDIDATE_EVENT_CAP = 20; // candidate-authored timeline entries per item: a flood guard, far above any honest use
+const restH = { "Content-Type": "application/json", "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": "Bearer " + SUPABASE_SERVICE_ROLE_KEY };
+const jsonOut = (o: unknown, status = 200) => new Response(JSON.stringify(o), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+
+async function educationResubmit(candidate_id: string, item_id: string, body: any): Promise<Response> {
+  const cleanField = (v: unknown): string | null | "bad" => {
+    if (v === undefined || v === null) return null; // not sent: leave as is
+    if (typeof v !== "string") return "bad";
+    const t = v.replace(/\s+/g, " ").trim();
+    return t.length > EDU_FIELD_MAX ? "bad" : t;
+  };
+  const f = body?.fields && typeof body.fields === "object" ? body.fields : {};
+  const incoming = { degree: cleanField(f.degree), field_of_study: cleanField(f.field_of_study), institution: cleanField(f.institution), location: cleanField(f.location) };
+  if (Object.values(incoming).includes("bad")) return jsonOut({ ok: false, error: "invalid_field" }, 400);
+  const rawNote = typeof body?.note === "string" ? body.note.trim() : "";
+  if (rawNote.length > EDU_NOTE_MAX) return jsonOut({ ok: false, error: "note_too_long" }, 400);
+
+  const itemRes = await fetch(SUPABASE_URL + "/rest/v1/verification_items?select=id,candidate_id,type,claim,status,source_item_id&id=eq." + encodeURIComponent(item_id), { headers: restH });
+  if (!itemRes.ok) return jsonOut({ ok: false, error: "lookup_failed" }, 500);
+  const item = (await itemRes.json())[0];
+  // Same "not_found" for a missing item, someone else's item, or one that is not an Education item.
+  if (!item || item.candidate_id !== candidate_id || item.type !== "Education" || !item.source_item_id) return jsonOut({ ok: false, error: "not_found" }, 404);
+  if (!EDU_OPEN_STATUSES.has(item.status)) return jsonOut({ ok: false, error: "not_open_for_edit" }, 409);
+
+  const eduRes = await fetch(SUPABASE_URL + "/rest/v1/education_items?select=id,institution,degree,field_of_study,location,start_date,end_date,start_date_precision,end_date_precision&candidate_id=eq."
+    + encodeURIComponent(candidate_id) + "&id=eq." + encodeURIComponent(item.source_item_id), { headers: restH });
+  const edu = eduRes.ok ? (await eduRes.json())[0] : null;
+  if (!edu) return jsonOut({ ok: false, error: "not_found" }, 404);
+
+  const next = {
+    degree: incoming.degree === null ? (edu.degree ?? "") : incoming.degree,
+    field_of_study: incoming.field_of_study === null ? (edu.field_of_study ?? "") : incoming.field_of_study,
+    institution: incoming.institution === null ? (edu.institution ?? "") : incoming.institution,
+    location: incoming.location === null ? (edu.location ?? "") : incoming.location,
+  };
+  const changed = (["degree", "field_of_study", "institution", "location"] as const).some((k) => (next[k] || "") !== (edu[k] || ""));
+  if (!changed && !rawNote) return jsonOut({ ok: false, error: "nothing_to_submit" }, 400);
+  if (changed && !next.degree && !next.field_of_study && !next.institution) return jsonOut({ ok: false, error: "empty_entry" }, 400);
+
+  // Flood guard on candidate-authored timeline entries for this item.
+  const cntRes = await fetch(SUPABASE_URL + "/rest/v1/verification_item_timeline?select=item_id&actor=eq.Candidate&item_id=eq." + encodeURIComponent(item_id), { headers: restH });
+  if (cntRes.ok && (await cntRes.json()).length >= EDU_CANDIDATE_EVENT_CAP) return jsonOut({ ok: false, error: "too_many_updates" }, 429);
+
+  const now = new Date().toISOString();
+  const beforeClaim = item.claim || eduClaim(edu);
+  let afterClaim = beforeClaim;
+  let statusAfter = item.status;
+  if (changed) {
+    const upd = await fetch(SUPABASE_URL + "/rest/v1/education_items?id=eq." + encodeURIComponent(edu.id) + "&candidate_id=eq." + encodeURIComponent(candidate_id), {
+      method: "PATCH", headers: { ...restH, "Prefer": "return=representation" },
+      body: JSON.stringify({ degree: next.degree || null, field_of_study: next.field_of_study || null, institution: next.institution || null, location: next.location || null, updated_at: now }),
+    });
+    const updRows = upd.ok ? await upd.json() : [];
+    if (!Array.isArray(updRows) || updRows.length !== 1) return jsonOut({ ok: false, error: "update_failed" }, 502);
+    afterClaim = eduClaim({ ...edu, ...next });
+    if (item.status !== "New") statusAfter = "New"; // back to intake so staff look at the new text
+  }
+  const patch: Record<string, unknown> = {};
+  if (changed) { patch.claim = afterClaim; patch.status = statusAfter; }
+  if (rawNote) { patch.candidate_note = rawNote; patch.candidate_note_at = now; }
+  const q = await fetch(SUPABASE_URL + "/rest/v1/verification_items?id=eq." + encodeURIComponent(item_id) + "&candidate_id=eq." + encodeURIComponent(candidate_id), {
+    method: "PATCH", headers: { ...restH, "Prefer": "return=representation" }, body: JSON.stringify(patch),
+  });
+  const qRows = q.ok ? await q.json() : [];
+  if (!Array.isArray(qRows) || qRows.length !== 1) return jsonOut({ ok: false, error: "update_failed" }, 502);
+
+  // Timeline, written server-side with a fixed actor (a candidate cannot choose who an entry is from).
+  const bits: string[] = [];
+  if (changed) bits.push("Before: " + beforeClaim + ". After: " + afterClaim + "." + (statusAfter !== item.status ? " Status was " + item.status + "; returned to New." : ""));
+  if (rawNote) bits.push("Candidate's note: " + rawNote);
+  await fetch(SUPABASE_URL + "/rest/v1/verification_item_timeline", {
+    method: "POST", headers: { ...restH, "Prefer": "return=minimal" },
+    body: JSON.stringify({ item_id, event_date: now, actor: "Candidate", action: changed ? "Candidate edited and resubmitted this education entry." : "Candidate added a note.", note: bits.join(" ") }),
+  }).catch(() => {}); // best-effort: the change itself already persisted above
+
+  return jsonOut({ ok: true, item: { id: item_id, claim: afterClaim, status: statusAfter, candidateNote: rawNote || null } });
+}
+
 export default {
   fetch: withSupabase({ auth: "none" }, async (req, _ctx) => {
     if (req.method === "OPTIONS") {
@@ -82,7 +189,8 @@ export default {
       const authBody = await req.clone().json().catch(() => ({}));
       const authDenied = await authGateCandidate(req, authBody);
       if (authDenied) return authDenied;
-      const { candidate_id, item_id, corrected_value, note } = await req.json();
+      const reqBody = await req.json();
+      const { candidate_id, item_id, corrected_value, note } = reqBody;
       if (!candidate_id || typeof candidate_id !== "string") {
         return new Response(JSON.stringify({ ok: false, error: "candidate_id_required" }), {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -93,6 +201,7 @@ export default {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
+      if (reqBody.action === "education_resubmit") return await educationResubmit(candidate_id, item_id, reqBody);
       const trimmedValue = typeof corrected_value === "string" ? corrected_value.trim() : "";
       const trimmedNote = typeof note === "string" ? note.trim() : "";
       if (!trimmedValue && !trimmedNote) {

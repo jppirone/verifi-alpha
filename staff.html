@@ -2382,6 +2382,9 @@ th.sortable{cursor:pointer;user-select:none}
                 <sc-if value="{{ row.registryFlag }}" hint-placeholder-val="{{ false }}">
                   <div style="margin-bottom:4px"><span class="tag tag-outline" style="color:#b26a00;border-color:#b26a00;white-space:nowrap">License found · not active</span></div>
                 </sc-if>
+                <sc-if value="{{ row.hasCandidateNote }}" hint-placeholder-val="{{ false }}">
+                  <div style="margin-bottom:4px"><span class="tag tag-outline" style="white-space:nowrap">Candidate note</span></div>
+                </sc-if>
                 {{ row.automatedCheck }}
               </sc-raw-td>
               <sc-raw-td>
@@ -2685,6 +2688,14 @@ th.sortable{cursor:pointer;user-select:none}
         <sc-if value="{{ licShowResult }}" hint-placeholder-val="{{ false }}">
           <div style="border-top:1px solid var(--color-divider);padding-top:var(--space-3);font-size:13px;color:var(--color-neutral-300);line-height:1.6;white-space:pre-wrap">{{ licResultText }}</div>
         </sc-if>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ detailHasCandidateNote }}" hint-placeholder-val="{{ false }}">
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-4)">
+        <div class="card-kicker">Candidate's note</div>
+        <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.5;white-space:pre-wrap">{{ detailCandidateNote }}</div>
+        <div style="font-size:11px;color:var(--color-neutral-500)">Left {{ detailCandidateNoteAt }}. Every note and edit the candidate made is in the timeline below.</div>
       </div>
       </sc-if>
 
@@ -3721,6 +3732,7 @@ class Component extends DCLogic {
       receivedDisp: this.fmt(it.received), desiredDisp: this.fmt(it.desired), followUpDisp: this.fmt(it.followUp),
       automatedCheck: it.automatedCheck, status: it.status, statusTagClass: this.statusTagClass(it.status),
       registryFlag: this.isNotActiveMatch(it),
+      hasCandidateNote: !!it.candidateNote,
       assignedTo: it.assignedTo,
       correctionRequested: !!it.correctionRequested,
       isAdminEditable: isAdmin,
@@ -3901,6 +3913,9 @@ class Component extends DCLogic {
       showAllItems: () => this.setState({ correctionFilter: false }),
       showCorrectionOnly: () => this.setState({ correctionFilter: true }),
 
+      detailHasCandidateNote: !!(selected && selected.candidateNote),
+      detailCandidateNote: selected ? (selected.candidateNote || '') : '',
+      detailCandidateNoteAt: selected && selected.candidateNoteAt ? new Date(selected.candidateNoteAt).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '',
       detailCorrectionRequested: !!(selected && selected.correctionRequested),
       detailCorrectionNote: selected ? (selected.correctionNote || '') : '',
       detailCorrectionField: selected ? (selected.correctionField || 'Claim detail') : '',

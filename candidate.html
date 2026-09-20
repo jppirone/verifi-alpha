@@ -3926,6 +3926,10 @@ a:hover{color:var(--color-accent)}
         </sc-if>
 
 
+        <sc-if value="{{ hasEduEditNotice }}" hint-placeholder-val="{{ false }}">
+          <div class="card elev-sm" style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">{{ eduEditNotice }}</div>
+        </sc-if>
+
         <sc-if value="{{ verificationItemsError }}" hint-placeholder-val="{{ false }}">
           <div style="font-size:13px;color:var(--color-neutral-500)">We couldn't load your verification items just now. Try refreshing the page.</div>
         </sc-if>
@@ -3988,11 +3992,17 @@ a:hover{color:var(--color-accent)}
               <sc-if value="{{ row.hasCorrectionMessage }}" hint-placeholder-val="{{ false }}">
                 <div style="font-size:12px;color:var(--color-warning,#c77d1e);border-top:1px solid var(--color-divider);padding-top:8px;line-height:1.6">{{ row.correctionMessage }}</div>
               </sc-if>
+              <sc-if value="{{ row.hasFinding }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:12px;color:var(--color-neutral-300);border-top:1px solid var(--color-divider);padding-top:8px;line-height:1.6"><b>What we found:</b> {{ row.findingText }}</div>
+              </sc-if>
               <sc-if value="{{ row.showLicenseEditButton }}" hint-placeholder-val="{{ false }}">
                 <button type="button" class="btn btn-ghost" style="align-self:flex-start;font-size:12px" sc-camel-on-click="{{ row.onOpenLicenseEdit }}">{{ row.licenseEditButtonLabel }}</button>
               </sc-if>
               <sc-if value="{{ row.licenseEditOpen }}" hint-placeholder-val="{{ false }}">
                 <div style="display:flex;flex-direction:column;gap:var(--space-2);border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
+                  <sc-if value="{{ row.hasFindingInForm }}" hint-placeholder-val="{{ false }}">
+                    <div style="font-size:12px;color:var(--color-warning,#c77d1e);line-height:1.6;max-width:520px"><b>What we found:</b> {{ row.findingText }}</div>
+                  </sc-if>
                   <div class="field" style="max-width:320px">
                     <label>Issuing state</label>
                     <sc-raw-select class="input" value="{{ licenseEditStateValue }}" sc-camel-on-change="{{ setLicenseEditState }}">
@@ -4013,6 +4023,36 @@ a:hover{color:var(--color-accent)}
                   <sc-if value="{{ row.canDismissCorrection }}" hint-placeholder-val="{{ false }}">
                     <button type="button" class="btn btn-ghost" style="align-self:flex-start;font-size:12px" sc-camel-on-click="{{ row.onDismissLicenseCorrection }}">These details are correct — keep this as candidate-stated</button>
                   </sc-if>
+                </div>
+              </sc-if>
+
+              <sc-if value="{{ row.hasPlaceholderHint }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:12px;color:var(--color-warning,#c77d1e);border-top:1px solid var(--color-divider);padding-top:8px;line-height:1.6">This entry still contains template text in square brackets. Edit it to what is true and resubmit, or add a note explaining it to our team.</div>
+              </sc-if>
+              <sc-if value="{{ row.hasCandidateNote }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:12px;color:var(--color-neutral-400);border-top:1px solid var(--color-divider);padding-top:8px;line-height:1.6"><b>Your note to our team:</b> {{ row.candidateNoteText }}</div>
+              </sc-if>
+              <sc-if value="{{ row.canEditEducation }}" hint-placeholder-val="{{ false }}">
+                <button type="button" class="btn btn-ghost" style="align-self:flex-start;font-size:12px" sc-camel-on-click="{{ row.openEducationEdit }}">Edit and resubmit, or add a note</button>
+              </sc-if>
+              <sc-if value="{{ row.educationFormOpen }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;flex-direction:column;gap:var(--space-2);border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
+                  <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6;max-width:520px">Correct what is printed here, add a note for our team, or both. An edited entry goes back to the start of review. Nothing else about your resume changes.</div>
+                  <div class="field" style="max-width:360px"><label>Degree</label><input class="input" value="{{ eduDraftDegree }}" sc-camel-on-change="{{ setEduDraftDegree }}"></div>
+                  <div class="field" style="max-width:360px"><label>Field of study</label><input class="input" value="{{ eduDraftField }}" sc-camel-on-change="{{ setEduDraftField }}"></div>
+                  <div class="field" style="max-width:360px"><label>Institution</label><input class="input" value="{{ eduDraftInstitution }}" sc-camel-on-change="{{ setEduDraftInstitution }}"></div>
+                  <div class="field" style="max-width:360px"><label>Location</label><input class="input" value="{{ eduDraftLocation }}" sc-camel-on-change="{{ setEduDraftLocation }}"></div>
+                  <div class="field" style="max-width:420px">
+                    <label>Note for our team (optional)</label>
+                    <textarea class="input" rows="3" maxlength="1000" value="{{ eduNoteValue }}" sc-camel-on-change="{{ setEduNote }}" placeholder="For example: this part of my resume was a blank template and I have no degree to list"></textarea>
+                  </div>
+                  <sc-if value="{{ hasEduEditError }}" hint-placeholder-val="{{ false }}">
+                    <div style="font-size:11px;color:#b00020;line-height:1.5;max-width:520px">{{ eduEditError }}</div>
+                  </sc-if>
+                  <div style="display:flex;gap:8px;flex-wrap:wrap">
+                    <button type="button" class="btn btn-secondary" disabled="{{ eduEditPending }}" sc-camel-on-click="{{ row.submitEducationEdit }}">{{ eduEditSaveLabel }}</button>
+                    <button type="button" class="btn btn-ghost" disabled="{{ eduEditPending }}" sc-camel-on-click="{{ row.cancelEducationEdit }}">Cancel</button>
+                  </div>
                 </div>
               </sc-if>
 
@@ -4091,11 +4131,17 @@ a:hover{color:var(--color-accent)}
               <sc-if value="{{ row.hasCorrectionMessage }}" hint-placeholder-val="{{ false }}">
                 <div style="font-size:12px;color:var(--color-warning,#c77d1e);border-top:1px solid var(--color-divider);padding-top:8px;line-height:1.6">{{ row.correctionMessage }}</div>
               </sc-if>
+              <sc-if value="{{ row.hasFinding }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:12px;color:var(--color-neutral-300);border-top:1px solid var(--color-divider);padding-top:8px;line-height:1.6"><b>What we found:</b> {{ row.findingText }}</div>
+              </sc-if>
               <sc-if value="{{ row.showLicenseEditButton }}" hint-placeholder-val="{{ false }}">
                 <button type="button" class="btn btn-ghost" style="align-self:flex-start;font-size:12px" sc-camel-on-click="{{ row.onOpenLicenseEdit }}">{{ row.licenseEditButtonLabel }}</button>
               </sc-if>
               <sc-if value="{{ row.licenseEditOpen }}" hint-placeholder-val="{{ false }}">
                 <div style="display:flex;flex-direction:column;gap:var(--space-2);border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
+                  <sc-if value="{{ row.hasFindingInForm }}" hint-placeholder-val="{{ false }}">
+                    <div style="font-size:12px;color:var(--color-warning,#c77d1e);line-height:1.6;max-width:520px"><b>What we found:</b> {{ row.findingText }}</div>
+                  </sc-if>
                   <div class="field" style="max-width:320px">
                     <label>Issuing state</label>
                     <sc-raw-select class="input" value="{{ licenseEditStateValue }}" sc-camel-on-change="{{ setLicenseEditState }}">
@@ -4790,7 +4836,7 @@ a:hover{color:var(--color-accent)}
             </sc-raw-tbody>
           </sc-raw-table>
         </div>
-        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Everything below is read from your account's saved records: your license checks, the correction emails we sent you, name changes, and employer lookups that matched you. For each license you see its latest state and the check results recorded for it, not every intermediate attempt.</div>
+        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Download a record of your account's activity as a CSV: your license checks, the correction emails we sent you, name changes, and employer lookups that matched you. For each license it has its latest state and the check results recorded for it, not every intermediate attempt. There is no on-screen table, just a date-ranged download.</div>
         <div style="display:flex;gap:var(--space-4);flex-wrap:wrap;align-items:flex-end">
           <div class="field" style="max-width:200px">
             <label for="la-start">From (optional)</label>
@@ -4815,26 +4861,6 @@ a:hover{color:var(--color-accent)}
           <div style="font-size:12px;color:var(--color-neutral-500)">{{ licenseActivityCountLabel }}</div>
           <button type="button" class="btn btn-primary" style="font-size:12px" disabled="{{ licenseActivityExportDisabled }}" sc-camel-on-click="{{ exportLicenseActivityCsv }}">Export CSV</button>
         </div>
-        <sc-if value="{{ licenseActivityHasRows }}" hint-placeholder-val="{{ false }}">
-          <sc-raw-table class="table">
-            <sc-raw-thead>
-              <sc-raw-tr>
-                <sc-raw-th>Date</sc-raw-th>
-                <sc-raw-th>Type</sc-raw-th>
-                <sc-raw-th>Activity</sc-raw-th>
-              </sc-raw-tr>
-            </sc-raw-thead>
-            <sc-raw-tbody>
-              <sc-for list="{{ licenseActivityRows }}" as="row" hint-placeholder-count="5">
-                <sc-raw-tr>
-                  <sc-raw-td style="white-space:nowrap;color:var(--color-neutral-400)">{{ row.dateLabel }}</sc-raw-td>
-                  <sc-raw-td style="white-space:nowrap">{{ row.typeLabel }}</sc-raw-td>
-                  <sc-raw-td style="line-height:1.6">{{ row.text }}</sc-raw-td>
-                </sc-raw-tr>
-              </sc-for>
-            </sc-raw-tbody>
-          </sc-raw-table>
-        </sc-if>
       </div>
       </sc-if>
       <sc-if value="{{ isFullResumeAccount }}" hint-placeholder-val="{{ true }}">
@@ -6144,8 +6170,18 @@ class Component extends DCLogic {
   // The P133 verification floor: a category only ever shows as having a confirmed status if at
   // least one real item in it is genuinely Verified (Confirmed) — never merely submitted or
   // attempted.
+  // One entry per credential (2026-09-20): a license used to appear twice on this tab, as a Certification row (the certification
+  // it was read from) and as its License row. A Certification queue row whose source certification is a license (it has a license_items
+  // extension, linked_certification_id) is the SAME credential as that License row, so only the License row is listed: it carries the
+  // real state/number correction form, while the Certification row carried the generic badge-link / phone form, which does not apply.
+  getVisibleVerificationItems() {
+    const s = this.state;
+    const linked = new Set((s.verificationLicenses || []).map(l => l.linkedCertificationId).filter(Boolean));
+    return (s.verificationItems || []).filter(it => !(it.type === 'Certification' && it.sourceItemId && linked.has(it.sourceItemId)));
+  }
+
   getVerificationCategorySummaries() {
-    const items = this.state.verificationItems || [];
+    const items = this.getVisibleVerificationItems();
     return this.VERIFICATION_CATEGORY_ORDER.map(type => {
       const catItems = items.filter(it => it.type === type);
       if (!catItems.length) return null;
@@ -6167,6 +6203,12 @@ class Component extends DCLogic {
     return {
       hasCorrectionMessage: !!(lic.correction && lic.correction.message),
       correctionMessage: lic.correction ? lic.correction.message : '',
+      // What the last automatic check actually found (fixed-vocabulary sentence from the server: wrong name, number not found, not active,
+      // held, unsupported...). Shown on the card, and above the fields while the edit form is open, so the candidate knows what to correct.
+      // A first not-found / unsupported-state result already carries its own correction message, so that one is not said twice.
+      hasFinding: !!(lic.finding && lic.finding.text && !(lic.correction && lic.correction.message)) && !(lic.editable && open),
+      hasFindingInForm: !!(lic.finding && lic.finding.text && !(lic.correction && lic.correction.message)) && !!lic.editable && open,
+      findingText: lic.finding ? lic.finding.text : '',
       showLicenseEditButton: !!lic.editable && !open,
       licenseEditButtonLabel: lic.correction ? 'Correct license details' : (lic.state ? 'Edit license details' : 'Add state / edit details'),
       licenseEditOpen: !!lic.editable && open,
@@ -6268,7 +6310,10 @@ class Component extends DCLogic {
         hasResponded: false, canRespond: false, showRespondButton: false, responseFormOpen: false,
         openRespond: () => {}, cancelRespond: () => {}, submitRespond: () => {},
         canEditContactDetails: false, openContactDetails: () => {},
-        ...this.licenseRowEditProps(l),
+        canEditEducation: false, educationFormOpen: false, hasPlaceholderHint: false, hasCandidateNote: false, candidateNoteText: '',
+        openEducationEdit: () => {}, cancelEducationEdit: () => {}, submitEducationEdit: () => {},
+        // this row already says why in unverifiedLicenseNote above, so the check's own finding is not repeated
+        ...this.licenseRowEditProps({ ...l, finding: null }),
       };
     });
   }
@@ -6276,7 +6321,7 @@ class Component extends DCLogic {
   getVerificationItemRows() {
     const s = this.state;
     const filter = s.verificationFilter;
-    return (s.verificationItems || [])
+    return this.getVisibleVerificationItems()
       .filter(it => {
         const terminal = this.verificationIsTerminal(it.status);
         if (filter === 'active') return !terminal;
@@ -6317,11 +6362,66 @@ class Component extends DCLogic {
           // own "no education section" scope) and only when a real source row is known.
           canEditContactDetails: (it.type === 'Job Experience' || it.type === 'Certification') && !!it.sourceItemId,
           openContactDetails: () => this.openContactDetailsModal(it.type, it.sourceItemId, it.claim),
+          // Education entry still in review: edit it and resubmit, and/or leave a note for staff (2026-09-20). Same open-status set the server
+          // enforces; a Discrepancy has its own respond form above.
+          canEditEducation: it.type === 'Education' && !!it.education && this.EDU_OPEN_STATUSES.includes(it.status) && s.eduEditId !== it.id,
+          educationFormOpen: it.type === 'Education' && !!it.education && this.EDU_OPEN_STATUSES.includes(it.status) && s.eduEditId === it.id,
+          hasPlaceholderHint: it.type === 'Education' && this.EDU_OPEN_STATUSES.includes(it.status) && /\[[^\]]{1,60}\]/.test(it.claim || ''),
+          hasCandidateNote: it.type === 'Education' && !!it.candidateNote,
+          candidateNoteText: it.candidateNote || '',
+          openEducationEdit: () => this.openEducationEdit(it),
+          cancelEducationEdit: () => this.setState({ eduEditId: null, eduEditError: '' }),
+          submitEducationEdit: () => this.submitEducationEdit(it.id),
           ...(it.type === 'License' && it.sourceItemId && (s.verificationLicenses || []).find(l => l.id === it.sourceItemId)
             ? this.licenseRowEditProps((s.verificationLicenses || []).find(l => l.id === it.sourceItemId)) : {}),
         };
       })
       .concat(this.getUnverifiedLicenseRows());
+  }
+
+  EDU_OPEN_STATUSES = ['New', 'In Progress', 'Awaiting Response', 'Needs Reconciliation'];
+
+  openEducationEdit(it) {
+    const e = it.education || {};
+    this.setState({ eduEditId: it.id, eduDraft: { degree: e.degree || '', fieldOfStudy: e.fieldOfStudy || '', institution: e.institution || '', location: e.location || '' }, eduNoteDraft: '', eduEditError: '', eduEditNotice: '' });
+  }
+
+  async submitEducationEdit(itemId) {
+    const s = this.state;
+    if (s.eduEditPending || !s.resumeCandidateId) return;
+    const it = (s.verificationItems || []).find(x => x.id === itemId);
+    if (!it || !it.education) return;
+    const d = s.eduDraft || {};
+    const norm = (v) => String(v || '').replace(/\s+/g, ' ').trim();
+    const note = String(s.eduNoteDraft || '').trim();
+    const changed = norm(d.degree) !== norm(it.education.degree) || norm(d.fieldOfStudy) !== norm(it.education.fieldOfStudy) || norm(d.institution) !== norm(it.education.institution) || norm(d.location) !== norm(it.education.location);
+    if (!changed && !note) { this.setState({ eduEditError: 'Change at least one field, or write a note for our team.' }); return; }
+    if (changed && !norm(d.degree) && !norm(d.fieldOfStudy) && !norm(d.institution)) { this.setState({ eduEditError: "An entry needs at least a degree, a field of study or an institution. If this entry isn't yours, leave the fields as they are and explain in the note." }); return; }
+    if (note.length > 1000) { this.setState({ eduEditError: 'Please keep the note under 1,000 characters.' }); return; }
+    this.setState({ eduEditPending: true, eduEditError: '' });
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/submit-candidate-correction-response', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: s.resumeCandidateId, action: 'education_resubmit', item_id: itemId,
+          fields: { degree: norm(d.degree), field_of_study: norm(d.fieldOfStudy), institution: norm(d.institution), location: norm(d.location) }, note }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ eduEditPending: false, eduEditError: "Couldn't reach the server. Check your connection and try again." });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      const msg = data.error === 'not_open_for_edit' ? 'This entry has already been reviewed, so it can no longer be edited here.'
+        : data.error === 'too_many_updates' ? "You've sent a lot of updates on this entry. Please wait for our team to review them."
+        : data.error === 'nothing_to_submit' ? 'Change at least one field, or write a note for our team.'
+        : "Couldn't save your changes. Please try again.";
+      this.setState({ eduEditPending: false, eduEditError: msg });
+      return;
+    }
+    this.setState({ eduEditPending: false, eduEditId: null, eduEditNotice: changed ? 'Saved. This entry was updated and sent back for review' + (note ? ', with your note.' : '.') : 'Your note was sent to our team.' });
+    this.loadVerificationItems(s.resumeCandidateId);
   }
 
   openCorrectionResponse(itemId) {
@@ -7165,6 +7265,7 @@ class Component extends DCLogic {
     skipEmployerContactModalOpen: false,
     verificationFilter: 'active', upgradeModalOpen: false, upgradeReturnTab: null, upgradeReturnTarget: null,
     licenseEditId: null, licenseEditState: '', licenseEditNumber: '', licenseEditPending: false, licenseEditError: '', licenseEditNotice: '',
+    eduEditId: null, eduDraft: { degree: '', fieldOfStudy: '', institution: '', location: '' }, eduNoteDraft: '', eduEditPending: false, eduEditError: '', eduEditNotice: '',
     verificationItems: [], verificationLicenses: [], verificationItemsLoading: false, verificationItemsError: null, verificationItemsLoadedFor: null,
     correctionResponseOpenId: null, correctionValueDraft: '', correctionNoteDraft: '',
     correctionSubmitPending: false, correctionSubmitError: null,
@@ -7412,7 +7513,7 @@ class Component extends DCLogic {
     const n = (st) => all.filter(e => e.status === st).length;
     const pending = c.pending.length;
     return [
-      n('approved') + ' approved, ' + n('declined') + ' declined, ' + all.filter(e => e.status === 'expired' && !e.approved_at).length + ' closed with no response, ' + all.filter(e => e.status === 'expired' && e.approved_at).length + ' approved and since ended.',
+      n('approved') + ' approved, ' + n('declined') + ' declined, ' + all.filter(e => e.status === 'expired' && !e.approved_at).length + ' closed with no response, ' + all.filter(e => e.status === 'expired' && e.approved_at).length + ' approved, where the employer\u2019s access has since expired.',
       pending === 1 ? '1 request is waiting on your answer.' : pending + ' requests are waiting on your answer.',
     ];
   }
@@ -7437,7 +7538,7 @@ class Component extends DCLogic {
       const statusLabel = r.status === 'pending' ? 'Waiting on your answer (closes ' + closes + ')'
         : r.status === 'approved' ? (r.delivered ? 'Approved, opened by the employer ' + this.empDateLabel(r.first_delivered_at) : 'Approved, not yet opened')
         : r.status === 'declined' ? 'Declined'
-        : (r.approved_at ? 'Approved; access has ended' : 'Closed, no response');
+        : (r.approved_at ? 'Approved. The employer\u2019s access to this ' + (r.kind === 'license_report' ? 'license report' : 'comparison') + ' has expired (they can no longer view what was shared).' : 'Closed, no response');
       return {
         id: r.id, domain: this.empRequesterLabel(r.requester), dateLabel: this.empDateLabel(r.created_at),
         typeLabel: r.kind === 'license_report' ? 'License status request' : 'Comparison request', attestation: r.attestation || '', statusLabel: statusLabel, trail: '', hasTrail: false,
@@ -10649,7 +10750,7 @@ class Component extends DCLogic {
       kycVerified: s.kycVerified,
       kycUnverified: !s.kycVerified,
       toggleKyc: (e) => { pd(e); this.setState(st => ({ kycVerified: !st.kycVerified })); },
-      showSaveBar: s.accountTab !== 'views' && s.accountTab !== 'subscription' && s.accountTab !== 'deactivation' && s.accountTab !== 'customization' && s.accountTab !== 'verification',
+      showSaveBar: s.accountTab !== 'views' && s.accountTab !== 'subscription' && s.accountTab !== 'deactivation' && s.accountTab !== 'customization' && s.accountTab !== 'verification' && s.accountTab !== 'activity',
       saveBarDisabled: !dirty,
       saveBarEnabled: dirty,
       saveBarNote: dirty ? 'You have unsaved changes on this tab.' : 'Save / revert activate once a tab has editable, unsaved changes.',
@@ -11249,12 +11350,6 @@ class Component extends DCLogic {
       licenseActivityLoading: s.licenseActivityLoading,
       licenseActivityError: s.licenseActivityError,
       licenseActivityTruncated: s.licenseActivityTruncated,
-      licenseActivityRows: this.licenseActivityFiltered().map(e => ({
-        dateLabel: new Date(e.at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }),
-        typeLabel: this.licenseActivityTypeLabel(e.category),
-        text: e.text,
-      })),
-      licenseActivityHasRows: this.licenseActivityFiltered().length > 0,
       licenseActivityCountLabel: s.licenseActivityLoading ? '' : (this.licenseActivityFiltered().length + ' entries' + (s.licActStart || s.licActEnd ? ' in this range.' : '.')),
       licenseActivityExportDisabled: s.licenseActivityLoading || this.licenseActivityFiltered().length === 0,
       exportLicenseActivityCsv: () => this.exportLicenseActivityCsv(),
@@ -11278,7 +11373,7 @@ class Component extends DCLogic {
             : (lic.verification && lic.verification.correction ? 'Action needed' : 'Candidate-stated, not independently verified'),
           ...(lic.verification ? this.licenseRowEditProps({
             id: lic.verification.license_item_id, state: lic.verification.state, licenseNumber: lic.license_number,
-            editable: lic.verification.editable, correction: lic.verification.correction,
+            editable: lic.verification.editable, correction: lic.verification.correction, finding: lic.verification.finding,
           }) : {}),
           hasExpiration: !!lic.expiration_date,
           expirationLabel: lic.expiration_date ? this.dateLabel(lic.expiration_date, lic.expiration_date_precision) : '',
@@ -11798,6 +11893,16 @@ class Component extends DCLogic {
       usStateOptions: this.US_STATE_OPTIONS,
       resumeLicenseDetecting: s.licenseDetecting,
       // Post-confirm license edit / correction surface (see licenseRowEditProps).
+      // Education edit + note (see submitEducationEdit)
+      eduDraftDegree: s.eduDraft.degree, setEduDraftDegree: (e) => this.setState(st => ({ eduDraft: { ...st.eduDraft, degree: e.target.value } })),
+      eduDraftField: s.eduDraft.fieldOfStudy, setEduDraftField: (e) => this.setState(st => ({ eduDraft: { ...st.eduDraft, fieldOfStudy: e.target.value } })),
+      eduDraftInstitution: s.eduDraft.institution, setEduDraftInstitution: (e) => this.setState(st => ({ eduDraft: { ...st.eduDraft, institution: e.target.value } })),
+      eduDraftLocation: s.eduDraft.location, setEduDraftLocation: (e) => this.setState(st => ({ eduDraft: { ...st.eduDraft, location: e.target.value } })),
+      eduNoteValue: s.eduNoteDraft, setEduNote: (e) => this.setState({ eduNoteDraft: e.target.value }),
+      eduEditPending: s.eduEditPending,
+      eduEditSaveLabel: s.eduEditPending ? 'Sending…' : 'Resubmit',
+      hasEduEditError: !!s.eduEditError, eduEditError: s.eduEditError,
+      hasEduEditNotice: !!s.eduEditNotice, eduEditNotice: s.eduEditNotice,
       licenseEditStateValue: s.licenseEditState,
       setLicenseEditState: (e) => this.setState({ licenseEditState: e.target.value }),
       licenseEditNumberValue: s.licenseEditNumber,

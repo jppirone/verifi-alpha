@@ -83,6 +83,38 @@ async function authGateCandidate(req: Request, body: any): Promise<Response | nu
   return UNAUTHORIZED();
 }
 
+// ---------------------------------------------------------------------------------------------------
+// WHAT THE CHECK FOUND, for the license holder (2026-09-20). The correction form used to let a candidate edit state / number without
+// ever saying what had not matched. This maps the stored check result to ONE sentence from a fixed vocabulary: not-found, name mismatch,
+// not active, held, unsupported, not checked. Nothing free-form from the registry ever passes through: the only registry text used is the
+// status label and expiration of the candidate's OWN name-matched record (validated against a strict pattern); the other rows the
+// registry returned (other people's names) stay in verification_detail and never leave the server. Returns null for a verified license.
+// ---------------------------------------------------------------------------------------------------
+function licenseFinding(l: any, verifiedByStaff: boolean): { code: string; text: string } | null {
+  if (verifiedByStaff || l.verification_outcome === "verified") return null;
+  const st = l.state ? String(l.state).toUpperCase() : "";
+  const reg = st ? `the ${st} state registry` : "the state registry";
+  const reason = String(l.verification_reason || "");
+  const outcome = String(l.verification_outcome || "");
+  const mr = l.verification_detail && typeof l.verification_detail === "object" ? l.verification_detail.matched_record : null;
+  const status = mr && typeof mr.statusText === "string" && /^[A-Za-z ,&'\/()\-]{1,60}$/.test(mr.statusText) ? mr.statusText : null;
+  const exp = mr && typeof mr.expiration === "string" && /^\d{4}-\d{2}-\d{2}$/.test(mr.expiration) ? mr.expiration : null;
+  const f = (code: string, text: string) => ({ code, text });
+  if (!st) return f("no_state", "This license has not been checked: no issuing state was given. Choose the state to run the check.");
+  if (outcome === "unsupported_jurisdiction" || reason.startsWith("no_adapter_for_")) return f("unsupported_state", `Automatic checks are not available for ${st} yet, so this license cannot be verified automatically.`);
+  if (reason === "no_state" || reason.startsWith("missing_") || outcome === "incomplete") return f("missing_detail", "The check could not run because the license number or state is missing.");
+  if (!outcome && !reason) return f("not_checked", "This license has not been checked against the registry yet.");
+  if (reason === "no_records" || outcome === "not_found") return f("not_found", `No license with this number was found in ${reg}. Check the number and the state.`);
+  if (reason === "no_exact_name_match") return f("name_mismatch", `${reg.charAt(0).toUpperCase() + reg.slice(1)} has a license with this number, but it is not under the name on your account. Either the number differs from the one on your license, or the name on your account differs from the name on the license.`);
+  if (reason === "exact_match_not_active") return f("not_active", `${reg.charAt(0).toUpperCase() + reg.slice(1)} has this license under your name, but it is not currently active${status ? ` (registry status: ${status})` : ""}${exp ? `; expiration date ${exp}` : ""}.`);
+  if (reason === "exact_match_status_indeterminate") return f("status_unclear", `${reg.charAt(0).toUpperCase() + reg.slice(1)} has this license under your name, but its status${status ? ` (${status})` : ""} is not one we can confirm automatically. Our team is reviewing it.`);
+  if (reason === "multiple_exact_matches") return f("multiple_matches", "More than one registry record matches your name and this license number, so our team is reviewing it.");
+  if (reason === "lookup_failed") return f("registry_unreachable", "The state registry could not be reached when we checked. Our team will review it.");
+  if (reason === "result_cap_reached") return f("too_many_results", "The registry returned too many results to tell which one is yours, so our team is reviewing it.");
+  if (reason === "recent_name_change") return f("name_change_hold", "This license is held for review because the name on your account was changed recently.");
+  return f("in_review", "This license could not be verified automatically and is with our team for review.");
+}
+
 export default {
   fetch: withSupabase({ auth: "none" }, async (req, _ctx) => {
     if (req.method === "OPTIONS") {
@@ -119,7 +151,7 @@ export default {
       // reference confirm-resume-data has written since Item C. Not staff-only or sensitive — it's
       // the id of the candidate's own row, same trust boundary as everything else already returned
       // here.
-      const url = SUPABASE_URL + "/rest/v1/verification_items?select=id,type,claim,status,created_at,note,correction_requested,correction_note,correction_value,source_item_id&candidate_id=eq."
+      const url = SUPABASE_URL + "/rest/v1/verification_items?select=id,type,claim,status,created_at,note,correction_requested,correction_note,correction_value,source_item_id,candidate_note&candidate_id=eq."
         + encodeURIComponent(candidate_id) + "&order=created_at.asc,id.asc";
       const res = await fetch(url, {
         headers: {
@@ -134,6 +166,15 @@ export default {
         });
       }
       const rows = await res.json();
+      // Education rows carry the printed fields so the candidate can edit and resubmit an entry still in review (2026-09-20). Only the
+      // candidate's own education_items are read, and only for rows whose queue item is open.
+      const eduIds = rows.filter((r: any) => r.type === "Education" && r.source_item_id).map((r: any) => r.source_item_id);
+      const eduRows: any[] = eduIds.length
+        ? await fetch(SUPABASE_URL + "/rest/v1/education_items?select=id,degree,field_of_study,institution,location&candidate_id=eq." + encodeURIComponent(candidate_id) + "&id=in.(" + eduIds.map(encodeURIComponent).join(",") + ")", {
+          headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": "Bearer " + SUPABASE_SERVICE_ROLE_KEY },
+        }).then((r) => r.ok ? r.json() : []).catch(() => [])
+        : [];
+      const eduById = new Map(eduRows.map((e: any) => [e.id, e]));
       const items = rows.map((r: any) => {
         const isDiscrepancy = r.status === "Discrepancy";
         return {
@@ -147,6 +188,10 @@ export default {
           correctionRequested: isDiscrepancy ? !!r.correction_requested : false,
           correctionNote: isDiscrepancy ? (r.correction_note || null) : null,
           correctionValue: isDiscrepancy ? (r.correction_value || null) : null,
+          candidateNote: r.candidate_note || null,
+          education: r.type === "Education" && r.source_item_id && eduById.get(r.source_item_id)
+            ? { degree: eduById.get(r.source_item_id).degree || "", fieldOfStudy: eduById.get(r.source_item_id).field_of_study || "", institution: eduById.get(r.source_item_id).institution || "", location: eduById.get(r.source_item_id).location || "" }
+            : null,
         };
       });
 
@@ -155,7 +200,7 @@ export default {
       // or a correction being requested — as candidate-stated instead of not at all, and (b) offer
       // the edit/correction surface on any license that isn't already verified. Licenses with a
       // queue row are also in `items` above (type "License"); the client matches them by id.
-      const licUrl = SUPABASE_URL + "/rest/v1/license_items?select=id,state,verification_outcome,queue_item_id,correction_status,correction_reason,correction_message,certification_items(name,issuing_body,license_number)"
+      const licUrl = SUPABASE_URL + "/rest/v1/license_items?select=id,linked_certification_id,state,verification_outcome,verification_reason,verification_detail,queue_item_id,correction_status,correction_reason,correction_message,certification_items(name,issuing_body,license_number)"
         + "&candidate_confirmed=eq.true&candidate_id=eq." + encodeURIComponent(candidate_id) + "&order=created_at.asc,id.asc";
       const licRes = await fetch(licUrl, {
         headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": "Bearer " + SUPABASE_SERVICE_ROLE_KEY },
@@ -166,6 +211,7 @@ export default {
         const qStatus = l.queue_item_id ? queueStatusById.get(l.queue_item_id) : null;
         return {
           id: l.id,
+          linkedCertificationId: l.linked_certification_id || null,
           name: l.certification_items?.name || null,
           issuingBody: l.certification_items?.issuing_body || null,
           licenseNumber: l.certification_items?.license_number || null,
@@ -177,6 +223,7 @@ export default {
           correction: l.correction_status === "requested"
             ? { status: "requested", reason: l.correction_reason || null, message: l.correction_message || null }
             : null,
+          finding: licenseFinding(l, qStatus === "Confirmed"),
         };
       });
 
