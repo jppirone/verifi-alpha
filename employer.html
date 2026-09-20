@@ -2805,6 +2805,14 @@ const __ds_scope = {};
         <div style="font-size:17px;line-height:1.5">Your payment needs a manual check.</div>
         <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">We have your payment but could not confirm it automatically. Reply to your receipt email with the reference and we will sort it out; nothing has been opened.</div>
       </sc-if>
+      <sc-if value="{{ guestStillOpen }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:17px;line-height:1.5">Your one-time view is still open.</div>
+        <div style="font-size:14px;line-height:1.6">It closes at {{ guestWindowEnd }}. Opening it again now is free and does not extend the time. After that it cannot be reopened.</div>
+        <sc-if value="{{ guestError }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:#e2735c;line-height:1.6">{{ guestError }}</div>
+        </sc-if>
+        <button type="button" class="btn btn-primary" style="align-self:flex-start" disabled="{{ guestBusy }}" sc-camel-on-click="{{ guestOpen }}">Open it again</button>
+      </sc-if>
       <sc-if value="{{ guestReady }}" hint-placeholder-val="{{ false }}">
         <div style="font-size:17px;line-height:1.5">Payment confirmed.</div>
         <div style="font-size:14px;line-height:1.6">Opening it now starts your 30 minutes. It cannot be reopened after that. Have your own copy ready, then open it.</div>
@@ -3626,6 +3634,8 @@ class Component extends DCLogic {
       guestPending: !!s.guest && s.guest.state === 'payment_pending',
       guestReview: !!s.guest && s.guest.state === 'payment_review',
       guestReady: !!s.guest && s.guest.state === 'ready_to_open',
+      guestStillOpen: !!s.guest && s.guest.state === 'open',
+      guestWindowEnd: s.guest && s.guest.window_ends_at ? new Date(s.guest.window_ends_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '',
       guestLabel: (s.guest && s.guest.candidate_label) || 'The candidate',
       guestAvailableUntil: s.guest && s.guest.available_until ? this.fmtDate(s.guest.available_until) : '',
       guestAck: !!s.guestAck,
