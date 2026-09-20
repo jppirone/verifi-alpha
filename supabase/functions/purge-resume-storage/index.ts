@@ -14,6 +14,15 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 //     explicit "paths" list (never "everything") and deletes only those paths that are STILL orphans according to the database at that
 //     moment (older than min_age_hours, standard layout, owner folder not a live candidate/verification/document owner); every other
 //     requested path is reported as skipped and left alone.
+//   * "sweep" (a second cron job, every 15 minutes; 2026-09-20): the standing safety net for STRAY files, e.g. upload-resume stored the file
+//     and then its resume_documents insert failed, or only one of its two uploads (original / sanitized render) succeeded. Such a file has no
+//     row, so the queue never learns about it. The sweep deletes a file only when ALL of these hold: it is in the standard
+//     <owner>/<document>/(original.<ext>|sanitized.jpg) layout (anything else is left alone and only counted); no resume_documents row names
+//     its path or is its document folder (checked again per file immediately before deleting); and it is older than min_age_hours (default 24,
+//     never below 1) so an upload still in flight is never touched. Unlike "reconcile" it does NOT require the owner folder to be dead: a
+//     stray from a failed upload sits in a LIVE signup's folder, and that signup row is never deleted, so the strict rule would protect it
+//     forever. That is safe here because a file with no document row cannot be reached by anything in the app. Every deletion is recorded in
+//     resume_storage_purge_queue as an already-purged audit row. dry_run:true only reports. At most 500 files per run.
 // Only the resume-documents bucket is ever touched.
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -38,6 +47,16 @@ async function isReferenced(path: string): Promise<boolean> {
   return ((await r.json()) as unknown[]).length > 0;
 }
 
+// Sweep's per-file re-check: a row names the path, or is the document folder the path sits in. Any doubt (a failed lookup) counts as referenced.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+async function stillReferenced(path: string): Promise<boolean> {
+  const docId = path.split("/")[1] ?? "";
+  if (!UUID_RE.test(docId)) return true;
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/resume_documents?or=(original_storage_path.eq."${path}",sanitized_render_path.eq."${path}",id.eq.${docId})&select=id&limit=1`, { headers: REST });
+  if (!r.ok) return true;
+  return ((await r.json()) as unknown[]).length > 0;
+}
+
 export default {
   fetch: withSupabase({ auth: "none" }, async (req, _ctx) => {
     if (req.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405);
@@ -51,6 +70,43 @@ export default {
     const storage = createClient(SUPABASE_URL, SERVICE_KEY).storage.from(BUCKET);
 
     try {
+      if (body.mode === "sweep") {
+        // ---- sweep mode (see the header)
+        const dryRun = body.dry_run === true;
+        const minAgeHours = Math.min(Math.max(Number(body.min_age_hours ?? 24) || 24, 1), 24 * 365);
+        const oRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/list_orphan_resume_objects`, {
+          method: "POST", headers: { ...REST, "Content-Type": "application/json" }, body: JSON.stringify({ p_min_age: `${minAgeHours} hours`, p_strict: false }),
+        });
+        if (!oRes.ok) return json({ ok: false, error: "orphan_listing_failed", detail: (await oRes.text()).slice(0, 200) }, 500);
+        const found = (await oRes.json()) as { name: string; created_at: string; size: number | null; standard_layout: boolean }[];
+        const candidates = found.filter((o) => o.standard_layout && SAFE_PATH.test(o.name));
+        const leftNonstandard = found.length - candidates.length;
+        const batchToConsider = candidates.slice(0, MAX_PER_RUN);
+        const toDelete: string[] = [];
+        let skippedReferenced = 0;
+        for (const o of batchToConsider) {
+          if (await stillReferenced(o.name)) skippedReferenced++; else toDelete.push(o.name);
+        }
+        let deleted = 0;
+        if (!dryRun) {
+          for (let i = 0; i < toDelete.length; i += BATCH) {
+            const batch = toDelete.slice(i, i + BATCH);
+            const { error } = await storage.remove(batch);
+            if (error) return json({ ok: false, error: "storage_remove_failed", detail: error.message, deleted }, 502);
+            deleted += batch.length;
+            // audit trail: an already-purged queue row per deleted file (a pending row for the same path is left for the queue run to close out)
+            await fetch(`${SUPABASE_URL}/rest/v1/resume_storage_purge_queue?on_conflict=bucket,path`, {
+              method: "POST", headers: { ...REST, "Content-Type": "application/json", "Prefer": "resolution=ignore-duplicates,return=minimal" },
+              body: JSON.stringify(batch.map((path) => ({ path, purged_at: new Date().toISOString() }))),
+            });
+          }
+        }
+        return json({
+          ok: true, mode: "sweep", dry_run: dryRun, min_age_hours: minAgeHours, unreferenced_found: found.length, stray_candidates: candidates.length,
+          considered: batchToConsider.length, skipped_referenced_at_recheck: skippedReferenced, left_nonstandard_layout: leftNonstandard,
+          deleted, would_delete: dryRun ? toDelete.length : undefined, deleted_names: (dryRun ? toDelete : toDelete.slice(0, deleted)).slice(0, 20),
+        });
+      }
       if (body.mode !== "reconcile") {
         // ---- queue mode
         const qRes = await fetch(`${SUPABASE_URL}/rest/v1/resume_storage_purge_queue?purged_at=is.null&bucket=eq.${BUCKET}&select=id,path&order=queued_at.asc&limit=${MAX_PER_RUN}`, { headers: REST });
