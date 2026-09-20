@@ -95,6 +95,28 @@ async function inflate(bytes: Uint8Array, cap: number): Promise<Uint8Array | nul
   return out;
 }
 
+// Just the first n inflated bytes (enough to recognise what a stream holds); stops reading as soon as it has them.
+async function inflateHead(bytes: Uint8Array, n: number): Promise<string | null> {
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    const reader = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate")).getReader();
+    while (total < n) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value); total += value.length;
+    }
+    await reader.cancel();
+  } catch (_e) { /* use what was read */ }
+  if (total === 0) return null;
+  const out = new Uint8Array(total);
+  let o = 0;
+  for (const c of chunks) { out.set(c, o); o += c.length; }
+  return latin1(out.subarray(0, n));
+}
+const looksZlib = (b: Uint8Array) => b.length > 8 && b[0] === 0x78 && (b[1] === 0x01 || b[1] === 0x5e || b[1] === 0x9c || b[1] === 0xda);
+const MAX_SNIFFED_STREAMS = 3000; // beyond this a PDF is refused rather than partly inspected
+
 const PDF_RULES: [RegExp, string][] = [
   [/\/(JavaScript|JS)(?![A-Za-z0-9])/, "pdf_javascript"],
   [/javascript\s*:/i, "pdf_javascript"],
@@ -113,6 +135,7 @@ async function scanPdf(b: Uint8Array, s: string): Promise<ScanFail | null> {
   const hidden: string[] = [];
   let pos = 0;
   let inflatedTotal = 0;
+  let sniffedStreams = 0;
   const startRe = />>\s*stream(\r\n|\n|\r)/g;
   for (;;) {
     startRe.lastIndex = pos;
@@ -122,17 +145,25 @@ async function scanPdf(b: Uint8Array, s: string): Promise<ScanFail | null> {
     const end = s.indexOf("endstream", bodyStart);
     if (end < 0) return fail("damaged");
     objectText.push(s.slice(pos, bodyStart));
-    // the dictionary of this stream: from its "obj" marker to the stream keyword
-    const objAt = s.lastIndexOf("obj", m.index);
-    const dict = s.slice(objAt >= 0 && m.index - objAt < 4000 ? objAt : Math.max(0, m.index - 2000), m.index + 2);
-    if (/\/ObjStm(?![A-Za-z0-9])/.test(dict)) {
-      let bodyEnd = end;
-      while (bodyEnd > bodyStart && (s.charCodeAt(bodyEnd - 1) === 0x0a || s.charCodeAt(bodyEnd - 1) === 0x0d)) bodyEnd--;
-      const body = b.subarray(bodyStart, bodyEnd);
+    // The dictionary of this stream: everything since the end of the previous object (an attacker can pad a dictionary, so no fixed window).
+    const prevEnd = s.lastIndexOf("endobj", m.index);
+    const dict = decodeNames(s.slice(prevEnd >= 0 ? prevEnd : 0, m.index + 2));
+    let bodyEnd = end;
+    while (bodyEnd > bodyStart && (s.charCodeAt(bodyEnd - 1) === 0x0a || s.charCodeAt(bodyEnd - 1) === 0x0d)) bodyEnd--;
+    const body = b.subarray(bodyStart, bodyEnd);
+    let isObjStm = /\/ObjStm(?![A-Za-z0-9])/.test(dict);
+    let sniffed = false;
+    if (!isObjStm && looksZlib(body)) {
+      // Whatever the dictionary says, a stream that inflates to an object-stream index ("12 0 13 45 ...") is one.
+      if (++sniffedStreams > MAX_SNIFFED_STREAMS) return fail("pdf_unscannable");
+      const head = await inflateHead(body, 200);
+      if (head && /^\s*(\d+\s+\d+\s+){1,}/.test(head)) { isObjStm = true; sniffed = true; }
+    }
+    if (isObjStm) {
       const fm = dict.match(/\/Filter\s*(\[[^\]]*\]|\/[A-Za-z0-9]+)/);
       const spec = fm ? fm[1].replace(/[\s\[\]]/g, "") : "";
-      if (!fm) hidden.push(latin1(body));                                              // an uncompressed object stream: plain text
-      else if (spec === "/FlateDecode") {
+      if (!sniffed && !fm) hidden.push(latin1(body));                                  // an uncompressed object stream: plain text
+      else if (sniffed || spec === "/FlateDecode") {
         const out = await inflate(body, 15 * 1024 * 1024);
         if (!out) return fail("pdf_unscannable");
         inflatedTotal += out.length;
