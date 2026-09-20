@@ -84,6 +84,13 @@ async function markGuestPaid(paymentId: string, piId: string): Promise<string> {
     method: "PATCH", headers: { "Prefer": "return=minimal" },
     body: JSON.stringify({ status: "paid", paid_at: new Date().toISOString(), stripe_payment_intent_id: piId, stripe_charge_id: charge ? charge.id : null, receipt_url: charge ? charge.receipt_url || null : null }),
   });
+  // Comparison Stage 3: a guest who has PAID must be able to open. Keep their approved, unopened snapshot alive for at least 24 more hours
+  // (it would otherwise be discarded 7 days after approval, possibly right after they paid).
+  if (p.comparison_request_id) {
+    const cr = (await rows(`comparison_requests?id=eq.${p.comparison_request_id}&status=eq.approved&first_delivered_at=is.null&select=id,snapshot_expires_at`))[0];
+    const floor = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    if (cr && (!cr.snapshot_expires_at || cr.snapshot_expires_at < floor)) await rest(`comparison_requests?id=eq.${cr.id}&first_delivered_at=is.null`, { method: "PATCH", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ snapshot_expires_at: floor }) });
+  }
   // Receipt details may arrive after the status flips; make sure they are stored even if another event won the transition.
   if (charge && charge.receipt_url) await rest(`employer_payments?id=eq.${paymentId}&receipt_url=is.null`, { method: "PATCH", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ receipt_url: charge.receipt_url, stripe_charge_id: charge.id }) });
   return "paid:" + (await sendReceipt(paymentId));

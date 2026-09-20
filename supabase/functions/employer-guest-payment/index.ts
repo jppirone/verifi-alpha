@@ -30,9 +30,8 @@ const corsHeaders = {
 //               guest token (shown once)
 //   status   -> {payment_id, guest_token}: the payment's status; wrong token = the same 404 as an unknown payment
 //
-// lookup_id is optional and NOT yet bound to an approval: the Tier 2 request flow will bind a payment to an approved
-// request. If supplied it must be a completed Tier 1 lookup that matched a candidate (checked, but nothing more is
-// revealed about it).
+// 2026-09-20: "create" is RETIRED. A guest payment is now created only by employer-comparison ("pay"), bound to ONE approved
+// comparison request; this endpoint keeps "pricing" and "status". (The old unbound create is refused with 410.)
 const REST = { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` };
 const JSON_H = { ...REST, "Content-Type": "application/json" };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -74,63 +73,9 @@ export default {
         return json({ ok: true, status: p.status, amount_cents: p.amount_cents, currency: p.currency, paid_at: p.paid_at, redeemed: !!p.redeemed_at, refunded: !!p.refunded_at, receipt_url: p.status === "paid" ? p.receipt_url : null });
       }
 
-      if (action === "create") {
-        const email = typeof body.payer_email === "string" ? body.payer_email.trim().toLowerCase().slice(0, 254) : "";
-        if (!EMAIL.test(email)) return json({ ok: false, error: "payer_email_invalid" }, 400);
-        let lookupId: string | null = null;
-        if (body.lookup_id !== undefined && body.lookup_id !== null) {
-          if (typeof body.lookup_id !== "string" || !UUID.test(body.lookup_id)) return json({ ok: false, error: "lookup_invalid" }, 400);
-          const lk = await rest(`employer_lookup_requests?id=eq.${body.lookup_id}&result_exists=eq.true&used_at=not.is.null&select=id`);
-          if (!lk.ok || !(await lk.json())[0]) return json({ ok: false, error: "lookup_invalid" }, 400);
-          lookupId = body.lookup_id;
-        }
-
-        const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-        const [perEmail, global] = await Promise.all([
-          rest(`employer_payments?payer_email=eq.${encodeURIComponent(email)}&created_at=gte.${encodeURIComponent(since)}&select=id&limit=${PER_EMAIL_PER_HOUR + 1}`),
-          rest(`employer_payments?created_at=gte.${encodeURIComponent(since)}&select=id&limit=${GLOBAL_PER_HOUR + 1}`),
-        ]);
-        if (!perEmail.ok || !global.ok) return json({ ok: false, error: "request_failed" }, 500);
-        if ((await perEmail.json()).length >= PER_EMAIL_PER_HOUR) return json({ ok: false, error: "rate_limited" }, 429);
-        if ((await global.json()).length >= GLOBAL_PER_HOUR) return json({ ok: false, error: "busy" }, 429);
-
-        const guestToken = randomToken();
-        const ins = await rest("employer_payments", {
-          method: "POST", headers: { "Prefer": "return=representation" },
-          body: JSON.stringify({ amount_cents: price.amount_cents, currency: price.currency, payer_email: email, access_token_hash: await sha256Hex(guestToken), lookup_id: lookupId }),
-        });
-        if (!ins.ok) return json({ ok: false, error: "request_failed" }, 500);
-        const pay = (await ins.json())[0];
-
-        const form = new URLSearchParams();
-        form.set("mode", "payment");
-        form.set("customer_email", email);
-        form.set("client_reference_id", pay.id);
-        form.set("metadata[product]", "employer_guest_comparison");
-        form.set("metadata[payment_id]", pay.id);
-        form.set("payment_intent_data[metadata][product]", "employer_guest_comparison");
-        form.set("payment_intent_data[metadata][payment_id]", pay.id);
-        form.set("payment_intent_data[description]", "Verifi comparison access (one-time view)");
-        form.set("line_items[0][quantity]", "1");
-        form.set("line_items[0][price_data][currency]", price.currency);
-        form.set("line_items[0][price_data][unit_amount]", String(price.amount_cents));
-        form.set("line_items[0][price_data][product_data][name]", "Verifi comparison access");
-        form.set("line_items[0][price_data][product_data][description]", "One-time view of a candidate's verified record next to your copy. Not a subscription.");
-        form.set("success_url", `${RETURN_BASE}?payment=success`);
-        form.set("cancel_url", `${RETURN_BASE}?payment=cancel`);
-        const sRes = await fetch("https://api.stripe.com/v1/checkout/sessions", {
-          method: "POST",
-          headers: { "Authorization": `Bearer ${STRIPE_SECRET_KEY}`, "Content-Type": "application/x-www-form-urlencoded", "Idempotency-Key": `employer-guest-${pay.id}` },
-          body: form.toString(),
-        });
-        const session = await sRes.json();
-        if (!sRes.ok || !session.url) {
-          await rest(`employer_payments?id=eq.${pay.id}`, { method: "DELETE" });
-          return json({ ok: false, error: "stripe_error" }, 502);
-        }
-        await rest(`employer_payments?id=eq.${pay.id}`, { method: "PATCH", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ stripe_checkout_session_id: session.id }) });
-        return json({ ok: true, payment_id: pay.id, guest_token: guestToken, checkout_url: session.url, amount_cents: price.amount_cents, currency: price.currency });
-      }
+      // RETIRED 2026-09-20 (comparison Stage 3): a guest payment now exists only bound to ONE approved comparison request, and is created by
+      // employer-comparison ("pay"), not here. An unbound payment could never be redeemed for anything, so creating one is refused.
+      if (action === "create") return json({ ok: false, error: "use_comparison_flow" }, 410);
 
       return json({ ok: false, error: "unknown_action" }, 404);
     } catch (_e) {

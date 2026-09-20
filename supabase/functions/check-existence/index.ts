@@ -178,6 +178,11 @@ export default {
         namesMatch(String(row.candidate_name || ""), c.first_name, c.last_name, c.full_name)
       ) || null;
       const exists = !!matched;
+      // Stage 3 (2026-09-20): a MATCHED lookup mints a one-time CLAIM token. Only its hash is stored (on the lookup); the token itself goes
+      // back in this one response, to the browser that completed the lookup, and is what lets a guest (no employer account) request a
+      // comparison later. A non-match mints and stores nothing, so the no-oracle guarantee is untouched.
+      const claimToken = exists ? Array.from(crypto.getRandomValues(new Uint8Array(32))).map((b) => b.toString(16).padStart(2, "0")).join("") : null;
+      const claimHash = claimToken ? Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(claimToken)))).map((b) => b.toString(16).padStart(2, "0")).join("") : null;
 
       // ---- burn the token: only now, only once, only if still valid ----
       const completedAt = new Date().toISOString();
@@ -194,6 +199,7 @@ export default {
           body: JSON.stringify({
             used_at: completedAt, result_exists: exists, matched_candidate_id: matched ? matched.id : null,
             candidate_label: matched ? String(row.candidate_name || "").slice(0, 120) || null : null,
+            claim_token_hash: claimHash,
             candidate_name: null, candidate_email: null, candidate_phone: null,
           }),
         },
@@ -210,7 +216,7 @@ export default {
       if (!exists) return json({ ok: true, exists: false });
       return json({
         ok: true, exists: true,
-        lookup_id: row.id, completed_at: completedAt,
+        lookup_id: row.id, completed_at: completedAt, claim_token: claimToken,
         // Echo of what the requester themselves typed (the new page load has no other copy of it).
         candidate_name: row.candidate_name, contact_used: row.candidate_email || row.candidate_phone || "",
         requester_name: row.requester_name, requester_company: row.requester_company, requester_email: row.requester_email,

@@ -238,9 +238,34 @@ async function noticeRequesterNotAuthorized(requestId: string): Promise<boolean>
   return ok;
 }
 
+// GUEST approval (Stage 3): the requester has no account, so the approval email carries a link with a random token; only the token's HASH
+// is stored on the request. The token is minted HERE, at send time, and only for a request whose link has never been sent, so a failed send
+// is simply retried by the sweep with a fresh token (nothing is lost, and a link that already went out is never invalidated).
+async function sendGuestLink(requestId: string): Promise<boolean> {
+  const r = (await rows(`comparison_requests?id=eq.${requestId}&select=id,access_method,status,requester_email,requester_name,first_delivered_at,guest_link_sent_at,snapshot_expires_at`))[0];
+  if (!r || r.access_method !== "guest" || r.status !== "approved" || r.first_delivered_at || r.guest_link_sent_at) return false;
+  const token = Array.from(crypto.getRandomValues(new Uint8Array(32))).map((b) => b.toString(16).padStart(2, "0")).join("");
+  const claim = await rest(`comparison_requests?id=eq.${requestId}&guest_link_sent_at=is.null&status=eq.approved`, {
+    method: "PATCH", headers: { "Prefer": "return=representation" },
+    body: JSON.stringify({ guest_link_sent_at: new Date().toISOString(), guest_token_hash: await sha256Hex(token) }),
+  });
+  const claimed = claim.ok ? await claim.json() : [];
+  if (!Array.isArray(claimed) || claimed.length === 0) return false;
+  const price = (await rows("employer_pricing?key=eq.guest_comparison&select=amount_cents,currency"))[0];
+  const money = price ? new Intl.NumberFormat("en-US", { style: "currency", currency: String(price.currency || "usd").toUpperCase() }).format(price.amount_cents / 100) : "a one-time fee";
+  const ok = await sendEmail(
+    r.requester_email,
+    "Your Verifi comparison request was approved",
+    `<p>Hi ${esc(r.requester_name || "there")},</p><p>The candidate approved your comparison request.</p><p><a href="${SITE}/employer.html?comparison=${token}">Open your comparison</a></p><p>This is a <b>one-time view</b>. Nothing is charged until you choose to open it: opening costs ${esc(money)}, and once you do you can read it for 30 minutes. After that it is gone and cannot be reopened, by you or by us. There is no account: this link is the only way in, so keep this email. The link works until ${esc(new Date(r.snapshot_expires_at).toUTCString())} if you do not open it.</p>`,
+  );
+  if (!ok) await rest(`comparison_requests?id=eq.${requestId}`, { method: "PATCH", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ guest_link_sent_at: null, guest_token_hash: null }) });
+  return ok;
+}
+
 async function noticeRequesterApproved(requestId: string): Promise<boolean> {
   const r = (await rows(`comparison_requests?id=eq.${requestId}&select=requester_email,requester_name,access_method,snapshot_expires_at`))[0];
-  if (!r || r.access_method !== "org") return false; // the guest link (which carries a one-time token) is built with the guest path
+  if (r && r.access_method === "guest") return await sendGuestLink(requestId);
+  if (!r || r.access_method !== "org") return false;
   return await sendEmail(
     r.requester_email,
     "Your Verifi comparison request was approved",
@@ -275,7 +300,11 @@ export default {
         const unnotified = await rows(`comparison_requests?status=eq.pending&candidate_notified_at=is.null&created_at=lt.${encodeURIComponent(cutoff)}&select=id&limit=20`);
         let renotified = 0;
         for (const u of unnotified) if ((await notifyCandidate(u.id)).sent) renotified++;
-        return json({ ok: true, expired: exp, requester_notices_sent: noticed, candidate_notices_retried: renotified });
+        // approval links for guests that never went out
+        const unlinked = await rows("comparison_requests?status=eq.approved&access_method=eq.guest&guest_link_sent_at=is.null&first_delivered_at=is.null&select=id&limit=20");
+        let relinked = 0;
+        for (const u of unlinked) if (await sendGuestLink(u.id)) relinked++;
+        return json({ ok: true, expired: exp, requester_notices_sent: noticed, candidate_notices_retried: renotified, guest_links_sent: relinked });
       }
       if (action === "notify_candidate") {
         if (!isServiceCaller(req)) return UNAUTHORIZED();
