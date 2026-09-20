@@ -122,15 +122,39 @@ function mdyToIso(s: string | null | undefined): string | null {
 //    as possibly truncated.
 const DBPR_ROW_CAP = 10;
 
-// "Current, Active" is the only clean pass. Statuses that are definitively not in good standing are
-// "inactive"; everything else (Delinquent, probation, anything unrecognized) is "indeterminate" —
-// a human decides, and it is never treated as a definitive negative.
+// DBPR's Status column is TWO fields joined by a comma, "<primary>[, <secondary>]" (2026-09-20, checked against ~900 live rows
+// across every DBPR board plus the detail pages):
+//   primary   = the state of the LICENSE itself: Current, Delinquent, Null and Void, License Expired, Revoked, Suspended,
+//               Retired, Deceased, Relinquished, ... (or an applicant stage: Application in Progress, Eligible for Exam, ...)
+//   secondary = the licensee's Active / Inactive flag. It only carries meaning when the primary is Current or Delinquent; on a
+//               dead license it is a leftover: a real "Null and Void, Active" row expired 12/31/2021, and a real
+//               "Suspended, Active" row expired in 2018. So the primary governs and a leftover "Active" never rescues it.
+// Only "Current" (bare, or with Active) is a clean pass. "inactive" means definitively not a currently valid license.
+// Everything else is "indeterminate": a human decides, and it is never treated as a definitive negative. Any text this table
+// does not know (a new DBPR status, an unseen secondary) also lands there, deliberately: unknown is never guessed either way.
+// Every string below was seen on a live DBPR row unless marked otherwise.
+// @@classifier-start
+const DBPR_PRIMARY_DEAD = new Set([
+  "null and void", "null & void", "voluntary null & void", "license expired", "revoked", "suspended", "relinquished",
+  "voluntary relinquishment", "license authority voided", "deceased", "retired", "involuntary inactive",
+  // application outcomes, not licenses: the person does not hold one (seen live only on rows with no license number)
+  "denied entry", "application withdrawn",
+]);
 function dbprStanding(status: string): "active" | "inactive" | "indeterminate" {
-  const s = (status || "").toLowerCase();
-  if (/\binactive\b|suspend|revok|\bnull\b|\bvoid\b|expired|denied|closed|cancel|withdrawn/.test(s)) return "inactive";
-  if (/\bactive\b/.test(s) && !/(delinquent|probation)/.test(s)) return "active";
-  return "indeterminate";
+  const parts = (status || "").toLowerCase().replace(/&amp;/g, "&").split(",").map((p) => p.replace(/\s+/g, " ").trim()).filter(Boolean);
+  if (parts.length === 0) return "indeterminate";
+  const primary = parts[0];
+  const secondary = parts.slice(1);
+  if (DBPR_PRIMARY_DEAD.has(primary)) return "inactive";
+  if (primary === "current" || primary === "delinquent") {
+    if (secondary.some((t) => t !== "active" && t !== "inactive")) return "indeterminate"; // an unseen second word (probation, ...)
+    if (secondary.includes("inactive")) return "inactive";
+    // Delinquent = renewal overdue and still in its late window: neither a pass nor a definitive negative, whatever the flag.
+    return primary === "current" ? "active" : "indeterminate";
+  }
+  return "indeterminate"; // applicant stages (Application in Progress, Eligible for Exam, Approved, ...) and anything unrecognized
 }
+// @@classifier-end
 
 const floridaDbpr: JurisdictionAdapter = {
   state: "FL",
