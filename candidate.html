@@ -3575,7 +3575,7 @@ a:hover{color:var(--color-accent)}
     <button type="button" id="tab-sharing" class="btn {{ tabSharingClass }}" sc-camel-on-click="{{ selectTabSharing }}">Sharing</button>
     </sc-if>
     <button type="button" id="tab-subscription" class="btn {{ tabSubscriptionClass }}" sc-camel-on-click="{{ selectTabSubscription }}">Subscription</button>
-    <button type="button" id="tab-activity" class="btn {{ tabActivityClass }}" sc-camel-on-click="{{ selectTabActivity }}">Activity</button>
+    <button type="button" id="tab-activity" class="btn {{ tabActivityClass }}" sc-camel-on-click="{{ selectTabActivity }}">{{ tabActivityLabel }}</button>
     <button type="button" id="tab-deactivation" class="btn {{ tabDeactivationClass }}" sc-camel-on-click="{{ selectTabDeactivation }}">{{ deactivationTabLabel }}</button>
     </div>
   </div>
@@ -4788,15 +4788,30 @@ a:hover{color:var(--color-accent)}
               <div class="card-kicker">Confirm</div>
               <div style="font-size:13px;color:var(--color-neutral-200);line-height:1.6">{{ empConfirmText }}</div>
               <div style="display:flex;gap:var(--space-3)">
-                <button type="button" class="btn btn-primary" style="font-size:12px" sc-camel-on-click="{{ confirmEmpAllow }}">Approve now</button>
-                <button type="button" class="btn btn-ghost" style="font-size:12px" sc-camel-on-click="{{ cancelEmpAllow }}">Cancel</button>
+                <button type="button" class="btn btn-primary" style="font-size:12px" disabled="{{ empBusy }}" sc-camel-on-click="{{ confirmEmpAllow }}">{{ empApproveLabel }}</button>
+                <button type="button" class="btn btn-ghost" style="font-size:12px" disabled="{{ empBusy }}" sc-camel-on-click="{{ cancelEmpAllow }}">Cancel</button>
               </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ empLoadError }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:#e2735c;line-height:1.6">We couldn't load your employer requests. <a href="#" sc-camel-on-click="{{ retryEmpLoad }}">Try again</a></div>
+          </sc-if>
+
+          <sc-if value="{{ snapshotOpen }}" hint-placeholder-val="{{ false }}">
+            <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
+              <div class="card-kicker">What was shared</div>
+              <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.6">{{ snapshotHeading }}</div>
+              <sc-for list="{{ snapshotLines }}" as="line" hint-placeholder-count="3">
+                <div style="font-size:13px;color:var(--color-neutral-200);line-height:1.6">{{ line }}</div>
+              </sc-for>
+              <a href="#" style="font-size:12px" sc-camel-on-click="{{ closeSnapshot }}">Close</a>
             </div>
           </sc-if>
 
           <sc-if value="{{ empNoticeOpen }}" hint-placeholder-val="{{ false }}">
             <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2);border:1px dashed var(--color-divider)">
-              <div class="card-kicker">Prototype only: notification</div>
+              <div class="card-kicker">Update</div>
               <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.6">{{ empNoticeText }}</div>
               <a href="#" style="font-size:12px" sc-camel-on-click="{{ dismissEmpNotice }}">Dismiss</a>
             </div>
@@ -4836,10 +4851,7 @@ a:hover{color:var(--color-accent)}
                       </div>
                     </sc-if>
                     <sc-if value="{{ row.isApproved }}" hint-placeholder-val="{{ false }}">
-                      <a href="#" style="font-size:12px" sc-camel-on-click="{{ row.onOpenSnapshot }}">View comparison snapshot</a>
-                    </sc-if>
-                    <sc-if value="{{ row.canAllowNow }}" hint-placeholder-val="{{ false }}">
-                      <button type="button" class="btn btn-ghost" style="font-size:12px" sc-camel-on-click="{{ row.onAllowNow }}">Allow now</button>
+                      <a href="#" style="font-size:12px" sc-camel-on-click="{{ row.onOpenSnapshot }}">See what was shared</a>
                     </sc-if>
                   </sc-raw-td>
                 </sc-raw-tr>
@@ -4857,7 +4869,7 @@ a:hover{color:var(--color-accent)}
             </div>
           </div>
 
-          <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">{{ tier1UnconfirmedLine }}</div>
+          <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Lookups that did not match a record are not kept, so they are not listed. Employers see only that a record exists; they see nothing about it unless you approve a comparison request.</div>
         </div>
       </div>
       </sc-if>
@@ -7147,8 +7159,8 @@ class Component extends DCLogic {
     czFlashField: null, czFlashFading: false, czResetFlash: false, czResetFading: false,
     activityStart: this.defaultActivityStart(), activityEnd: this.defaultActivityEnd(),
     activityLog: this.seedActivityLog(),
-    employerActivity: this.seedEmployerActivity(), tier1UnconfirmedCount: 7,
-    empPage: 0, empConfirmId: null, empNotice: null,
+    comparison: { loaded: false, loading: false, error: false, pending: [], history: [], tier1: [], would: null },
+    empPage: 0, empConfirmId: null, empNotice: null, empBusy: false, snapshotView: null,
     // Item A (2026-09-08 regression session): these all start genuinely blank — no real email/phone
     // exists yet at getInitialState() time (before signup/login even happens), so nothing safe can
     // be seeded here. seedContactFromAccount() (see its own header) fills these in for real, once,
@@ -7261,88 +7273,141 @@ class Component extends DCLogic {
     }));
   }
 
-  seedEmployerActivity() {
-    return [
-      { id: 'ea1', tier: 2, domain: 'northwindtalent.com', date: '2026-08-28T15:20:00', status: 'pending', attestation: 'Applied through our job board on Aug 24, resume submitted by the candidate.', history: [] },
-      { id: 'ea2', tier: 1, domain: 'brightline-freight.com', date: '2026-08-27T09:05:00', shown: true },
-      { id: 'ea3', tier: 2, domain: 'acme-inc.com', date: '2026-08-25T11:40:00', status: 'approved', attestation: 'Resume emailed to the hiring manager by the candidate.', history: ['Approved Aug 25'] },
-      { id: 'ea4', tier: 2, domain: 'harborline-properties.com', date: '2026-08-22T16:10:00', status: 'declined', attestation: 'Copy forwarded by a third-party recruiter, original source not named.', history: ['Declined Aug 22'] },
-      { id: 'ea5', tier: 1, domain: 'summitstaffing.com', date: '2026-08-20T13:15:00', shown: false },
-      { id: 'ea6', tier: 2, domain: 'orion-logistics.com', date: '2026-08-18T10:00:00', status: 'closed', attestation: 'Downloaded from a job board profile, board not named.', history: ['Request closed Aug 21'] },
-      { id: 'ea7', tier: 1, domain: 'meridianhr.com', date: '2026-08-15T08:45:00', shown: true },
-      { id: 'ea8', tier: 2, domain: 'crestpoint.co', date: '2026-08-12T14:30:00', status: 'approved', attestation: 'Provided by the candidate during a phone screen.', history: ['Declined Aug 10', 'Approved Aug 12'] },
-      { id: 'ea9', tier: 2, domain: 'vertexstaffing.com', date: '2026-08-08T09:30:00', status: 'closed', attestation: 'Received from an internal referral, source not named.', history: ['Request closed Aug 11'] },
-      { id: 'ea10', tier: 1, domain: 'lakeshore-industrial.com', date: '2026-08-05T14:05:00', shown: true },
-    ];
-  }
-
+  // Employer activity (2026-09-20, comparison Stage 1): REAL data from candidate-comparison-requests, gated by this candidate's own session.
+  // This block used to be seeded with fake employers and a client-only approve/decline; nothing here is fabricated any more. Approve and
+  // decline are server actions, and what an approval shares is decided on the server (only items confirmed AND verified).
   empDateLabel(iso) {
     return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   }
 
-  empShortDate() {
-    return new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  async comparisonCall(body) {
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/candidate-comparison-requests', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify(Object.assign({ session_token: this.candidateSessionToken(), candidate_id: this.state.resumeCandidateId }, body)),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) { return { status: 0, data: {} }; }
+    return { status: res.status, data: data || {} };
+  }
+
+  ensureComparisonLoaded(force) {
+    const s = this.state;
+    if (!s.resumeCandidateId || s.accountType === 'license_only' || s.comparison.loading) return;
+    if (!force && s.comparison.loaded) return;
+    this.loadComparison();
+  }
+
+  async loadComparison() {
+    this.setState(st => ({ comparison: Object.assign({}, st.comparison, { loading: true, error: false }) }));
+    const r = await this.comparisonCall({ action: 'list' });
+    if (!r.data.ok) { this.setState(st => ({ comparison: Object.assign({}, st.comparison, { loading: false, loaded: true, error: true }) })); return; }
+    this.setState({ comparison: { loaded: true, loading: false, error: false, pending: r.data.pending || [], history: r.data.history || [], tier1: r.data.tier1 || [], would: r.data.would_share || null } });
+  }
+
+  empRequesterLabel(rq) {
+    const who = [rq.name, rq.company].filter(Boolean).join(', ');
+    return (who ? who + ' \u00b7 ' : '') + rq.email + (rq.domain_type === 'personal' ? ' (personal email address)' : '');
   }
 
   employerSorted() {
-    return this.state.employerActivity.slice().sort((a, b) => (a.date < b.date ? 1 : -1));
+    const c = this.state.comparison;
+    const cmp = c.pending.concat(c.history).map(r => ({ kind: 'compare', id: r.id, date: r.created_at, r: r }));
+    const t1 = c.tier1.map(t => ({ kind: 'lookup', id: 'l-' + t.id, date: t.date, t: t }));
+    return cmp.concat(t1).sort((x, y) => (x.date < y.date ? 1 : -1));
   }
 
   empPageCount() {
-    return Math.max(1, Math.ceil(this.state.employerActivity.length / 5));
+    return Math.max(1, Math.ceil(this.employerSorted().length / 5));
   }
 
   getEmployerSummaryLines() {
-    const t2 = this.state.employerActivity.filter(e => e.tier === 2);
-    const n = (st) => t2.filter(e => e.status === st).length;
-    const parts = [n('approved') + ' approved', n('declined') + ' declined', n('closed') + ' closed with no response'];
-    const pending = n('pending');
+    const c = this.state.comparison;
+    const all = c.pending.concat(c.history);
+    const n = (st) => all.filter(e => e.status === st).length;
+    const pending = c.pending.length;
     return [
-      parts.join(', ') + '.',
+      n('approved') + ' approved, ' + n('declined') + ' declined, ' + all.filter(e => e.status === 'expired' && !e.approved_at).length + ' closed with no response, ' + all.filter(e => e.status === 'expired' && e.approved_at).length + ' approved and since ended.',
       pending === 1 ? '1 request is waiting on your answer.' : pending + ' requests are waiting on your answer.',
     ];
   }
 
   getEmployerRows() {
     const start = this.state.empPage * 5;
-    const labels = { pending: 'Pending', approved: 'Approved', declined: 'Declined', closed: 'Closed, no response' };
-    return this.employerSorted().slice(start, start + 5).map(e => {
-      const tier2 = e.tier === 2;
-      const history = e.history || [];
+    return this.employerSorted().slice(start, start + 5).map(item => {
+      if (item.kind === 'lookup') {
+        const t = item.t;
+        return {
+          id: item.id, domain: (t.company ? t.company + ' \u00b7 ' : '') + t.domain, dateLabel: this.empDateLabel(t.date),
+          typeLabel: 'Existence lookup', attestation: '', statusLabel: 'Confirmed that a record exists for you', trail: '', hasTrail: false,
+          isPending: false, isApproved: false, onApprove: () => {}, onDecline: () => {}, onOpenSnapshot: () => {},
+        };
+      }
+      const r = item.r;
+      const closes = r.expires_at ? this.empDateLabel(r.expires_at) : '';
+      const statusLabel = r.status === 'pending' ? 'Waiting on your answer (closes ' + closes + ')'
+        : r.status === 'approved' ? (r.delivered ? 'Approved, opened by the employer ' + this.empDateLabel(r.first_delivered_at) : 'Approved, not yet opened')
+        : r.status === 'declined' ? 'Declined'
+        : (r.approved_at ? 'Approved; access has ended' : 'Closed, no response');
       return {
-        id: e.id,
-        domain: e.domain,
-        dateLabel: this.empDateLabel(e.date),
-        typeLabel: tier2 ? 'Tier 2 comparison request' : 'Tier 1 existence lookup',
-        attestation: tier2 ? (e.attestation || '') : '',
-        statusLabel: tier2 ? (labels[e.status] || '') : (e.shown ? 'Record shown' : 'Record hidden (opted out)'),
-        trail: history.join(' \u2192 '),
-        hasTrail: history.length > 1,
-        isPending: tier2 && e.status === 'pending',
-        isApproved: tier2 && e.status === 'approved',
-        canAllowNow: tier2 && (e.status === 'declined' || e.status === 'closed'),
-        onApprove: () => this.answerEmployerRequest(e.id, 'approved'),
-        onDecline: () => this.answerEmployerRequest(e.id, 'declined'),
-        onAllowNow: () => this.setState({ empConfirmId: e.id }),
-        onOpenSnapshot: (ev) => { if (ev && ev.preventDefault) ev.preventDefault(); this.setState({ placeholderModalOpen: true }); },
+        id: r.id, domain: this.empRequesterLabel(r.requester), dateLabel: this.empDateLabel(r.created_at),
+        typeLabel: 'Comparison request', attestation: r.attestation || '', statusLabel: statusLabel, trail: '', hasTrail: false,
+        isPending: r.status === 'pending', isApproved: r.status === 'approved' && r.snapshot_available,
+        onApprove: () => this.setState({ empConfirmId: r.id }),
+        onDecline: () => this.respondToRequest(r.id, 'decline'),
+        onOpenSnapshot: (ev) => { if (ev && ev.preventDefault) ev.preventDefault(); this.openSnapshot(r); },
       };
     });
   }
 
-  answerEmployerRequest(id, status) {
-    const entry = this.state.employerActivity.find(e => e.id === id);
-    if (!entry) return;
-    const stamp = (status === 'approved' ? 'Approved ' : 'Declined ') + this.empShortDate();
-    this.setState(st => ({
-      employerActivity: st.employerActivity.map(e => e.id === id
-        ? Object.assign({}, e, { status: status, history: (e.history || []).concat([stamp]) })
-        : e),
-      empConfirmId: null,
-      empNotice: status === 'approved'
-        ? 'An email went to ' + entry.domain + ' telling them the comparison is now open to them. Nothing is actually delivered in this prototype.'
-        : 'An email went to ' + entry.domain + ' telling them the request closed without access, with no reason given. Nothing is actually delivered in this prototype.',
-    }));
-    this.addActivityLog('Comparison request ' + status + ' for ' + entry.domain);
+  empWouldShareText() {
+    const w = this.state.comparison.would;
+    if (!w || !w.verified_total) return null;
+    const part = (n, one, many) => (n ? n + ' ' + (n === 1 ? one : many) : '');
+    return [part(w.work.verified, 'job', 'jobs'), part(w.education.verified, 'education entry', 'education entries'), part(w.certifications.verified, 'certification or license', 'certifications and licenses')].filter(Boolean).join(', ');
+  }
+
+  async respondToRequest(id, decision) {
+    if (this.state.empBusy) return;
+    const r = this.state.comparison.pending.find(x => x.id === id);
+    this.setState({ empBusy: true, empNotice: null });
+    const res = await this.comparisonCall({ action: 'respond', request_id: id, decision: decision });
+    const code = res.data && res.data.error;
+    let notice;
+    if (res.data.ok) {
+      notice = decision === 'approve'
+        ? 'Approved. ' + (res.data.employer_notified ? 'They have been emailed and can now open it.' : "We couldn't email them, but they can open it from their account.")
+        : 'Declined. ' + (res.data.employer_notified ? 'They were emailed that the request was not authorized, with no reason given.' : 'They will be emailed that the request was not authorized, with no reason given.');
+      this.addActivityLog('Comparison request ' + (decision === 'approve' ? 'approved' : 'declined') + (r ? ' for ' + r.requester.email : ''));
+    } else {
+      notice = code === 'nothing_to_share' ? "You don't have any verified items yet, so there is nothing to share. You can decline, or wait until some of your items are verified."
+        : code === 'expired' ? 'That request closed before you answered.'
+        : code === 'not_pending' ? 'That request was already answered.'
+        : "That didn't work. Please try again.";
+    }
+    this.setState({ empBusy: false, empConfirmId: null, empNotice: notice });
+    await this.loadComparison();
+  }
+
+  async openSnapshot(r) {
+    const res = await this.comparisonCall({ action: 'view_snapshot', request_id: r.id });
+    if (!res.data.ok) { this.setState({ empNotice: 'That snapshot is no longer available.' }); await this.loadComparison(); return; }
+    this.setState({ snapshotView: { requester: r.requester, content: res.data.content, assembledAt: res.data.assembled_at } });
+  }
+
+  getSnapshotLines() {
+    const v = this.state.snapshotView;
+    if (!v || !v.content) return [];
+    const c = v.content;
+    const how = (x) => (x.verification && x.verification.method === 'state_registry' ? 'checked against the state registry' : 'verified by Verifi review') + (x.verification && x.verification.verified_on ? ', ' + x.verification.verified_on : '');
+    const range = (a, b, cur) => [a, cur ? 'present' : b].filter(Boolean).join(' - ');
+    const lines = [];
+    (c.work || []).forEach(w => lines.push('Job: ' + [w.title, w.employer, w.location].filter(Boolean).join(', ') + (range(w.start, w.end, w.current) ? ' (' + range(w.start, w.end, w.current) + ')' : '') + ' \u2014 ' + how(w)));
+    (c.education || []).forEach(e => lines.push('Education: ' + [e.degree, e.field_of_study, e.institution, e.location].filter(Boolean).join(', ') + (range(e.start, e.end) ? ' (' + range(e.start, e.end) + ')' : '') + ' \u2014 ' + how(e)));
+    (c.certifications || []).forEach(x => lines.push('Certification: ' + [x.name, x.issuer, x.license_number ? 'Lic #' + x.license_number : '', x.license_state, x.issued].filter(Boolean).join(', ') + ' \u2014 ' + how(x)));
+    return lines;
   }
 
   addActivityLog(activity) {
@@ -7399,6 +7464,7 @@ class Component extends DCLogic {
     // Customization/Views had nothing real to read regardless of the fixture-vs-real-data fix
     // itself. Loaded once per session here, covering all three tabs no matter which is opened first.
     this.ensureResumeExtractionLoaded();
+    this.ensureComparisonLoaded();
   }
 
   // Item 8 (2026-09-11 status-check session): the real backend write behind tour_completed_at —
@@ -11107,7 +11173,7 @@ class Component extends DCLogic {
       correctionSubmitError: !!s.correctionSubmitError,
       employerSummaryLines: this.getEmployerSummaryLines(),
       employerRows: this.getEmployerRows(),
-      empPageLabel: 'Page ' + (s.empPage + 1) + ' of ' + this.empPageCount() + ', ' + s.employerActivity.length + ' entries.',
+      empPageLabel: 'Page ' + (s.empPage + 1) + ' of ' + this.empPageCount() + ', ' + this.employerSorted().length + ' entries.',
       empCanPrev: s.empPage > 0,
       empNoPrev: s.empPage === 0,
       empCanNext: s.empPage < this.empPageCount() - 1,
@@ -11116,19 +11182,26 @@ class Component extends DCLogic {
       empNextPage: () => this.setState({ empPage: Math.min(this.empPageCount() - 1, s.empPage + 1) }),
       empConfirmOpen: !!s.empConfirmId,
       empConfirmText: (() => {
-        const e = s.employerActivity.find(x => x.id === s.empConfirmId);
+        const e = s.comparison.pending.find(x => x.id === s.empConfirmId);
         if (!e) return '';
-        const lead = e.status === 'declined'
-          ? 'You previously declined this request.'
-          : 'This request closed without a response from you.';
-        return lead + ' Approving now will let ' + e.domain + ' see your comparison. This cannot be undone once you approve. Confirm?';
+        const what = this.empWouldShareText();
+        if (!what) return "You don't have any verified items yet, so there is nothing to share with " + this.empRequesterLabel(e.requester) + '. You can decline, or wait until some of your items are verified.';
+        return 'Approve ' + this.empRequesterLabel(e.requester) + '? They will see only items you confirmed that Verifi has verified, as they stand right now: ' + what + '. Your other items are not shown or described. If they never open it, it is discarded after 7 days; once opened it stays available to them for up to 90 days. You cannot undo an approval.';
       })(),
-      confirmEmpAllow: () => this.answerEmployerRequest(s.empConfirmId, 'approved'),
+      empApproveLabel: s.empBusy ? 'Approving…' : 'Approve and share',
+      empBusy: s.empBusy,
+      confirmEmpAllow: () => { if (this.empWouldShareText()) this.respondToRequest(s.empConfirmId, 'approve'); else this.setState({ empConfirmId: null }); },
       cancelEmpAllow: () => this.setState({ empConfirmId: null }),
       empNoticeOpen: !!s.empNotice,
       empNoticeText: s.empNotice || '',
       dismissEmpNotice: (e) => { pd(e); this.setState({ empNotice: null }); },
-      tier1UnconfirmedLine: s.tier1UnconfirmedCount + ' unconfirmed lookup attempts this period. Nothing is kept about these, so there are no individual entries to show.',
+      empLoadError: !!s.comparison.error,
+      retryEmpLoad: (e) => { pd(e); this.ensureComparisonLoaded(true); },
+      snapshotOpen: !!s.snapshotView,
+      snapshotHeading: s.snapshotView ? ('What ' + this.empRequesterLabel(s.snapshotView.requester) + ' was shown, as of ' + this.empDateLabel(s.snapshotView.assembledAt) + ':') : '',
+      snapshotLines: this.getSnapshotLines(),
+      closeSnapshot: (e) => { pd(e); this.setState({ snapshotView: null }); },
+      tabActivityLabel: 'Activity' + (s.accountType !== 'license_only' && s.comparison.pending.length ? ' (' + s.comparison.pending.length + ')' : ''),
       exportVerifiedData: () => this.exportVerifiedData(),
       exportVerifiedDataLink: (e) => { pd(e); this.exportVerifiedData(); },
       tabIsSharing: s.accountTab === 'sharing',
@@ -11184,7 +11257,7 @@ class Component extends DCLogic {
       }),
       selectTabSharing: () => this.guardedNav(() => this.setState({ accountTab: 'sharing' })),
       selectTabSubscription: () => this.guardedNav(() => this.setState({ accountTab: 'subscription' })),
-      selectTabActivity: () => this.guardedNav(() => { this.setState({ accountTab: 'activity' }); if (s.accountType === 'license_only') this.ensureLicenseActivityLoaded(true); }),
+      selectTabActivity: () => this.guardedNav(() => { this.setState({ accountTab: 'activity' }); if (s.accountType === 'license_only') this.ensureLicenseActivityLoaded(true); else this.ensureComparisonLoaded(true); }),
       selectTabDeactivation: () => this.guardedNav(() => this.setState({ accountTab: 'deactivation' })),
       mobileNavOpen: s.mobileNavOpen,
       mobileNavOpenStr: s.mobileNavOpen ? 'true' : 'false',
