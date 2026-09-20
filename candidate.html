@@ -7607,25 +7607,37 @@ class Component extends DCLogic {
       endDate: this.isoPartialDate(e.end_date, e.end_date_precision),
       verification: tally(verificationFor(bySource.get(e.id))),
     }));
+    // A license's own check result, worded exactly as the Verification Status tab words it: a staff/registry queue row wins; else a
+    // registry match is 'verified'; else it went out as the candidate stated it, with the same reason the tab gives.
+    const licenseCheck = (l) => {
+      const q = l.queueItemId ? items.find(i => i.id === l.queueItemId) : null;
+      if (q) return verificationFor(q);
+      if (l.outcome === 'verified') return { status: 'verified', label: 'Verified', note: 'This license matched the state registry.' };
+      const reason = !l.state ? "No issuing state was provided, so it couldn't be checked automatically."
+        : l.outcome === 'not_found' ? "It wasn't found in the state registry under the details provided."
+        : "Automatic checks aren't available for this state yet.";
+      return { status: l.correction ? 'action_needed' : 'candidate_stated', label: l.correction ? 'Action needed' : 'Candidate-stated',
+        note: 'Sent as you stated it, not independently verified. ' + reason };
+    };
     let certificates;
     if ((ex.certifications || []).length) {
       certificates = ex.certifications.map(c => {
-        const lic = (ex.license_items || []).find(l => l.linked_certification_id === c.id);
-        // a license's automatic registry check lives on its own queue row; prefer it, else the certification's own row
-        const row = (lic && items.find(i => i.type === 'License' && i.sourceItemId === lic.id)) || bySource.get(c.id);
+        const li = (ex.license_items || []).find(x => x.linked_certification_id === c.id);
+        const lic = li ? licenses.find(l => l.id === li.id) : null;
         return clean({
           name: c.name, issuer: c.issuing_body,
           date: this.isoPartialDate(c.issue_date, c.issue_date_precision),
           expirationDate: this.isoPartialDate(c.expiration_date, c.expiration_date_precision),
-          licenseNumber: c.license_number, licenseState: lic ? lic.state : undefined,
-          verification: tally(verificationFor(row)),
+          licenseNumber: c.license_number, licenseState: li ? li.state : undefined,
+          verification: tally(verificationFor(bySource.get(c.id))),
+          licenseCheck: lic ? licenseCheck(lic) : undefined,
         });
       });
     } else {
-      // licence-only accounts have no resume: their licences come from the verification payload
+      // licence-only accounts have no resume: their licences come from the verification payload, and the licence check IS the verification
       certificates = licenses.map(l => clean({
         name: l.name, issuer: l.issuingBody, licenseNumber: l.licenseNumber, licenseState: l.state,
-        verification: tally(verificationFor(items.find(i => i.type === 'License' && i.sourceItemId === l.id))),
+        verification: tally(licenseCheck(l)),
       }));
     }
     // the candidate's own saved (generic) summary if they have one, else the summary printed on their resume; partner-specific saved versions are listed separately
