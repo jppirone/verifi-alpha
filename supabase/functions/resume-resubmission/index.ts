@@ -363,6 +363,19 @@ const FACT_COLS: Record<string, Record<string, string[]>> = {
 const DESCRIPTIVE_COLS = ["position", "heading", "extraction_confidence"];
 const NEEDS_REVIEW_NOTE = (f: Rec) => `Auto-flagged: unstructured content from the candidate's resume that didn't map to a defined category (heading: ${JSON.stringify(f.heading || "(none)")}). Not independently validated against the uploaded document the way the structured fields above it are — review for anything that reads like an inserted job-description-style claim rather than content genuinely present on the original resume. Full content:\n\n${f.content || ""}`;
 
+// The record a CHANGED item becomes: the verified record with ONLY the changed facts rewritten (a fact the new file omits, or states in a way the
+// matcher treats as the same, keeps its verified value). One function so the plan the candidate reviews and the update apply commits can never
+// disagree about the claim text.
+function mergeFacts(kind: string, o: Rec, n: Rec, changes: Change[]): { facts: Record<string, unknown>; clearContact: boolean; merged: Rec } {
+  const facts: Record<string, unknown> = {}; let clearContact = false;
+  for (const ch of changes) {
+    for (const col of FACT_COLS[kind][ch.field] || []) facts[col] = n[col] ?? null;
+    if (kind === "work" && ch.field === "company") clearContact = true; // a different employer: the old contact details no longer apply
+  }
+  if (clearContact) Object.assign(facts, { employer_name_override: null, employer_location_override: null, contact_phone: null, contact_name: null });
+  return { facts, clearContact, merged: { ...o, ...facts } };
+}
+
 // ctx = what computePlan read and matched (active rows a*, staged rows s*, the queue rows, the match results). Returns the INSTRUCTIONS the SQL apply
 // executes, plus what must happen after the commit (license checks, contact details).
 function buildOps(c: any, optIn: OptIn, newDoc: string, baseDoc: string | null) {
@@ -430,14 +443,9 @@ function buildOps(c: any, optIn: OptIn, newDoc: string, baseDoc: string | null) 
         continue;
       }
       // CHANGED: rewrite only the facts that changed; everything the new file omitted keeps its verified value
-      const fields: Record<string, unknown> = { ...desc };
-      let clearContact = false;
-      for (const ch of p.changes) {
-        for (const col of FACT_COLS[kind][ch.field] || []) fields[col] = n[col] ?? null;
-        if (kind === "work" && ch.field === "company") clearContact = true; // a different employer: the old contact details no longer apply
-      }
-      if (clearContact) Object.assign(fields, { employer_name_override: null, employer_location_override: null, contact_phone: null, contact_name: null });
-      const merged = { ...o, ...fields };
+      const mf = mergeFacts(kind, o, n, p.changes);
+      const fields: Record<string, unknown> = { ...desc, ...mf.facts };
+      const merged = mf.merged;
       const newClaim = (claim as any)[kind](merged);
       const existing = rowsOf(o.id, QTYPE[kind])[0] || null;
       const lic = kind === "certification" ? aLic.get(o.id) : null;
@@ -598,7 +606,7 @@ async function computePlan(resub: any, doc: any): Promise<{ plan: any; fingerpri
           kind, item_id: o.id, staged_id: n.id, label: label[kind](o), changes: p.changes, ambiguous: p.ambiguous, flags: p.flags,
           verification_before: v ? (v as any).status ?? null : null,
           verification_after: v ? "New (re-verified)" : "not in verification (no queue row before)",
-          new_claim: claim[kind](n),
+          new_claim: claim[kind](mergeFacts(kind, o, n, p.changes).merged),
         });
         if (v) optCount[kind]++;
       }

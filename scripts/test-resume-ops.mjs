@@ -9,7 +9,7 @@ import { stripTypeScriptTypes } from "node:module";
 
 const src = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../supabase/functions/resume-resubmission/index.ts"), "utf8");
 const cut = (a, b) => { const i = src.indexOf(a), j = src.indexOf(b); if (i < 0 || j < 0) throw new Error("markers " + a); return src.slice(i, j); };
-const js = stripTypeScriptTypes(cut("// @@matcher-start", "// @@matcher-end") + "\n" + cut("// @@ops-start", "// @@ops-end")) + "\nexport { matchWork, matchEducation, matchCertifications, matchTexts, buildOps };\n";
+const js = stripTypeScriptTypes(cut("// @@matcher-start", "// @@matcher-end") + "\n" + cut("// @@ops-start", "// @@ops-end")) + "\nexport { matchWork, matchEducation, matchCertifications, matchTexts, buildOps, mergeFacts };\n";
 const tmp = path.join(os.tmpdir(), `ops-${process.pid}.mjs`); fs.writeFileSync(tmp, js);
 const M = await import(pathToFileURL(tmp).href); fs.unlinkSync(tmp);
 
@@ -150,6 +150,22 @@ console.log("== LICENSES: reset (registry asked again after commit) or attach; n
   const cert = ce("Plumber", "DBPR", { license_number: "CFC1425829" }), lic = { id: uid(), linked_certification_id: cert.id, state: "FL", updated_at: TS }, lq = vqRow("License", lic.id, "Confirmed", "x");
   const { ops, verifyIds } = build(ctx({ aC: [cert], aL: [lic], sC: [copyOf(cert)], sL: [{ id: uid(), linked_certification_id: "x", state: "FL" }], vq: [lq] }));
   t("an UNCHANGED license is kept: no reset, no re-check, its queue row untouched", ops.kept.length === 1 && ops.changed.length === 0 && verifyIds.length === 0 && !JSON.stringify({ ...ops, guard: null }).includes(lq.id));
+}
+
+console.log("== the plan and the apply build the SAME claim (found live: an extracted license number 'SCC 131151265' vs the verified 'SCC131151265')");
+{
+  const cert = ce("Certified Specialty Contractor", "State of Florida (DBPR)", { license_number: "SCC131151265" }), lic = { id: uid(), linked_certification_id: cert.id, state: null, queue_item_id: null, updated_at: TS };
+  const sc = copyOf(cert, { license_number: "SCC 131151265" }), sl = { id: uid(), linked_certification_id: sc.id, state: "FL", state_source: "resume", state_evidence: "DBPR", updated_at: TS };
+  const c = ctx({ aC: [cert], aL: [lic], sC: [sc], sL: [sl], vq: [vqRow("Certification", cert.id, "Confirmed", "Certified Specialty Contractor, State of Florida (DBPR), Lic #SCC131151265")] });
+  const p = c.C.pairs[0], mf = M.mergeFacts("certification", c.oldCert[0], c.newCert[0], p.changes);
+  const { ops } = build(c);
+  t("only the license STATE changed; the spaced number is the same license, so the verified number is kept", p.changes.length === 1 && p.changes[0].field === "license_state" && mf.merged.license_number === "SCC131151265" && !("license_number" in mf.facts), JSON.stringify(p.changes));
+  t("the reset queue row's claim (what apply stores) equals the merged claim (what the plan shows)", ops.changed[0].queue.claim === "Certified Specialty Contractor, State of Florida (DBPR), Lic #SCC131151265");
+}
+{
+  const job = wk("Truven", "Manager", "2014", "2019", { employer_name_override: "Truven Health", contact_phone: "555" }), n2 = copyOf(job, { company: "IBM Watson Health", employer_name_override: null });
+  const mf = M.mergeFacts("work", job, n2, [{ field: "company", kind: "conflict", before: "Truven Health", after: "IBM Watson Health" }]);
+  t("mergeFacts: a company change clears the old contact details and the merged record carries the new company", mf.clearContact && mf.merged.company === "IBM Watson Health" && mf.merged.contact_phone === null && mf.merged.title === "Manager");
 }
 
 console.log("== freeform and skills");
