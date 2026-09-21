@@ -146,6 +146,8 @@ type Assembled = { kind: Kind; content: any; notCleared: NotCleared[]; licenses:
 const LICENSE_REASON: Record<string, string> = {
   no_exact_name_match: "The state registry record for this license number is under a different name than the one on this account.",
   exact_match_not_active: "Found in the state registry, but not currently active.",
+  // a license a periodic re-check found no longer active after it had been verified (2026-09-21): a different finding from one that never was
+  lapsed_since_verified: "Previously verified; the state registry now lists this license as not currently active.",
   no_records: "No record was found in the state registry for this license number.",
 };
 const LICENSE_REASON_GENERIC = "The automatic check could not confirm this license.";
@@ -165,7 +167,7 @@ function reportReasonKey(outcome: unknown, reason: unknown): string {
   if (outcome === "unsupported_jurisdiction") return "no_registry_for_state";
   if (!outcome || outcome === "incomplete") return "not_checked";
   if (outcome === "not_found") return "no_records";
-  if (reason === "no_exact_name_match" || reason === "exact_match_not_active") return String(reason);
+  if (reason === "no_exact_name_match" || reason === "exact_match_not_active" || reason === "lapsed_since_verified") return String(reason);
   if (reason === "lookup_failed" || reason === "recent_name_change") return "under_review";
   return "generic";
 }

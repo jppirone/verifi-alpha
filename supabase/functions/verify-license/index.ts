@@ -290,6 +290,49 @@ async function statusReport(supabase: any, candidateId: string, licenseItemId: s
   return { ok: true, cached: false, checked_at: checkedAt, ...summary };
 }
 
+// ---------------------------------------------------------------------------------------------------------------------------
+// recheck_lookup (periodic re-check of already-Confirmed licenses, 2026-09-21). SERVICE-ONLY and READ-ONLY: our own scheduled job
+// (recheck-licenses) calls it, once per license, to ask the registry again. It uses the SAME adapter and decide() as every other check, so the
+// classifier lives in exactly one place, and it writes NOTHING (no cache, no queue row, no license_items change): what to do with the answer
+// is decided by the caller and applied only through the database function apply_license_downgrade, which can only ever move Confirmed ->
+// Needs Reconciliation. It re-checks eligibility itself (defense in depth; the caller's list already filtered): a license is looked up only if it
+// is a registry pass (verification_outcome 'verified') whose License queue row is still Confirmed and was not changed by staff since the
+// automatic pass. A staff-confirmed license therefore never causes a registry call. The name/number/state used are returned as `expect` so the
+// database can refuse the downgrade if any of them changed while the lookup ran. (The name derivation below mirrors statusReport's on purpose;
+// statusReport was left untouched because the license-report product depends on it.)
+// ---------------------------------------------------------------------------------------------------------------------------
+async function recheckLookup(supabase: any, candidateId: string, licenseItemId: string): Promise<any> {
+  const { data: item } = await supabase.from("license_items").select("id, state, linked_certification_id, verification_outcome, verified_at, queue_item_id").eq("id", licenseItemId).eq("candidate_id", candidateId).maybeSingle();
+  if (!item) return { ok: false, error: "license_item_not_found" };
+  if (item.verification_outcome !== "verified" || !item.verified_at || !item.queue_item_id) return { ok: true, status: "not_eligible" };
+  const { data: q } = await supabase.from("verification_items").select("type, status, status_changed_at").eq("id", item.queue_item_id).maybeSingle();
+  if (!q || q.type !== "License" || q.status !== "Confirmed" || Date.parse(q.status_changed_at) > Date.parse(item.verified_at) + 120_000) return { ok: true, status: "not_eligible" };
+  const state = normalizeState(item.state);
+  const adapter = state ? ADAPTERS[state] : undefined;
+  if (!state || !adapter) return { ok: true, status: "skipped", why: state ? "no_adapter" : "no_state" };
+  const { data: cert } = await supabase.from("certification_items").select("license_number").eq("id", item.linked_certification_id).eq("candidate_id", candidateId).maybeSingle();
+  const { data: cand } = await supabase.from("candidates").select("first_name, last_name, full_name").eq("id", candidateId).maybeSingle();
+  let firstName = (cand?.first_name || "").trim();
+  let lastName = (cand?.last_name || "").trim();
+  if (!lastName && cand?.full_name) { const parts = String(cand.full_name).trim().split(/\s+/); firstName = parts[0] || ""; lastName = parts.slice(1).join(" "); }
+  const licenseNumber = adapter.normalizeLicenseNumber((cert?.license_number || "").trim());
+  const have: Record<RequiredField, string> = { license_number: licenseNumber, first_name: firstName, last_name: lastName };
+  const missing = adapter.requiredFields.filter((f) => !have[f]);
+  if (missing.length) return { ok: true, status: "skipped", why: "missing_" + missing.join("_") };
+  const lookup = await adapter.lookup({ licenseNumber, firstName, lastName });
+  if (!lookup.ok) return { ok: false, error: "lookup_failed" };
+  const d = decide(lookup);
+  return {
+    ok: true, status: "checked", outcome: d.outcome, reason: d.reason, checked_at: new Date().toISOString(),
+    expect: { license_number: licenseNumber, state, first_name: firstName, last_name: lastName, verified_at: item.verified_at },
+    detail: {
+      searched: { license_number: licenseNumber, first_name: firstName, last_name: lastName, state },
+      records: lookup.records, capped: lookup.capped, lookup_error: null, matched_record: d.matched,
+      registry_expiration: d.matched ? d.matched.expiration : null, name_change_hold: null,
+    },
+  };
+}
+
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 
 function escHtml(s: unknown): string {
@@ -442,7 +485,7 @@ export default {
       // defer_notice and notify_corrections are only ever sent by our own functions (confirm-resume-data, update-license-details,
       // update-profile-name), so they need the service-role key. A plain candidate-triggered check (candidate_id +
       // license_item_id, idempotent and rate-limited by its cooldown) stays open, as before.
-      const serviceOnly = reqBody.after_correction === true || reqBody.defer_notice === true || reqBody.action === "notify_corrections" || reqBody.action === "status_report";
+      const serviceOnly = reqBody.after_correction === true || reqBody.defer_notice === true || reqBody.action === "notify_corrections" || reqBody.action === "status_report" || reqBody.action === "recheck_lookup";
       if (serviceOnly || reqBody.staff_rerun === true) {
         const caller = await authenticateStaffOrService(req, reqBody, { staff: !serviceOnly, service: true });
         if (!caller) return json({ ok: false, error: "unauthorized" }, 401);
@@ -472,6 +515,10 @@ export default {
       if (reqBody.action === "status_report") {
         if (!candidate_id || !license_item_id) return json({ ok: false, error: "candidate_id and license_item_id are required" }, 400);
         return json(await statusReport(supabase, candidate_id, license_item_id, Number(reqBody.max_age_seconds)));
+      }
+      if (reqBody.action === "recheck_lookup") {
+        if (!candidate_id || !license_item_id) return json({ ok: false, error: "candidate_id and license_item_id are required" }, 400);
+        return json(await recheckLookup(supabase, candidate_id, license_item_id));
       }
       const staffRerun = staff_rerun === true;
       const afterCorrection = after_correction === true;

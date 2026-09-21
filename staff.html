@@ -2381,7 +2381,7 @@ th.sortable{cursor:pointer;user-select:none}
               <sc-raw-td style="white-space:nowrap;font-size:12px;color:var(--color-neutral-400)">{{ row.followUpDisp }}</sc-raw-td>
               <sc-raw-td style="max-width:240px;font-size:12px;color:var(--color-neutral-500)">
                 <sc-if value="{{ row.registryFlag }}" hint-placeholder-val="{{ false }}">
-                  <div style="margin-bottom:4px"><span class="tag tag-outline" style="color:#b26a00;border-color:#b26a00;white-space:nowrap">License found · not active</span></div>
+                  <div style="margin-bottom:4px"><span class="tag tag-outline" style="color:#b26a00;border-color:#b26a00;white-space:nowrap">{{ row.registryFlagText }}</span></div>
                 </sc-if>
                 <sc-if value="{{ row.hasCandidateNote }}" hint-placeholder-val="{{ false }}">
                   <div style="margin-bottom:4px"><span class="tag tag-outline" style="white-space:nowrap">Candidate note</span></div>
@@ -2667,7 +2667,7 @@ th.sortable{cursor:pointer;user-select:none}
         <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.5">Runs automatically when a candidate confirms a license with a state and number. Unlike the manual checks, its result sets this item's status: Confirmed on a clean match, Needs Reconciliation when unclear, Discrepancy (staff re-run only) when the registry lists an exact match as not in good standing. Uses the stored data below — nothing is typed by hand.</div>
         <sc-if value="{{ licNotActive }}" hint-placeholder-val="{{ false }}">
           <div style="border:1px solid #b26a00;border-radius:8px;padding:var(--space-3);display:flex;flex-direction:column;gap:4px">
-            <span class="tag tag-outline" style="align-self:flex-start;color:#b26a00;border-color:#b26a00">License found · name matches · not currently active</span>
+            <span class="tag tag-outline" style="align-self:flex-start;color:#b26a00;border-color:#b26a00">{{ licNotActiveTag }}</span>
             <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">{{ licNotActiveText }}</div>
             <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.5">The automatic check does not reject this on its own: it goes to staff as Needs Reconciliation. A staff re-run of the check is what can set Discrepancy.</div>
           </div>
@@ -2954,7 +2954,13 @@ class Component extends DCLogic {
   // True for a License queue item whose last automatic check found the license in the registry with a correct name match, but the
   // registry lists it as not currently valid (verify-license reason code exact_match_not_active). Read from stored data only.
   isNotActiveMatch(it) {
-    return !!(it && it.type === 'License' && it.licenseData && it.licenseData.reason === 'exact_match_not_active');
+    return !!(it && it.type === 'License' && it.licenseData && (it.licenseData.reason === 'exact_match_not_active' || it.licenseData.reason === 'lapsed_since_verified'));
+  }
+
+  // True when the license WAS verified (a registry pass) and the periodic re-check later found it no longer active (reason lapsed_since_verified): a
+  // different finding from one that was never valid. The queue row was returned to Needs Reconciliation automatically; nothing was sent to the candidate.
+  isLapsedAfterVerified(it) {
+    return !!(it && it.type === 'License' && it.licenseData && it.licenseData.reason === 'lapsed_since_verified');
   }
 
   statusTagClass(status) {
@@ -3827,6 +3833,7 @@ class Component extends DCLogic {
       receivedDisp: this.fmt(it.received), desiredDisp: this.fmt(it.desired), followUpDisp: this.fmt(it.followUp),
       automatedCheck: it.automatedCheck, status: it.status, statusTagClass: this.statusTagClass(it.status),
       registryFlag: this.isNotActiveMatch(it),
+      registryFlagText: this.isLapsedAfterVerified(it) ? 'Was verified · now not active' : 'License found · not active',
       hasCandidateNote: !!it.candidateNote,
       assignedTo: it.assignedTo,
       correctionRequested: !!it.correctionRequested,
@@ -4016,7 +4023,7 @@ class Component extends DCLogic {
       // license is not currently valid (expired, null and void, inactive, ...). It lands in the queue as Needs Reconciliation.
       findingFilterOptions: [
         { value: '', label: 'All' },
-        { value: 'not_active', label: 'License found, name matches, not active' },
+        { value: 'not_active', label: 'License found, name matches, not active (incl. lapsed after verification)' },
       ],
       hasAnyFilterActive: !!(s.nameFilter.trim() || s.itemIdFilter.trim() || s.typeFilter || s.findingFilter),
       clearFilters: () => this.setState({ nameFilter: '', itemIdFilter: '', typeFilter: '', findingFilter: '' }),
@@ -4145,12 +4152,14 @@ class Component extends DCLogic {
       licNumber: selected && selected.licenseData ? (selected.licenseData.licenseNumber || '—') : '',
       licHolder: selected ? (selected.candidateName || '—') : '',
       licNotActive: !!(selected && this.isNotActiveMatch(selected)),
+      licNotActiveTag: selected && this.isLapsedAfterVerified(selected) ? 'Was verified · periodic re-check found it no longer active' : 'License found · name matches · not currently active',
       licNotActiveText: (() => {
         if (!selected || !this.isNotActiveMatch(selected)) return '';
         const m = selected.licenseData.registryMatch || {};
         const bits = ['Registry status: ' + (m.statusText || 'not recorded') + '.'];
         if (m.licenseType) bits.push('License type: ' + m.licenseType + '.');
         if (m.expiration) bits.push('Registry expiration: ' + m.expiration + '.');
+        if (this.isLapsedAfterVerified(selected)) bits.unshift('This license passed the registry check earlier; the scheduled re-check now finds it not active, so it was returned here automatically.');
         return bits.join(' ');
       })(),
       licLastOutcome: selected && selected.licenseData ? ((selected.licenseData.outcome || 'not checked') + (selected.licenseData.reason ? ' (' + selected.licenseData.reason + ')' : '')) : '',
