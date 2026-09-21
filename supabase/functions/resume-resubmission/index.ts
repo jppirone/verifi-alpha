@@ -503,15 +503,16 @@ export default {
         if (!base) return json({ ok: false, error: "no_confirmed_resume" }, 409);
         const open = (await rows(`resume_resubmissions?candidate_id=eq.${cid}&status=in.(${OPEN.join(",")})&select=id,status&limit=1`))[0];
         if (open) return json({ ok: false, error: "resubmission_in_progress", resubmission_id: open.id, status: open.status }, 409);
-        // Leftover uploads of earlier FAILED attempts (kept so staff could see the failure) are discarded now that the candidate is trying again.
-        for (const f of await rows(`resume_resubmissions?candidate_id=eq.${cid}&status=eq.failed&resume_document_id=not.is.null&select=id,resume_document_id`)) {
-          await discardAttemptDoc(cid, f.resume_document_id);
-        }
         const now = Date.now();
         const day = await rows(`resume_resubmissions?candidate_id=eq.${cid}&created_at=gt.${encodeURIComponent(new Date(now - 24 * 3600 * 1000).toISOString())}&select=created_at&order=created_at.asc`);
         const month = await rows(`resume_resubmissions?candidate_id=eq.${cid}&created_at=gt.${encodeURIComponent(new Date(now - 30 * 24 * 3600 * 1000).toISOString())}&select=created_at&order=created_at.asc`);
         if (day.length >= RATE_PER_DAY) return json({ ok: false, error: "rate_limited", window: "day", limit: RATE_PER_DAY, retry_after_seconds: Math.max(60, Math.ceil((new Date(day[0].created_at).getTime() + 24 * 3600 * 1000 - now) / 1000)) }, 429);
         if (month.length >= RATE_PER_30_DAYS) return json({ ok: false, error: "rate_limited", window: "30_days", limit: RATE_PER_30_DAYS, retry_after_seconds: Math.max(60, Math.ceil((new Date(month[0].created_at).getTime() + 30 * 24 * 3600 * 1000 - now) / 1000)) }, 429);
+        // Only once the attempt is really going ahead (not rate-limited): leftover uploads of earlier FAILED attempts, kept so staff could see the
+        // failure, are discarded now that the candidate is trying again.
+        for (const f of await rows(`resume_resubmissions?candidate_id=eq.${cid}&status=eq.failed&resume_document_id=not.is.null&select=id,resume_document_id`)) {
+          await discardAttemptDoc(cid, f.resume_document_id);
+        }
         const ins = await fetch(`${SUPABASE_URL}/rest/v1/resume_resubmissions`, {
           method: "POST", headers: { ...REST, "Content-Type": "application/json", "Prefer": "return=representation" },
           body: JSON.stringify({ candidate_id: cid, base_document_id: base.id, status: "uploading", ack_at: new Date().toISOString(), ack_text_version: ACK_TEXT_VERSION }),
