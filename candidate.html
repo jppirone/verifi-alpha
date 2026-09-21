@@ -12796,7 +12796,7 @@ class Component extends DCLogic {
         if (btn && related && btn.parentElement && btn.parentElement.contains(related)) return;
         this.setState({ helpMenuOpen: false });
       },
-      helpChatLabel: s.screen === 'account' ? this.getTourSteps().find(t => t.tab === s.accountTab).title : 'your account',
+      helpChatLabel: s.screen === 'account' ? ((this.getTourSteps().find(t => t.tab === s.accountTab) || {}).title || (s.accountTab === 'resumeUpdate' ? 'Update my resume' : 'your account')) : 'your account',
       helpLaunchTour: () => { const steps = this.getTourSteps(); this.setState({ helpMenuOpen: false, screen: 'account', accountTab: steps[s.tourStep] ? steps[s.tourStep].tab : 'profile', tourActive: true }, () => this.measureTourTarget()); },
       helpTabProfile: () => this.setState({ helpMenuOpen: false, helpTabModalTab: 'profile' }),
       helpTabVerification: () => this.setState({ helpMenuOpen: false, helpTabModalTab: 'verification' }),
