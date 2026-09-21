@@ -205,6 +205,18 @@ function isValidBoundaryResult(x: unknown): x is BoundaryResult {
   );
 }
 
+// The Skills block's own literal heading (2026-09-21). NO extraction prompt carries it (adding a field to those prompts measurably changed how one job
+// bullet was transcribed, so they stay byte-for-byte as they were): it comes from the section-boundary step, the call that already reads every section's
+// heading to classify it. The first section that step called "skills" and gave a non-empty heading supplies it. When the boundary step failed, found no
+// skills section, or gave that section no heading, the answer is "" and every screen falls back to "Skills" exactly as before. Nothing is stored when no
+// skills were extracted (a heading with nothing under it belongs to nothing). One string per resume; whitespace collapsed, length-capped.
+function cleanHeading(s: unknown): string { return typeof s === "string" ? s.replace(/\s+/g, " ").trim().slice(0, 200) : ""; }
+function resolveSkillsHeading(boundaries: BoundaryResult | null | undefined, extraction: { skills?: unknown }): string {
+  if (!boundaries || !Array.isArray(extraction.skills) || !extraction.skills.some((x) => typeof x === "string" && x.trim())) return "";
+  const b = boundaries.sections.find((s) => s.category === "skills" && cleanHeading(s.heading));
+  return b ? cleanHeading(b.heading) : "";
+}
+
 // STEP 2 OF 2 support: renders step 1's already-decided boundaries into the block step 2's prompt
 // includes — this is what actually enforces "do not independently re-judge category". Mirrors
 // rasterize-pdf-page's buildSectionBoundaryBlock exactly, minus the continuation-context branch,
@@ -660,6 +672,7 @@ type ExtractionResult = {
   education: Array<{ institution: string; degree: string; field_of_study: string; location?: string; start_date: string; end_date: string; extraction_confidence: string; position?: number; heading?: string }>;
   certifications: Array<{ name: string; issuing_body: string; license_number?: string; issue_date: string; expiration_date: string; extraction_confidence: string; position?: number; heading?: string }>;
   skills: Array<string>;
+  skills_heading?: string;
   skills_position?: number | null;
   freeform: Array<{ section_type: string; heading: string; content: string; position?: number }>;
 };
@@ -1318,6 +1331,11 @@ function mergeExtractions(pages: Array<{ pageNumber: number; extraction: Extract
     certifications: pages.flatMap(({ pageNumber, extraction }) =>
       extraction.certifications.map((c) => ({ ...c, position: globalizePosition(pageNumber, c.position) ?? undefined }))),
     skills: pages.flatMap(({ extraction }) => extraction.skills),
+    // the first page that reported the skills block's heading (a skills list that runs onto a later page has no heading there)
+    skills_heading: (() => {
+      const withHeading = pages.find(({ extraction }) => !!cleanHeading(extraction.skills_heading));
+      return withHeading ? cleanHeading(withHeading.extraction.skills_heading) : "";
+    })(),
     // Only one page can sensibly claim "the" skills block position — the first page that actually
     // reported one. A resume with skills split oddly across pages is a real edge case this doesn't
     // try to solve; it just doesn't crash or silently pick an arbitrary later page instead.
@@ -1533,6 +1551,7 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
     p_certifications: merged.certifications,
     p_skills: merged.skills,
     p_skills_position: merged.skills_position ?? null,
+    p_skills_heading: merged.skills_heading || null,
     p_freeform: merged.freeform,
     p_ocr_text: combinedOcrText,
     p_candidate_location: merged.candidate_location || null,
@@ -1829,6 +1848,7 @@ export default {
         let extraction: ExtractionResult;
         try {
           extraction = dedupePositions(await runVisionExtraction(sanitized_base64, sectionBoundaries));
+          extraction.skills_heading = resolveSkillsHeading(sectionBoundaries, extraction);
         } catch (visionErr) {
           await supabase.from("resume_documents").update({ extraction_status: "failed" }).eq("id", docId);
           return new Response(JSON.stringify({ ok: false, error: "vision_extraction_failed", detail: String(visionErr), resume_document_id: docId }), {
@@ -1850,6 +1870,7 @@ export default {
           p_certifications: extraction.certifications,
           p_skills: extraction.skills,
           p_skills_position: extraction.skills_position ?? null,
+          p_skills_heading: extraction.skills_heading || null,
           p_freeform: extraction.freeform,
           // Explicit null, not omitted: this path is vision-only by construction (that's the whole
           // reason it exists — see this branch's own header), so there is no OCR text and never

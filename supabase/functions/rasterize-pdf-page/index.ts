@@ -554,6 +554,18 @@ type BoundarySection = {
 
 type BoundaryResult = { sections: BoundarySection[] };
 
+// The Skills block's own literal heading (2026-09-21). NO extraction prompt carries it (adding a field to those prompts measurably changed how one job
+// bullet was transcribed, so they stay byte-for-byte as they were): it comes from the section-boundary step, the call that already reads every section's
+// heading to classify it. The first section that step called "skills" and gave a non-empty heading supplies it. When the boundary step failed, found no
+// skills section, or gave that section no heading, the answer is "" and every screen falls back to "Skills" exactly as before. Nothing is stored when no
+// skills were extracted (a heading with nothing under it belongs to nothing). One string per resume; whitespace collapsed, length-capped.
+function cleanHeading(s: unknown): string { return typeof s === "string" ? s.replace(/\s+/g, " ").trim().slice(0, 200) : ""; }
+function resolveSkillsHeading(boundaries: BoundaryResult | null | undefined, extraction: { skills?: unknown }): string {
+  if (!boundaries || !Array.isArray(extraction.skills) || !extraction.skills.some((x) => typeof x === "string" && x.trim())) return "";
+  const b = boundaries.sections.find((s) => s.category === "skills" && cleanHeading(s.heading));
+  return b ? cleanHeading(b.heading) : "";
+}
+
 const BOUNDARY_SCHEMA_SHAPE = `{
   "sections": [
     { "heading": string, "category": "work_history" | "education" | "certifications" | "skills" | "summary" | "hobbies_other" | "unknown", "is_continuation_of_previous_page": boolean }
@@ -886,6 +898,7 @@ type ExtractionResult = {
   education: Array<{ institution: string; degree: string; field_of_study: string; location?: string; start_date: string; end_date: string; extraction_confidence: string; position?: number; heading?: string }>;
   certifications: Array<{ name: string; issuing_body: string; license_number?: string; issue_date: string; expiration_date: string; extraction_confidence: string; position?: number; heading?: string }>;
   skills: Array<string>;
+  skills_heading?: string;
   skills_position?: number | null;
   freeform: Array<{ section_type: string; heading: string; content: string; position?: number }>;
 };
@@ -1539,6 +1552,7 @@ export default {
         extraction = await runHaikuExtraction(ocrText, trailingContext, sectionBoundaries, modelCalls);
         extractionMs = Date.now() - haikuStart;
       }
+      extraction.skills_heading = resolveSkillsHeading(sectionBoundaries, extraction);
 
       return new Response(JSON.stringify({
         ok: true,

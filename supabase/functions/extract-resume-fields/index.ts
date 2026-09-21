@@ -80,6 +80,18 @@ type BoundarySection = { heading: string; category: BoundaryCategory };
 
 type BoundaryResult = { sections: BoundarySection[] };
 
+// The Skills block's own literal heading (2026-09-21). NO extraction prompt carries it (adding a field to those prompts measurably changed how one job
+// bullet was transcribed, so they stay byte-for-byte as they were): it comes from the section-boundary step, the call that already reads every section's
+// heading to classify it. The first section that step called "skills" and gave a non-empty heading supplies it. When the boundary step failed, found no
+// skills section, or gave that section no heading, the answer is "" and every screen falls back to "Skills" exactly as before. Nothing is stored when no
+// skills were extracted (a heading with nothing under it belongs to nothing). One string per resume; whitespace collapsed, length-capped.
+function cleanHeading(s: unknown): string { return typeof s === "string" ? s.replace(/\s+/g, " ").trim().slice(0, 200) : ""; }
+function resolveSkillsHeading(boundaries: BoundaryResult | null | undefined, extraction: { skills?: unknown }): string {
+  if (!boundaries || !Array.isArray(extraction.skills) || !extraction.skills.some((x) => typeof x === "string" && x.trim())) return "";
+  const b = boundaries.sections.find((s) => s.category === "skills" && cleanHeading(s.heading));
+  return b ? cleanHeading(b.heading) : "";
+}
+
 const BOUNDARY_SCHEMA_SHAPE = `{
   "sections": [
     { "heading": string, "category": "work_history" | "education" | "certifications" | "skills" | "summary" | "hobbies_other" | "unknown" }
@@ -612,6 +624,7 @@ type ExtractionResult = {
   education: Array<{ institution: string; degree: string; field_of_study: string; location?: string; start_date: string; end_date: string; extraction_confidence: string; position?: number; heading?: string }>;
   certifications: Array<{ name: string; issuing_body: string; license_number?: string; issue_date: string; expiration_date: string; extraction_confidence: string; position?: number; heading?: string }>;
   skills: Array<string>;
+  skills_heading?: string;
   skills_position?: number | null;
   freeform: Array<{ section_type: string; heading: string; content: string; position?: number }>;
 };
@@ -788,6 +801,7 @@ export default {
       const currentCandidateId = freshDoc?.candidate_id ?? doc.candidate_id;
 
       dedupePositions(parsed);
+      parsed.skills_heading = resolveSkillsHeading(sectionBoundaries, parsed);
       const { error: rpcErr } = await supabase.rpc("insert_resume_extraction", {
         p_resume_document_id: resume_document_id,
         p_candidate_id: currentCandidateId,
@@ -796,6 +810,7 @@ export default {
         p_certifications: parsed.certifications,
         p_skills: parsed.skills,
         p_skills_position: parsed.skills_position ?? null,
+        p_skills_heading: parsed.skills_heading || null,
         p_freeform: parsed.freeform,
         // This path only ever runs once real OCR text exists — extraction_status must already be
         // 'ocr_done' to reach here at all (see the check above) — so doc.ocr_raw_text (already
