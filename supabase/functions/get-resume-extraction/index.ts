@@ -144,7 +144,7 @@ export default {
         const authDenied = await authGateCandidate(req, authBody);
         if (authDenied) return authDenied;
       }
-      const { candidate_id } = await req.json();
+      const { candidate_id, resume_document_id: wantedDocumentId } = await req.json();
       if (!candidate_id) {
         return new Response(JSON.stringify({ ok: false, error: "candidate_id is required" }), {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -158,7 +158,7 @@ export default {
       // intentional skip back into resumeConfirm forever.
       // employer_contact_resolved_at added for Item C (2026-09-08): same class of signal, one step
       // later in the flow — see checkEmployerContactIncomplete's own header in candidate.html.
-      const RESUME_DOC_SELECT = "id, original_storage_path, original_filename, mime_type, extraction_status, uploaded_at, continued_without_data_at, employer_contact_resolved_at, candidate_location, printed_header, license_detection_status, extraction_page_count, extraction_lease_until, extraction_progress_at, extraction_stalls";
+      const RESUME_DOC_SELECT = "id, original_storage_path, original_filename, mime_type, extraction_status, uploaded_at, continued_without_data_at, employer_contact_resolved_at, candidate_location, printed_header, license_detection_status, extraction_page_count, extraction_lease_until, extraction_progress_at, extraction_stalls, kind, supersedes_document_id";
 
       // Item (2026-09-14 live-testing session, real bug found in production data): this used to
       // order by uploaded_at alone — the single most recent row, full stop, with no regard for
@@ -179,10 +179,14 @@ export default {
       // (both null, the ordinary still-reviewing-my-first-upload case; or, in principle, both set,
       // which confirm-resume-data's own once-only conditional PATCH should make effectively
       // impossible in practice).
-      const { data: doc, error: docErr } = await supabase
-        .from("resume_documents")
-        .select(RESUME_DOC_SELECT)
-        .eq("candidate_id", candidate_id)
+      // Resume resubmission, Stage 1 (2026-09-21): a candidate's staged RESUBMISSION document (an upload made after confirmation, not yet applied)
+      // must never be what "the candidate's resume" resolves to: it would send them back into the first-resume review flow and show unreviewed
+      // rows as their profile. So the default read is the initial documents plus any CONFIRMED document (an applied resubmission becomes the
+      // current record in Stage 2). The review flow reads a specific document by asking for it, which is still scoped to this candidate.
+      let docQuery = supabase.from("resume_documents").select(RESUME_DOC_SELECT).eq("candidate_id", candidate_id);
+      if (typeof wantedDocumentId === "string" && /^[0-9a-f-]{36}$/i.test(wantedDocumentId)) docQuery = docQuery.eq("id", wantedDocumentId);
+      else docQuery = docQuery.or("kind.eq.initial,confirmed_at.not.is.null");
+      const { data: doc, error: docErr } = await docQuery
         .order("confirmed_at", { ascending: false, nullsFirst: false })
         .order("uploaded_at", { ascending: false })
         .limit(1)

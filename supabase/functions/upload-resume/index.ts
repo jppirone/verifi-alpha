@@ -1670,6 +1670,14 @@ export default {
       // identifier if it does).
       let linkColumn: "candidate_id" | "email_verification_id";
       let linkValue: string;
+      let resubClaim: { id: string; base: string | null } | null = null; // set when this upload is a resume resubmission (see the candidate_id branch)
+      const releaseResubClaim = async () => {
+        if (!resubClaim) return;
+        await fetch(`${SUPABASE_URL}/rest/v1/resume_resubmissions?id=eq.${resubClaim.id}&resume_document_id=is.null&status=eq.extracting`, {
+          method: "PATCH", headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "uploading", updated_at: new Date().toISOString() }),
+        }).catch(() => {});
+      };
       if (hasCand) {
         const { data: candRow, error: candErr } = await supabase
           .from("candidates").select("id").eq("id", candidate_id).single();
@@ -1680,6 +1688,42 @@ export default {
         }
         linkColumn = "candidate_id";
         linkValue = candidate_id;
+
+        // Resume resubmission, Stage 1 (2026-09-21). An upload into an existing account used to be accepted whether or not the candidate had
+        // already confirmed a resume, with no limit; confirm-resume-data would then happily confirm the second document and duplicate every item and
+        // queue row. Now:
+        //   * a candidate WITH a confirmed resume may only upload as a resubmission, through an open attempt that recorded the acknowledgement
+        //     (resume-resubmission "start"), for a full_resume account; anything else is refused;
+        //   * a candidate without one keeps the old "try a different file" behaviour, capped at 12 uploads per 24 hours (every upload costs a full
+        //     extraction).
+        const restRead = { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` };
+        const readRows = async (p: string): Promise<any[]> => { const r = await fetch(`${SUPABASE_URL}/rest/v1/${p}`, { headers: restRead }); return r.ok ? await r.json() : []; };
+        const confirmedDocs = await readRows(`resume_documents?candidate_id=eq.${candidate_id}&confirmed_at=not.is.null&select=id&order=confirmed_at.desc&limit=1`);
+        const wantsResub = typeof body.resubmission_id === "string" && body.resubmission_id !== "";
+        if (confirmedDocs.length && !wantsResub) {
+          return new Response(JSON.stringify({ ok: false, error: "already_confirmed", message: "Your resume is already confirmed. Use Update my resume to submit a new one." }), {
+            status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        if (wantsResub) {
+          if (!/^[0-9a-f-]{36}$/i.test(body.resubmission_id)) return jsonResponse({ ok: false, error: "resubmission_id_invalid" }, 400);
+          const acct = (await readRows(`candidates?id=eq.${candidate_id}&select=account_type,deletion_scheduled_at`))[0];
+          if (!acct || acct.account_type !== "full_resume" || acct.deletion_scheduled_at || !confirmedDocs.length) {
+            return jsonResponse({ ok: false, error: "resubmission_not_allowed" }, 403);
+          }
+          // Claim the open attempt atomically (uploading -> extracting): two uploads can never both proceed for one acknowledgement.
+          const claim = await fetch(`${SUPABASE_URL}/rest/v1/resume_resubmissions?id=eq.${body.resubmission_id.toLowerCase()}&candidate_id=eq.${candidate_id}&status=eq.uploading&resume_document_id=is.null`, {
+            method: "PATCH", headers: { ...restRead, "Content-Type": "application/json", "Prefer": "return=representation" },
+            body: JSON.stringify({ status: "extracting", updated_at: new Date().toISOString() }),
+          });
+          const claimed = claim.ok ? await claim.json() : [];
+          if (!claimed.length) return jsonResponse({ ok: false, error: "resubmission_not_open" }, 409);
+          resubClaim = { id: claimed[0].id, base: claimed[0].base_document_id };
+        } else {
+          const since = encodeURIComponent(new Date(Date.now() - 24 * 3600 * 1000).toISOString());
+          const recent = await readRows(`resume_documents?candidate_id=eq.${candidate_id}&uploaded_at=gt.${since}&select=id`);
+          if (recent.length >= 12) return jsonResponse({ ok: false, error: "too_many_uploads", message: "Too many uploads today. Please try again tomorrow." }, 429);
+        }
       } else {
         const { data: evRow, error: evErr } = await supabase
           .from("email_verifications")
@@ -1712,6 +1756,7 @@ export default {
       }
       const [origUpload, sanUpload] = await Promise.all(uploads);
       if (origUpload.error || sanUpload?.error) {
+        await releaseResubClaim();
         return new Response(JSON.stringify({
           ok: false, error: "storage_upload_failed",
           detail: { original: origUpload.error?.message, sanitized: sanUpload?.error?.message },
@@ -1723,6 +1768,7 @@ export default {
         .insert({
           id: docId,
           [linkColumn]: linkValue,
+          ...(resubClaim ? { kind: "resubmission", supersedes_document_id: resubClaim.base } : {}),
           original_storage_path: originalPath,
           original_filename: original_filename ?? null,
           mime_type,
@@ -1735,9 +1781,16 @@ export default {
         .select()
         .single();
       if (insertErr) {
+        await releaseResubClaim();
         return new Response(JSON.stringify({ ok: false, error: "db_insert_failed", detail: insertErr.message }), {
           status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
+      }
+      if (resubClaim) {
+        await fetch(`${SUPABASE_URL}/rest/v1/resume_resubmissions?id=eq.${resubClaim.id}`, {
+          method: "PATCH", headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ resume_document_id: docId, updated_at: new Date().toISOString() }),
+        }).catch(() => {});
       }
 
       // PDF branch: one page per rasterize-pdf-page call, per the real memory-ceiling finding that

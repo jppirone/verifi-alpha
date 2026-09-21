@@ -104,7 +104,7 @@ export default {
       const headers = { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` };
 
       const docsRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/resume_documents?select=id,candidate_id,uploaded_at,continued_without_data_at&extraction_status=eq.failed&order=uploaded_at.desc`,
+        `${SUPABASE_URL}/rest/v1/resume_documents?select=id,candidate_id,uploaded_at,continued_without_data_at,kind&extraction_status=eq.failed&order=uploaded_at.desc`,
         { headers },
       );
       if (!docsRes.ok) {
@@ -120,51 +120,47 @@ export default {
         });
       }
 
-      // One row per candidate — their most recent failed document, since docs is already ordered
-      // newest-first and this keeps only the first (most recent) row seen per candidate_id. Rows
-      // with no candidate_id at all (a real case found live: an upload attempt that never got tied
-      // to an account) are skipped here — there's no candidate to reach out to, and leaving one in
-      // would poison every "in.(...)" filter built from candidateIds below with a literal "null",
-      // which fails the whole request rather than just that one row (confirmed live: this silently
-      // zeroed out candidateName/candidateEmail/candidatePhone for every real candidate, not just
-      // the null one, until this filter was added).
+      // Resume resubmission, Stage 1 (2026-09-21). Two kinds of failed document now:
+      //   * a failed FIRST resume ('initial'): one row per candidate, their most recent, exactly as before, EXCLUDING anyone who already has a queue
+      //     row (they reached staff some other way and nothing here is left to see);
+      //   * a failed RESUBMISSION: always listed, whether or not the candidate has queue rows. That exclusion is right for a first resume and
+      //     wrong for a resubmission: every candidate who can resubmit already has queue rows, so a failed resubmission was invisible to staff.
+      // Rows with no candidate_id at all (a real case found live: an upload attempt that never got tied to an account) are skipped: there is
+      // no candidate to reach, and one would poison every "in.(...)" filter built below with a literal "null" (confirmed live: that silently
+      // zeroed out the name/email/phone of every real candidate, not just the null one).
       const latestByCandidate = new Map<string, any>();
+      const latestResubByCandidate = new Map<string, any>();
       for (const d of docs) {
         if (!d.candidate_id) continue;
-        if (!latestByCandidate.has(d.candidate_id)) latestByCandidate.set(d.candidate_id, d);
+        const bucket = d.kind === "resubmission" ? latestResubByCandidate : latestByCandidate; // docs is newest-first: keep the first seen
+        if (!bucket.has(d.candidate_id)) bucket.set(d.candidate_id, d);
       }
       const candidateIds = Array.from(latestByCandidate.keys());
 
-      // Excluded entirely once a candidate has ANY verification_items row — the moment even one
-      // real item exists, they've reached the staff queue some other way (a later successful
-      // upload, opting into a category, etc.) and this list's whole point — nothing to see — no
-      // longer applies to them.
-      const vqRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/verification_items?select=candidate_id&candidate_id=in.(${candidateIds.map(encodeURIComponent).join(",")})`,
-        { headers },
-      );
-      const vqRows = vqRes.ok ? await vqRes.json() : [];
+      const vqRows = candidateIds.length
+        ? await fetch(`${SUPABASE_URL}/rest/v1/verification_items?select=candidate_id&candidate_id=in.(${candidateIds.map(encodeURIComponent).join(",")})`, { headers }).then((r) => (r.ok ? r.json() : []))
+        : [];
       const hasQueueItems = new Set(vqRows.map((r: any) => r.candidate_id));
-
       const relevantIds = candidateIds.filter((id) => !hasQueueItems.has(id));
-      if (relevantIds.length === 0) {
+      const allIds = Array.from(new Set([...relevantIds, ...latestResubByCandidate.keys()]));
+      if (allIds.length === 0) {
         return new Response(JSON.stringify({ ok: true, items: [] }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
 
       const candRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/candidates?select=id,email,phone,full_name,first_name,last_name&id=in.(${relevantIds.map(encodeURIComponent).join(",")})`,
+        `${SUPABASE_URL}/rest/v1/candidates?select=id,email,phone,full_name,first_name,last_name&id=in.(${allIds.map(encodeURIComponent).join(",")})`,
         { headers },
       );
       const candRows = candRes.ok ? await candRes.json() : [];
       const candidateById = new Map(candRows.map((c: any) => [c.id, c]));
 
-      const items = relevantIds.map((id) => {
-        const doc = latestByCandidate.get(id);
+      const toItem = (id: string, doc: any, kind: "initial" | "resubmission") => {
         const cand: any = candidateById.get(id) || {};
         return {
           candidateId: id,
+          kind,
           // Same first_name/last_name-preferred, full_name-fallback convention as
           // list-verification-items — first_name/last_name is what a real signup writes now,
           // full_name is what every candidate who signed up before that change has instead.
@@ -174,7 +170,11 @@ export default {
           uploadedAt: doc.uploaded_at,
           continuedWithoutDataAt: doc.continued_without_data_at,
         };
-      });
+      };
+      const items = [
+        ...relevantIds.map((id) => toItem(id, latestByCandidate.get(id), "initial")),
+        ...Array.from(latestResubByCandidate.entries()).map(([id, doc]) => toItem(id, doc, "resubmission")),
+      ];
 
       return new Response(JSON.stringify({ ok: true, items }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },

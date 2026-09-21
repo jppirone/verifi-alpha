@@ -95,7 +95,7 @@ export default {
 
       // Look up storage paths BEFORE the RPC deletes the row — nothing to read them from after.
       const lookupRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/resume_documents?id=eq.${resume_document_id}&candidate_id=eq.${candidate_id}&select=original_storage_path,sanitized_render_path`,
+        `${SUPABASE_URL}/rest/v1/resume_documents?id=eq.${resume_document_id}&candidate_id=eq.${candidate_id}&select=original_storage_path,sanitized_render_path,confirmed_at,kind`,
         { headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } },
       );
       const lookupRows = lookupRes.ok ? await lookupRes.json() : [];
@@ -103,6 +103,21 @@ export default {
       if (!doc) {
         return new Response(JSON.stringify({ ok: false, error: "not_found" }), {
           status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // Resume resubmission, Stage 1 (2026-09-21): this used to delete ANY of the candidate's documents, including a CONFIRMED one (its items and file)
+      // whenever no queue row pointed at it (the verification_items.bundle_id foreign key was the only thing standing in the way). A confirmed
+      // document is the record of what the candidate submitted and what was verified: it is never discarded from here. A resubmission attempt is
+      // discarded through resume-resubmission's own cancel, which also closes the attempt.
+      if (doc.confirmed_at) {
+        return new Response(JSON.stringify({ ok: false, error: "confirmed_document_protected" }), {
+          status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (doc.kind === "resubmission") {
+        return new Response(JSON.stringify({ ok: false, error: "use_resubmission_cancel" }), {
+          status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
 

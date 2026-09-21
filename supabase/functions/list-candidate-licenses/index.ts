@@ -110,8 +110,10 @@ export default {
         });
       }
 
+      // Resume resubmission, Stage 1 (2026-09-21): only CONFIRMED rows. This read had no such filter, so a staged (not yet applied) resubmission's
+      // certifications and licenses would have appeared on the License Status tab next to the real ones.
       const res = await fetch(
-        `${SUPABASE_URL}/rest/v1/certification_items?candidate_id=eq.${encodeURIComponent(candidate_id)}&select=id,name,issuing_body,license_number,trade_soc_code,issue_date,issue_date_precision,expiration_date,expiration_date_precision,status,candidate_confirmed,created_at&order=created_at.asc`,
+        `${SUPABASE_URL}/rest/v1/certification_items?candidate_id=eq.${encodeURIComponent(candidate_id)}&candidate_confirmed=eq.true&select=id,name,issuing_body,license_number,trade_soc_code,issue_date,issue_date_precision,expiration_date,expiration_date_precision,status,candidate_confirmed,created_at&order=created_at.asc`,
         { headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } },
       );
       if (!res.ok) {
@@ -128,7 +130,7 @@ export default {
       // certification_items.status.
       const restHeaders = { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` };
       const liRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/license_items?candidate_id=eq.${encodeURIComponent(candidate_id)}&select=id,linked_certification_id,state,verification_outcome,verification_reason,verification_detail,queue_item_id,correction_status,correction_reason,correction_message`,
+        `${SUPABASE_URL}/rest/v1/license_items?candidate_id=eq.${encodeURIComponent(candidate_id)}&candidate_confirmed=eq.true&select=id,linked_certification_id,state,verification_outcome,verification_reason,verification_detail,queue_item_id,correction_status,correction_reason,correction_message`,
         { headers: restHeaders },
       );
       const liRows: any[] = liRes.ok ? await liRes.json() : [];

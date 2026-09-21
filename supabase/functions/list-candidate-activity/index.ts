@@ -121,7 +121,7 @@ export default {
       const c = cands[0];
 
       const [licenses, nameChanges, lookups] = await Promise.all([
-        rest(`license_items?candidate_id=eq.${cid}&select=id,linked_certification_id,state,verified_at,queue_item_id,correction_status,correction_requested_at,correction_notified_at,created_at`),
+        rest(`license_items?candidate_id=eq.${cid}&candidate_confirmed=eq.true&select=id,linked_certification_id,state,verified_at,queue_item_id,correction_status,correction_requested_at,correction_notified_at,created_at`),
         rest(`candidate_name_changes?candidate_id=eq.${cid}&select=old_first_name,old_last_name,new_first_name,new_last_name,changed_at&order=changed_at.desc&limit=100`),
         rest(`employer_lookup_requests?matched_candidate_id=eq.${cid}&result_exists=eq.true&used_at=not.is.null&select=used_at,requester_email,requester_company&order=used_at.desc&limit=200`),
       ]);

@@ -159,6 +159,24 @@ export default {
     }
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+    // Transaction safety (resume resubmission, Stage 1, 2026-09-21). The claim below is committed on its own and everything after it is a series
+    // of separate writes, so a failure part-way used to leave the document permanently "confirmed" with only some rows updated, and every retry got
+    // 409 (which the client treats as success). Now, if this call fails BEFORE the staff-queue rows are inserted (they go in as one statement, so a
+    // failure means none were), the claim is released so the same submission can simply be retried: every earlier write only sets the submitted
+    // values again. After the queue insert nothing can fail the request (verification runs in the background), so nothing needs releasing.
+    let claimed: { at: string; doc: string; candidate: string } | null = null;
+    let queueDone = false;
+    const releaseClaim = async () => {
+      if (!claimed || queueDone) return;
+      await fetch(`${SUPABASE_URL}/rest/v1/resume_documents?id=eq.${claimed.doc}&candidate_id=eq.${claimed.candidate}&confirmed_at=eq.${encodeURIComponent(claimed.at)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
+        body: JSON.stringify({ confirmed_at: null }),
+      }).catch(() => {});
+      claimed = null;
+    };
+    const failReleasing = async (bodyText: BodyInit, init: ResponseInit): Promise<Response> => { await releaseClaim(); return new Response(bodyText, init); };
+
     try {
       const authBody = await req.clone().json().catch(() => ({}));
       const authDenied = await authGateCandidate(req, authBody);
@@ -211,7 +229,26 @@ export default {
       // silently re-running every insert below. Only guarded when resume_document_id is actually
       // present (it always is from the real client — see submitResumeConfirmation's own body — but
       // stays optional per Item D's own foundation-only framing) so no existing caller breaks.
+      // Two more guards, both about a candidate who is ALREADY confirmed:
+      //   * a resubmission's document is never confirmed here (its items become the profile only through the resubmission apply, which reconciles
+      //     against the verified record); and
+      //   * a second, different document is never confirmed here either: it used to be, duplicating every item and queue row.
       if (resume_document_id) {
+        const gate = await fetch(`${SUPABASE_URL}/rest/v1/resume_documents?candidate_id=eq.${candidate_id}&or=(id.eq.${resume_document_id},confirmed_at.not.is.null)&select=id,kind,confirmed_at`, {
+          headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
+        });
+        const gateRows: any[] = gate.ok ? await gate.json() : [];
+        const thisDoc = gateRows.find((d) => d.id === resume_document_id);
+        if (thisDoc && thisDoc.kind === "resubmission") {
+          return new Response(JSON.stringify({ ok: false, error: "resubmission_not_confirmable_here" }), { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+        if (gateRows.some((d) => d.id !== resume_document_id && d.confirmed_at)) {
+          return new Response(JSON.stringify({ ok: false, error: "already_confirmed" }), { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+      }
+
+      if (resume_document_id) {
+        const claimAt = new Date().toISOString();
         const claimRes = await fetch(
           `${SUPABASE_URL}/rest/v1/resume_documents?id=eq.${resume_document_id}&candidate_id=eq.${candidate_id}&confirmed_at=is.null`,
           {
@@ -222,10 +259,11 @@ export default {
               "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
               "Prefer": "return=representation",
             },
-            body: JSON.stringify({ confirmed_at: new Date().toISOString(), candidate_location: candidate_location || null }),
+            body: JSON.stringify({ confirmed_at: claimAt, candidate_location: candidate_location || null }),
           },
         );
         const claimedRows = claimRes.ok ? await claimRes.json() : [];
+        if (claimedRows.length) claimed = { at: claimAt, doc: resume_document_id, candidate: candidate_id };
         if (!claimedRows.length) {
           return new Response(JSON.stringify({ ok: false, error: "already_confirmed" }), {
             status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -262,7 +300,7 @@ export default {
           candidate_confirmed: true, updated_at: new Date().toISOString(),
         }).eq("id", w.id).eq("candidate_id", candidate_id).select("id");
         if (error || !data || data.length === 0) {
-          return new Response(JSON.stringify({ ok: false, error: "work_history_update_failed", detail: error ? error.message : "no matching row for this candidate", item_id: w.id }), {
+          return await failReleasing(JSON.stringify({ ok: false, error: "work_history_update_failed", detail: error ? error.message : "no matching row for this candidate", item_id: w.id }), {
             status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
@@ -280,7 +318,7 @@ export default {
           candidate_confirmed: true, updated_at: new Date().toISOString(),
         }).eq("id", e.id).eq("candidate_id", candidate_id).select("id");
         if (error || !data || data.length === 0) {
-          return new Response(JSON.stringify({ ok: false, error: "education_update_failed", detail: error ? error.message : "no matching row for this candidate", item_id: e.id }), {
+          return await failReleasing(JSON.stringify({ ok: false, error: "education_update_failed", detail: error ? error.message : "no matching row for this candidate", item_id: e.id }), {
             status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
@@ -298,7 +336,7 @@ export default {
           candidate_confirmed: true, updated_at: new Date().toISOString(),
         }).eq("id", c.id).eq("candidate_id", candidate_id).select("id");
         if (error || !data || data.length === 0) {
-          return new Response(JSON.stringify({ ok: false, error: "certification_update_failed", detail: error ? error.message : "no matching row for this candidate", item_id: c.id }), {
+          return await failReleasing(JSON.stringify({ ok: false, error: "certification_update_failed", detail: error ? error.message : "no matching row for this candidate", item_id: c.id }), {
             status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
@@ -312,7 +350,7 @@ export default {
           skill_text: sk.skill_text ?? "", candidate_confirmed: true, updated_at: new Date().toISOString(),
         }).eq("id", sk.id).eq("candidate_id", candidate_id).select("id");
         if (error || !data || data.length === 0) {
-          return new Response(JSON.stringify({ ok: false, error: "skill_update_failed", detail: error ? error.message : "no matching row for this candidate", item_id: sk.id }), {
+          return await failReleasing(JSON.stringify({ ok: false, error: "skill_update_failed", detail: error ? error.message : "no matching row for this candidate", item_id: sk.id }), {
             status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
@@ -327,7 +365,7 @@ export default {
           candidate_confirmed: true, updated_at: new Date().toISOString(),
         }).eq("id", f.id).eq("candidate_id", candidate_id).select("id");
         if (error || !data || data.length === 0) {
-          return new Response(JSON.stringify({ ok: false, error: "freeform_update_failed", detail: error ? error.message : "no matching row for this candidate", item_id: f.id }), {
+          return await failReleasing(JSON.stringify({ ok: false, error: "freeform_update_failed", detail: error ? error.message : "no matching row for this candidate", item_id: f.id }), {
             status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
@@ -342,7 +380,7 @@ export default {
           .select("id, state, state_source, state_evidence")
           .eq("candidate_id", candidate_id).in("id", licenses.map((l) => l.id));
         if (prevErr) {
-          return new Response(JSON.stringify({ ok: false, error: "license_lookup_failed", detail: prevErr.message }), {
+          return await failReleasing(JSON.stringify({ ok: false, error: "license_lookup_failed", detail: prevErr.message }), {
             status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
@@ -350,14 +388,14 @@ export default {
         for (const l of licenses) {
           const prev: any = prevById.get(l.id);
           if (!prev) {
-            return new Response(JSON.stringify({ ok: false, error: "license_update_failed", detail: "no matching row for this candidate", item_id: l.id }), {
+            return await failReleasing(JSON.stringify({ ok: false, error: "license_update_failed", detail: "no matching row for this candidate", item_id: l.id }), {
               status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
             });
           }
           if (l.remove) {
             const { error: delErr } = await supabase.from("license_items").delete().eq("id", l.id).eq("candidate_id", candidate_id);
             if (delErr) {
-              return new Response(JSON.stringify({ ok: false, error: "license_update_failed", detail: delErr.message, item_id: l.id }), {
+              return await failReleasing(JSON.stringify({ ok: false, error: "license_update_failed", detail: delErr.message, item_id: l.id }), {
                 status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
               });
             }
@@ -372,7 +410,7 @@ export default {
             candidate_confirmed: true, updated_at: new Date().toISOString(),
           }).eq("id", l.id).eq("candidate_id", candidate_id);
           if (updErr) {
-            return new Response(JSON.stringify({ ok: false, error: "license_update_failed", detail: updErr.message, item_id: l.id }), {
+            return await failReleasing(JSON.stringify({ ok: false, error: "license_update_failed", detail: updErr.message, item_id: l.id }), {
               status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
             });
           }
@@ -504,13 +542,15 @@ export default {
 
       if (queueInserts.length) {
         const { error: queueErr } = await supabase.from("verification_items").insert(queueInserts);
+        if (!queueErr) queueDone = true;
         if (queueErr) {
-          return new Response(JSON.stringify({ ok: false, error: "verification_queue_insert_failed", detail: queueErr.message }), {
+          return await failReleasing(JSON.stringify({ ok: false, error: "verification_queue_insert_failed", detail: queueErr.message }), {
             status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
       }
 
+      queueDone = true; // (also when there was nothing to queue) from here nothing can fail the request
       // Automatic license verification: everything above is committed, so a slow or failing registry lookup can
       // never lose the candidate's confirmation. It also no longer holds the candidate's response: state registry
       // lookups are slow and outside our control (DBPR alone is three sequential requests), and the confirm used to
@@ -580,6 +620,7 @@ export default {
         license_verification_mode: licenseVerification.some((v) => v.status === "queued") ? "background" : "inline",
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     } catch (e) {
+      await releaseClaim();
       return new Response(JSON.stringify({ ok: false, error: "unhandled", detail: String(e) }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

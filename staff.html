@@ -3968,15 +3968,16 @@ class Component extends DCLogic {
       showResumeFailuresTable: s.resumeFailuresLoaded && !s.resumeFailuresError && s.resumeFailures.length > 0,
       loadResumeFailuresAction: () => this.loadResumeFailures(),
       resumeFailureRows: s.resumeFailures.map(f => ({
-        candidateName: f.candidateName || '—',
+        candidateName: (f.candidateName || '—') + (f.kind === 'resubmission' ? ' (resume update)' : ''),
         candidateEmail: f.candidateEmail || '—',
         candidatePhone: f.candidatePhone || '—',
         uploadedDisp: this.fmtDateTime(f.uploadedAt),
         // Distinguishes "explicitly continued past the failure" from "never acknowledged it at
         // all" (still mid-flow, or abandoned) — both need outreach, but per this task's explicit
         // ask they're no longer indistinguishable in the data or here.
-        ackLabel: f.continuedWithoutDataAt ? ('Continued without data — ' + this.fmtDateTime(f.continuedWithoutDataAt)) : 'Never acknowledged the failure',
-        ackClass: f.continuedWithoutDataAt ? 'tag tag-neutral' : 'tag tag-outline',
+        // A failed RESUBMISSION (a confirmed candidate updating their resume): their existing profile was never touched.
+        ackLabel: f.kind === 'resubmission' ? 'Resume update failed; existing profile unchanged' : (f.continuedWithoutDataAt ? ('Continued without data — ' + this.fmtDateTime(f.continuedWithoutDataAt)) : 'Never acknowledged the failure'),
+        ackClass: f.kind === 'resubmission' ? 'tag tag-outline' : (f.continuedWithoutDataAt ? 'tag tag-neutral' : 'tag tag-outline'),
       })),
 
       queueScopeNote: isAdmin ? 'Showing every item across every worker.' : 'Showing items assigned to you.',
