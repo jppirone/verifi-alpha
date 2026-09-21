@@ -3482,7 +3482,7 @@ a:hover{color:var(--color-accent)}
   <div class="card elev-md" style="width:100%;padding:var(--space-8);display:flex;flex-direction:column;gap:var(--space-3);text-align:left">
     <div style="font-size:17px;text-align:center">Your account has been deactivated.</div>
     <sc-if value="{{ isFullResumeAccount }}" hint-placeholder-val="{{ true }}">
-    <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">Your access ended immediately. Data already shared with linked downstream partners will be removed there too. Partners have 10 business days to acknowledge the deletion instruction and 45 days to complete it.</div>
+    <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">Your access ended immediately. No partner agreements are active yet, so none of your data has been shared with any partner. When partner agreements are in place, partners will be contractually required to delete a deactivated candidate's data within 45 days, and we will relay their confirmation back to you.</div>
     </sc-if>
     <sc-if value="{{ isLicenseOnlyAccount }}" hint-placeholder-val="{{ false }}">
     <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">Your access ended immediately.</div>
@@ -4750,30 +4750,42 @@ a:hover{color:var(--color-accent)}
     </sc-if>
 
     <sc-if value="{{ tabIsSharing }}" hint-placeholder-val="{{ false }}">
-      <div style="position:relative">
-        <sc-if value="{{ pausedGlobal }}" hint-placeholder-val="{{ false }}">
-          <div style="position:absolute;inset:0;background:rgba(22,24,38,0.88);border-radius:var(--radius-md);z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--space-3);padding:var(--space-6);text-align:center">
-            <div style="font-size:16px">Delivery paused</div>
-            <div style="font-size:12px;color:var(--color-neutral-400);max-width:320px">All downstream sharing is paused. Existing links stay intact. Nothing new is sent until you resume.</div>
-            <button type="button" class="btn btn-primary" sc-camel-on-click="{{ resumeGlobal }}">Resume all sharing</button>
-          </div>
-        </sc-if>
-
-        <div style="display:flex;flex-direction:column;gap:var(--space-6);{{ sharingDimStyle }}">
+      <div style="display:flex;flex-direction:column;gap:var(--space-6)">
 
           <sc-if value="{{ arrivedFromDeactivationPause }}" hint-placeholder-val="{{ false }}">
-            <div class="card elev-sm" style="font-size:12px;color:var(--color-neutral-300);line-height:1.6">You chose to pause sharing instead of deactivating. Use Pause all sharing below, or pause individual connections.</div>
+            <div class="card elev-sm" style="font-size:12px;color:var(--color-neutral-300);line-height:1.6">You chose to pause sharing instead of deactivating. Turn on the pause below.</div>
           </sc-if>
 
-          <div class="card elev-sm" style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3)">
-            <div>
-              <div class="card-title" style="margin-bottom:2px">Pause all sharing</div>
-              <div style="font-size:12px;color:var(--color-neutral-500)">Suppresses delivery to every recipient at once, without removing any individual link.</div>
+          <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3)">
+              <div>
+                <div class="card-title" style="margin-bottom:2px">Keep my data out of licensed feeds</div>
+                <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">No partner agreements are active yet, so nothing is being shared today. Turn this on to tell us you do not want your data included in any licensed feed, now or once partners launch. It covers every partner, and you can change it at any time.</div>
+              </div>
+              <label style="display:flex;gap:8px;align-items:center;font-size:13px;white-space:nowrap">
+                <input type="checkbox" checked="{{ pausedGlobal }}" disabled="{{ feedPauseDisabled }}" sc-camel-on-change="{{ togglePausedGlobal }}"> Paused
+              </label>
             </div>
-            <label style="display:flex;gap:8px;align-items:center;font-size:13px;white-space:nowrap">
-              <input type="checkbox" checked="{{ pausedGlobal }}" sc-camel-on-change="{{ togglePausedGlobal }}"> Paused
-            </label>
+            <sc-if value="{{ feedPauseStatusLine }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.6">{{ feedPauseStatusLine }}</div>
+            </sc-if>
+            <sc-if value="{{ feedPauseError }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:12px;color:var(--color-accent-300);line-height:1.6">{{ feedPauseError }}</div>
+            </sc-if>
+            <sc-if value="{{ feedPauseLoadFailed }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:12px;color:var(--color-accent-300);line-height:1.6">We could not load this setting. <a href="#" sc-camel-on-click="{{ retryFeedPauseLoad }}">Try again</a></div>
+            </sc-if>
+            <div style="font-size:11px;color:var(--color-neutral-500)">Takes effect the moment you change it. It does not use the Save bar.</div>
           </div>
+
+          <div style="position:relative">
+            <div style="position:absolute;inset:0;background:rgba(22,24,38,0.94);backdrop-filter:blur(3px);border-radius:var(--radius-md);z-index:5;display:flex;justify-content:center;align-items:flex-start;padding:var(--space-6)">
+              <div style="position:sticky;top:96px;margin-top:var(--space-8);text-align:center;max-width:340px;display:flex;flex-direction:column;gap:var(--space-2)">
+                <div style="font-size:18px">Coming soon</div>
+                <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">Sharing with recruiting partners is not live. No partner agreements are active and nothing is being shared. This preview shows where those controls will live.</div>
+              </div>
+            </div>
+            <div inert aria-hidden="true" style="display:flex;flex-direction:column;gap:var(--space-6);pointer-events:none;user-select:none">
 
           <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
             <div class="card-kicker">Downstream recipients</div>
@@ -4878,7 +4890,8 @@ a:hover{color:var(--color-accent)}
             <div style="font-size:12px;color:var(--color-neutral-500)">Self-declared, never inferred from your employment history. Visibility defaults to hidden from every recipient, the most protective setting.</div>
           </div>
 
-        </div>
+            </div>
+          </div>
       </div>
     </sc-if>
     <sc-if value="{{ tabIsSubscription }}" hint-placeholder-val="{{ false }}">
@@ -5381,28 +5394,16 @@ a:hover{color:var(--color-accent)}
                 <sc-raw-td>{{ dtX }}Permanently removed after the 30-day window</sc-raw-td>
               </sc-raw-tr>
               <sc-raw-tr>
-                <sc-raw-td>Data already sent to sharing partners</sc-raw-td>
-                <sc-raw-td>{{ dtCheck }}Stays live and verified</sc-raw-td>
-                <sc-if value="{{ isCurrentlyPaid }}" hint-placeholder-val="{{ false }}"><sc-raw-td>{{ dtCheck }}Stays live and verified</sc-raw-td></sc-if>
-                <sc-raw-td>{{ dtX }}Partners are required to mark it no longer verified and stop treating it as current</sc-raw-td>
+                <sc-raw-td>Data shared with partners</sc-raw-td>
+                <sc-raw-td>{{ dtCheck }}None: no partner agreements are active, so nothing has been shared</sc-raw-td>
+                <sc-if value="{{ isCurrentlyPaid }}" hint-placeholder-val="{{ false }}"><sc-raw-td>{{ dtCheck }}None: no partner agreements are active, so nothing has been shared</sc-raw-td></sc-if>
+                <sc-raw-td>{{ dtCheck }}None has been shared. Once partner agreements are active, partners will be contractually required to delete a deactivated candidate's data within 45 days, with confirmation relayed back to you</sc-raw-td>
               </sc-raw-tr>
               <sc-raw-tr>
-                <sc-raw-td>Partner accounts you created through us</sc-raw-td>
-                <sc-raw-td>{{ dtCheck }}Untouched</sc-raw-td>
-                <sc-if value="{{ isCurrentlyPaid }}" hint-placeholder-val="{{ false }}"><sc-raw-td>{{ dtCheck }}Untouched</sc-raw-td></sc-if>
-                <sc-raw-td>{{ dtX }}Eligible for removal on request</sc-raw-td>
-              </sc-raw-tr>
-              <sc-raw-tr>
-                <sc-raw-td>Partner accounts you already had and linked</sc-raw-td>
-                <sc-raw-td>{{ dtCheck }}Untouched</sc-raw-td>
-                <sc-if value="{{ isCurrentlyPaid }}" hint-placeholder-val="{{ false }}"><sc-raw-td>{{ dtCheck }}Untouched</sc-raw-td></sc-if>
-                <sc-raw-td>{{ dtX }}Stay linked, only the verified claim is affected, not the account itself</sc-raw-td>
-              </sc-raw-tr>
-              <sc-raw-tr>
-                <sc-raw-td>New sharing to partners</sc-raw-td>
-                <sc-raw-td>{{ dtX }}Stopped until resumed</sc-raw-td>
-                <sc-if value="{{ isCurrentlyPaid }}" hint-placeholder-val="{{ false }}"><sc-raw-td>{{ dtCheck }}Continues, but only with the single static free view, not customized per-partner views</sc-raw-td></sc-if>
-                <sc-raw-td>{{ dtX }}Stopped</sc-raw-td>
+                <sc-raw-td>Inclusion in future licensed feeds</sc-raw-td>
+                <sc-raw-td>{{ dtCheck }}Your master pause on the Sharing tab keeps your data out of any future licensed feed until you turn it off</sc-raw-td>
+                <sc-if value="{{ isCurrentlyPaid }}" hint-placeholder-val="{{ false }}"><sc-raw-td>{{ dtCheck }}Your master pause setting is unchanged</sc-raw-td></sc-if>
+                <sc-raw-td>{{ dtX }}Ends: a deactivated account is never included</sc-raw-td>
               </sc-raw-tr>
               <sc-raw-tr>
                 <sc-raw-td>Your verification history</sc-raw-td>
@@ -7542,11 +7543,12 @@ class Component extends DCLogic {
     linkedinEnabled: false, linkedinLinked: true, linkedinPaused: false,
     indeedEnabled: false, indeedLinked: false, indeedPaused: false,
     glassdoorEnabled: false, glassdoorLinked: false, glassdoorPaused: false,
-    pausedGlobal: false, jobStatus: null, visibility: 'hidden',
+    pausedGlobal: false, feedPausedAt: null, feedPauseLoadedFor: null, feedPauseLoading: false, feedPauseFailedFor: null, feedPauseBusy: false, feedPauseError: null,
+    jobStatus: null, visibility: 'hidden',
     savedLinkedinEnabled: false, savedIndeedEnabled: false, savedGlassdoorEnabled: false,
     savedLinkedinLinked: true, savedIndeedLinked: false, savedGlassdoorLinked: false,
     savedLinkedinPaused: false, savedIndeedPaused: false, savedGlassdoorPaused: false,
-    savedPausedGlobal: false, savedJobStatus: null, savedVisibility: 'hidden',
+    savedJobStatus: null, savedVisibility: 'hidden',
     accountTier: 'free', discoverable: false, discoverableSavePending: false, discoverableSaveError: null,
     // discoverable above is only a display default until the real saved value is loaded from the server
     // (ensureDiscoverableLoaded). discoverableLoadedFor/FailedFor are the candidate id the load settled
@@ -8147,6 +8149,7 @@ class Component extends DCLogic {
     }
     this._lastAccountTab = tabNow;
     if (this.state.screen === 'tiers' || this.isLicenseProfileTabOpen()) this.ensureDiscoverableLoaded();
+    if (this.state.screen === 'account') this.ensureFeedPauseLoaded();
     if (this.state.screen === 'account' && this.state.accountType === 'license_only' && this.state.accountTab === 'activity') { this.ensureLicenseActivityLoaded(); this.ensureComparisonLoaded(); }
     if (prevState && this.state.tourActive && (prevState.tourStep !== this.state.tourStep || !prevState.tourActive)) {
       this.measureTourTarget();
@@ -9125,6 +9128,43 @@ class Component extends DCLogic {
       discoverableLoading: false, discoverableLoadedFor: id,
       discoverable: st.discoverableTouchedFor === id ? st.discoverable : value,
     }));
+  }
+
+  // Master feed pause (2026-09-21): real, server-side (candidates.feed_paused_at via candidate-feed-pause). Not part of the Save bar: it is written the
+  // moment the candidate changes it, and the box only ever shows what the server confirmed. Until the value has loaded for THIS candidate the box is
+  // disabled and shows "not paused" (never a guess that could later be written back).
+  async ensureFeedPauseLoaded() {
+    const s = this.state;
+    const id = s.resumeCandidateId;
+    if (!id || s.feedPauseLoading || s.feedPauseLoadedFor === id || s.feedPauseFailedFor === id) return;
+    this.setState({ feedPauseLoading: true });
+    const data = await this.callFeedPause(id, undefined);
+    if (!data) { this.setState({ feedPauseLoading: false, feedPauseFailedFor: id }); return; }
+    this.setState({ feedPauseLoading: false, feedPauseLoadedFor: id, pausedGlobal: data.paused, feedPausedAt: data.paused_at || null });
+  }
+
+  async callFeedPause(id, paused) {
+    try {
+      const body = { session_token: this.candidateSessionToken(), candidate_id: id };
+      if (typeof paused === 'boolean') body.paused = paused;
+      const res = await fetch(this.SUPABASE_FN_URL + '/candidate-feed-pause', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      return res.ok && data.ok && typeof data.paused === 'boolean' ? data : null;
+    } catch (e) { return null; }
+  }
+
+  async setFeedPause(next) {
+    const s = this.state;
+    const id = s.resumeCandidateId;
+    if (!id || s.feedPauseBusy || s.feedPauseLoadedFor !== id) return;
+    this.setState({ feedPauseBusy: true, feedPauseError: null });
+    const data = await this.callFeedPause(id, next);
+    if (!data) { this.setState({ feedPauseBusy: false, feedPauseError: 'We could not save that change, so your setting has not changed. Please try again.' }); return; }
+    this.setState({ feedPauseBusy: false, pausedGlobal: data.paused, feedPausedAt: data.paused_at || null });
   }
 
   async saveDiscoverableThenAdvance() {
@@ -10805,7 +10845,7 @@ class Component extends DCLogic {
       return s.linkedinEnabled !== s.savedLinkedinEnabled || s.indeedEnabled !== s.savedIndeedEnabled || s.glassdoorEnabled !== s.savedGlassdoorEnabled ||
         s.linkedinLinked !== s.savedLinkedinLinked || s.indeedLinked !== s.savedIndeedLinked || s.glassdoorLinked !== s.savedGlassdoorLinked ||
         s.linkedinPaused !== s.savedLinkedinPaused || s.indeedPaused !== s.savedIndeedPaused || s.glassdoorPaused !== s.savedGlassdoorPaused ||
-        s.pausedGlobal !== s.savedPausedGlobal || s.jobStatus !== s.savedJobStatus || s.visibility !== s.savedVisibility;
+        s.jobStatus !== s.savedJobStatus || s.visibility !== s.savedVisibility;
     }
     return false;
   }
@@ -10831,7 +10871,7 @@ class Component extends DCLogic {
         savedLinkedinEnabled: s.linkedinEnabled, savedIndeedEnabled: s.indeedEnabled, savedGlassdoorEnabled: s.glassdoorEnabled,
         savedLinkedinLinked: s.linkedinLinked, savedIndeedLinked: s.indeedLinked, savedGlassdoorLinked: s.glassdoorLinked,
         savedLinkedinPaused: s.linkedinPaused, savedIndeedPaused: s.indeedPaused, savedGlassdoorPaused: s.glassdoorPaused,
-        savedPausedGlobal: s.pausedGlobal, savedJobStatus: s.jobStatus, savedVisibility: s.visibility,
+        savedJobStatus: s.jobStatus, savedVisibility: s.visibility,
       });
       this.addActivityLog('Sharing preferences saved');
     }
@@ -10846,7 +10886,7 @@ class Component extends DCLogic {
         linkedinEnabled: s.savedLinkedinEnabled, indeedEnabled: s.savedIndeedEnabled, glassdoorEnabled: s.savedGlassdoorEnabled,
         linkedinLinked: s.savedLinkedinLinked, indeedLinked: s.savedIndeedLinked, glassdoorLinked: s.savedGlassdoorLinked,
         linkedinPaused: s.savedLinkedinPaused, indeedPaused: s.savedIndeedPaused, glassdoorPaused: s.savedGlassdoorPaused,
-        pausedGlobal: s.savedPausedGlobal, jobStatus: s.savedJobStatus, visibility: s.savedVisibility,
+        jobStatus: s.savedJobStatus, visibility: s.savedVisibility,
       });
     }
   }
@@ -11401,6 +11441,7 @@ class Component extends DCLogic {
 
   renderVals() {
     const s = this.state;
+    const feedPauseReady = !!s.resumeCandidateId && s.feedPauseLoadedFor === s.resumeCandidateId;
     const dirty = this.isDirty();
     const pd = (e) => { if (e && e.preventDefault) e.preventDefault(); };
     const openPlaceholder = (e) => { pd(e); this.setState({ placeholderModalOpen: true }); };
@@ -11808,12 +11849,17 @@ class Component extends DCLogic {
         }
         this.saveActive();
       },
-      pausedGlobal: s.pausedGlobal,
-      togglePausedGlobal: () => this.setState(st => ({ pausedGlobal: !st.pausedGlobal })),
-      resumeGlobal: () => this.setState({ pausedGlobal: false }),
-      sharingDimStyle: s.pausedGlobal ? 'opacity:0.35;pointer-events:none' : '',
-      showPauseIndicator: s.savedPausedGlobal || s.savedLinkedinPaused || s.savedIndeedPaused || s.savedGlassdoorPaused,
-      pauseIndicatorLabel: s.savedPausedGlobal ? 'Sharing paused' : 'Sharing partially paused',
+      pausedGlobal: feedPauseReady && s.pausedGlobal,
+      feedPauseDisabled: !feedPauseReady || s.feedPauseBusy,
+      togglePausedGlobal: () => this.setFeedPause(!s.pausedGlobal),
+      feedPauseError: s.feedPauseError,
+      feedPauseLoadFailed: !!s.resumeCandidateId && s.feedPauseFailedFor === s.resumeCandidateId,
+      retryFeedPauseLoad: () => this.setState({ feedPauseFailedFor: null }),
+      feedPauseStatusLine: feedPauseReady && s.pausedGlobal
+        ? 'Paused' + (s.feedPausedAt ? ' since ' + new Date(s.feedPausedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '') + '. Your data will not be included in any licensed feed.'
+        : '',
+      showPauseIndicator: feedPauseReady && s.pausedGlobal,
+      pauseIndicatorLabel: 'Sharing paused',
 
       jobStatus: s.jobStatus,
       jsEmployedLooking: s.jobStatus === 'employed_looking',
