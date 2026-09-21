@@ -11,9 +11,14 @@ import { withSupabase } from "jsr:@supabase/server@1";
 //   2. a clean pass  -> bookkeeping only (next check in 7 days, sooner right after the registry's own expiration date);
 //      a lookup that failed / an incomplete license -> bookkeeping only (retry later with back-off), NEVER a downgrade;
 //      anything else -> looks AGAIN after CONFIRM_WAIT_MS. Only if the second lookup is not a pass either AND gives the same reason is it
-//      applied, through apply_license_downgrade, which can only move Confirmed -> Needs Reconciliation and re-checks under row locks that
-//      nothing changed since (status, staff activity, number, state, name). Anything else about the two lookups (second one passes, or a
-//      different problem) leaves the license Confirmed and tries again tomorrow: one odd registry response never downgrades anyone.
+//      queued for a downgrade. Anything else about the two lookups (second one passes, or a different problem) leaves the license Confirmed and
+//      tries again tomorrow: one odd registry response never downgrades anyone.
+//   3. At the END of the run the queued downgrades are applied through apply_license_downgrade, which can only move Confirmed -> Needs
+//      Reconciliation and re-checks under row locks that nothing changed since (status, staff activity, number, state, name).
+//      RATE GUARD: a registry that changed its pages would look like "many licenses stopped matching". A genuine lapse is the registry saying the
+//      license is inactive under the holder's own name (exact_match_not_active): a parser that broke does not produce that. So if more than
+//      RATE_GUARD_MIN queued findings are of any OTHER kind and they are more than half of the licenses that got an answer this run, none of
+//      those is applied (they are retried tomorrow and the run log says downgrade_rate_guard); real lapses in the same run are applied as usual.
 // Rate: MAX_PER_RUN licenses per run, LOOKUP_SPACING_MS apart, and the run stops taking new licenses after TIME_BUDGET_MS; three lookup failures
 // in a row (registry down) end the run without touching anything. Each run is recorded in license_recheck_runs (ids and counts only).
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -24,6 +29,7 @@ const LOOKUP_SPACING_MS = 3000;
 const CONFIRM_WAIT_MS = 20000;
 const TIME_BUDGET_MS = 95000;
 const MAX_CONSECUTIVE_FAILURES = 3;
+const RATE_GUARD_MIN = 3;
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -63,7 +69,8 @@ export default {
     if (!due.ok || !Array.isArray(due.data)) return json({ ok: false, error: "due_lookup_failed" }, 500);
 
     const detail: Array<{ license_item_id: string; result: string }> = [];
-    let stillVerified = 0, downgraded = 0, errors = 0, skipped = 0, attempted = 0, consecutiveFailures = 0;
+    let stillVerified = 0, downgraded = 0, errors = 0, skipped = 0, attempted = 0, consecutiveFailures = 0, answered = 0;
+    const pending: Array<{ id: string; expect: any; decision: any; lapse: boolean }> = [];
     let aborted: string | null = null;
     const dueRows = due.data as Array<{ license_item_id: string; candidate_id: string; total_due: number; overdue_days: number }>;
     const note = async (id: string, result: string) => { detail.push({ license_item_id: id, result }); };
@@ -82,6 +89,7 @@ export default {
           continue;
         }
         consecutiveFailures = 0;
+        if (a.status === "checked") answered++;
         if (a.status === "not_eligible") { skipped++; await note(id, "not_eligible"); continue; }   // changed since the list was taken; nothing recorded
         if (a.status !== "checked") { skipped++; await book(id, "skipped"); await note(id, "skipped_" + String(a.why || "unknown")); continue; }
         if (a.outcome === "verified") { stillVerified++; await book(id, "still_verified"); await note(id, "still_verified"); continue; }
@@ -93,13 +101,22 @@ export default {
         if (b.outcome === "verified") { stillVerified++; await book(id, "still_verified"); await note(id, "transient_adverse_then_verified"); continue; }
         if (b.outcome !== a.outcome || b.reason !== a.reason) { skipped++; await book(id, "unstable"); await note(id, "unstable_two_different_results"); continue; }
 
-        const applied = await rpc("apply_license_downgrade", { p_license: id, p_expect: b.expect, p_decision: { outcome: b.outcome, reason: b.reason, detail: b.detail } });
-        const result = applied.ok && applied.data ? String(applied.data.result || "unknown") : "apply_failed";
-        if (result === "downgraded") { downgraded++; await note(id, "downgraded:" + String(applied.data.reason)); }
-        else { skipped++; await book(id, "refused"); await note(id, "not_downgraded:" + (applied.data && applied.data.why ? String(applied.data.why) : result)); }
+        pending.push({ id, expect: b.expect, decision: { outcome: b.outcome, reason: b.reason, detail: b.detail }, lapse: b.reason === "exact_match_not_active" });
       } catch (e) {
         errors++; await book(id, "error"); await note(id, "exception");
       }
+    }
+
+    // ---- apply the queued downgrades (see the rate guard above)
+    const nonLapse = pending.filter((p) => !p.lapse).length;
+    const guardTripped = nonLapse > RATE_GUARD_MIN && nonLapse * 2 > answered;
+    if (guardTripped) aborted = aborted || "downgrade_rate_guard";
+    for (const p of pending) {
+      if (guardTripped && !p.lapse) { skipped++; await book(p.id, "unstable"); await note(p.id, "held_by_rate_guard"); continue; }
+      const applied = await rpc("apply_license_downgrade", { p_license: p.id, p_expect: p.expect, p_decision: p.decision });
+      const result = applied.ok && applied.data ? String(applied.data.result || "unknown") : "apply_failed";
+      if (result === "downgraded") { downgraded++; await note(p.id, "downgraded:" + String(applied.data.reason)); }
+      else { skipped++; await book(p.id, "refused"); await note(p.id, "not_downgraded:" + (applied.data && applied.data.why ? String(applied.data.why) : result)); }
     }
 
     const oldest = dueRows.length ? Math.max(...dueRows.map((r) => Number(r.overdue_days) || 0)) : null;
