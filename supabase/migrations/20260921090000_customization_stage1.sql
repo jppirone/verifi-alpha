@@ -144,7 +144,7 @@ begin
   select coalesce(jsonb_agg(x.o order by x.pos nulls last, x.id), '[]'::jsonb) into j_work from (
     select w.id, w.position pos, jsonb_strip_nulls(jsonb_build_object(
       'id', w.id, 'position', w.position, 'heading', nullif(w.heading, ''),
-      'employer', w.company, 'title', w.title, 'location', nullif(w.location, ''),
+      'employer', nullif(w.company, ''), 'title', nullif(w.title, ''), 'location', nullif(w.location, ''),
       'start', _cz_pdate(w.start_date, w.start_date_precision),
       'end', case when w.end_date_precision = 'present' then null else _cz_pdate(w.end_date, w.end_date_precision) end,
       'current', case when w.end_date_precision = 'present' then true else null end,
@@ -168,7 +168,7 @@ begin
   select coalesce(jsonb_agg(x.o order by x.pos nulls last, x.id), '[]'::jsonb) into j_edu from (
     select e.id, e.position pos, jsonb_strip_nulls(jsonb_build_object(
       'id', e.id, 'position', e.position, 'heading', nullif(e.heading, ''),
-      'institution', e.institution, 'degree', e.degree, 'field_of_study', e.field_of_study, 'location', nullif(e.location, ''),
+      'institution', nullif(e.institution, ''), 'degree', nullif(e.degree, ''), 'field_of_study', nullif(e.field_of_study, ''), 'location', nullif(e.location, ''),
       'start', _cz_pdate(e.start_date, e.start_date_precision), 'end', _cz_pdate(e.end_date, e.end_date_precision),
       'included', coalesce(o.included, true),
       'verification', case when vv.status is null then jsonb_build_object('status', 'not_checked')
@@ -187,7 +187,7 @@ begin
   select coalesce(jsonb_agg(x.o order by x.pos nulls last, x.id), '[]'::jsonb) into j_cert from (
     select ce.id, ce.position pos, jsonb_strip_nulls(jsonb_build_object(
       'id', ce.id, 'position', ce.position, 'heading', nullif(ce.heading, ''),
-      'name', ce.name, 'issuer', ce.issuing_body, 'license_number', nullif(ce.license_number, ''), 'license_state', l.state,
+      'name', nullif(ce.name, ''), 'issuer', nullif(ce.issuing_body, ''), 'license_number', nullif(ce.license_number, ''), 'license_state', l.state,
       'issued', _cz_pdate(ce.issue_date, ce.issue_date_precision),
       'included', coalesce(o.included, true),
       'verification',
