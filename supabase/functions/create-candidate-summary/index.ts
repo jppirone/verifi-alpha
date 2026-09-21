@@ -74,6 +74,13 @@ export default {
         });
       }
 
+      if (typeof content === "string" && content.length > 4000) {
+        return new Response(JSON.stringify({ ok: false, error: "content_too_long", max: 4000 }), { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      if (typeof name === "string" && name.trim().length > 100) {
+        return new Response(JSON.stringify({ ok: false, error: "name_too_long", max: 100 }), { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
       const res = await fetch(`${SUPABASE_URL}/rest/v1/candidate_summary_versions`, {
         method: "POST",
         headers: {

@@ -3914,7 +3914,7 @@ a:hover{color:var(--color-accent)}
             <sc-if value="{{ isFullResumeAccount }}" hint-placeholder-val="{{ true }}">
             <div class="field" style="max-width:280px">
               <label for="pf-printed-phone">Printed Number</label>
-              <input class="input" id="pf-printed-phone" placeholder="+1 (___) ___-____" value="{{ printedPhone }}" sc-camel-on-change="{{ setPrintedPhone }}">
+              <input class="input" id="pf-printed-phone" placeholder="+1 (___) ___-____" value="{{ printedPhone }}" disabled="{{ printedContactLocked }}" sc-camel-on-change="{{ setPrintedPhone }}">
             </div>
             <sc-if value="{{ printedPhoneHasValue }}" hint-placeholder-val="{{ true }}">
               <div style="font-size:12px;color:var(--color-accent-300);line-height:1.6">This number will appear on any resume generated from this system and will be sent to every downstream partner.</div>
@@ -3931,7 +3931,7 @@ a:hover{color:var(--color-accent)}
             <!-- Item A: was "Pre-filled once from your parsed resume, if a number was found there" —
                  real resume-contact-extraction was never built (see seedContactFromAccount's own
                  header); this now genuinely pre-fills from your account, so the copy says that. -->
-            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Pre-filled once from your account. Editable at any time, with no re-verification required.</div>
+            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Editable at any time, with no re-verification required.</div>
             </sc-if>
 
             <div class="field" style="max-width:280px">
@@ -3985,12 +3985,18 @@ a:hover{color:var(--color-accent)}
             <sc-if value="{{ isFullResumeAccount }}" hint-placeholder-val="{{ true }}">
             <div class="field" style="max-width:320px">
               <label for="pf-printed-email">Printed Email</label>
-              <input class="input" id="pf-printed-email" placeholder="you@email.com" value="{{ printedEmail }}" sc-camel-on-change="{{ setPrintedEmail }}">
+              <input class="input" id="pf-printed-email" placeholder="you@email.com" value="{{ printedEmail }}" disabled="{{ printedContactLocked }}" sc-camel-on-change="{{ setPrintedEmail }}">
             </div>
             <sc-if value="{{ printedEmailEdited }}" hint-placeholder-val="{{ false }}">
               <div style="font-size:12px;color:var(--color-accent-300);line-height:1.6">This email will appear on any resume generated from this system and will be sent to every downstream partner.</div>
             </sc-if>
-            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Pre-filled once from your account email. Editable at any time.</div>
+            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Editable at any time. What you save here is what your resume PDF and any licensed feed print; leaving it empty prints no address.</div>
+            <sc-if value="{{ printedContactLocked }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">Printing your own phone number and email on your resume is part of customization, which is on paid plans. On a free plan they stay private.</div>
+            </sc-if>
+            <sc-if value="{{ contactSaveError }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:12px;color:#e2735c;line-height:1.6">{{ contactSaveError }} Your printed phone and email were not saved.</div>
+            </sc-if>
             <sc-if value="{{ showPrintedEmailOffer }}" hint-placeholder-val="{{ true }}">
               <div style="display:flex;flex-direction:column;gap:6px;padding:var(--space-3);border:1px solid var(--color-neutral-800);border-radius:var(--radius-md)">
                 <div style="font-size:13px;color:var(--color-neutral-300)">Use your account email as your Printed Email too?</div>
@@ -4440,11 +4446,17 @@ a:hover{color:var(--color-accent)}
       <div style="display:flex;flex-direction:column;gap:var(--space-6)">
 
         <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">
-          Choose which resume categories each delivery target receives. This never changes who you actually share with (that stays controlled on the Sharing tab), and every change here saves the instant you make it.
+          Choose what goes on your resume, in the PDF you download and in any licensed feed. Every change is saved to your account the moment you make it: you'll see "Saved" beside it, or an error if it didn't go through. This never changes who you share with (that stays on the Sharing tab), and it never changes a verification result.
+        </div>
+
+        <div style="display:flex;align-items:center;gap:var(--space-3);min-height:18px;font-size:12px">
+          <sc-if value="{{ czSaving }}" hint-placeholder-val="{{ false }}"><span style="color:var(--color-neutral-500)">Saving…</span></sc-if>
+          <sc-if value="{{ czSaved }}" hint-placeholder-val="{{ false }}"><span style="color:var(--color-accent-300)">Saved</span></sc-if>
+          <sc-if value="{{ czError }}" hint-placeholder-val="{{ false }}"><span style="color:#e2735c">{{ czError }}</span></sc-if>
         </div>
 
         <div style="font-size:11px;color:var(--color-neutral-600);line-height:1.6">
-          Your name and contact info always appear on every view and can't be turned off. Your professional summary is now chosen per delivery target below. Write and name summary versions on the Content Manager tab.
+          Your name always appears and can't be turned off. Your phone and email appear only if you've chosen to print them on Profile Info. Content flagged for review is left off by default: tick a section below to include it. Write and name summary versions on the Content Manager tab.
         </div>
 
         <div class="card elev-sm" style="display:flex;flex-direction:column;gap:2px;opacity:0.7">
@@ -4455,105 +4467,88 @@ a:hover{color:var(--color-accent)}
           </sc-if>
         </div>
 
-        <div class="field" style="max-width:280px">
-          <label for="cz-target">Customize for:</label>
-          <sc-raw-select class="input" id="cz-target" value="{{ customizeTarget }}" sc-camel-on-change="{{ setCustomizeTarget }}">
-            <option value="">Select a delivery target</option>
-            <sc-for list="{{ partnerOptions }}" as="p" hint-placeholder-count="3">
-              <option value="{{ p.key }}">{{ p.label }}</option>
-            </sc-for>
-          </sc-raw-select>
-        </div>
+        <sc-if value="{{ czLoadFailed }}" hint-placeholder-val="{{ false }}">
+          <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2);align-items:flex-start">
+            <div style="font-size:13px;color:var(--color-neutral-300)">We couldn't load your resume content just now.</div>
+            <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ retryCzLoad }}">Try again</button>
+          </div>
+        </sc-if>
+        <sc-if value="{{ czShowLoading }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:13px;color:var(--color-neutral-500)">Loading your resume content…</div>
+        </sc-if>
 
         <sc-if value="{{ isPaidTier }}" hint-placeholder-val="{{ true }}">
-        <sc-if value="{{ hasCustomizeTarget }}" hint-placeholder-val="{{ false }}">
+        <sc-if value="{{ czReady }}" hint-placeholder-val="{{ true }}">
           <div style="display:flex;flex-direction:column;gap:var(--space-2);max-width:420px">
-            <div class="field" style="max-width:280px">
-              <label for="cz-summary">Summary for this target</label>
-              <sc-raw-select class="input" id="cz-summary" value="{{ customizeSummaryId }}" sc-camel-on-change="{{ setCustomizeSummaryId }}">
-                <option value="">No summary</option>
-                <sc-for list="{{ summaryOptionsForTarget }}" as="su" hint-placeholder-count="2">
+            <div class="field" style="max-width:320px">
+              <label for="cz-summary">Summary on your resume</label>
+              <sc-raw-select class="input" id="cz-summary" value="{{ czSummaryChoice }}" sc-camel-on-change="{{ setCzSummary }}">
+                <option value="none">No summary</option>
+                <option value="default">Default summary</option>
+                <sc-for list="{{ czSummaryOptions }}" as="su" hint-placeholder-count="2">
                   <option value="{{ su.id }}">{{ su.label }}</option>
                 </sc-for>
               </sc-raw-select>
             </div>
-            <div style="display:flex;align-items:center;gap:var(--space-2);min-height:16px">
-              <sc-if value="{{ showSummarySaved }}" hint-placeholder-val="{{ false }}">
-                <span style="font-size:11px;color:var(--color-accent-300);{{ summarySavedFadeStyle }}">Saved</span>
-              </sc-if>
-            </div>
             <div class="card elev-sm" style="display:flex;flex-direction:column;gap:2px;opacity:0.7">
-              <div class="card-kicker">Summary sent to this target</div>
-              <!-- Item 8 (2026-09-08 regression session): this box used to grow to fit its content,
-                   full-length, same as everywhere else on this screen -- unlike the job-responsibilities
-                   textarea a few rows above (rows="3", native browser scroll once content exceeds that),
-                   a long summary here just pushed the rest of the page down instead of scrolling in
-                   place, so seeing the whole thing meant scrolling the WHOLE page rather than this one
-                   box, or going back to Content Manager to read it in the edit modal instead. Bounded
-                   height + its own overflow-y:auto mirrors that same textarea's own overflow behavior. -->
-              <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6;max-height:100px;overflow-y:auto">{{ customizeSummaryPreview }}</div>
+              <div class="card-kicker">Summary that will appear</div>
+              <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6;max-height:100px;overflow-y:auto">{{ czSummaryPreview }}</div>
             </div>
+          </div>
+
+          <div class="card elev-sm" style="display:flex;flex-direction:column;gap:0">
+            <div class="card-kicker" style="margin-bottom:var(--space-2)">Content on your resume</div>
+            <sc-for list="{{ czCategoryRows }}" as="cat" hint-placeholder-count="5">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3);padding:11px 0;border-bottom:1px solid var(--color-divider)">
+                <label style="display:flex;gap:10px;align-items:center;font-size:14px;cursor:pointer">
+                  <input type="checkbox" checked="{{ cat.checked }}" disabled="{{ czSaving }}" sc-camel-on-change="{{ cat.onToggle }}"> {{ cat.label }}</label>
+              </div>
+              <sc-if value="{{ cat.note }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:11px;color:var(--color-neutral-600);line-height:1.6;padding:6px 0 6px 28px;border-bottom:1px solid var(--color-divider)">{{ cat.note }}</div>
+              </sc-if>
+              <sc-for list="{{ cat.items }}" as="it" hint-placeholder-count="0">
+                <div style="display:flex;align-items:center;gap:var(--space-3);padding:8px 0 8px 28px;border-bottom:1px solid var(--color-divider)">
+                  <label style="display:flex;gap:10px;align-items:center;font-size:13px;cursor:pointer">
+                    <input type="checkbox" checked="{{ it.checked }}" disabled="{{ czSaving }}" sc-camel-on-change="{{ it.onToggle }}"> {{ it.label }}</label>
+                </div>
+              </sc-for>
+            </sc-for>
+          </div>
+
+          <sc-if value="{{ czAllDeselected }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:#e2b93c;background:color-mix(in srgb, #e2b93c 12%, transparent);border:1px solid color-mix(in srgb, #e2b93c 35%, transparent);border-radius:var(--radius-md);padding:10px 12px">You've deselected everything. Only your name and any contact details you chose to print will appear.</div>
+          </sc-if>
+
+          <div style="display:flex;justify-content:flex-end;align-items:center;gap:var(--space-3)">
+            <sc-if value="{{ czResetConfirm }}" hint-placeholder-val="{{ false }}">
+              <span style="font-size:12px;color:var(--color-neutral-400)">Put every item back as extracted? This undoes your exclusions, edited job descriptions and skill changes.</span>
+              <button type="button" class="btn btn-primary" disabled="{{ czSaving }}" sc-camel-on-click="{{ confirmCzReset }}">Yes, reset</button>
+              <button type="button" class="btn btn-ghost" sc-camel-on-click="{{ cancelCzReset }}">Cancel</button>
+            </sc-if>
+            <sc-if value="{{ czResetIdle }}" hint-placeholder-val="{{ true }}">
+              <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ askCzReset }}">Reset to default</button>
+            </sc-if>
           </div>
         </sc-if>
         </sc-if>
 
         <sc-if value="{{ isFreeTier }}" hint-placeholder-val="{{ false }}">
           <div class="card elev-sm" style="display:flex;flex-direction:column;gap:0">
-            <div class="card-kicker" style="margin-bottom:var(--space-2)">Preview: upgrade to customize per target</div>
-            <sc-for list="{{ freeCategoryRows }}" as="cat" hint-placeholder-count="5">
+            <div class="card-kicker" style="margin-bottom:var(--space-2)">Preview: upgrade to choose what goes on your resume</div>
+            <sc-for list="{{ czFreeRows }}" as="cat" hint-placeholder-count="5">
               <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3);padding:11px 0;border-bottom:1px solid var(--color-divider)">
                 <label style="display:flex;gap:10px;align-items:center;font-size:14px;color:var(--color-neutral-500);cursor:not-allowed">
-                  <input type="checkbox" checked="checked" disabled="disabled"> {{ cat.label }}</label>
+                  <input type="checkbox" checked="{{ cat.checked }}" disabled="disabled"> {{ cat.label }}</label>
               </div>
               <sc-for list="{{ cat.items }}" as="it" hint-placeholder-count="0">
                 <div style="display:flex;align-items:center;gap:var(--space-3);padding:8px 0 8px 28px;border-bottom:1px solid var(--color-divider)">
                   <label style="display:flex;gap:10px;align-items:center;font-size:13px;color:var(--color-neutral-500);cursor:not-allowed">
-                    <input type="checkbox" checked="checked" disabled="disabled"> {{ it.label }}</label>
+                    <input type="checkbox" checked="{{ it.checked }}" disabled="disabled"> {{ it.label }}</label>
                 </div>
               </sc-for>
             </sc-for>
+            <button type="button" class="btn btn-primary" style="align-self:flex-start;margin-top:var(--space-3)" sc-camel-on-click="{{ czUpgradePrompt }}">See plans</button>
           </div>
-        </sc-if>
-
-        <sc-if value="{{ isPaidTier }}" hint-placeholder-val="{{ true }}">
-        <sc-if value="{{ hasCustomizeTarget }}" hint-placeholder-val="{{ false }}">
-          <div class="card elev-sm" style="display:flex;flex-direction:column;gap:0">
-            <div class="card-kicker" style="margin-bottom:var(--space-2)">Content for {{ customizeTargetLabel }}</div>
-
-            <sc-for list="{{ categoryRows }}" as="cat" hint-placeholder-count="5">
-              <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3);padding:11px 0;border-bottom:1px solid var(--color-divider)">
-                <label style="display:flex;gap:10px;align-items:center;font-size:14px;cursor:pointer">
-                  <input type="checkbox" checked="{{ cat.checked }}" sc-camel-on-change="{{ cat.onToggle }}"> {{ cat.label }}</label>
-                <div style="display:flex;align-items:center;min-width:44px;justify-content:flex-end">
-                  <sc-if value="{{ cat.showSaved }}" hint-placeholder-val="{{ false }}">
-                    <span style="font-size:11px;color:var(--color-accent-300);{{ cat.savedFadeStyle }}">Saved</span>
-                  </sc-if>
-                </div>
-              </div>
-              <sc-for list="{{ cat.items }}" as="it" hint-placeholder-count="0">
-                <div style="display:flex;align-items:center;gap:var(--space-3);padding:8px 0 8px 28px;border-bottom:1px solid var(--color-divider)">
-                  <label style="display:flex;gap:10px;align-items:center;font-size:13px;cursor:pointer">
-                    <input type="checkbox" checked="{{ it.checked }}" sc-camel-on-change="{{ it.onToggle }}"> {{ it.label }}</label>
-                </div>
-              </sc-for>
-            </sc-for>
-          </div>
-
-          <!-- Item 18 (2026-09-12 live-testing session): clear, non-blocking warning when every
-               content category for this target is deselected — never stops the candidate from
-               actually doing it (that's a real, valid choice, e.g. a contact-only share), just makes
-               sure it's not an accident they don't notice until a partner receives almost nothing. -->
-          <sc-if value="{{ allDeselected }}" hint-placeholder-val="{{ false }}">
-            <div style="font-size:12px;color:#e2b93c;background:color-mix(in srgb, #e2b93c 12%, transparent);border:1px solid color-mix(in srgb, #e2b93c 35%, transparent);border-radius:var(--radius-md);padding:10px 12px">You've deselected everything. This means only your contact information will be sent.</div>
-          </sc-if>
-
-          <div style="display:flex;justify-content:flex-end;align-items:center;gap:var(--space-3)">
-            <sc-if value="{{ showCzResetSaved }}" hint-placeholder-val="{{ false }}">
-              <span style="font-size:11px;color:var(--color-accent-300);{{ czResetFadeStyle }}">Reset</span>
-            </sc-if>
-            <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ resetCzToDefault }}">Reset to default</button>
-          </div>
-        </sc-if>
         </sc-if>
 
       </div>
@@ -4563,14 +4558,15 @@ a:hover{color:var(--color-accent)}
       <div style="display:flex;flex-direction:column;gap:var(--space-6)">
 
         <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">
-          This is the part of your record you write yourself: as many named summary versions as you want, your skills, and the responsibilities under each verified role. Choose which summary a partner receives on the Customization tab.
+          This is the part of your record you write yourself: as many named summary versions as you want, your skills, and the responsibilities under each verified role. Everything you change here is saved to your account as soon as you make it, and it is what appears on your PDF and in any licensed feed. Choose which summary is used, and what is included, on the Customization tab.
         </div>
 
-        <!-- Item 19 (2026-09-12 live-testing session): matches Customization's own "Always
-             included" block (name/location/contact) — real dead end this closes: name and contact
-             info are edited from the Basic Info / Contact Info cards on this same account, but there
-             was no read-only confirmation of what actually always goes out, visible from Content
-             Manager itself, before this. -->
+        <div style="display:flex;align-items:center;gap:var(--space-3);min-height:18px;font-size:12px">
+          <sc-if value="{{ czSaving }}" hint-placeholder-val="{{ false }}"><span style="color:var(--color-neutral-500)">Saving…</span></sc-if>
+          <sc-if value="{{ czSaved }}" hint-placeholder-val="{{ false }}"><span style="color:var(--color-accent-300)">Saved</span></sc-if>
+          <sc-if value="{{ czError }}" hint-placeholder-val="{{ false }}"><span style="color:#e2735c">{{ czError }}</span></sc-if>
+        </div>
+
         <div class="card elev-sm" style="display:flex;flex-direction:column;gap:2px;opacity:0.7">
           <div class="card-kicker">Always included</div>
           <div style="font-size:13px;color:var(--color-neutral-400)" title="Always included, cannot be removed">{{ alwaysIncludedLine }}</div>
@@ -4579,10 +4575,20 @@ a:hover{color:var(--color-accent)}
           </sc-if>
         </div>
 
+        <sc-if value="{{ czLoadFailed }}" hint-placeholder-val="{{ false }}">
+          <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2);align-items:flex-start">
+            <div style="font-size:13px;color:var(--color-neutral-300)">We couldn't load your resume content just now.</div>
+            <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ retryCzLoad }}">Try again</button>
+          </div>
+        </sc-if>
+        <sc-if value="{{ czShowLoading }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:13px;color:var(--color-neutral-500)">Loading your resume content…</div>
+        </sc-if>
+
         <sc-if value="{{ isFreeTier }}" hint-placeholder-val="{{ false }}">
           <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
             <div class="card-kicker">Preview: upgrade to write your own content</div>
-            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Free accounts send one summary, the skills as first parsed, and the responsibilities as first submitted, the same way to everyone. Upgrade to rewrite each role's responsibilities, edit your skills field by field, and keep as many named summary versions as you want.</div>
+            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Free accounts get one summary, the skills as first parsed, and the responsibilities as first submitted. Upgrade to rewrite each role's responsibilities, edit your skills field by field, and keep as many named summary versions as you want.</div>
 
             <div style="display:flex;flex-direction:column;gap:4px;padding-top:var(--space-2)">
               <div style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--color-neutral-500)">Summary</div>
@@ -4627,7 +4633,10 @@ a:hover{color:var(--color-accent)}
               <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
                 <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3)">
                   <div class="card-title" style="margin-bottom:0">{{ su.name }}</div>
-                  <span class="tag tag-outline">{{ su.tagLabel }}</span>
+                  <div style="display:flex;gap:var(--space-2)">
+                    <sc-if value="{{ su.inUse }}" hint-placeholder-val="{{ false }}"><span class="tag tag-accent">On your resume</span></sc-if>
+                    <span class="tag tag-outline">{{ su.tagLabel }}</span>
+                  </div>
                 </div>
                 <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">{{ su.preview }}</div>
                 <div style="display:flex;gap:var(--space-2)">
@@ -4638,31 +4647,46 @@ a:hover{color:var(--color-accent)}
             </sc-for>
           </div>
 
+          <sc-if value="{{ czReady }}" hint-placeholder-val="{{ true }}">
           <div style="display:flex;flex-direction:column;gap:var(--space-3)">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3)">
               <div class="card-kicker">{{ skillsHeadingLabel }}</div>
               <div style="font-size:11px;color:var(--color-neutral-600)">{{ skillCountLabel }}</div>
             </div>
             <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
-              <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Up to 15 skills, each its own field. Every term is delivered exactly as you type it: nothing is renamed, merged, or mapped to a standard label.</div>
+              <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Each skill is its own field, saved when you leave the field. Every term is delivered exactly as you type it: nothing is renamed, merged, or mapped to a standard label. Removing a skill takes it off your resume; you can restore an extracted one below.</div>
               <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,200px),1fr));gap:var(--space-2);max-width:760px" sc-camel-on-blur="{{ onSkillsBlur }}">
                 <sc-for list="{{ skillFields }}" as="sk" hint-placeholder-count="5">
                   <div style="display:flex;align-items:center;gap:6px">
-                    <input class="input" id="{{ sk.id }}" placeholder="Skill" value="{{ sk.value }}" sc-camel-on-change="{{ sk.onChange }}">
-                    <button type="button" class="btn btn-icon btn-ghost" style="flex:none" aria-label="Delete skill" sc-camel-on-click="{{ sk.onDelete }}">
+                    <input class="input" id="{{ sk.id }}" placeholder="Skill" maxlength="100" value="{{ sk.value }}" sc-camel-on-change="{{ sk.onChange }}">
+                    <button type="button" class="btn btn-icon btn-ghost" style="flex:none" aria-label="Remove skill" sc-camel-on-click="{{ sk.onDelete }}">
                       <svg width="15" height="15" sc-camel-view-box="0 0 256 256" fill="currentColor"><path d="M216 48h-36V36a28 28 0 0 0-28-28h-48a28 28 0 0 0-28 28v12H40a12 12 0 0 0 0 24h4v136a20 20 0 0 0 20 20h128a20 20 0 0 0 20-20V72h4a12 12 0 0 0 0-24ZM100 36a4 4 0 0 1 4-4h48a4 4 0 0 1 4 4v12h-56Zm88 168H68V72h120Zm-72-100v64a12 12 0 0 1-24 0v-64a12 12 0 0 1 24 0Zm48 0v64a12 12 0 0 1-24 0v-64a12 12 0 0 1 24 0Z"></path></svg>
                     </button>
                   </div>
                 </sc-for>
               </div>
               <sc-if value="{{ skillAddVisible }}" hint-placeholder-val="{{ true }}">
-                <button type="button" class="btn btn-secondary" style="align-self:flex-start" sc-camel-on-click="{{ addSkillField }}">+ Add skill</button>
+                <div style="display:flex;align-items:center;gap:var(--space-2);max-width:420px">
+                  <input class="input" id="cz-new-skill" placeholder="New skill" maxlength="100" value="{{ czNewSkill }}" sc-camel-on-change="{{ setCzNewSkill }}">
+                  <button type="button" class="btn btn-secondary" style="flex:none" disabled="{{ czSaving }}" sc-camel-on-click="{{ addSkillField }}">+ Add skill</button>
+                </div>
+              </sc-if>
+              <sc-if value="{{ hasRemovedSkills }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;flex-direction:column;gap:4px;padding-top:var(--space-2)">
+                  <div style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--color-neutral-500)">Removed from your resume</div>
+                  <sc-for list="{{ removedSkills }}" as="rs" hint-placeholder-count="0">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);font-size:13px;color:var(--color-neutral-400);padding:6px 0;border-bottom:1px solid var(--color-divider)">
+                      <span>{{ rs.text }}</span>
+                      <button type="button" class="btn btn-ghost" style="font-size:12px" disabled="{{ czSaving }}" sc-camel-on-click="{{ rs.onRestore }}">Restore</button>
+                    </div>
+                  </sc-for>
+                </div>
               </sc-if>
               <div class="field">
-                <label for="skills-overflow">Scratch space, not delivered</label>
-                <textarea class="input" id="skills-overflow" rows="3" placeholder="Anything that doesn't fit in the 15 fields above" value="{{ skillOverflow }}" sc-camel-on-change="{{ setSkillOverflow }}"></textarea>
+                <label for="skills-overflow">Scratch space (this page only, not saved, not delivered)</label>
+                <textarea class="input" id="skills-overflow" rows="3" placeholder="Anything you want to keep in front of you while you edit" value="{{ skillOverflow }}" sc-camel-on-change="{{ setSkillOverflow }}"></textarea>
               </div>
-              <div style="font-size:11px;color:var(--color-neutral-600);line-height:1.6">Nothing in the scratch space is delivered to a partner or shown in any generated view. If a parse found more than 15 skills, the extras landed here in the order they were read, which is not a ranking. Copy anything you want delivered into a field above. Deleting a field never pulls an item up from here.</div>
+              <div style="font-size:11px;color:var(--color-neutral-600);line-height:1.6">Nothing in the scratch space is saved or delivered, and it is gone when you leave or reload this page. Copy anything you want to keep into a skill field above.</div>
             </div>
           </div>
 
@@ -4672,33 +4696,39 @@ a:hover{color:var(--color-accent)}
               <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
                 <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3)">
                   <div style="font-size:13px;color:var(--color-neutral-400);opacity:0.7" title="Verified employment, edited elsewhere, not here">{{ role.label }}</div>
-                  <div style="display:flex;align-items:center;min-width:44px;justify-content:flex-end">
-                    <sc-if value="{{ role.showSaved }}" hint-placeholder-val="{{ false }}">
-                      <span style="font-size:11px;color:var(--color-accent-300);{{ role.savedFadeStyle }}">Saved</span>
-                    </sc-if>
-                  </div>
+                  <sc-if value="{{ role.edited }}" hint-placeholder-val="{{ false }}"><span class="tag tag-outline">Edited by you</span></sc-if>
                 </div>
-                <textarea class="input" rows="3" value="{{ role.description }}" sc-camel-on-change="{{ role.onChange }}"></textarea>
-                <div style="font-size:11px;color:var(--color-neutral-600);line-height:1.6">Not independently verified. This is your own description, and it's editable directly.</div>
+                <textarea class="input" rows="3" maxlength="8000" value="{{ role.description }}" sc-camel-on-change="{{ role.onChange }}"></textarea>
+                <sc-if value="{{ role.notSaved }}" hint-placeholder-val="{{ false }}">
+                  <div style="font-size:12px;color:#e2735c;line-height:1.6">Not saved. Your text is still here; leave the box again to retry.</div>
+                </sc-if>
+                <sc-if value="{{ role.stale }}" hint-placeholder-val="{{ false }}">
+                  <div style="font-size:12px;color:#e2b93c;line-height:1.6">The resume text this was based on has changed since you edited it. Check that your version is still right, or restore the current text.</div>
+                </sc-if>
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-3)">
+                  <div style="font-size:11px;color:var(--color-neutral-600);line-height:1.6">Not independently verified. This is your own description; it is saved when you leave the box.</div>
+                  <sc-if value="{{ role.edited }}" hint-placeholder-val="{{ false }}">
+                    <button type="button" class="btn btn-ghost" style="font-size:12px;flex:none" disabled="{{ czSaving }}" sc-camel-on-click="{{ role.onRestore }}">Restore original</button>
+                  </sc-if>
+                </div>
               </div>
             </sc-for>
           </div>
+          </sc-if>
         </sc-if>
 
-        <!-- Item 3 (2026-09-11 status-check session): needs_review content had ZERO representation
-             anywhere in this tab (or Customization) before this -- unconditionally, not just for a
-             sparse document, since getCzCategories() (the source both tabs render from) has no
-             needs_review category at all. Shown here regardless of tier -- this is about a candidate
-             being able to see/edit content that's actually theirs, not a premium editing feature like
-             job responsibilities above, so it isn't gated by isFreeTier/isPaidTier the way that is. -->
         <sc-if value="{{ hasFlaggedContent }}" hint-placeholder-val="{{ false }}">
           <div style="display:flex;flex-direction:column;gap:var(--space-3)">
             <div class="card-kicker">Flagged for review</div>
-            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Content from your resume that didn't clearly fit a standard category. Edit it directly, or use Customization to control which delivery targets receive it.</div>
+            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Content from your resume that didn't clearly fit a standard category. It is left off your resume by default. Tick a section to include it exactly as extracted; its text can't be edited here.</div>
             <sc-for list="{{ flaggedContentItems }}" as="fc" hint-placeholder-count="2">
               <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
-                <div style="font-size:13px;color:var(--color-neutral-400)">{{ fc.heading }}</div>
-                <textarea class="input" rows="3" value="{{ fc.content }}" sc-camel-on-change="{{ fc.onChange }}"></textarea>
+                <label style="display:flex;gap:10px;align-items:center;font-size:13px;color:var(--color-neutral-300);cursor:pointer">
+                  <input type="checkbox" checked="{{ fc.checked }}" disabled="{{ fc.disabled }}" sc-camel-on-change="{{ fc.onToggle }}"> {{ fc.heading }}</label>
+                <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6;white-space:pre-wrap;max-height:140px;overflow-y:auto">{{ fc.content }}</div>
+                <sc-if value="{{ fc.lockedNote }}" hint-placeholder-val="{{ false }}">
+                  <div style="font-size:11px;color:var(--color-neutral-600)">Including flagged content is part of customization on a paid plan.</div>
+                </sc-if>
               </div>
             </sc-for>
           </div>
@@ -4708,17 +4738,7 @@ a:hover{color:var(--color-accent)}
     </sc-if>
 
     <sc-if value="{{ tabIsViews }}" hint-placeholder-val="{{ false }}">
-      <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6;margin-bottom:var(--space-4)">A single ATS-safe PDF preview, built from the resume content you confirmed (your own confirmed details, not verification results, and it carries no verification marks), never the originally uploaded document. Content selections are edited on Customization, not here.</div>
-
-      <div class="field" style="max-width:280px;margin-bottom:var(--space-4)">
-        <label for="views-select">Delivery target</label>
-        <sc-raw-select class="input" id="views-select" value="{{ viewsTabPartner }}" sc-camel-on-change="{{ setViewsTabPartner }}">
-          <option value="">Default (all content)</option>
-          <sc-for list="{{ partnerOptions }}" as="p" hint-placeholder-count="3">
-            <option value="{{ p.key }}">{{ p.label }}</option>
-          </sc-for>
-        </sc-raw-select>
-      </div>
+      <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6;margin-bottom:var(--space-4)">A single ATS-safe PDF, built fresh from what is saved on your account: your confirmed resume content with the choices you made on Customization and Content Manager. It carries no verification marks, and it is never the originally uploaded document. To change what appears, use Customization or Content Manager; changes are saved there as you make them.</div>
 
       <div style="display:flex;flex-direction:column;gap:var(--space-3)">
         <div id="pdf-preview-container" style="width:100%;min-height:70vh;max-height:80vh;overflow:auto;background:var(--color-neutral-900);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:16px;display:flex;flex-direction:column;align-items:center;gap:16px"></div>
@@ -5607,20 +5627,12 @@ a:hover{color:var(--color-accent)}
         <div class="dialog-body">
           <div class="field">
             <label for="summary-name">Name</label>
-            <input class="input" id="summary-name" placeholder="e.g. Leadership angle" value="{{ summaryModalName }}" sc-camel-on-change="{{ setSummaryModalName }}">
-          </div>
-          <div class="field" style="margin-top:var(--space-3)">
-            <label for="summary-partner">Assign to</label>
-            <sc-raw-select class="input" id="summary-partner" value="{{ summaryModalPartner }}" sc-camel-on-change="{{ setSummaryModalPartner }}">
-              <option value="">Generic (not partner-specific)</option>
-              <sc-for list="{{ partnerOptions }}" as="p" hint-placeholder-count="3">
-                <option value="{{ p.key }}">{{ p.label }}</option>
-              </sc-for>
-            </sc-raw-select>
+            <input class="input" id="summary-name" placeholder="e.g. Leadership angle" maxlength="100" value="{{ summaryModalName }}" sc-camel-on-change="{{ setSummaryModalName }}">
           </div>
           <div class="field" style="margin-top:var(--space-3)">
             <label for="summary-text">Summary text</label>
-            <textarea class="input" id="summary-text" rows="3" value="{{ summaryModalText }}" sc-camel-on-change="{{ setSummaryModalText }}"></textarea>
+            <textarea class="input" id="summary-text" rows="5" maxlength="4000" value="{{ summaryModalText }}" sc-camel-on-change="{{ setSummaryModalText }}"></textarea>
+            <div style="font-size:11px;color:var(--color-neutral-600);margin-top:4px">Up to 4000 characters.</div>
           </div>
         </div>
         <sc-if value="{{ summaryModalError }}" hint-placeholder-val="{{ false }}">
@@ -6036,64 +6048,350 @@ class Component extends DCLogic {
     return this.ACCOUNT_TABS;
   }
 
-  // Real dead end found live (2026-09-07 wiring audit): Content Manager, Customization, and Views
-  // all read from this exact fixture (CZ_CATEGORIES was a hardcoded constant — "Acme Inc.", "Beta
-  // Corp", "State University", a fake AWS cert) instead of the candidate's own real, confirmed
-  // work_history_items/education_items/certification_items — confirmed live, not theorized: a
-  // candidate opening Views to preview "what employers see" saw fake sample jobs and fell back to
-  // the literal placeholder name "Alex Rivera" if their real name wasn't separately re-entered here
-  // (profileFirst/savedFirst had the exact same "Alex"/"Rivera" literal default and were never
-  // seeded from the real session — see applySession's own fix). getCzCategories() below replaces
-  // the fixture: same shape (so every existing per-item checkbox/customization/PDF-build call site
-  // keeps working unchanged — every reference to the old CZ_CATEGORIES constant below was updated
-  // to call this method instead), but built fresh each time from this.state.resumeExtraction, the
-  // exact same data resumeConfirm already loads and confirms. Item keys are now the real row ids
-  // (uuids) instead of fake fixture keys ('acme','beta',...) — defaultCzCategorySet below was
-  // rewritten to match, building its per-item true/false defaults dynamically instead of off a
-  // fixed literal keyed to fixture ids that no longer exist.
-  getCzCategories() {
-    // this.state may not exist yet — defaultCzCategorySet (below) calls this from getInitialState()
-    // itself, before `this.state` is assigned.
-    const ex = this.state && this.state.resumeExtraction;
-    const workHistory = (ex && ex.work_history) || [];
-    const education = (ex && ex.education) || [];
-    const certifications = (ex && ex.certifications) || [];
-    const needsReview = ((ex && ex.freeform) || []).filter(f => f.section_type === 'needs_review');
-    return [
-      { key: 'experience', label: 'Job Experience', items: workHistory.map(w => ({
-        key: w.id,
-        label: [w.title, w.company].filter(Boolean).join(' at ') + this.parenDateRange(w.start_date, w.start_date_precision, w.end_date, w.end_date_precision),
-        description: w.job_responsibilities || '',
-      })) },
-      { key: 'education', label: 'Education', items: education.map(e => ({
-        key: e.id,
-        // The dates print as the source printed them: a range stays a range ("1985-1990"), and nothing is added that the
-        // source did not say (this used to append "(Graduated Jan 1990)" to any education row that had an end date).
-        label: [e.degree, e.field_of_study, [e.institution, e.location].filter(Boolean).join(', ')].filter(Boolean).join(', ') + this.parenDateRange(e.start_date, e.start_date_precision, e.end_date, e.end_date_precision),
-      })) },
-      { key: 'skills', label: this.skillsHeading() },
-      { key: 'certifications', label: 'Certifications', items: certifications.map(c => ({
-        key: c.id,
-        // Item 7 (2026-09-12 live-testing session): license_number rendered alongside name here too
-        // — this is the single label source Customization, Content Manager's cmRoles-style previews,
-        // and buildResumeLines' PDF output all read from (see Item 4/6's own comments on why), so
-        // fixing it once here keeps every surface in sync rather than needing the same fix repeated
-        // per screen. Always rendered together with name, never split apart or silently dropped.
-        label: [c.name, c.issuing_body, c.license_number ? `Lic #${c.license_number}` : ''].filter(Boolean).join(', ') + (c.issue_date ? ` (${this.dateLabel(c.issue_date, c.issue_date_precision)})` : ''),
-      })) },
-      // Item 3 (2026-09-11 status-check session): needs_review previously had no representation in
-      // Customization at all -- content flagged from the resume as not fitting a standard category
-      // had no per-item control over which delivery target received it, unlike every other real
-      // category here. Itemized the same way as the others (real freeform row id as the key) rather
-      // than lumped into the single misc boolean below, so each flagged section can be included or
-      // excluded independently -- buildResumeLines' own needs_review handling now reads this per-item
-      // state instead of the old single misc gate (see its own comment).
-      { key: 'needsReview', label: 'Flagged for review', items: needsReview.map(f => ({
-        key: f.id,
-        label: (f.heading || '').trim() || 'Untitled section',
-      })) },
-      { key: 'misc', label: 'Hobbies & other activities' },
-    ];
+  // ===================================================================================================================================
+  // Candidate customization (Stage 2, 2026-09-21): REAL and server-persisted. What used to live here was client-only React state (a per-partner
+  // checkbox set, role-description and skill edits) that vanished on reload while the tab said every change "saves the instant you make it".
+  // Now the source of truth is the server's reconciled resume (get-customization / save-customization; assemble_customized_resume): this file
+  // only DISPLAYS that JSON and sends operations. Nothing about the candidate's customization is kept in local state beyond a cache of the last
+  // server response (czData), drafts of text the candidate has typed but the server has not yet confirmed (czDrafts), and the "Saved" / error
+  // indicators. The PDF (buildResumeLines) reads the server's JSON too, never local state.
+  // ===================================================================================================================================
+
+  // "Mar 2019" / "2019" / "Mar 15, 2019" from the reconciled JSON's partial-date strings ('2019', '2019-03', '2019-03-15'): exactly as precise as the source.
+  czPartialLabel(p) {
+    const m = String(p || '').match(/^(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?$/);
+    if (!m) return '';
+    if (!m[2]) return m[1];
+    const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][parseInt(m[2], 10) - 1];
+    if (!mon) return m[1];
+    return m[3] ? mon + ' ' + parseInt(m[3], 10) + ', ' + m[1] : mon + ' ' + m[1];
+  }
+
+  czRange(start, end, current) {
+    const label = [this.czPartialLabel(start), current ? 'Present' : this.czPartialLabel(end)].filter(Boolean).join('-');
+    return label ? ' (' + label + ')' : '';
+  }
+
+  czWorkLabel(w) { return [w.title, w.employer].filter(Boolean).join(' at ') + this.czRange(w.start, w.end, w.current); }
+  czEduLabel(e) { return [e.degree, e.field_of_study, [e.institution, e.location].filter(Boolean).join(', ')].filter(Boolean).join(', ') + this.czRange(e.start, e.end, false); }
+  czCertLabel(c) { return [c.name, c.issuer, c.license_number ? 'Lic #' + c.license_number : ''].filter(Boolean).join(', ') + (c.issued ? ' (' + this.czPartialLabel(c.issued) + ')' : ''); }
+
+  czReady() {
+    const s = this.state;
+    return !!(s.czData && s.resumeCandidateId && s.czLoadedFor === s.resumeCandidateId);
+  }
+
+  async czCall(fn, body) {
+    try {
+      const res = await fetch(this.SUPABASE_FN_URL + '/' + fn, {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify(Object.assign({ session_token: this.candidateSessionToken(), candidate_id: this.state.resumeCandidateId }, body)),
+      });
+      const j = await res.json().catch(() => ({}));
+      return { http: res.status, j };
+    } catch (e) {
+      return { http: 0, j: {} };
+    }
+  }
+
+  // Loads the editor view (every item with its `included` flag) from the server. Called every time one of the three tabs is opened, so what is shown is
+  // always what is saved, including after a reload, a second device, or a plan change.
+  loadCz() {
+    const id = this.state.resumeCandidateId;
+    if (!id) return Promise.resolve(null);
+    if (this._czLoadPromise) return this._czLoadPromise;
+    const p = (async () => {
+      this.setState({ czLoading: true });
+      const r = await this.czCall('get-customization', { view: 'editor' });
+      if (r.http === 200 && r.j.ok && r.j.resume && r.j.resume.available) {
+        this.setState({ czData: r.j.resume, czLoadedFor: id, czLoading: false, czLoadFailed: false }, () => this.applyCzContactToProfile(r.j.resume));
+        return r.j.resume;
+      }
+      this.setState({ czLoading: false, czLoadFailed: true });
+      return null;
+    })();
+    this._czLoadPromise = p;
+    p.then(() => { if (this._czLoadPromise === p) this._czLoadPromise = null; }, () => { if (this._czLoadPromise === p) this._czLoadPromise = null; });
+    return p;
+  }
+
+  // The printed phone/email now live on the server (customization state); when the candidate is on a paid plan, Profile Info shows what the server has,
+  // unless they are in the middle of editing those fields.
+  applyCzContactToProfile(R) {
+    const s = this.state;
+    if (!R || !R.customization || !R.customization.active || s.accountType !== 'full_resume') return;
+    if (s.printedPhone !== s.savedPrintedPhone || s.printedEmail !== s.savedPrintedEmail) return;
+    const phone = (R.contact && R.contact.phone && R.contact.phone.value) || '';
+    const email = (R.contact && R.contact.email && R.contact.email.value) || '';
+    if (phone === s.printedPhone && email === s.printedEmail) return;
+    this.setState({ printedPhone: phone, savedPrintedPhone: phone, printedEmail: email, savedPrintedEmail: email });
+  }
+
+  czFlashSaved() {
+    const id = ++this._czFlashCounter;
+    this.setState({ czSaved: true });
+    setTimeout(() => { if (this._czFlashCounter === id) this.setState({ czSaved: false }); }, 1800);
+  }
+
+  czErrorMessage(r) {
+    const e = r && r.j && r.j.error;
+    if (r && r.http === 0) return "We couldn't reach the server, so nothing was saved. Check your connection and try again.";
+    switch (e) {
+      case 'version_conflict': return 'This was changed somewhere else (another tab or device). We reloaded your latest saved version; please make your change again.';
+      case 'tier_required': return 'Customizing your resume is part of a paid plan, so this was not saved.';
+      case 'skill_cap': return 'You can have up to ' + ((this.state.czData && this.state.czData.skills && this.state.czData.skills.max) || 15) + ' skills. Remove one first.';
+      case 'field_locked': case 'unknown_field': return "That part comes from your verified record and can't be changed here.";
+      case 'text_too_long': return 'That text is too long (the limit is ' + ((r.j && r.j.max) || 'lower') + ' characters).';
+      case 'text_empty': return "A skill can't be blank. Use the remove button to take it off your resume.";
+      case 'text_invalid': return "That text contains characters that can't be saved.";
+      case 'phone_invalid': return "That phone number doesn't look valid.";
+      case 'email_invalid': return "That email address doesn't look valid.";
+      case 'item_not_found': return 'That item is no longer on your resume. We reloaded the latest.';
+      case 'account_deactivated': case 'not_full_resume': return "This account can't be customized right now.";
+      default: return "We couldn't save that change, so nothing was changed. Please try again.";
+    }
+  }
+
+  // ONE write path. Operations are sent one request at a time, in order; base_version is read at the moment each one runs, so queued changes made in quick
+  // succession never conflict with each other. Resolves true only when the server confirmed the save; on any failure nothing was changed on the server.
+  czSave(ops) {
+    const run = async () => {
+      if (!this.czReady()) await this.loadCz();
+      if (!this.czReady()) { this.setState({ czError: "Your resume content isn't loaded yet. Please try again in a moment." }); return false; }
+      this.setState({ czSaving: true, czError: null });
+      const r = await this.czCall('save-customization', { base_version: this.state.czData.customization.version, ops });
+      if (r.http === 200 && r.j.ok && r.j.resume) {
+        this.setState({ czData: r.j.resume, czSaving: false, czError: null });
+        this.czFlashSaved();
+        return true;
+      }
+      const msg = this.czErrorMessage(r);
+      const e = r.j && r.j.error;
+      if (e === 'version_conflict' || e === 'item_not_found' || e === 'tier_required') await this.loadCz();
+      this.setState({ czSaving: false, czError: msg });
+      return false;
+    };
+    this._czChain = (this._czChain || Promise.resolve()).then(run, run);
+    return this._czChain;
+  }
+
+  czCategories() {
+    const R = this.state.czData;
+    if (!R) return [];
+    const cats = [];
+    if ((R.work || []).length) cats.push({ key: 'experience', label: 'Job Experience', items: R.work.map(w => ({ id: w.id, kind: 'work', label: this.czWorkLabel(w), included: w.included })) });
+    if ((R.education || []).length) cats.push({ key: 'education', label: 'Education', items: R.education.map(e => ({ id: e.id, kind: 'education', label: this.czEduLabel(e), included: e.included })) });
+    if (((R.skills && R.skills.items) || []).length) cats.push({ key: 'skills', label: this.skillsHeading(), items: R.skills.items.map(x => ({ id: x.id, kind: x.kind, label: x.text, included: x.included })) });
+    if ((R.certifications || []).length) cats.push({ key: 'certifications', label: 'Certifications', items: R.certifications.map(c => ({ id: c.id, kind: 'certification', label: this.czCertLabel(c), included: c.included })) });
+    const flagged = (R.other_sections || []).filter(f => f.section_type === 'needs_review');
+    if (flagged.length) cats.push({ key: 'needsReview', label: 'Flagged for review', note: 'Left off by default. Tick a section to include it exactly as extracted.', items: flagged.map(f => ({ id: f.id, kind: 'freeform', label: (f.heading || '').trim() || 'Untitled section', included: f.included })) });
+    const misc = (R.other_sections || []).filter(f => f.section_type !== 'needs_review');
+    if (misc.length) cats.push({ key: 'misc', label: 'Hobbies & other activities', items: misc.map(f => ({ id: f.id, kind: 'freeform', label: (f.heading || '').trim() || 'Untitled section', included: f.included })) });
+    return cats;
+  }
+
+  async czToggleItem(it, e) {
+    const box = e && e.target;
+    const want = box ? !!box.checked : !it.included;
+    const ok = await this.czSave([{ op: 'include', kind: it.kind, item_id: it.id, included: want }]);
+    if (!ok && box) box.checked = !want;
+  }
+
+  async czToggleCategory(cat, e) {
+    const box = e && e.target;
+    const want = box ? !!box.checked : !cat.items.every(i => i.included);
+    const ops = cat.items.filter(i => i.included !== want).map(i => ({ op: 'include', kind: i.kind, item_id: i.id, included: want }));
+    if (!ops.length) return;
+    const ok = await this.czSave(ops);
+    if (!ok && box) box.checked = !want;
+  }
+
+  // Summary choice: 'none' | 'default' | a summary version id.
+  czSummaryChoice() {
+    const R = this.state.czData;
+    if (!R || !R.summary) return 'default';
+    if (R.summary.source === 'none') return 'none';
+    if (R.summary.source === 'candidate_selected' && R.summary.id && R.summary.id !== this.czDefaultSummaryId()) return R.summary.id;
+    return 'default';
+  }
+
+  czDefaultSummaryId() {
+    const g = (this.state.savedSummaries || []).find(su => su.partner_key === '');
+    return g ? g.id : null;
+  }
+
+  async czChooseSummary(val, e) {
+    const before = this.czSummaryChoice();
+    const op = val === 'none' ? { op: 'summary', mode: 'none' } : (val === 'default' ? { op: 'summary', mode: 'default' } : { op: 'summary', mode: 'version', summary_id: val });
+    const ok = await this.czSave([op]);
+    if (!ok && e && e.target) e.target.value = before;
+  }
+
+  async czEditDescription(w, text) {
+    const next = String(text || '').replace(/\r\n?/g, '\n').trim();
+    if (next === (w.description || '').trim() && !this.state.czDraftErr[w.id]) { this.setState(st => { const d = { ...st.czDrafts }; delete d[w.id]; return { czDrafts: d }; }); return; }
+    this.setState(st => ({ czDrafts: { ...st.czDrafts, [w.id]: text }, czDraftErr: { ...st.czDraftErr, [w.id]: false } }));
+    const ok = await this.czSave([{ op: 'text', kind: 'work', item_id: w.id, field: 'job_responsibilities', value: next }]);
+    this.setState(st => {
+      const d = { ...st.czDrafts }, er = { ...st.czDraftErr };
+      if (ok) { delete d[w.id]; delete er[w.id]; } else { er[w.id] = true; }
+      return { czDrafts: d, czDraftErr: er };
+    });
+  }
+
+  async czRestoreDescription(w) {
+    const ok = await this.czSave([{ op: 'text', kind: 'work', item_id: w.id, field: 'job_responsibilities', value: null }]);
+    if (ok) this.setState(st => { const d = { ...st.czDrafts }, er = { ...st.czDraftErr }; delete d[w.id]; delete er[w.id]; return { czDrafts: d, czDraftErr: er }; });
+  }
+
+  async czEditSkill(sk, text, e) {
+    const next = String(text || '').trim().replace(/\s+/g, ' ');
+    if (next === sk.text) return;
+    const ok = await this.czSave([{ op: 'text', kind: sk.kind, item_id: sk.id, field: 'skill_text', value: next }]);
+    if (!ok && e && e.target) e.target.value = sk.text;
+  }
+
+  czRemoveSkill(sk) {
+    return this.czSave([sk.kind === 'skill_added' ? { op: 'remove_added_skill', item_id: sk.id } : { op: 'include', kind: 'skill', item_id: sk.id, included: false }]);
+  }
+
+  async czAddSkill() {
+    const text = (this.state.czNewSkill || '').trim();
+    if (!text) return;
+    const ok = await this.czSave([{ op: 'add_skill', text }]);
+    if (ok) this.setState({ czNewSkill: '' });
+  }
+
+  czIncludedSkills() {
+    const R = this.state.czData;
+    return ((R && R.skills && R.skills.items) || []).filter(x => x.included);
+  }
+
+  async czMergeSkills() {
+    const s = this.state;
+    const cur = (s.skillDupQueue || [])[0];
+    if (!cur) return;
+    const b = this.czIncludedSkills().find(x => x.text === cur.b);
+    if (b) {
+      const ok = await this.czRemoveSkill(b);
+      if (!ok) { this.setState({ skillDupQueue: [] }); return; }
+    }
+    this.setState(st => ({ skillDupQueue: this.prunedSkillDupQueue(st.skillDupQueue.slice(1), this.czIncludedSkills().map(x => x.text), st.skillDupKept) }));
+  }
+
+  async czReset() {
+    const ok = await this.czSave([{ op: 'reset_items' }]);
+    if (ok) this.setState({ czResetConfirm: false, czDrafts: {}, czDraftErr: {} });
+  }
+
+  // Printed phone / email (Profile Info) persist as part of the same customization state. Only called for a paid full-resume account.
+  async saveContactPreferences(phone, email) {
+    this.setState({ contactSaveError: null });
+    const ok = await this.czSave([{ op: 'contact', printed_phone: (phone || '').trim() || null, printed_email: (email || '').trim() || null }]);
+    if (ok) this.setState(st => ({ savedPrintedPhone: phone, savedPrintedEmail: email, contactSaveError: null }));
+    else this.setState(st => ({ contactSaveError: st.czError || "We couldn't save your printed phone and email." }));
+  }
+
+  // The skills section title: the resume's own heading when one was captured, "Skills" otherwise.
+  skillsHeading() {
+    const R = this.state.czData;
+    if (R && R.skills && typeof R.skills.heading === 'string' && R.skills.heading.trim()) return R.skills.heading.trim().replace(/\s+/g, ' ');
+    const rows = (this.state.resumeExtraction && this.state.resumeExtraction.skills) || [];
+    const row = rows.find(r => r && typeof r.heading === 'string' && r.heading.trim());
+    return row ? row.heading.trim().replace(/\s+/g, ' ') : 'Skills';
+  }
+
+  findSkillDuplicatePairs() {
+    return this.findSkillDuplicatePairsIn(this.czIncludedSkills().map(x => x.text), this.state.skillDupKept);
+  }
+
+  // The generated resume, built ONLY from the server's reconciled JSON (Stage 2, 2026-09-21): `R` is get-customization's 'delivered' view (excluded items
+  // already dropped by the server, summary / skills / descriptions / printed contact already resolved, verification status never printed), and `L` is
+  // the 'editor' view, used only for the positions of every item, excluded ones included, so section boundaries stay where the source document had them
+  // (see groupByLiteralHeading). Nothing here reads customization, summaries, skills or contact details from local state.
+  buildResumeLines(R, L) {
+    const lines = [];
+    const push = (text, bold) => lines.push({ text: this.sanitizeAts(text), bold: !!bold });
+    const H = R.header || {};
+    // All-or-nothing header choice (unchanged): 'printed' reproduces the verbatim captured header; anything else composes name, location and the contact
+    // details the candidate chose to print. A missing printed header falls back to the composed one, never a blank.
+    if (H.mode === 'printed' && H.printed_header) {
+      String(H.printed_header).split('\n').forEach(line => { if (line.trim()) push(line); });
+    } else {
+      if (R.candidate && R.candidate.name) push(R.candidate.name);
+      if (H.location) push(H.location);
+      const c = R.contact || {};
+      const contactLine = [c.phone && c.phone.value, c.email && c.email.value].filter(Boolean).join(' · ');
+      if (contactLine) push(contactLine);
+    }
+    const S = R.summary || {};
+    if (S.content) {
+      if (S.heading) push(S.heading, true);
+      this.wrapText(S.content, 90).forEach(w => push(w));
+    }
+    push('');
+
+    const other = (kind) => {
+      const out = [];
+      const add = (rows, k) => { if (k !== kind) (rows || []).forEach(r => { if (r && typeof r.position === 'number') out.push(r.position); }); };
+      add(L.work, 'work'); add(L.education, 'education'); add(L.certifications, 'certifications'); add(L.other_sections, 'freeform');
+      if (kind !== 'skills' && L.skills && typeof L.skills.section_position === 'number') out.push(L.skills.section_position);
+      return out;
+    };
+    const posOf = (x) => (typeof x.position === 'number' ? x.position : Infinity);
+    const grouped = [];
+    const groupKind = (rows, kind, mk, key) => {
+      const items = (rows || []).map(x => ({ position: posOf(x), heading: x.heading || '', label: mk(x), body: kind === 'experience' ? (x.description || '') : '' }));
+      items.sort((a, b) => a.position - b.position);
+      this.groupByLiteralHeading(items, other(key)).forEach(g => grouped.push({ kind, position: g.position, heading: g.heading, items: g.items }));
+    };
+    groupKind(R.work, 'experience', (w) => this.czWorkLabel(w), 'work');
+    groupKind(R.education, 'education', (e) => this.czEduLabel(e), 'education');
+    groupKind(R.certifications, 'certifications', (c) => this.czCertLabel(c), 'certifications');
+
+    const skillTexts = ((R.skills && R.skills.items) || []).map(x => (x.text || '').trim()).filter(Boolean);
+    if (skillTexts.length) {
+      // one skill per line (each skill is its own line, as in the source); the section prints under the resume's own heading, "Skills" when it had none
+      grouped.push({ kind: 'skills', position: (R.skills && typeof R.skills.section_position === 'number') ? R.skills.section_position : Infinity, body: skillTexts.join('\n'), heading: (R.skills && R.skills.heading) || 'Skills' });
+    }
+    // flagged / other sections: only what the candidate left included (needs_review is excluded unless they opted it in)
+    (R.other_sections || []).forEach(f => {
+      const content = (f.content || '').trim();
+      if (!content) return;
+      grouped.push({ kind: 'misc', position: posOf(f), heading: (f.heading || '').trim(), body: content });
+    });
+    grouped.sort((a, b) => a.position - b.position);
+
+    // A section shows exactly one heading: the literal source heading, or nothing if the source had none.
+    let lastHeading = null;
+    grouped.forEach(g => {
+      if (g.items) {
+        const heading = (g.heading || '').trim();
+        if (heading && heading !== lastHeading) push(heading, true);
+        lastHeading = heading || null;
+        g.items.forEach(b => {
+          this.wrapText(b.label, 90).forEach(w => push(w));
+          if (b.body) this.wrapText(b.body, 90).forEach(w => push(w));
+          push('');
+        });
+        return;
+      }
+      if (g.kind === 'skills') {
+        const skillsHeading = g.heading || 'Skills';
+        if (skillsHeading !== lastHeading) push(skillsHeading, true);
+        lastHeading = skillsHeading;
+        this.wrapText(g.body, 90).forEach(w => push(w));
+        push('');
+        return;
+      }
+      const heading = (g.heading || '').trim();
+      if (heading && heading !== lastHeading) push(heading, true);
+      lastHeading = heading || null;
+      this.wrapText(g.body, 90).forEach(w => push(w));
+      push('');
+    });
+    return lines;
   }
 
   monthYearLabel(dateStr) {
@@ -6138,83 +6436,6 @@ class Component extends DCLogic {
 
   _czFlashCounter = 0;
   _cmFlashCounter = 0;
-
-  PARTNER_DEFAULT_RULES = {
-    linkedin: { misc: false },
-    indeed: {},
-    glassdoor: {},
-  };
-
-  // Built dynamically from getCzCategories() now — real dead end this replaces: the old version was
-  // a fixed literal keyed to the fixture's fake ids ({acme:true, beta:true,...}), so a real
-  // candidate's actual work-history/education/certification ids never appeared in a fresh
-  // customization set at all (every real item would have rendered unchecked, having no matching
-  // key). allTrue(catKey) below defaults every REAL item currently known for that category to
-  // included — same "everything on by default, opt out per item" behavior as before, just sourced
-  // from real ids instead of fixture ones. Deliberately state-safe (this.state may not exist yet —
-  // this runs from getInitialState() itself, before `this.state` is assigned) via getCzCategories()'s
-  // own `this.state &&` guard.
-  defaultCzCategorySet(partnerKey) {
-    const cats = this.getCzCategories();
-    const allTrue = (catKey) => {
-      const cat = cats.find(c => c.key === catKey);
-      const out = {};
-      ((cat && cat.items) || []).forEach(it => { out[it.key] = true; });
-      return out;
-    };
-    const base = {
-      experience: allTrue('experience'),
-      education: allTrue('education'),
-      skills: true,
-      certifications: allTrue('certifications'),
-      needsReview: allTrue('needsReview'),
-      misc: true,
-      // Item 4 (2026-09-08 regression session): this used to be the literal string
-      // 'sum-generic' -- a placeholder fixture id left over from before Item B's real
-      // candidate_summary_versions backend existed. It never matched any real saved
-      // summary's real (server-issued) id, so getSummaryText's old fallback silently
-      // substituted the generic summary into the generated document for every target,
-      // regardless of what a candidate picked, until they happened to explicitly change
-      // that specific target's selection. null means "not yet customized" -- see
-      // seedCzSummaryDefaults, which fills this in with the real generic summary's own id
-      // the first time real summaries are available, and getSummaryText, which now treats
-      // null and '' (a real, explicit "No summary" choice) differently.
-      summaryId: null,
-    };
-    return { ...base, ...(this.PARTNER_DEFAULT_RULES[partnerKey] || {}) };
-  }
-
-  // Real dead end this closes (2026-09-07 wiring audit): customization's per-item checkbox sets are
-  // built once, at getInitialState() time, before resumeExtraction has ever loaded — so they start
-  // as {} for every category (no known items yet). Without this, a candidate's real work-history/
-  // education/certification items would never get a default checkbox state at all once they DID
-  // load, since nothing recomputed customization afterward. Called from loadResumeExtraction's own
-  // success path. Merges rather than overwrites: only fills in items customization doesn't already
-  // have an entry for (defaulting new ones to included), so anything the candidate already toggled
-  // — including on a page they've had open across a resumeExtraction poll/reload — is left alone.
-  refreshCzCategoryDefaults() {
-    const cats = this.getCzCategories().filter(c => c.items);
-    this.setState(st => {
-      const next = {};
-      for (const partner of Object.keys(st.customization)) {
-        const set = { ...st.customization[partner] };
-        for (const cat of cats) {
-          const merged = { ...(set[cat.key] || {}) };
-          cat.items.forEach(it => { if (!(it.key in merged)) merged[it.key] = true; });
-          set[cat.key] = merged;
-        }
-        next[partner] = set;
-      }
-      return { customization: next };
-    });
-  }
-
-  seedRoleDescriptions() {
-    const exp = this.getCzCategories().find(c => c.key === 'experience');
-    const out = {};
-    exp.items.forEach(it => { out[it.key] = it.description || ''; });
-    return out;
-  }
 
   // Item B (2026-09-08 session): lazy-load-on-tab-visit, same pattern as
   // ensureVerificationItemsLoaded/loadVerificationItems — a candidate's first visit to Content
@@ -6262,87 +6483,7 @@ class Component extends DCLogic {
       savedSummariesError: null,
       savedSummaries: data.summaries || [],
       savedSummariesLoadedFor: candidateId,
-    }, () => {
-      this.seedCzSummaryDefaults();
-      if (this.state.accountTab === 'views') this.renderPdfPreview();
     });
-  }
-
-  roleDescription(key) {
-    const s = this.state;
-    if (s && s.roleDescriptions && s.roleDescriptions[key] !== undefined) return s.roleDescriptions[key];
-    const exp = this.getCzCategories().find(c => c.key === 'experience');
-    const it = exp.items.find(i => i.key === key);
-    return it ? (it.description || '') : '';
-  }
-
-  setRoleDescription(key, text) {
-    const id = ++this._cmFlashCounter;
-    this.setState(st => ({ roleDescriptions: { ...st.roleDescriptions, [key]: text }, cmFlashField: key, cmFlashFading: false }));
-    setTimeout(() => { if (this._cmFlashCounter === id) this.setState({ cmFlashFading: true }); }, 900);
-    setTimeout(() => { if (this._cmFlashCounter === id) this.setState({ cmFlashField: null, cmFlashFading: false }); }, 1500);
-  }
-
-  // Item 4 (2026-09-08 regression session): the old version treated "id doesn't match any
-  // real saved summary" as one case, which silently conflated two very different
-  // situations -- a target that was never customized (summaryId still at its placeholder
-  // default) and a candidate's real, explicit "No summary" choice (summaryId === '', from
-  // the <option value=""> in the Customization tab's dropdown) -- both fell through to the
-  // same generic-summary fallback, so explicitly choosing "No summary" had no visible
-  // effect on the generated document. null now means "never customized" (falls back to the
-  // generic summary, same as before); '' means a real, explicit "No summary" choice and is
-  // now honored (returns empty, no fallback). A real id that no longer matches anything
-  // (e.g. that summary version was deleted after being selected) also falls back to the
-  // generic summary rather than silently producing an empty document.
-  getSummaryText(target) {
-    const s = this.state;
-    const list = s.savedSummaries || [];
-    const custom = target && s.customization[target];
-    const id = custom ? custom.summaryId : null;
-    if (id === '') return '';
-    if (id) {
-      const found = list.find(su => su.id === id);
-      if (found) return found.content;
-    }
-    const generic = list.find(su => su.partner_key === '');
-    return generic ? generic.content : '';
-  }
-
-  // Item 4 (2026-09-08 regression session): companion to the summaryId default fix above --
-  // seeds every target's summaryId to the real generic (no-partner) summary's own id, the
-  // first time real summaries are available, same "seed once real data arrives, only if
-  // still untouched" convention already used by refreshCzCategoryDefaults/
-  // seedSkillItemsIfBlank elsewhere in this file. Only touches targets still at null (never
-  // customized) -- never overwrites a real explicit choice, including '' ("No summary").
-  seedCzSummaryDefaults() {
-    const generic = (this.state.savedSummaries || []).find(su => su.partner_key === '');
-    if (!generic) return;
-    this.setState(st => {
-      const next = {};
-      let changed = false;
-      for (const key of Object.keys(st.customization)) {
-        const entry = st.customization[key];
-        if (entry && entry.summaryId == null) {
-          next[key] = { ...entry, summaryId: generic.id };
-          changed = true;
-        } else {
-          next[key] = entry;
-        }
-      }
-      return changed ? { customization: next } : {};
-    });
-  }
-
-  setCustomizeSummaryId(id) {
-    const target = this.state.customizeTarget;
-    if (!target) return;
-    const fid = ++this._czFlashCounter;
-    this.setState(st => ({
-      customization: { ...st.customization, [target]: { ...st.customization[target], summaryId: id } },
-      czFlashField: 'summaryId', czFlashFading: false,
-    }));
-    setTimeout(() => { if (this._czFlashCounter === fid) this.setState({ czFlashFading: true }); }, 900);
-    setTimeout(() => { if (this._czFlashCounter === fid) this.setState({ czFlashField: null, czFlashFading: false }); }, 1500);
   }
 
   // Item B (2026-09-08 session): real create/update against candidate_summary_versions — see
@@ -6357,12 +6498,14 @@ class Component extends DCLogic {
     if (!candidateId || s.summaryModalSaving) return;
     const name = (s.summaryModalName || '').trim() || 'Untitled summary';
     const content = s.summaryModalText || '';
-    const partner_key = s.summaryModalPartner || '';
+    if (content.length > 4000) { this.setState({ summaryModalError: 'A summary can be up to 4000 characters. This one is ' + content.length + '.' }); return; }
+    if (name.length > 100) { this.setState({ summaryModalError: 'A summary name can be up to 100 characters.' }); return; }
     this.setState({ summaryModalSaving: true, summaryModalError: null });
     const fn = s.summaryModalId ? 'update-candidate-summary' : 'create-candidate-summary';
+    // (a summary is no longer assigned to a partner: new ones are generic, and an edit leaves any older assignment as it was)
     const body = s.summaryModalId
-      ? { candidate_id: candidateId, id: s.summaryModalId, name, content, partner_key }
-      : { candidate_id: candidateId, name, content, partner_key };
+      ? { candidate_id: candidateId, id: s.summaryModalId, name, content }
+      : { candidate_id: candidateId, name, content, partner_key: '' };
     let res, data;
     try {
       res = await fetch(this.SUPABASE_FN_URL + '/' + fn, {
@@ -6376,11 +6519,13 @@ class Component extends DCLogic {
       return;
     }
     if (!res.ok || !data.ok) {
-      this.setState({ summaryModalSaving: false, summaryModalError: "Couldn't save this summary. Please try again." });
+      const tooLong = data && (data.error === 'content_too_long' || data.error === 'name_too_long');
+      this.setState({ summaryModalSaving: false, summaryModalError: tooLong ? (data.error === 'content_too_long' ? 'A summary can be up to 4000 characters.' : 'A summary name can be up to 100 characters.') : "Couldn't save this summary. Please try again." });
       return;
     }
     this.setState({ summaryModalSaving: false, summaryModalError: null, summaryModalOpen: false });
     this.loadSummaries(candidateId);
+    this.loadCz();
   }
 
   // Item B: real delete against candidate_summary_versions — see delete-candidate-summary's own
@@ -6403,17 +6548,7 @@ class Component extends DCLogic {
       return;
     }
     if (!res.ok || !data.ok) return;
-    this.setState(st => {
-      const cz = {};
-      Object.keys(st.customization).forEach(k => {
-        // Item 4 (2026-09-08 regression session): null here, not '' -- a target whose
-        // assigned summary just got deleted out from under it should gracefully fall back
-        // to the generic summary (via seedCzSummaryDefaults, triggered by the loadSummaries
-        // call below), not silently go blank the way an explicit "No summary" choice would.
-        cz[k] = st.customization[k].summaryId === id ? { ...st.customization[k], summaryId: null } : st.customization[k];
-      });
-      return { customization: cz };
-    });
+    this.loadCz();
     this.loadSummaries(candidateId);
   }
 
@@ -6980,220 +7115,6 @@ class Component extends DCLogic {
     });
   }
 
-  // Item 2 (2026-09-14 live-testing session): real, confirmed gap — buildResumeLines had no defense
-  // against a needs_review freeform row restating content that ALSO landed correctly in a
-  // structured category (certifications, in the real case this was found against: "Professional
-  // Certifications" showed up once as real certification_items entries, once more as a leftover
-  // needs_review block under its own heading). The extraction prompt already has its own
-  // "Deduplication" rule asking the model not to do this — already confirmed elsewhere this session
-  // (see the position-uniqueness fix, Item B) that asking the LLM in prose is not reliable enough to
-  // depend on alone for something a candidate would see duplicated in their own generated document.
-  // This is the deterministic backstop: if a needs_review block's own lines are themselves mostly
-  // just restating names already captured as real certifications/work-history/education entries,
-  // treat the whole block as a leftover duplicate and drop it here, at render time, regardless of
-  // whether the extraction step's own dedup succeeded or not. Deliberately majority-based (60%), not
-  // 100% — a needs_review block that duplicates most of its lines but adds one genuinely new item at
-  // the end should still get dropped rather than kept for the sake of that one line: the other
-  // needs_review rows on this same document already prove genuinely new content survives elsewhere,
-  // so erring toward dropping a near-total-duplicate is the safer default than showing the same
-  // certifications twice under two different headings.
-  freeformIsMostlyDuplicateOfCaptured(f, ex) {
-    const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-    const lines = (f.content || '').split('\n').map(norm).filter(Boolean);
-    if (!lines.length) return false;
-    const captured = new Set();
-    (ex.certifications || []).forEach(c => { if (c.name) captured.add(norm(c.name)); });
-    (ex.work_history || []).forEach(w => { if (w.company) captured.add(norm(w.company)); if (w.title) captured.add(norm(w.title)); });
-    (ex.education || []).forEach(e => { if (e.institution) captured.add(norm(e.institution)); if (e.degree) captured.add(norm(e.degree)); });
-    const matched = lines.filter(l => captured.has(l)).length;
-    return matched > 0 && (matched / lines.length) >= 0.6;
-  }
-
-  buildResumeLines(target) {
-    const s = this.state;
-    const cats = this.getCzCategories();
-    const catVal = (key) => (target ? s.customization[target][key] : true);
-    const lines = [];
-    const push = (text, bold) => lines.push({ text: this.sanitizeAts(text), bold: !!bold });
-    const deliveredContact = this.resolveDeliveredContact();
-    const ex = s.resumeExtraction;
-    // Real dead end this replaces (2026-09-07 wiring audit): fell back to the literal placeholder
-    // "Alex Rivera" whenever savedFirst/savedLast were unset \u2014 confirmed live, a candidate previewing
-    // "what employers see" could see a fake person's name. Now omitted entirely rather than faked if
-    // genuinely unset (matches contactLine's own pattern immediately below) \u2014 profileFirst/savedFirst
-    // are also now seeded from the real session name in applySession, so this should be the real name
-    // in practice, not a gap that needed a fallback string at all.
-    // Item 6 (2026-09-12 live-testing session, follow-up build): the all-or-nothing header choice,
-    // replacing Item 19's separate name/location/contact composition (that field's own resumeConfirm
-    // UI is retired -- see that card's own comment). 'printed' reproduces the verbatim captured
-    // header exactly, including any suffix or middle name; 'account' composes a clean header from
-    // structured fields only, using personalLocation (Personal Info's own candidate-editable field,
-    // never the document-extracted candidate_location, which nothing downstream reads anymore).
-    // Falls back to the 'account' composition if 'printed' is selected but no printed_header was
-    // ever captured for this document (extraction predates Item 6, or the page genuinely had no
-    // header block) -- never renders a blank header just because the preferred source is empty.
-    const printedHeader = (s.resumeExtraction && s.resumeExtraction.resume_document && s.resumeExtraction.resume_document.printed_header) || '';
-    if (s.headerDisplayMode === 'printed' && printedHeader) {
-      printedHeader.split('\n').forEach(line => { if (line.trim()) push(line); });
-    } else {
-      const nameLine = [s.savedFirst, s.savedLast].filter(Boolean).join(' ');
-      if (nameLine) push(nameLine);
-      if (s.personalLocation) push(s.personalLocation);
-      const contactLine = [deliveredContact.phone.value, deliveredContact.email.value].filter(Boolean).join(' \u00b7 ');
-      if (contactLine) push(contactLine);
-    }
-    // Item 9 (2026-09-08 regression session): this used to push the whole summary as ONE line --
-    // unlike EXPERIENCE's roleDescription and SKILLS a few lines below, both already wrapped via
-    // wrapText before being pushed. buildAtsPdfBytes below has no wrapping of its own (it's a raw
-    // per-line PDF text-show operator at a fixed x position, one push() call = one literal line at
-    // one y position) -- an unwrapped line longer than the page's usable width just runs off the
-    // right edge instead of continuing on a new line, confirmed live against a real long summary.
-    // Bug 1 (2026-09-17 live-demo report) / Item #3 point 7: Summary's own literal heading, printed
-    // only when it's actually the extracted document's own summary being shown verbatim (content
-    // equality check against the freeform row) -- a candidate-authored alternate summary version for
-    // this delivery target is no longer the document's own words, so it correctly gets no heading
-    // either. Never a generic "Summary" label, and never both a generic label and the real one
-    // stacked together (point 7's own concrete example).
-    const freeformSummary = ex && ex.freeform.find(f => f.section_type === 'summary');
-    const summaryText = this.getSummaryText(target);
-    const summaryHeading = (freeformSummary && summaryText && freeformSummary.content === summaryText) ? (freeformSummary.heading || '').trim() : '';
-    if (summaryText) {
-      if (summaryHeading) push(summaryHeading, true);
-      this.wrapText(summaryText, 90).forEach(w => push(w));
-    }
-    push('');
-    // Item 6 (2026-09-11 status-check session): this used to render every category in a fixed
-    // EXPERIENCE -> EDUCATION -> SKILLS -> CERTIFICATIONS -> ADDITIONAL INFORMATION template
-    // order, unconditionally, regardless of where those sections actually appeared in the
-    // candidate's real source document. Real fix: reuse the exact position-sorted pattern already
-    // proven live for the resumeConfirm screen (resumeSectionsOrdered, elsewhere in this file) --
-    // every category's items interleave in their true document order instead of a fixed template.
-    // Item #3 (2026-09-17): section boundaries and headings are now driven by the source document's
-    // own literal headings (work_history/education/certifications each now carry a real `heading`
-    // field, same as freeform always has), not by a fixed category taxonomy -- see
-    // groupByLiteralHeading (shared with resumeSectionsOrdered, so this screen and the confirm
-    // screen always agree on where one section ends and the next begins). Item labels are pulled
-    // from getCzCategories() (the same source Customization itself renders) so both surfaces always
-    // agree, and every label/body flows through wrapText.
-    const grouped = [];
-    if (ex) {
-      const expVal = catVal('experience');
-      const expItems = [];
-      cats.find(c => c.key === 'experience').items.forEach(it => {
-        if (target && !expVal[it.key]) return;
-        const w = ex.work_history.find(row => row.id === it.key);
-        if (!w) return;
-        expItems.push({ position: typeof w.position === 'number' ? w.position : Infinity, heading: w.heading || '', label: it.label, body: this.roleDescription(it.key) });
-      });
-      expItems.sort((a, b) => a.position - b.position);
-      this.groupByLiteralHeading(expItems, this.positionsOfOtherKinds(ex, 'work_history')).forEach(g => grouped.push({ kind: 'experience', position: g.position, heading: g.heading, items: g.items }));
-
-      const eduVal = catVal('education');
-      const eduItems = [];
-      cats.find(c => c.key === 'education').items.forEach(it => {
-        if (target && !eduVal[it.key]) return;
-        const x = ex.education.find(row => row.id === it.key);
-        if (!x) return;
-        eduItems.push({ position: typeof x.position === 'number' ? x.position : Infinity, heading: x.heading || '', label: it.label, body: '' });
-      });
-      eduItems.sort((a, b) => a.position - b.position);
-      this.groupByLiteralHeading(eduItems, this.positionsOfOtherKinds(ex, 'education')).forEach(g => grouped.push({ kind: 'education', position: g.position, heading: g.heading, items: g.items }));
-
-      const certVal = catVal('certifications');
-      const certItems = [];
-      cats.find(c => c.key === 'certifications').items.forEach(it => {
-        if (target && !certVal[it.key]) return;
-        const c = ex.certifications.find(row => row.id === it.key);
-        if (!c) return;
-        certItems.push({ position: typeof c.position === 'number' ? c.position : Infinity, heading: c.heading || '', label: it.label, body: '' });
-      });
-      certItems.sort((a, b) => a.position - b.position);
-      this.groupByLiteralHeading(certItems, this.positionsOfOtherKinds(ex, 'certifications')).forEach(g => grouped.push({ kind: 'certifications', position: g.position, heading: g.heading, items: g.items }));
-
-      if (catVal('skills') && ex.skills && ex.skills.length > 0) {
-        // Real regression found live testing a genuinely complex document (16-item Core
-        // Competencies list): joining every skill onto ONE comma-separated line, then word-wrapping
-        // that single giant string, produced a dense run-on block with no visual separation between
-        // skills at all -- readable as prose, not as a scannable list, which is what every other
-        // section in this generated document (certifications, experience bullets) already gets via
-        // wrapText's own line-per-item behavior. Joining with "\n" instead means each skill lands on
-        // its own line once wrapText renders it (wrapText already preserves embedded "\n" -- see its
-        // own header) -- one line per skill, matching how the source document itself presents them,
-        // without claiming the source's specific two-column visual LAYOUT (a design choice this
-        // plain-text PDF was never going to reproduce either way). Skills' own literal heading
-        // (skill_items.heading, 2026-09-21) rides along on the group and prints as its section title in the render loop below.
-        const skillLine = this.deliveredSkills().join('\n');
-        if (skillLine) {
-          const positions = ex.skills.map(sk => sk.section_position).filter(p => typeof p === 'number');
-          grouped.push({ kind: 'skills', position: positions.length ? Math.min(...positions) : Infinity, body: skillLine, heading: this.skillsHeading() });
-        }
-      }
-      // Item 3 (2026-09-11 status-check session): needs_review now reads per-item catVal like every
-      // other real category above (see getCzCategories' own comment on why it's itemized now)
-      // instead of the single misc boolean gate this used to share with hobbies_other -- a candidate
-      // can now exclude one flagged section from a delivery target without losing every flagged
-      // section. hobbies_other stays under the single misc boolean below, unchanged. Neither is
-      // grouped by groupByLiteralHeading -- each freeform row already carries its own real, distinct
-      // heading and can legitimately recur at different points in true document order (unlike
-      // experience/education/certifications, several freeform rows sharing identical heading text
-      // are not necessarily one contiguous section).
-      const needsReviewVal = catVal('needsReview');
-      cats.find(c => c.key === 'needsReview').items.forEach(it => {
-        if (target && !needsReviewVal[it.key]) return;
-        const f = ex.freeform.find(row => row.id === it.key && row.section_type === 'needs_review');
-        if (!f) return;
-        const content = (f.content || '').trim();
-        if (!content) return;
-        if (this.freeformIsMostlyDuplicateOfCaptured(f, ex)) return;
-        grouped.push({ kind: 'misc', position: typeof f.position === 'number' ? f.position : Infinity, heading: (f.heading || '').trim(), body: content });
-      });
-      if (catVal('misc')) {
-        ex.freeform.filter(f => f.section_type === 'hobbies_other').forEach(f => {
-          const content = (f.content || '').trim();
-          if (!content) return;
-          grouped.push({ kind: 'misc', position: typeof f.position === 'number' ? f.position : Infinity, heading: (f.heading || '').trim(), body: content });
-        });
-      }
-    }
-    grouped.sort((a, b) => a.position - b.position);
-
-    // Item #3 point 7 (2026-09-17): a section shows exactly one heading -- the literal source
-    // heading text, or nothing if the source genuinely has none. No generic label is ever
-    // substituted or stacked alongside the real one -- confirmed as a deliberate, strict reading:
-    // this replaces the old fixed EXPERIENCE/EDUCATION/CERTIFICATIONS labels AND the old
-    // 'ADDITIONAL INFORMATION' fallback for headless misc content. 'skills' now carries its own captured
-    // heading too (skillsHeading), falling back to "Skills" only when the resume had none.
-    let lastHeading = null;
-    grouped.forEach(g => {
-      if (g.items) {
-        const heading = (g.heading || '').trim();
-        if (heading && heading !== lastHeading) push(heading, true);
-        lastHeading = heading || null;
-        g.items.forEach(b => {
-          this.wrapText(b.label, 90).forEach(w => push(w));
-          if (b.body) this.wrapText(b.body, 90).forEach(w => push(w));
-          push('');
-        });
-        return;
-      }
-      if (g.kind === 'skills') {
-        // the resume's own Skills heading when one was captured, "Skills" otherwise (see skillsHeading)
-        const skillsHeading = g.heading || 'Skills';
-        if (skillsHeading !== lastHeading) push(skillsHeading, true);
-        lastHeading = skillsHeading;
-        this.wrapText(g.body, 90).forEach(w => push(w));
-        push('');
-        return;
-      }
-      const heading = (g.heading || '').trim();
-      if (heading && heading !== lastHeading) push(heading, true);
-      lastHeading = heading || null;
-      this.wrapText(g.body, 90).forEach(w => push(w));
-      push('');
-    });
-    return lines;
-  }
-
   buildAtsPdfBytes(lines) {
     const pageWidth = 612, pageHeight = 792, marginX = 54, marginTop = 54, marginBottom = 54;
     const fontSize = 11, leading = 15;
@@ -7242,26 +7163,36 @@ class Component extends DCLogic {
     return out;
   }
 
-  computePdfKey() {
-    const s = this.state;
-    const target = s.accountTier === 'paid' ? s.viewsTabPartner : '';
-    return s.accountTier + '|' + target + '|' + JSON.stringify(s.customization);
-  }
-
-  renderPdfPreview() {
+  // Views: fetches the server's reconciled resume EVERY time (the 'delivered' view for the content, the 'editor' view only for item positions), then builds
+  // the PDF from that JSON alone. Nothing about the resume is read from local state, so what is previewed / downloaded is what is saved.
+  async renderPdfPreview() {
     const container = document.getElementById('pdf-preview-container');
     if (!container) { requestAnimationFrame(() => this.renderPdfPreview()); return; }
+    const seq = this._pdfSeq = (this._pdfSeq || 0) + 1;
+    if (this._pdfBlobUrl) { URL.revokeObjectURL(this._pdfBlobUrl); this._pdfBlobUrl = null; }
+    container.innerHTML = '';
+    const note = (text) => { const d = document.createElement('div'); d.style.cssText = 'color:var(--color-neutral-500);font-size:12px;padding:24px;text-align:center'; d.textContent = text; container.appendChild(d); };
+    note('Loading your resume\u2026');
+    const [del, ed] = await Promise.all([this.czCall('get-customization', { view: 'delivered' }), this.czCall('get-customization', { view: 'editor' })]);
+    if (seq !== this._pdfSeq) return;   // a newer render superseded this one
+    const ok = (r) => r.http === 200 && r.j.ok && r.j.resume && r.j.resume.available;
+    if (!ok(del) || !ok(ed)) { container.innerHTML = ''; note("We couldn't load your resume just now, so there is nothing to preview or download. Please try again."); return; }
+    this._pdfSourceVersion = del.j.resume.customization.version;
+    this.renderPdfPreviewFrom(del.j.resume, ed.j.resume);
+  }
+
+  renderPdfPreviewFrom(delivered, editor) {
+    const container = document.getElementById('pdf-preview-container');
+    if (!container) return;
     try {
-      const s = this.state;
-      const target = s.accountTier === 'paid' ? s.viewsTabPartner : '';
-      const lines = this.buildResumeLines(target);
+      const lines = this.buildResumeLines(delivered, editor);
       const pdfText = this.buildAtsPdfBytes(lines);
       const bytes = new Uint8Array(pdfText.length);
       for (let i = 0; i < pdfText.length; i++) bytes[i] = pdfText.charCodeAt(i);
       const blob = new Blob([bytes], { type: 'application/pdf' });
       if (this._pdfBlobUrl) URL.revokeObjectURL(this._pdfBlobUrl);
       this._pdfBlobUrl = URL.createObjectURL(blob);
-      this._pdfFilename = (target ? (this.PARTNERS.find(p => p.key === target) || {}).label || target : 'default') + '-resume.pdf';
+      this._pdfFilename = 'resume.pdf';
 
       container.innerHTML = '';
       if (!window.pdfjsLib) {
@@ -7269,7 +7200,7 @@ class Component extends DCLogic {
         msg.style.cssText = 'color:var(--color-neutral-500);font-size:12px;padding:24px;text-align:center';
         msg.textContent = 'Loading preview\u2026';
         container.appendChild(msg);
-        setTimeout(() => this.renderPdfPreview(), 300);
+        setTimeout(() => this.renderPdfPreviewFrom(delivered, editor), 300);
         return;
       }
       if (window.pdfjsLib.GlobalWorkerOptions && !window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
@@ -7469,55 +7400,6 @@ class Component extends DCLogic {
     if (this._pdfBlobUrl) URL.revokeObjectURL(this._pdfBlobUrl);
   }
 
-  toggleCzItem(target, categoryKey, itemKey) {
-    const id = ++this._czFlashCounter;
-    this.setState(st => {
-      const cat = st.customization[target][categoryKey];
-      return {
-        customization: { ...st.customization, [target]: { ...st.customization[target], [categoryKey]: { ...cat, [itemKey]: !cat[itemKey] } } },
-        czFlashField: categoryKey, czFlashFading: false,
-      };
-    });
-    setTimeout(() => { if (this._czFlashCounter === id) this.setState({ czFlashFading: true }); }, 900);
-    setTimeout(() => { if (this._czFlashCounter === id) this.setState({ czFlashField: null, czFlashFading: false }); }, 1500);
-  }
-
-  toggleCzCategory(target, key) {
-    const id = ++this._czFlashCounter;
-    this.setState(st => {
-      const cur = st.customization[target][key];
-      let next;
-      if (cur && typeof cur === 'object') {
-        const allOn = Object.values(cur).every(Boolean);
-        next = Object.fromEntries(Object.keys(cur).map(k => [k, !allOn]));
-      } else {
-        next = !cur;
-      }
-      return {
-        customization: { ...st.customization, [target]: { ...st.customization[target], [key]: next } },
-        czFlashField: key, czFlashFading: false,
-      };
-    });
-    setTimeout(() => { if (this._czFlashCounter === id) this.setState({ czFlashFading: true }); }, 900);
-    setTimeout(() => { if (this._czFlashCounter === id) this.setState({ czFlashField: null, czFlashFading: false }); }, 1500);
-  }
-
-  resetCzToDefault() {
-    const target = this.state.customizeTarget;
-    if (!target) return;
-    const id = ++this._czFlashCounter;
-    this.setState(st => ({
-      customization: { ...st.customization, [target]: this.defaultCzCategorySet(target) },
-      czFlashField: null, czResetFlash: true, czResetFading: false,
-      // Item 4 (2026-09-08 regression session): defaultCzCategorySet's summaryId is null
-      // ("not customized") -- without re-seeding here, the dropdown would show "No summary"
-      // right after a reset while the generated document actually still falls back to the
-      // real generic summary, a real display/behavior mismatch a candidate would notice.
-    }), () => this.seedCzSummaryDefaults());
-    setTimeout(() => { if (this._czFlashCounter === id) this.setState({ czResetFading: true }); }, 900);
-    setTimeout(() => { if (this._czFlashCounter === id) this.setState({ czResetFlash: false, czResetFading: false }); }, 1500);
-  }
-
   getInitialState() {
     const verifyToken = new URLSearchParams(window.location.search).get('verify_token');
     const loginToken = new URLSearchParams(window.location.search).get('login_token');
@@ -7627,7 +7509,6 @@ class Component extends DCLogic {
     mobileNavOpen: false,
     kycModalOpen: false, kycModalPendingSave: false,
     connectModalOpen: false, connectModalPartner: null,
-    viewsTabPartner: '',
     phoneConfirmed: false, confirmedPhoneNumber: '', phoneModalOpen: false, phoneModalPendingSave: false, phoneCodeInput: '',
     phoneVerifiedAt: null, phoneVerifySavePending: false, phoneVerifySaveError: null,
     crossValidationDone: false, crossValidationModalOpen: false, crossValidationContext: null, crossValidationPromptDismissed: false,
@@ -7666,28 +7547,24 @@ class Component extends DCLogic {
     tourActive: false, tourStep: 0, tourEverShown: false, tourRect: { top: 100, left: 100, width: 100, height: 40 },
     placeholderModalOpen: false,
     helpMenuOpen: false, helpTabModalTab: null,
-    customizeTarget: '',
-    customization: {
-      linkedin: this.defaultCzCategorySet('linkedin'), indeed: this.defaultCzCategorySet('indeed'), glassdoor: this.defaultCzCategorySet('glassdoor'),
-    },
-    roleDescriptions: this.seedRoleDescriptions(),
+    // Customization (Stage 2): the server's reconciled resume is the source of truth; this is only a cache of the last response plus UI-only flags.
+    czData: null, czLoadedFor: null, czLoading: false, czLoadFailed: false, czSaving: false, czSaved: false, czError: null,
+    czDrafts: {}, czDraftErr: {}, czNewSkill: '', czResetConfirm: false, contactSaveError: null,
     // Item B (2026-09-08 session): no longer seeded from a client fixture — real backend now,
     // see ensureSummariesLoaded's own header. Starts empty; the Content Manager tab's first visit
     // loads (and auto-seeds server-side, from the real extracted summary) the real rows.
     savedSummaries: [], savedSummariesLoading: false, savedSummariesError: null, savedSummariesLoadedFor: null,
     summaryModalOpen: false, summaryModalId: null, summaryModalName: '', summaryModalPartner: '', summaryModalText: '',
     summaryModalSaving: false, summaryModalError: null,
-    cmFlashField: null, cmFlashFading: false,
     // No longer seeded from a fixture (see removed applySkillFixture/seedSkillItems) — this grid's
     // real data source is now the resumeConfirm screen's confirmed skill_items (see resumeExtraction.
     // skills / updateResumeSkill), not this tab. Starts empty rather than reproducing the old
     // fixture's fake defaults; loading a returning candidate's own confirmed skills into this tab is
     // a real, separate, not-yet-built next step (Content Manager has no live data source for any
     // field today — same known gap as the rest of that tab).
-    skillItems: [''], skillOverflow: '',
+    skillOverflow: '',
     skillDeleteIndex: null, skillDupQueue: [], skillDupKept: [],
     upgradeModalContext: 'customization',
-    czFlashField: null, czFlashFading: false, czResetFlash: false, czResetFading: false,
     activityStart: this.defaultActivityStart(), activityEnd: this.defaultActivityEnd(),
     activityLog: this.seedActivityLog(),
     comparison: { loaded: false, loading: false, error: false, pending: [], history: [], tier1: [], would: null },
@@ -7723,33 +7600,6 @@ class Component extends DCLogic {
     return [];
   }
 
-  deliveredSkills() {
-    return (this.state.skillItems || []).map(x => (x || '').trim()).filter(Boolean);
-  }
-
-  // The Skills section's own literal heading as printed on the resume ("Core Competencies", "Technical Skills", ...), captured at extraction and stored on every
-  // skill row of the block (skill_items.heading), the same way work/education/certification rows carry theirs. Rows extracted before that column existed, and
-  // resumes whose skills have no visible heading, have none, so every place that names the section falls back to "Skills".
-  skillsHeading() {
-    const rows = (this.state.resumeExtraction && this.state.resumeExtraction.skills) || [];
-    const row = rows.find(r => r && typeof r.heading === 'string' && r.heading.trim());
-    return row ? row.heading.trim().replace(/\s+/g, ' ') : 'Skills';
-  }
-
-  // Real dead end this closes (2026-09-07 wiring audit): skillItems (Content Manager's editable
-  // grid, and the only source deliveredSkills/Views reads from) started as [''] — one blank field —
-  // regardless of what the candidate's real, confirmed skill_items actually were. Seeds it from
-  // resumeExtraction.skills once, the first time real data is available; only when skillItems is
-  // still in its untouched-blank state, so this never clobbers edits the candidate has already made
-  // in this tab (including across a resumeExtraction poll/reload while Content Manager is open).
-  seedSkillItemsIfBlank() {
-    const s = this.state;
-    const blank = !s.skillItems || s.skillItems.length === 0 || (s.skillItems.length === 1 && !s.skillItems[0]);
-    if (!blank) return;
-    const real = ((s.resumeExtraction && s.resumeExtraction.skills) || []).map(x => x.skill_text || '').filter(Boolean);
-    if (real.length) this.setState({ skillItems: real });
-  }
-
   normalizeSkill(v) {
     return (v || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   }
@@ -7781,10 +7631,6 @@ class Component extends DCLogic {
     return [this.normalizeSkill(a), this.normalizeSkill(b)].sort().join('|');
   }
 
-  findSkillDuplicatePairs() {
-    return this.findSkillDuplicatePairsIn(this.state.skillItems, this.state.skillDupKept);
-  }
-
   findSkillDuplicatePairsIn(itemList, keptList) {
     const items = itemList || [];
     const kept = keptList || [];
@@ -7804,13 +7650,6 @@ class Component extends DCLogic {
 
   prunedSkillDupQueue(queue, items, kept) {
     return (queue || []).filter(p => items.indexOf(p.a) >= 0 && items.indexOf(p.b) >= 0 && kept.indexOf(this.skillPairKey(p.a, p.b)) < 0);
-  }
-
-  setSkillItem(index, value) {
-    this.setState(st => ({
-      skillItems: st.skillItems.map((v, idx) => (idx === index ? value : v)),
-      skillDupQueue: [],
-    }));
   }
 
   // Employer activity (2026-09-20, comparison Stage 1): REAL data from candidate-comparison-requests, gated by this candidate's own session.
@@ -8150,6 +7989,10 @@ class Component extends DCLogic {
     this._lastAccountTab = tabNow;
     if (this.state.screen === 'tiers' || this.isLicenseProfileTabOpen()) this.ensureDiscoverableLoaded();
     if (this.state.screen === 'account') this.ensureFeedPauseLoaded();
+    if (this.state.screen === 'account' && this.state.accountType === 'full_resume' && this.state.resumeCandidateId && this.state.czLoadedFor !== this.state.resumeCandidateId && !this.state.czLoading && this._czAutoTried !== this.state.resumeCandidateId) {
+      this._czAutoTried = this.state.resumeCandidateId;
+      this.loadCz();
+    }
     if (this.state.screen === 'account' && this.state.accountType === 'license_only' && this.state.accountTab === 'activity') { this.ensureLicenseActivityLoaded(); this.ensureComparisonLoaded(); }
     if (prevState && this.state.tourActive && (prevState.tourStep !== this.state.tourStep || !prevState.tourActive)) {
       this.measureTourTarget();
@@ -8202,11 +8045,16 @@ class Component extends DCLogic {
   seedContactFromAccount(email, phone) {
     const s = this.state;
     const patch = {};
+    // On a paid plan the printed values live on the server (customization state) and Profile Info shows what is saved there, so the account value is
+    // never re-seeded over a printed field the candidate left empty (empty means private, and is what the delivered resume uses).
+    const serverOwnsPrinted = !!(s.czData && s.czLoadedFor && s.czData.customization && s.czData.customization.active);
     if (email && !s.printedEmail) {
-      patch.printedEmail = email; patch.savedPrintedEmail = email; patch.parsedResumeEmail = email;
+      if (!serverOwnsPrinted) { patch.printedEmail = email; patch.savedPrintedEmail = email; }
+      patch.parsedResumeEmail = email;
     }
     if (phone && !s.printedPhone) {
-      patch.printedPhone = phone; patch.savedPrintedPhone = phone; patch.parsedResumePhone = phone;
+      if (!serverOwnsPrinted) { patch.printedPhone = phone; patch.savedPrintedPhone = phone; }
+      patch.parsedResumePhone = phone;
       patch.verifiedPhoneEntry = phone; patch.savedVerifiedPhoneEntry = phone; patch.cvPhoneEntry = phone;
     }
     return patch;
@@ -8230,8 +8078,9 @@ class Component extends DCLogic {
     // initial state). s.email is real and always present once a candidate has an account at all;
     // the fallback was dead weight that would have silently faked a value had it ever been reached.
     const verifiedEmail = s.email || '';
-    const printedPhone = (s.printedPhone || '').trim();
-    const printedEmail = (s.printedEmail || '').trim();
+    // Printing your own phone / email is part of customization (paid): on a free plan nothing is printed, so this is what the panels below must say.
+    const printedPhone = s.accountTier === 'paid' ? (s.printedPhone || '').trim() : '';
+    const printedEmail = s.accountTier === 'paid' ? (s.printedEmail || '').trim() : '';
     const stateOf = (printed, verified) => {
       if (!printed) return 'private';
       return verified && norm(printed) === norm(verified) ? 'verified' : 'stated';
@@ -9858,8 +9707,6 @@ class Component extends DCLogic {
       if (confirmed) this.addActivityLog('Paid plan selected at signup');
     } else if (confirmed && returnCtx && returnCtx.upgradeReturnTab) {
       patch.accountTab = returnCtx.upgradeReturnTab;
-      if (returnCtx.upgradeReturnTab === 'customization') patch.customizeTarget = returnCtx.upgradeReturnTarget;
-      if (returnCtx.upgradeReturnTab === 'views') patch.viewsTabPartner = returnCtx.upgradeReturnTarget;
     } else if (this.state.screen === 'account') {
       // Post-payment redirect gap (2026-09-19): this handler DOES run, after session routing, but only ever set
       // accountTab when an entry point had stashed upgradeReturnTab before the redirect. The main path (pick Paid on
@@ -9868,7 +9715,7 @@ class Component extends DCLogic {
       // "may still be processing" message) that lives on the Subscription tab. Land there.
       patch.accountTab = 'subscription';
     }
-    this.setState(patch, () => { if (patch.accountTab === 'views') this.renderPdfPreview(); });
+    this.setState(patch, () => { if (patch.accountTab === 'views') this.renderPdfPreview(); if (patch.accountTab === 'customization' || patch.accountTab === 'contentManager') this.loadCz(); });
   }
 
   // Subscription cancellation gap (2026-09-18), Step 3: shared retry-poll for the webhook-backed
@@ -10321,8 +10168,6 @@ class Component extends DCLogic {
     // resumeExtraction yet at the moment setState is called — see the callback, not a synchronous
     // read), not before.
     this.setState({ resumeExtractionLoading: false, resumeExtraction: data }, () => {
-      this.refreshCzCategoryDefaults();
-      this.seedSkillItemsIfBlank();
       // Item 14: this is the one real choke point both resumeConfirm entry paths (a fresh signup
       // via applySignupConfirmation, and a returning candidate via checkResumeFlowIncomplete) funnel
       // through — renderOriginalPdfViewer no-ops on its own if the extracted document isn't a PDF or
@@ -10479,7 +10324,7 @@ class Component extends DCLogic {
         });
         const added = detectedCerts.filter(c => !known.has(c.id)).map(c => ({ ...c, trade_soc_code: c.trade_soc_code || this.suggestTradeSocCode(c.name, c.issuing_body) || '' }));
         return { licenseDetecting: false, resumeExtraction: { ...ex, certifications: merged.concat(added), license_items: out.license_items || [], resume_document: { ...ex.resume_document, license_detection_status: 'done' } } };
-      }, () => this.refreshCzCategoryDefaults());
+      });
     } else {
       this.setState({ licenseDetecting: false });
     }
@@ -10858,7 +10703,10 @@ class Component extends DCLogic {
       // locally, so it looked saved and silently reverted on the next session load.
       const first = (s.profileFirst || '').trim(), last = (s.profileLast || '').trim();
       const nameChanged = first !== (s.savedFirst || '') || last !== (s.savedLast || '');
-      this.setState({ savedFirst: nameChanged ? s.savedFirst : first, savedLast: nameChanged ? s.savedLast : last, savedVerifiedPhoneEntry: s.verifiedPhoneEntry, savedPrintedPhone: s.printedPhone, savedPrintedEmail: s.printedEmail, savedNotifyEmail: s.notifyEmail, savedNotifySms: s.notifySms, savedHeaderDisplayMode: s.headerDisplayMode, savedPersonalLocation: s.personalLocation });
+      // The printed phone / email are saved on the server (customization state) for a paid full-resume account: their "saved" copies only move once the
+      // server confirms (saveContactPreferences), so a failed save leaves the Save bar up instead of looking saved.
+      const contactChanged = s.accountTier === 'paid' && s.accountType === 'full_resume' && (s.printedPhone !== s.savedPrintedPhone || s.printedEmail !== s.savedPrintedEmail);
+      this.setState({ savedFirst: nameChanged ? s.savedFirst : first, savedLast: nameChanged ? s.savedLast : last, savedVerifiedPhoneEntry: s.verifiedPhoneEntry, savedPrintedPhone: contactChanged ? s.savedPrintedPhone : s.printedPhone, savedPrintedEmail: contactChanged ? s.savedPrintedEmail : s.printedEmail, savedNotifyEmail: s.notifyEmail, savedNotifySms: s.notifySms, savedHeaderDisplayMode: s.headerDisplayMode, savedPersonalLocation: s.personalLocation });
       this.addActivityLog('Profile Info preferences saved');
       // Item 6 (2026-09-12 live-testing session, follow-up build): the one real backend write in
       // this whole Save flow — see save-header-preferences' own header for why. Fired alongside the
@@ -10866,6 +10714,7 @@ class Component extends DCLogic {
       // headerPrefsSaveError without blocking or reverting the rest of this save.
       this.saveHeaderPreferences();
       if (nameChanged) this.saveProfileName(first, last);
+      if (contactChanged) this.saveContactPreferences(s.printedPhone, s.printedEmail);
     } else if (s.accountTab === 'sharing') {
       this.setState({
         savedLinkedinEnabled: s.linkedinEnabled, savedIndeedEnabled: s.indeedEnabled, savedGlassdoorEnabled: s.glassdoorEnabled,
@@ -11434,7 +11283,7 @@ class Component extends DCLogic {
     const prevTab = this.state.accountTab;
     action();
     this.setState(st => ({
-      viewsTabPartner: '', tierSelection: st.accountTier, changePlanOpen: false, deactReason: '', deactNote: '',
+      tierSelection: st.accountTier, changePlanOpen: false, deactReason: '', deactNote: '',
       ...(prevTab === 'sharing' && st.accountTab !== 'sharing' ? { arrivedFromDeactivationPause: false } : {}),
     }));
   }
@@ -11442,6 +11291,7 @@ class Component extends DCLogic {
   renderVals() {
     const s = this.state;
     const feedPauseReady = !!s.resumeCandidateId && s.feedPauseLoadedFor === s.resumeCandidateId;
+    const czReady = this.czReady();
     const dirty = this.isDirty();
     const pd = (e) => { if (e && e.preventDefault) e.preventDefault(); };
     const openPlaceholder = (e) => { pd(e); this.setState({ placeholderModalOpen: true }); };
@@ -11747,6 +11597,8 @@ class Component extends DCLogic {
       notifySmsDisabled: !(!!s.verifiedPhoneEntry && s.verifiedPhoneEntry === s.confirmedPhoneNumber),
       notifySmsEnabled: !!s.verifiedPhoneEntry && s.verifiedPhoneEntry === s.confirmedPhoneNumber,
       printedPhone: s.printedPhone,
+      printedContactLocked: s.accountTier !== 'paid',
+      contactSaveError: s.contactSaveError,
       setPrintedPhone: (e) => this.setState({ printedPhone: e.target.value, printedPhoneChangeKept: false }),
       parsedResumePhone: s.parsedResumePhone,
       printedPhoneHasValue: !!(s.printedPhone || '').trim(),
@@ -11886,7 +11738,7 @@ class Component extends DCLogic {
       // seedCzSummaryDefaults fix above, to whatever the summaryId placeholder happened to
       // resolve to). Same real-dead-end pattern already fixed for resumeExtraction via
       // ensureResumeExtractionLoaded, applied here.
-      selectTabViews: () => this.guardedTabNav('views', () => { this.ensureSummariesLoaded(); this.setState({ accountTab: 'views' }, () => this.renderPdfPreview()); }),
+      selectTabViews: () => this.guardedTabNav('views', () => { this.setState({ accountTab: 'views' }, () => this.renderPdfPreview()); }),
       downloadPdf: () => {
         if (!this._pdfBlobUrl) return;
         const a = document.createElement('a');
@@ -11896,142 +11748,103 @@ class Component extends DCLogic {
         a.click();
         a.remove();
       },
-      partnerOptions: this.PARTNERS,
       socTradeOptions: this.SOC_TRADE_OPTIONS,
       tabIsCustomization: s.accountTab === 'customization',
       tabCustomizationClass: s.accountTab === 'customization' ? 'btn-secondary' : 'btn-ghost',
-      // Item 4 (2026-09-08 regression session): same ensureSummariesLoaded gap as
-      // selectTabViews above -- a candidate landing on Customization directly would see the
-      // per-target summary dropdown offering only "No summary" (summaryOptionsForTarget
-      // filters off the still-empty savedSummaries) with no way to know real saved
-      // summaries existed until they happened to visit Content Manager first.
-      selectTabCustomization: () => this.guardedTabNav('customization', () => { this.ensureSummariesLoaded(); this.setState({ accountTab: 'customization' }); }),
-      customizeTarget: s.customizeTarget,
-      setCustomizeTarget: (e) => {
-        const val = e.target.value;
-        if (val && s.accountTier === 'free') { e.target.value = ''; this.setState({ upgradeModalOpen: true, upgradeModalContext: 'customization', upgradeReturnTab: 'customization', upgradeReturnTarget: val }); return; }
-        this.setState({ customizeTarget: val, czFlashField: null, czResetFlash: false });
-      },
-      // Item 17 (2026-09-12 live-testing session): an itemized category with zero real items (e.g.
-      // a document with no work history at all) is filtered out here too — same reasoning as
-      // categoryRows just below (see its own header): nothing real to preview, and showing an empty,
-      // permanently-checked row for a category that doesn't exist on this candidate's resume is
-      // misleading regardless of whether the checkbox itself is interactive.
-      freeCategoryRows: this.getCzCategories().filter(c => !c.items || c.items.length > 0).map(c => ({
-        label: c.label,
-        items: c.items ? c.items.map(it => ({ label: it.label })) : [],
-      })),
+      selectTabCustomization: () => this.guardedTabNav('customization', () => { this.ensureSummariesLoaded(); this.setState({ accountTab: 'customization', czResetConfirm: false }); this.loadCz(); }),
+      // shared by Customization, Content Manager and Views: the real state of the server-persisted customization (see czSave)
+      czReady,
+      czLoading: s.czLoading,
+      czShowLoading: s.czLoading && !czReady,
+      czLoadFailed: s.czLoadFailed && !czReady,
+      retryCzLoad: () => this.loadCz(),
+      czSaving: s.czSaving,
+      czSaved: s.czSaved,
+      czError: s.czError,
       upgradeModalOpen: s.upgradeModalOpen,
       closeUpgradeModal: () => this.setState({ upgradeModalOpen: false }),
       goUpgradeFromModal: () => this.setState({ upgradeModalOpen: false, accountTab: 'subscription' }),
-      hasCustomizeTarget: !!s.customizeTarget,
-      customizeTargetLabel: (this.PARTNERS.find(p => p.key === s.customizeTarget) || {}).label || '',
-      // Item 3/17 (2026-09-12 live-testing session): real, confirmed bug — reproduced by reasoning
-      // through the actual code, not assumption. `Object.values(val).every(Boolean)` on an itemized
-      // category with ZERO real items (val = {}, e.g. a document with no work history/education at
-      // all) is VACUOUSLY true — JS's own .every() returns true on an empty array unconditionally.
-      // That made the category checkbox render as permanently checked for exactly this case, and
-      // toggleCzCategory's own matching logic (Object.fromEntries(Object.keys({}).map(...))) always
-      // maps an empty object back to another empty object no matter what "next" computes to — so
-      // clicking it was a genuine no-op, not just a rendering glitch: "stuck checked and
-      // un-uncheckable" was real. Filtering out itemized categories with zero items here (mirroring
-      // resumeConfirm's own resumeHasWorkHistory-style gating, and freeCategoryRows just above) fixes
-      // both symptoms at once — nothing real to toggle means no row renders, rather than a fake one
-      // that can't reflect a real state.
-      categoryRows: s.customizeTarget ? this.getCzCategories().filter(c => !c.items || c.items.length > 0).map(c => {
-        const val = s.customization[s.customizeTarget][c.key];
-        const isItemized = !!c.items;
-        return {
-          label: c.label,
-          checked: isItemized ? Object.values(val).every(Boolean) : val,
-          onToggle: () => this.toggleCzCategory(s.customizeTarget, c.key),
-          showSaved: s.czFlashField === c.key,
-          savedFadeStyle: s.czFlashFading ? 'transition:opacity 0.5s ease;opacity:0' : 'transition:opacity 0.15s ease;opacity:1',
-          items: isItemized ? c.items.map(it => ({
-            label: it.label,
-            checked: val[it.key],
-            onToggle: () => this.toggleCzItem(s.customizeTarget, c.key, it.key),
-          })) : [],
-        };
-      }) : [],
-      // Item 18 (2026-09-12 live-testing session): "anything selected" checked directly per category
-      // (Object.values(...).some(Boolean), never .every()) so an empty itemized category can't
-      // accidentally read as "selected" the same vacuous-truth way Item 3/17 just fixed for the
-      // checked/toggle logic above — an empty {} correctly contributes nothing either way here.
-      allDeselected: (() => {
-        if (!s.customizeTarget) return false;
-        const val = s.customization[s.customizeTarget];
-        if (!val) return false;
-        const anySelected = ['experience', 'education', 'certifications', 'needsReview'].some(k => Object.values(val[k] || {}).some(Boolean)) || !!val.skills || !!val.misc;
-        return !anySelected;
-      })(),
-      showCzResetSaved: s.czResetFlash,
-      czResetFadeStyle: s.czResetFading ? 'transition:opacity 0.5s ease;opacity:0' : 'transition:opacity 0.15s ease;opacity:1',
-      resetCzToDefault: () => this.resetCzToDefault(),
-      summaryOptionsForTarget: s.customizeTarget ? s.savedSummaries.filter(su => su.partner_key === '' || su.partner_key === s.customizeTarget).map(su => ({
-        id: su.id,
-        label: su.name + (su.partner_key ? ' (' + ((this.PARTNERS.find(p => p.key === su.partner_key) || {}).label || '') + ')' : ' (Generic)'),
-      })) : [],
-      customizeSummaryId: s.customizeTarget && s.customization[s.customizeTarget] ? (s.customization[s.customizeTarget].summaryId || '') : '',
-      setCustomizeSummaryId: (e) => this.setCustomizeSummaryId(e.target.value),
-      customizeSummaryPreview: this.getSummaryText(s.customizeTarget),
-      // Item 6 (2026-09-12 live-testing session, follow-up build): mirrors buildResumeLines' own
-      // all-or-nothing header choice (see its own comment) so this preview stays truthful to what
-      // the generated PDF actually contains -- 'printed' shows the verbatim header (joined onto one
-      // line here, since this is a compact glance summary, not the full document), 'account' composes
-      // from structured fields using personalLocation, never the retired candidate_location.
+      czUpgradePrompt: () => this.setState({ upgradeModalOpen: true, upgradeModalContext: 'customization' }),
+      czCategoryRows: this.czCategories().map(c => ({
+        label: c.label,
+        note: c.note || '',
+        checked: c.items.every(i => i.included),
+        onToggle: (e) => this.czToggleCategory(c, e),
+        items: c.items.map(it => ({ label: it.label, checked: it.included, onToggle: (e) => this.czToggleItem(it, e) })),
+      })),
+      czFreeRows: this.czCategories().map(c => ({
+        label: c.label,
+        checked: c.items.every(i => i.included),
+        items: c.items.map(it => ({ label: it.label, checked: it.included })),
+      })),
+      czAllDeselected: czReady && !this.czCategories().some(c => c.items.some(i => i.included)),
+      czResetConfirm: s.czResetConfirm,
+      czResetIdle: !s.czResetConfirm,
+      askCzReset: () => this.setState({ czResetConfirm: true }),
+      cancelCzReset: () => this.setState({ czResetConfirm: false }),
+      confirmCzReset: () => this.czReset(),
+      czSummaryOptions: (s.savedSummaries || []).filter(su => su.id !== this.czDefaultSummaryId()).map(su => ({ id: su.id, label: su.name })),
+      czSummaryChoice: this.czSummaryChoice(),
+      setCzSummary: (e) => this.czChooseSummary(e.target.value, e),
+      czSummaryPreview: (s.czData && s.czData.summary && s.czData.summary.content) || 'No summary will appear on your resume.',
+      // "Always included": what the generated resume opens with, taken from the server's reconciled JSON (so it can never disagree with the PDF).
       alwaysIncludedLine: (() => {
-        const printedHeader = (s.resumeExtraction && s.resumeExtraction.resume_document && s.resumeExtraction.resume_document.printed_header) || '';
-        if (s.headerDisplayMode === 'printed' && printedHeader) {
-          return printedHeader.split('\n').map(l => l.trim()).filter(Boolean).join(' \u00b7 ');
-        }
-        return [[s.savedFirst, s.savedLast].filter(Boolean).join(' '), s.personalLocation || '', this.resolveDeliveredContact().phone.value, this.resolveDeliveredContact().email.value].filter(Boolean).join(' \u00b7 ');
+        const R = s.czData;
+        if (!R) return s.czLoadFailed ? '' : 'Loading…';
+        const H = R.header || {};
+        if (H.mode === 'printed' && H.printed_header) return String(H.printed_header).split('\n').map(l => l.trim()).filter(Boolean).join(' · ');
+        const c = R.contact || {};
+        return [R.candidate && R.candidate.name, H.location, c.phone && c.phone.value, c.email && c.email.value].filter(Boolean).join(' · ');
       })(),
-      showAlwaysIncludedPrivateNote: !!(this.resolveDeliveredContact().phone.statement || this.resolveDeliveredContact().email.statement),
-      alwaysIncludedPrivateNote: [this.resolveDeliveredContact().phone.statement, this.resolveDeliveredContact().email.statement].filter(Boolean).join('. '),
-      showSummarySaved: s.czFlashField === 'summaryId',
-      summarySavedFadeStyle: s.czFlashFading ? 'transition:opacity 0.5s ease;opacity:0' : 'transition:opacity 0.15s ease;opacity:1',
+      showAlwaysIncludedPrivateNote: !!(s.czData && s.czData.contact && (s.czData.contact.phone.state === 'private' || s.czData.contact.email.state === 'private')),
+      alwaysIncludedPrivateNote: (s.czData && s.czData.contact ? [s.czData.contact.phone.state === 'private' ? 'Valid phone on file: yes, private' : '', s.czData.contact.email.state === 'private' ? 'Valid email on file: yes, private' : ''].filter(Boolean).join('. ') : ''),
       tabIsContentManager: s.accountTab === 'contentManager',
       tabContentManagerClass: s.accountTab === 'contentManager' ? 'btn-secondary' : 'btn-ghost',
-      selectTabContentManager: () => this.guardedTabNav('contentManager', () => { this.setState({ accountTab: 'contentManager' }); this.ensureSummariesLoaded(); }),
-      cmRoles: this.getCzCategories().find(c => c.key === 'experience').items.map(it => ({
-        label: it.label,
-        description: this.roleDescription(it.key),
-        onChange: (e) => this.setRoleDescription(it.key, e.target.value),
-        showSaved: s.cmFlashField === it.key,
-        savedFadeStyle: s.cmFlashFading ? 'transition:opacity 0.5s ease;opacity:0' : 'transition:opacity 0.15s ease;opacity:1',
-      })),
+      selectTabContentManager: () => this.guardedTabNav('contentManager', () => { this.setState({ accountTab: 'contentManager' }); this.ensureSummariesLoaded(); this.loadCz(); }),
+      cmRoles: ((czReady && s.czData.work) || []).map(w => {
+        const draft = s.czDrafts[w.id];
+        return {
+          label: this.czWorkLabel(w),
+          description: draft !== undefined ? draft : (w.description || ''),
+          edited: !!w.description_edited,
+          stale: !!w.description_stale,
+          notSaved: !!s.czDraftErr[w.id],
+          onChange: (e) => this.czEditDescription(w, e.target.value),
+          onRestore: () => this.czRestoreDescription(w),
+        };
+      }),
       cmUpgradePrompt: () => this.setState({ upgradeModalOpen: true, upgradeModalContext: 'contentManager' }),
-      // Item 3 (2026-09-11 status-check session): see the template's own comment on this section.
-      flaggedContentItems: ((s.resumeExtraction && s.resumeExtraction.freeform) || [])
+      // Flagged for review: shown read-only (its text is locked to the extraction); the candidate opts it in or out. Excluded unless opted in.
+      flaggedContentItems: ((czReady && s.czData.other_sections) || [])
         .filter(f => f.section_type === 'needs_review')
         .map(f => ({
           heading: (f.heading || '').trim() || 'Untitled section',
           content: f.content || '',
-          onChange: (e) => this.updateResumeFreeform(f.id, e.target.value),
+          checked: !!f.included,
+          disabled: s.accountTier !== 'paid' || s.czSaving,
+          lockedNote: s.accountTier !== 'paid',
+          onToggle: (e) => this.czToggleItem({ id: f.id, kind: 'freeform', included: !!f.included }, e),
         })),
-      hasFlaggedContent: !!(s.resumeExtraction && s.resumeExtraction.freeform && s.resumeExtraction.freeform.some(f => f.section_type === 'needs_review')),
-      freeSummaryPreview: this.getSummaryText(''),
-      freeSkillsPreview: this.deliveredSkills(),
+      hasFlaggedContent: !!(czReady && (s.czData.other_sections || []).some(f => f.section_type === 'needs_review')),
+      freeSummaryPreview: (s.czData && s.czData.summary && s.czData.summary.content) || '',
+      freeSkillsPreview: ((czReady && s.czData.skills && s.czData.skills.items) || []).filter(x => x.included).map(x => x.text),
       skillsHeadingLabel: this.skillsHeading(),
-      skillFields: s.skillItems.map((val, i) => ({
+      skillFields: this.czIncludedSkills().map((sk, i) => ({
         id: 'skill-field-' + i,
-        value: val,
-        onChange: (e) => this.setSkillItem(i, e.target.value),
+        value: sk.text,
+        onChange: (e) => this.czEditSkill(sk, e.target.value, e),
         onDelete: () => this.setState({ skillDeleteIndex: i }),
       })),
-      skillCountLabel: this.deliveredSkills().length + ' of 15 delivered',
-      skillAddVisible: s.skillItems.length < 15 && (s.skillDupQueue || []).length === 0,
-      addSkillField: () => this.setState(st => ({ skillItems: [...st.skillItems, ''] }), () => {
-        const idx = this.state.skillItems.length - 1;
-        let tries = 0;
-        const focusNew = () => {
-          const el = document.getElementById('skill-field-' + idx);
-          if (el) { el.focus(); if (document.activeElement === el) return; }
-          if (++tries < 12) requestAnimationFrame(focusNew);
-        };
-        focusNew();
-      }),
+      skillCountLabel: this.czIncludedSkills().length + ' of ' + ((czReady && s.czData.skills && s.czData.skills.max) || 15) + ' on your resume',
+      skillAddVisible: czReady && this.czIncludedSkills().length < ((s.czData.skills && s.czData.skills.max) || 15) && (s.skillDupQueue || []).length === 0,
+      czNewSkill: s.czNewSkill,
+      setCzNewSkill: (e) => this.setState({ czNewSkill: e.target.value }),
+      addSkillField: () => this.czAddSkill(),
+      hasRemovedSkills: czReady && ((s.czData.skills && s.czData.skills.items) || []).some(x => !x.included && x.kind === 'skill'),
+      removedSkills: ((czReady && s.czData.skills && s.czData.skills.items) || []).filter(x => !x.included && x.kind === 'skill').map(x => ({
+        text: x.text,
+        onRestore: () => this.czSave([{ op: 'include', kind: 'skill', item_id: x.id, included: true }]),
+      })),
       onSkillsBlur: (e) => {
         const root = e.currentTarget;
         const next = e.relatedTarget;
@@ -12042,33 +11855,26 @@ class Component extends DCLogic {
       skillDupPromptOpen: (s.skillDupQueue || []).length > 0,
       skillDupShowProgress: (s.skillDupQueue || []).length > 1,
       skillDupProgressLabel: 'Similar pair 1 of ' + (s.skillDupQueue || []).length,
-      skillDupPairLabel: (s.skillDupQueue || []).length ? '\u201C' + s.skillDupQueue[0].a + '\u201D and \u201C' + s.skillDupQueue[0].b + '\u201D' : '',
-      skillDupMergeLabel: (s.skillDupQueue || []).length ? 'Keep only \u201C' + s.skillDupQueue[0].a + '\u201D' : 'Merge',
+      skillDupPairLabel: (s.skillDupQueue || []).length ? '“' + s.skillDupQueue[0].a + '” and “' + s.skillDupQueue[0].b + '”' : '',
+      skillDupMergeLabel: (s.skillDupQueue || []).length ? 'Keep only “' + s.skillDupQueue[0].a + '”' : 'Merge',
       keepBothSkills: () => this.setState(st => {
         const cur = st.skillDupQueue[0];
         if (!cur) return {};
         const kept = [...st.skillDupKept, this.skillPairKey(cur.a, cur.b)];
-        return { skillDupKept: kept, skillDupQueue: this.prunedSkillDupQueue(st.skillDupQueue.slice(1), st.skillItems, kept) };
+        return { skillDupKept: kept, skillDupQueue: this.prunedSkillDupQueue(st.skillDupQueue.slice(1), this.czIncludedSkills().map(x => x.text), kept) };
       }),
-      mergeSkills: () => this.setState(st => {
-        const cur = st.skillDupQueue[0];
-        if (!cur) return {};
-        let removed = false;
-        const items = st.skillItems.filter(v => {
-          if (!removed && v === cur.b) { removed = true; return false; }
-          return true;
-        });
-        return { skillItems: items, skillDupQueue: this.prunedSkillDupQueue(st.skillDupQueue.slice(1), items, st.skillDupKept) };
-      }),
+      mergeSkills: () => this.czMergeSkills(),
       skillDeleteConfirmOpen: s.skillDeleteIndex !== null,
-      skillDeleteBody: s.skillDeleteIndex !== null && (s.skillItems[s.skillDeleteIndex] || '').trim()
-        ? '\u201C' + s.skillItems[s.skillDeleteIndex].trim() + '\u201D stops being delivered to every partner. Nothing moves up from the scratch space to fill the slot: that is a copy-paste you make yourself.'
-        : 'This field is empty, so nothing is currently delivered from it.',
+      skillDeleteBody: (() => {
+        const sk = s.skillDeleteIndex !== null ? this.czIncludedSkills()[s.skillDeleteIndex] : null;
+        return sk ? '“' + sk.text + '” comes off your resume and out of any licensed feed. ' + (sk.kind === 'skill' ? 'You can restore it from "Removed from your resume" below.' : 'Skills you added yourself are deleted.') : 'This skill is no longer on your resume.';
+      })(),
       cancelSkillDelete: () => this.setState({ skillDeleteIndex: null }),
-      confirmSkillDelete: () => this.setState(st => ({
-        skillItems: st.skillItems.filter((v, idx) => idx !== st.skillDeleteIndex),
-        skillDeleteIndex: null, skillDupQueue: [],
-      })),
+      confirmSkillDelete: async () => {
+        const sk = this.czIncludedSkills()[this.state.skillDeleteIndex];
+        this.setState({ skillDeleteIndex: null, skillDupQueue: [] });
+        if (sk) await this.czRemoveSkill(sk);
+      },
       skillOverflow: s.skillOverflow,
       setSkillOverflow: (e) => this.setState({ skillOverflow: e.target.value }),
       savedSummariesLoading: s.savedSummariesLoading,
@@ -12076,6 +11882,7 @@ class Component extends DCLogic {
       summaryCards: s.savedSummaries.map(su => ({
         name: su.name,
         preview: su.content.length > 130 ? su.content.slice(0, 130) + '\u2026' : su.content,
+        inUse: !!(s.czData && s.czData.summary && s.czData.summary.id === su.id),
         tagLabel: su.partner_key ? ((this.PARTNERS.find(p => p.key === su.partner_key) || {}).label || 'Generic') : 'Generic',
         onEdit: () => this.setState({ summaryModalOpen: true, summaryModalId: su.id, summaryModalName: su.name, summaryModalPartner: su.partner_key, summaryModalText: su.content, summaryModalError: null }),
         onDelete: () => this.deleteSummary(su.id),
@@ -12084,18 +11891,16 @@ class Component extends DCLogic {
       summaryModalOpen: s.summaryModalOpen,
       summaryModalTitle: s.summaryModalId ? 'Edit summary' : 'New summary',
       summaryModalName: s.summaryModalName,
-      summaryModalPartner: s.summaryModalPartner,
       summaryModalText: s.summaryModalText,
       summaryModalSaving: s.summaryModalSaving,
       summaryModalError: s.summaryModalError,
       summaryModalSaveLabel: s.summaryModalSaving ? 'Saving…' : 'Save summary',
       setSummaryModalName: (e) => this.setState({ summaryModalName: e.target.value }),
-      setSummaryModalPartner: (e) => this.setState({ summaryModalPartner: e.target.value }),
       setSummaryModalText: (e) => this.setState({ summaryModalText: e.target.value }),
       closeSummaryModal: () => this.setState({ summaryModalOpen: false }),
       saveSummaryModal: () => this.saveSummaryFromModal(),
-      upgradeModalTitle: s.upgradeModalContext === 'contentManager' ? 'Upgrade to write your own content' : 'Upgrade to customize by delivery target',
-      upgradeModalBody: s.upgradeModalContext === 'contentManager' ? 'Editing job responsibilities and keeping multiple named Summary versions is a paid feature. Upgrade to write per-partner summaries and choose which one LinkedIn, Indeed, and Glassdoor each receives.' : 'Per-recipient content customization and previews are a paid feature. Upgrade to choose exactly what LinkedIn, Indeed, and Glassdoor each receive.',
+      upgradeModalTitle: s.upgradeModalContext === 'contentManager' ? 'Upgrade to write your own content' : 'Upgrade to customize your resume',
+      upgradeModalBody: s.upgradeModalContext === 'contentManager' ? 'Editing job responsibilities and skills and keeping multiple named summary versions is a paid feature. Upgrade to write your own content and choose which summary appears on your resume.' : 'Choosing exactly what appears on your resume, in your PDF and in any licensed feed is a paid feature. Upgrade to include or leave out any job, education entry, certification, skill or flagged section.',
       accountTier: s.accountTier,
       discoverable: s.discoverable,
       toggleDiscoverable: (e) => this.setState(st => ({ discoverable: !!e.target.checked, discoverableTouchedFor: st.resumeCandidateId })),
@@ -12110,12 +11915,6 @@ class Component extends DCLogic {
       isPaidTier: s.accountTier === 'paid',
       isFreeTier: s.accountTier === 'free',
       resetAll: () => this.resetAll(),
-      viewsTabPartner: s.viewsTabPartner,
-      setViewsTabPartner: (e) => {
-        const val = e.target.value;
-        if (val && s.accountTier === 'free') { e.target.value = ''; this.setState({ upgradeModalOpen: true, upgradeReturnTab: 'views', upgradeReturnTarget: val }); return; }
-        this.setState({ viewsTabPartner: val }, () => this.renderPdfPreview());
-      },
       // Item 2 (2026-09-12 live-testing session): the new, additive original-document viewer on
       // Views — see renderViewsOriginalPdfViewer's own header for why this doesn't replace the
       // ATS-rebuild preview above it. Only offered when the uploaded document is actually a PDF

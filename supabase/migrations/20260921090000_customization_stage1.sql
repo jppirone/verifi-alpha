@@ -11,6 +11,9 @@
 --     row is Confirmed (a certification also when its linked License queue row is Confirmed). Customization decides what is SHOWN, not what is TRUE.
 --   * Comparison snapshots and license reports do not read these tables at all (decision 2026-09-21: they reflect what was submitted and verified).
 --
+-- DEFAULTS. Everything the candidate confirmed is included by default EXCEPT flagged ("needs_review") sections, which are excluded by default and only
+-- appear when the candidate deliberately includes them (decision 2026-09-21; applies to the candidate's PDF and to any future feed alike).
+--
 -- WHAT THE CANDIDATE MAY CHANGE (and nothing else): include/exclude any item; the text of a job's responsibilities; the text of a skill (edit / add /
 -- remove an added one); which summary is used; the printed phone and email. Company, title, dates, location, institution, degree, license fields and
 -- everything else stay locked to the verified data: apply_customization_ops has no operation that can touch them, and the endpoint rejects a request
@@ -233,11 +236,11 @@ begin
   select coalesce(jsonb_agg(x.o order by x.pos nulls last, x.id), '[]'::jsonb) into j_free from (
     select f.id, f.position pos, jsonb_strip_nulls(jsonb_build_object(
       'id', f.id, 'position', f.position, 'section_type', f.section_type, 'heading', nullif(f.heading, ''), 'content', f.content,
-      'included', coalesce(o.included, true))) o
+      'included', coalesce(o.included, f.section_type <> 'needs_review'))) o
     from candidate_freeform_sections f
     left join candidate_item_overrides o on v_apply and o.candidate_id = p_candidate and o.kind = 'freeform' and o.item_id = f.id
     where f.candidate_id = p_candidate and f.candidate_confirmed and f.resume_document_id = any (v_docs) and f.section_type <> 'summary'
-      and (not p_delivered_only or coalesce(o.included, true))
+      and (not p_delivered_only or coalesce(o.included, f.section_type <> 'needs_review'))
   ) x;
 
   -- ---- summary: 'none' / a chosen version (both only while paid) / the default (the generic version, else the resume's own summary)
@@ -283,6 +286,7 @@ begin
     'summary', jsonb_strip_nulls(jsonb_build_object('id', v_summary_id, 'content', v_summary, 'source', v_summary_source, 'heading', v_summary_heading)),
     'work', j_work, 'education', j_edu, 'certifications', j_cert,
     'skills', jsonb_build_object('heading', (select nullif(btrim(s.heading), '') from skill_items s where s.candidate_id = p_candidate and s.candidate_confirmed and s.resume_document_id = any (v_docs) and nullif(btrim(s.heading), '') is not null order by s.position nulls last limit 1),
+                                 'section_position', (select min(s.section_position) from skill_items s where s.candidate_id = p_candidate and s.candidate_confirmed and s.resume_document_id = any (v_docs)),
                                  'base_count', v_base_skills, 'max', greatest(15, v_base_skills), 'items', j_skills),
     'other_sections', j_free
   );
@@ -410,7 +414,10 @@ begin
   end loop;
 
   -- keep the table sparse: an override that says nothing (included, no text, not an added skill) is deleted
-  delete from candidate_item_overrides where candidate_id = p_candidate and kind <> 'skill_added' and included and text_override is null;
+  -- (a flagged / needs_review section defaults to EXCLUDED, so for those an override saying "included" is the deviation and "excluded" is the default)
+  delete from candidate_item_overrides o where o.candidate_id = p_candidate and o.kind not in ('skill_added', 'freeform') and o.included and o.text_override is null;
+  delete from candidate_item_overrides o using candidate_freeform_sections f
+   where o.candidate_id = p_candidate and o.kind = 'freeform' and f.id = o.item_id and o.text_override is null and o.included = (f.section_type <> 'needs_review');
 
   -- the delivered skill count may not exceed max(15, extracted count)
   select count(*) into v_base_count from skill_items s where s.candidate_id = p_candidate and s.candidate_confirmed and s.resume_document_id = any (v_docs);
