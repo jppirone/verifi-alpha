@@ -3070,7 +3070,9 @@ class Component extends DCLogic {
     else if (paymentReturn) this.setState({ screen: 'paymentReturn', paymentReturnKind: paymentReturn });
     const isBillingReturn = !!billingReturn && !paymentReturn && !comparisonToken && !token && !loginToken;
     if (isBillingReturn) this._billingKind = billingReturn;
-    if (stored && !token && !loginToken) {
+    // (an emailed LOOKUP link does not stop the stored session being resumed: the two are independent, the lookup runs on the server by its token, and a signed-in
+    // organization member who lands on the result must still be signed in to request the record. Only a SIGN-IN link takes priority.)
+    if (stored && !loginToken) {
       this.setState({ realToken: stored }, async () => { const loaded = await this.loadReal(); if (isBillingReturn) this.afterBillingReturn(billingReturn, loaded); });
     } else if (stored && loginToken) {
       // A sign-in link takes priority: the stored session is NOT resumed alongside it (two account loads racing, each for a different person, is exactly
