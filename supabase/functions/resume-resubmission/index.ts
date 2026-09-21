@@ -12,6 +12,12 @@ import { withSupabase } from "jsr:@supabase/server@1";
 //   plan    {resubmission_id}   once the upload has been extracted (and licenses detected) computes the REVIEW DATA: what would be added, kept
 //                               unchanged, changed (facts changed: re-verification) and removed, against the ACTIVE profile. Read-only against
 //                               the profile: it stores the plan on the attempt (for Stage 2's apply) and nothing else. Poll it until status 'ready'.
+//   apply   {resubmission_id, plan_hash, opt_in}  (STAGE 2) commits exactly the plan the candidate reviewed, in ONE database transaction
+//                               (apply_resume_resubmission): archive then delete removed items, reset changed items to New with a rebuilt claim and a
+//                               before/after timeline entry, update kept items' descriptive fields only (their queue rows are not touched), confirm new
+//                               items and create their queue rows per the opt-in, delete the staged duplicates, re-home everything to the new document.
+//                               A stale plan (anything changed since review) is refused with 409 and the fresh plan; nothing is written. After the commit:
+//                               real registry checks for new/changed licenses. The response lists the items whose employer contact details are now needed.
 //   cancel  {resubmission_id}   discards the attempt entirely: the staged rows, the stored file and the attempt's document. Only ever an
 //                               unconfirmed resubmission document; the existing profile is never touched.
 //
@@ -326,18 +332,187 @@ async function patch(path: string, body: unknown): Promise<any[]> {
 }
 
 const OPEN = ["uploading", "extracting", "detecting_licenses", "ready"];
+// @@ops-start
 const printDate = (d: unknown, p: unknown): string => showDate(dv(d, p)) || "";
 const label = {
   work: (r: Rec) => [clean(r.title), clean(r.employer_name_override) || clean(r.company), [printDate(r.start_date, r.start_date_precision), printDate(r.end_date, r.end_date_precision)].filter(Boolean).join(" – ")].filter(Boolean).join(" · ") || "(untitled job)",
   education: (r: Rec) => [[clean(r.degree), clean(r.field_of_study)].filter(Boolean).join(", "), clean(r.institution)].filter(Boolean).join(" · ") || "(untitled education)",
   certification: (r: Rec) => [clean(r.name), clean(r.issuing_body), r.license_number ? `#${clean(r.license_number)}` : ""].filter(Boolean).join(" · ") || "(untitled certification)",
 };
-// The staff-facing claim text a NEW or CHANGED item will carry (same shape as confirm-resume-data's claim builders; Stage 2 inserts it).
+// The staff-facing claim text a NEW or CHANGED item carries: the same shape as confirm-resume-data's claim builders.
 const claim = {
   work: (w: Rec) => [w.title, w.company, w.location, [printDate(w.start_date, w.start_date_precision), printDate(w.end_date, w.end_date_precision)].filter(Boolean).join(" – ")].filter(Boolean).join(", "),
   education: (e: Rec) => [e.degree, e.field_of_study, e.institution, e.location, [printDate(e.start_date, e.start_date_precision), printDate(e.end_date, e.end_date_precision)].filter(Boolean).join(" – ")].filter(Boolean).join(", "),
   certification: (c: Rec) => [c.name, c.issuing_body, c.license_number ? `Lic #${c.license_number}` : null, printDate(c.issue_date, c.issue_date_precision)].filter(Boolean).join(", "),
+  license: (c: Rec, state: string) => [c.name || "License", c.issuing_body, c.license_number ? `Lic #${c.license_number}` : null, state].filter(Boolean).join(", "), // verify-license's claimFor
+  needsReview: (f: Rec) => {
+    const heading = (f.heading || "").trim(), content = (f.content || "").trim();
+    const preview = content.length > 140 ? content.slice(0, 140) + "…" : content;
+    return heading ? `${heading}: ${preview}` : preview || "(no heading, no content)";
+  },
 };
+
+type OptIn = { work: boolean; education: boolean; certifications: boolean };
+const TABLE: Record<string, string> = { work: "work_history_items", education: "education_items", certification: "certification_items", skill: "skill_items", freeform: "candidate_freeform_sections" };
+// which stored columns a changed FACT rewrites (a fact the new file merely omits is never rewritten)
+const FACT_COLS: Record<string, Record<string, string[]>> = {
+  work: { company: ["company"], title: ["title"], start_date: ["start_date", "start_date_precision"], end_date: ["end_date", "end_date_precision"], location: ["location"] },
+  education: { institution: ["institution"], degree: ["degree"], field_of_study: ["field_of_study"], start_date: ["start_date", "start_date_precision"], end_date: ["end_date", "end_date_precision"], location: ["location"] },
+  certification: { name: ["name"], issuing_body: ["issuing_body"], license_number: ["license_number"], issue_date: ["issue_date", "issue_date_precision"], expiration_date: ["expiration_date", "expiration_date_precision"], license_state: [] },
+};
+const DESCRIPTIVE_COLS = ["position", "heading", "extraction_confidence"];
+const NEEDS_REVIEW_NOTE = (f: Rec) => `Auto-flagged: unstructured content from the candidate's resume that didn't map to a defined category (heading: ${JSON.stringify(f.heading || "(none)")}). Not independently validated against the uploaded document the way the structured fields above it are — review for anything that reads like an inserted job-description-style claim rather than content genuinely present on the original resume. Full content:\n\n${f.content || ""}`;
+
+// ctx = what computePlan read and matched (active rows a*, staged rows s*, the queue rows, the match results). Returns the INSTRUCTIONS the SQL apply
+// executes, plus what must happen after the commit (license checks, contact details).
+function buildOps(c: any, optIn: OptIn, newDoc: string, baseDoc: string | null) {
+  const { aW, aE, aS, aF, aL, sW, sE, sS, sF, sL, vq, W, E, C, S, F, oldCert, newCert } = c;
+  const aLic = new Map<string, any>(aL.map((l: any) => [l.linked_certification_id, l])), sLic = new Map<string, any>(sL.map((l: any) => [l.linked_certification_id, l]));
+  const bySrc = new Map<string, any[]>();
+  for (const v of vq) if (v.source_item_id) { const a = bySrc.get(v.source_item_id) || []; a.push(v); bySrc.set(v.source_item_id, a); }
+  const vqIds = new Set<string>(vq.map((v: any) => v.id));
+  const rowsOf = (id: string, type?: string) => (bySrc.get(id) || []).filter((v) => !type || v.type === type);
+  const ops: any = {
+    candidate_id: c.cid, new_document_id: newDoc, base_document_id: baseDoc, opt_in: optIn,
+    removed: [], changed: [], kept: [], added: [], lineage: [], contact_reset: false,
+    staged: { work_history_items: sW.map((r: any) => r.id), education_items: sE.map((r: any) => r.id), certification_items: newCert.map((r: any) => r.id), skill_items: sS.map((r: any) => r.id), candidate_freeform_sections: sF.map((r: any) => r.id) },
+    staged_delete: { work: [], education: [], certification: [], skill: [], freeform: [] },
+    guard: {
+      items: [
+        ...aW.map((r: any) => ({ t: "work_history_items", id: r.id, ts: r.updated_at })), ...aE.map((r: any) => ({ t: "education_items", id: r.id, ts: r.updated_at })),
+        ...oldCert.map((r: any) => ({ t: "certification_items", id: r.id, ts: r.updated_at })), ...aS.map((r: any) => ({ t: "skill_items", id: r.id, ts: r.updated_at })),
+        ...aF.map((r: any) => ({ t: "candidate_freeform_sections", id: r.id, ts: r.updated_at })), ...aL.map((r: any) => ({ t: "license_items", id: r.id, ts: r.updated_at })),
+      ],
+      counts: { work_history_items: aW.length, education_items: aE.length, certification_items: oldCert.length, skill_items: aS.length, candidate_freeform_sections: aF.length, license_items: aL.length },
+      queue: vq.map((v: any) => ({ id: v.id, status: v.status, ts: v.status_changed_at })), queue_count: vq.length,
+    },
+  };
+  const verifyIds: string[] = [];
+  const contactNeeded: { work: string[]; certification: string[] } = { work: [], certification: [] };
+  const CAT: Record<string, keyof OptIn> = { work: "work", education: "education", certification: "certifications" };
+  const QTYPE: Record<string, string> = { work: "Job Experience", education: "Education", certification: "Certification" };
+
+  // the queue row a NEW item (or a changed item that had none) gets, under the same rules confirm-resume-data applies
+  const newQueue = (kind: string, r: Rec) => {
+    if (kind === "certification") {
+      const unmatched = r.source_match === "unmatched", missingTrade = !r.trade_soc_code;
+      if (!unmatched && !optIn.certifications) return null;
+      if (unmatched || missingTrade) {
+        const reasons: string[] = [];
+        if (unmatched) reasons.push(`this certification's name did not fuzzy-match anything in the candidate's own uploaded document (OCR'd text) — see certification_source_match. Not proof of fabrication (OCR coverage has real, documented gaps: vision-routed pages have no OCR text at all), but real enough to warrant a human look before treating it as verified. Name as extracted: ${JSON.stringify(r.name || "")}`);
+        if (missingTrade) reasons.push("no trade/occupation type (SOC code) was selected for this certification — see certification_items.trade_soc_code. No automated licensing-board check can be routed without it, so this needs a human look rather than silently sitting as a normal queue item with no check that will ever fire.");
+        return { type: "Certification", claim: claim.certification(r), status: "Needs Reconciliation", internal_note: `Auto-flagged: ${reasons.join(" Also: ")}` };
+      }
+      return { type: "Certification", claim: claim.certification(r), status: "New", internal_note: null };
+    }
+    if (!optIn[CAT[kind]]) return null;
+    return { type: QTYPE[kind], claim: (claim as any)[kind](r), status: "New", internal_note: null };
+  };
+  const lineage = (kind: string, id: string, relation: string) => ops.lineage.push({ kind, id, relation });
+
+  const sections: [string, Section, any[], any[]][] = [["work", W, aW, sW], ["education", E, aE, sE], ["certification", C, oldCert, newCert]];
+  for (const [kind, sec, oldR, newR] of sections) {
+    for (const i of sec.removed) {
+      const r = oldR[i]; const lic = kind === "certification" ? aLic.get(r.id) : null;
+      const ids = new Set<string>(rowsOf(r.id).map((v) => v.id));
+      if (lic) { for (const v of rowsOf(lic.id)) ids.add(v.id); if (lic.queue_item_id && vqIds.has(lic.queue_item_id)) ids.add(lic.queue_item_id); }
+      ops.removed.push({ kind, id: r.id, license_id: lic ? lic.id : null, vq: [...ids] });
+    }
+    for (const p of sec.pairs) {
+      const o = oldR[p.oldIdx], n = newR[p.newIdx];
+      const desc: Record<string, unknown> = {};
+      for (const col of DESCRIPTIVE_COLS) desc[col] = n[col] ?? null;
+      if (kind === "work" && clean(n.job_responsibilities)) desc.job_responsibilities = n.job_responsibilities;
+      ops.staged_delete[kind].push(n.id);
+      if (p.cls === "kept") {
+        ops.kept.push({ kind, id: o.id, fields: desc });
+        lineage(kind, o.id, p.descriptive.length ? "descriptive_updated" : "reconfirmed");
+        continue;
+      }
+      // CHANGED: rewrite only the facts that changed; everything the new file omitted keeps its verified value
+      const fields: Record<string, unknown> = { ...desc };
+      let clearContact = false;
+      for (const ch of p.changes) {
+        for (const col of FACT_COLS[kind][ch.field] || []) fields[col] = n[col] ?? null;
+        if (kind === "work" && ch.field === "company") clearContact = true; // a different employer: the old contact details no longer apply
+      }
+      if (clearContact) Object.assign(fields, { employer_name_override: null, employer_location_override: null, contact_phone: null, contact_name: null });
+      const merged = { ...o, ...fields };
+      const newClaim = (claim as any)[kind](merged);
+      const existing = rowsOf(o.id, QTYPE[kind])[0] || null;
+      const lic = kind === "certification" ? aLic.get(o.id) : null;
+      const allVq = new Set<string>(rowsOf(o.id).map((v) => v.id));
+      if (lic) { for (const v of rowsOf(lic.id)) allVq.add(v.id); if (lic.queue_item_id && vqIds.has(lic.queue_item_id)) allVq.add(lic.queue_item_id); }
+      const what = p.changes.map((ch: Change) => `${ch.field.replace(/_/g, " ")}: ${ch.before ?? "(none)"} → ${ch.after ?? "(none)"}${ch.kind === "added" ? " (new detail)" : ""}`).join("; ") || "matched ambiguously, so treated as changed";
+      let queue: any = null;
+      if (existing) {
+        queue = optIn[CAT[kind]] ? { mode: "reset", id: existing.id, claim: newClaim, note: `Before: ${existing.claim || "(no claim)"} (status ${existing.status}). After: ${newClaim} (status New). Changed: ${what}.` } : { mode: "delete", ids: [existing.id] };
+      } else {
+        const q = newQueue(kind, merged);
+        if (q) queue = { mode: "insert", row: q };
+      }
+      if (queue && queue.mode !== "delete" && (kind === "work" || kind === "certification")) contactNeeded[kind].push(o.id); // education has no contact step
+      const entry: any = { kind, id: o.id, fields, vq_all: [...allVq], queue };
+      // the license extension (a licensed certification only)
+      if (kind === "certification" && p.changes.some((ch: Change) => ch.field === "license_state" || ch.field === "license_number")) {
+        const licS = sLic.get(n.id);
+        const state = (licS?.state || lic?.state || "") as string;
+        if (lic) {
+          const lq = rowsOf(lic.id, "License")[0] || (lic.queue_item_id ? vq.find((v: any) => v.id === lic.queue_item_id) : null);
+          entry.license = {
+            action: "reset", id: lic.id, state: licS?.state || "", state_source: licS?.state_source || "candidate", state_evidence: licS?.state_evidence || null,
+            queue_id: lq ? lq.id : null, claim: claim.license(merged, state),
+            note: `Before: ${lq?.claim || "(no claim)"} (status ${lq?.status || "n/a"}). After: ${claim.license(merged, state)}. Changed: ${what}.`,
+          };
+          if (state) verifyIds.push(lic.id);
+        } else if (licS) {
+          entry.license = { action: "attach", staged_id: licS.id };
+          if (licS.state) verifyIds.push(licS.id);
+        }
+        if (entry.license) lineage("license", entry.license.id || entry.license.staged_id, "facts_changed");
+      }
+      ops.changed.push(entry);
+      lineage(kind, o.id, "facts_changed");
+    }
+    for (const j of sec.added) {
+      const r = newR[j]; const licS = kind === "certification" ? sLic.get(r.id) : null;
+      const q = newQueue(kind, r);
+      ops.added.push({ kind, staged_id: r.id, queue: q, license_staged_id: licS ? licS.id : null });
+      lineage(kind, r.id, "origin");
+      if (q && (kind === "work" || kind === "certification")) contactNeeded[kind].push(r.id);
+      if (licS) { lineage("license", licS.id, "origin"); if (licS.state) verifyIds.push(licS.id); }
+    }
+  }
+
+  // skills: unverified, so removed = archived + deleted, kept = position only, added = confirmed
+  for (const i of S.removed) ops.removed.push({ kind: "skill", id: aS[i].id, vq: [] });
+  for (const p of S.pairs) { ops.kept.push({ kind: "skill", id: aS[p.i].id, fields: { position: sS[p.j].position ?? null, section_position: sS[p.j].section_position ?? null } }); ops.staged_delete.skill.push(sS[p.j].id); lineage("skill", aS[p.i].id, "reconfirmed"); }
+  for (const j of S.added) { ops.added.push({ kind: "skill", staged_id: sS[j].id, queue: null }); lineage("skill", sS[j].id, "origin"); }
+  // freeform sections: a needs_review section's queue row is found by its claim text (that queue row has no source id)
+  const nrRows = vq.filter((v: any) => v.type === "Needs Review");
+  for (const i of F.removed) {
+    const f = aF[i];
+    const ids = f.section_type === "needs_review" ? nrRows.filter((v: any) => v.claim === claim.needsReview(f)).map((v: any) => v.id) : [];
+    ops.removed.push({ kind: "freeform", id: f.id, vq: ids });
+  }
+  for (const p of F.pairs) { ops.kept.push({ kind: "freeform", id: aF[p.i].id, fields: { position: sF[p.j].position ?? null, heading: sF[p.j].heading ?? null } }); ops.staged_delete.freeform.push(sF[p.j].id); lineage("freeform", aF[p.i].id, "reconfirmed"); }
+  for (const j of F.added) {
+    const f = sF[j];
+    ops.added.push({ kind: "freeform", staged_id: f.id, queue: f.section_type === "needs_review" ? { type: "Needs Review", claim: claim.needsReview(f), status: "Needs Reconciliation", internal_note: NEEDS_REVIEW_NOTE(f) } : null });
+    lineage("freeform", f.id, "origin");
+  }
+
+  ops.contact_reset = contactNeeded.work.length + contactNeeded.certification.length > 0;
+  const counts = {
+    added: ops.added.length, kept: ops.kept.length, changed: ops.changed.length, removed: ops.removed.length,
+    queue_rows_created: ops.added.filter((a: any) => a.queue).length + ops.changed.filter((x: any) => x.queue && x.queue.mode === "insert").length,
+    queue_rows_reset: ops.changed.filter((x: any) => x.queue && x.queue.mode === "reset").length,
+    licenses_to_verify: verifyIds.length, contact_needed: contactNeeded,
+  };
+  ops.counts = counts;
+  return { ops, verifyIds: [...new Set(verifyIds)], contactNeeded, counts };
+}
+// @@ops-end
 
 function canonical(v: unknown): string {
   if (Array.isArray(v)) return `[${v.map(canonical).join(",")}]`;
@@ -359,7 +534,7 @@ async function discardAttemptDoc(cid: string, docId: string): Promise<{ ok: bool
   return { ok: true };
 }
 
-async function computePlan(resub: any, doc: any): Promise<{ plan: any; fingerprint: string }> {
+async function computePlan(resub: any, doc: any): Promise<{ plan: any; fingerprint: string; ctx: any }> {
   const cid = resub.candidate_id, newDoc = doc.id;
   const confirmedDocs = (await rows(`resume_documents?candidate_id=eq.${cid}&confirmed_at=not.is.null&select=id`)).map((d) => d.id);
   if (!confirmedDocs.length) throw new Error("no_confirmed_document");
@@ -367,14 +542,14 @@ async function computePlan(resub: any, doc: any): Promise<{ plan: any; fingerpri
   const staged = `candidate_id=eq.${cid}&resume_document_id=eq.${newDoc}`;
   const [aW, aE, aC, aS, aF, aL, sW, sE, sC, sS, sF, sL, vq, snaps] = await Promise.all([
     rows(`work_history_items?${active}&select=*&order=position`), rows(`education_items?${active}&select=*&order=position`),
-    rows(`certification_items?${active}&select=*&order=position`), rows(`skill_items?${active}&select=id,skill_text,position,updated_at&order=position`),
-    rows(`candidate_freeform_sections?${active}&select=id,section_type,heading,content,updated_at&order=position`),
+    rows(`certification_items?${active}&select=*&order=position`), rows(`skill_items?${active}&select=id,skill_text,position,section_position,updated_at&order=position`),
+    rows(`candidate_freeform_sections?${active}&select=id,section_type,heading,content,position,updated_at&order=position`),
     rows(`license_items?${active}&select=id,linked_certification_id,state,verification_outcome,queue_item_id,updated_at`),
     rows(`work_history_items?${staged}&select=*&order=position`), rows(`education_items?${staged}&select=*&order=position`),
-    rows(`certification_items?${staged}&select=*&order=position`), rows(`skill_items?${staged}&select=id,skill_text,position&order=position`),
-    rows(`candidate_freeform_sections?${staged}&select=id,section_type,heading,content&order=position`),
-    rows(`license_items?${staged}&select=id,linked_certification_id,state`),
-    rows(`verification_items?candidate_id=eq.${cid}&select=id,type,status,status_changed_at,source_item_id,assigned_to,correction_requested`),
+    rows(`certification_items?${staged}&select=*&order=position`), rows(`skill_items?${staged}&select=id,skill_text,position,section_position&order=position`),
+    rows(`candidate_freeform_sections?${staged}&select=id,section_type,heading,content,position&order=position`),
+    rows(`license_items?${staged}&select=id,linked_certification_id,state,state_source,state_evidence`),
+    rows(`verification_items?candidate_id=eq.${cid}&select=id,type,claim,status,status_changed_at,source_item_id,assigned_to,correction_requested`),
     rows(`comparison_snapshots?candidate_id=eq.${cid}&select=request_id`),
   ]);
   const ocr = (await rows(`resume_documents?id=eq.${newDoc}&select=ocr_raw_text`))[0]?.ocr_raw_text as string | null | undefined;
@@ -479,7 +654,7 @@ async function computePlan(resub: any, doc: any): Promise<{ plan: any; fingerpri
     vq.filter((v) => v.source_item_id).map((v) => [v.id, v.status, v.status_changed_at]).sort(),
     [sW, sE, sC, sS, sF, sL].map((a) => a.map((r: any) => r.id).sort()),
   ]);
-  return { plan, fingerprint: await sha256Hex(fp) };
+  return { plan, fingerprint: await sha256Hex(fp), ctx: { cid, aW, aE, aC, aS, aF, aL, sW, sE, sC, sS, sF, sL, vq, W, E, C, S, F, oldCert, newCert } };
 }
 
 export default {
@@ -573,6 +748,60 @@ export default {
         const saved = await setStatus("ready", { plan, plan_hash: planHash, base_fingerprint: fingerprint, counts: plan.counts });
         if (!saved.length) return json({ ok: true, status: "not_open" });
         return json({ ok: true, status: "ready", resubmission_id: resub.id, plan_hash: planHash, plan });
+      }
+
+      if (action === "apply") {
+        // Nothing unreviewed ever applies. The plan the candidate saw is identified by its hash; it is RE-DERIVED here from the current data and must
+        // hash the same, and the transaction re-checks the same facts again under row locks. Any difference answers 409 with the fresh plan, and
+        // nothing has been written.
+        const oi = body.opt_in;
+        if (!oi || typeof oi.work !== "boolean" || typeof oi.education !== "boolean" || typeof oi.certifications !== "boolean") return json({ ok: false, error: "opt_in_invalid" }, 400);
+        if (typeof body.plan_hash !== "string" || !/^[0-9a-f]{64}$/.test(body.plan_hash)) return json({ ok: false, error: "plan_hash_invalid" }, 400);
+        if (resub.status !== "ready") return json({ ok: false, error: "not_ready", status: resub.status }, 409);
+        const doc = (await rows(`resume_documents?id=eq.${resub.resume_document_id}&candidate_id=eq.${cid}&select=id,kind,confirmed_at,extraction_status,license_detection_status`))[0];
+        if (!doc || doc.kind !== "resubmission" || doc.confirmed_at || doc.extraction_status !== "extracted" || doc.license_detection_status !== "done") return json({ ok: false, error: "refused" }, 409);
+        const stale = async () => {
+          const fresh = await computePlan(resub, doc); const h = await sha256Hex(canonical(fresh.plan));
+          await patch(`resume_resubmissions?id=eq.${resub.id}&status=eq.ready`, { plan: fresh.plan, plan_hash: h, base_fingerprint: fresh.fingerprint, counts: fresh.plan.counts, updated_at: new Date().toISOString() });
+          return json({ ok: false, error: "plan_changed", plan_hash: h, plan: fresh.plan }, 409);
+        };
+        const current = await computePlan(resub, doc);
+        if (await sha256Hex(canonical(current.plan)) !== body.plan_hash) return await stale();
+        const built = buildOps(current.ctx, { work: oi.work, education: oi.education, certifications: oi.certifications }, doc.id, resub.base_document_id);
+        const rpc = await fetch(`${SUPABASE_URL}/rest/v1/rpc/apply_resume_resubmission`, {
+          method: "POST", headers: { ...REST, "Content-Type": "application/json" }, body: JSON.stringify({ p_resubmission_id: resub.id, p_ops: built.ops }),
+        });
+        if (!rpc.ok) {
+          const err = await rpc.json().catch(() => ({} as any));
+          const msg = String(err?.message || "");
+          if (msg === "plan_changed") return await stale();
+          if (msg === "attempt_not_ready" || msg === "document_not_applicable") return json({ ok: false, error: "not_ready" }, 409);
+          return json({ ok: false, error: "apply_failed", detail: msg.slice(0, 200) }, 500);
+        }
+        const result = await rpc.json();
+
+        // After the commit: real registry checks for every license that is new or whose details changed (the same background pattern, and the
+        // same single bundled candidate email, as the first confirmation). Their results land on the license and its queue row as they finish.
+        if (built.verifyIds.length) {
+          const runChecks = async () => {
+            const out = await Promise.all(built.verifyIds.map(async (license_item_id) => {
+              try {
+                const r = await fetch(`${SUPABASE_URL}/functions/v1/verify-license`, { method: "POST", headers: { ...REST, "Content-Type": "application/json" }, body: JSON.stringify({ candidate_id: cid, license_item_id, defer_notice: true }), signal: AbortSignal.timeout(45000) });
+                const j = await r.json().catch(() => ({} as any));
+                return { ok: !!j.ok, correction: !!j.correction };
+              } catch (_e) { return { ok: false, correction: false }; }
+            }));
+            if (out.some((o) => o.correction)) {
+              await fetch(`${SUPABASE_URL}/functions/v1/verify-license`, { method: "POST", headers: { ...REST, "Content-Type": "application/json" }, body: JSON.stringify({ candidate_id: cid, action: "notify_corrections" }), signal: AbortSignal.timeout(20000) }).catch(() => {});
+            }
+          };
+          const er = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime;
+          if (er && typeof er.waitUntil === "function") er.waitUntil(runChecks().catch(() => {})); else await runChecks();
+        }
+        return json({
+          ok: true, status: "applied", counts: built.counts, archived: result.archived, queue_created: result.new_queue,
+          licenses_verifying: built.verifyIds, contact_needed: built.contactNeeded, document_id: doc.id,
+        });
       }
 
       return json({ ok: false, error: "unknown_action" }, 400);
