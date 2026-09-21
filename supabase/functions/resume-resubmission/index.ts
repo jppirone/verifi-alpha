@@ -345,6 +345,20 @@ function canonical(v: unknown): string {
   return JSON.stringify(v);
 }
 
+// Discards one attempt's own upload: its staged rows (through the existing discard RPC), the stored files. Only ever an UNCONFIRMED document of
+// kind 'resubmission'; anything else is refused and nothing is touched.
+async function discardAttemptDoc(cid: string, docId: string): Promise<{ ok: boolean; refused?: boolean; detail?: string }> {
+  const doc = (await rows(`resume_documents?id=eq.${docId}&candidate_id=eq.${cid}&select=id,kind,confirmed_at,original_storage_path,sanitized_render_path`))[0];
+  if (!doc) return { ok: true };
+  if (doc.kind !== "resubmission" || doc.confirmed_at) return { ok: false, refused: true };
+  const rpc = await fetch(`${SUPABASE_URL}/rest/v1/rpc/discard_resume_document`, { method: "POST", headers: { ...REST, "Content-Type": "application/json" }, body: JSON.stringify({ p_resume_document_id: doc.id, p_candidate_id: cid }) });
+  if (!rpc.ok) return { ok: false, detail: (await rpc.text()).slice(0, 200) };
+  for (const p of [doc.original_storage_path, doc.sanitized_render_path].filter(Boolean)) {
+    await fetch(`${SUPABASE_URL}/storage/v1/object/resume-documents/${p}`, { method: "DELETE", headers: REST }).catch(() => {});
+  }
+  return { ok: true };
+}
+
 async function computePlan(resub: any, doc: any): Promise<{ plan: any; fingerprint: string }> {
   const cid = resub.candidate_id, newDoc = doc.id;
   const confirmedDocs = (await rows(`resume_documents?candidate_id=eq.${cid}&confirmed_at=not.is.null&select=id`)).map((d) => d.id);
@@ -489,6 +503,10 @@ export default {
         if (!base) return json({ ok: false, error: "no_confirmed_resume" }, 409);
         const open = (await rows(`resume_resubmissions?candidate_id=eq.${cid}&status=in.(${OPEN.join(",")})&select=id,status&limit=1`))[0];
         if (open) return json({ ok: false, error: "resubmission_in_progress", resubmission_id: open.id, status: open.status }, 409);
+        // Leftover uploads of earlier FAILED attempts (kept so staff could see the failure) are discarded now that the candidate is trying again.
+        for (const f of await rows(`resume_resubmissions?candidate_id=eq.${cid}&status=eq.failed&resume_document_id=not.is.null&select=id,resume_document_id`)) {
+          await discardAttemptDoc(cid, f.resume_document_id);
+        }
         const now = Date.now();
         const day = await rows(`resume_resubmissions?candidate_id=eq.${cid}&created_at=gt.${encodeURIComponent(new Date(now - 24 * 3600 * 1000).toISOString())}&select=created_at&order=created_at.asc`);
         const month = await rows(`resume_resubmissions?candidate_id=eq.${cid}&created_at=gt.${encodeURIComponent(new Date(now - 30 * 24 * 3600 * 1000).toISOString())}&select=created_at&order=created_at.asc`);
@@ -513,20 +531,15 @@ export default {
       if (!resub) return json({ ok: false, error: "not_found" }, 404);
 
       if (action === "cancel") {
-        if (!OPEN.includes(resub.status)) return json({ ok: false, error: "not_open", status: resub.status }, 409);
+        // An attempt that FAILED (extraction or license detection) leaves its staged upload behind for staff to see in the failure report; the
+        // candidate can still cancel it, which discards that upload. An applied, cancelled or expired attempt has nothing to cancel.
+        if (!OPEN.includes(resub.status) && resub.status !== "failed") return json({ ok: false, error: "not_open", status: resub.status }, 409);
         if (resub.resume_document_id) {
-          const doc = (await rows(`resume_documents?id=eq.${resub.resume_document_id}&candidate_id=eq.${cid}&select=id,kind,confirmed_at,original_storage_path,sanitized_render_path`))[0];
-          // Never a confirmed document, never an initial one: the only thing this can discard is this attempt's own unconfirmed upload.
-          if (doc && (doc.kind !== "resubmission" || doc.confirmed_at)) return json({ ok: false, error: "refused" }, 409);
-          if (doc) {
-            const rpc = await fetch(`${SUPABASE_URL}/rest/v1/rpc/discard_resume_document`, { method: "POST", headers: { ...REST, "Content-Type": "application/json" }, body: JSON.stringify({ p_resume_document_id: doc.id, p_candidate_id: cid }) });
-            if (!rpc.ok) return json({ ok: false, error: "discard_failed", detail: (await rpc.text()).slice(0, 200) }, 500);
-            for (const p of [doc.original_storage_path, doc.sanitized_render_path].filter(Boolean)) {
-              await fetch(`${SUPABASE_URL}/storage/v1/object/resume-documents/${p}`, { method: "DELETE", headers: REST }).catch(() => {});
-            }
-          }
+          const d = await discardAttemptDoc(cid, resub.resume_document_id);
+          if (d.refused) return json({ ok: false, error: "refused" }, 409);
+          if (!d.ok) return json({ ok: false, error: "discard_failed", detail: d.detail }, 500);
         }
-        await patch(`resume_resubmissions?id=eq.${resub.id}&status=in.(${OPEN.join(",")})`, { status: "cancelled", closed_at: new Date().toISOString(), updated_at: new Date().toISOString(), plan: null, plan_hash: null, base_fingerprint: null });
+        await patch(`resume_resubmissions?id=eq.${resub.id}&status=in.(${[...OPEN, "failed"].join(",")})`, { status: "cancelled", closed_at: new Date().toISOString(), updated_at: new Date().toISOString(), plan: null, plan_hash: null, base_fingerprint: null });
         return json({ ok: true, status: "cancelled" });
       }
 
