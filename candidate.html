@@ -3551,14 +3551,8 @@ a:hover{color:var(--color-accent)}
   <sc-if value="{{ showKycCompletedBanner }}" hint-placeholder-val="{{ false }}">
     <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.5;margin-bottom:var(--space-4)">Identity verification: step completed (simulated in this alpha; no identity check was performed).</div>
   </sc-if>
-  <!-- Subscription-tab warning gap (2026-09-19): shown on whichever tab the candidate lands on after leaving the
-       Subscription tab with a Paid choice that was never completed. No Dismiss, same reasoning as the inline notice on
-       the Subscription tab: it clears itself when they open that tab (where the inline notice stays) or subscribe. -->
   <sc-if value="{{ existingAccountNotice }}" hint-placeholder-val="{{ false }}">
     <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.5;margin-bottom:var(--space-4);padding:8px 10px;border:1px solid var(--color-divider);border-radius:6px;display:flex;justify-content:space-between;gap:var(--space-3);align-items:center"><span>You already had a Verifi account with this email, so we signed you in to it instead of creating a new one. Nothing about your account was changed.</span><button type="button" class="btn btn-ghost" style="font-size:12px" sc-camel-on-click="{{ dismissExistingAccountNotice }}">Dismiss</button></div>
-  </sc-if>
-  <sc-if value="{{ subscribeAbandonedNotice }}" hint-placeholder-val="{{ false }}">
-    <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.5;margin-bottom:var(--space-4);padding:8px 10px;border:1px solid var(--color-divider);border-radius:6px">You haven't completed subscribing — nothing was charged and your account remains on the Free plan. Open the Subscription tab to finish.</div>
   </sc-if>
 
 
@@ -5291,6 +5285,21 @@ a:hover{color:var(--color-accent)}
         <div class="dialog-actions">
           <button type="button" class="btn btn-secondary" disabled="{{ checkoutPending }}" sc-camel-on-click="{{ closeDowngradeModal }}">Cancel</button>
           <button type="button" class="btn btn-secondary" disabled="{{ checkoutPending }}" sc-camel-on-click="{{ confirmDowngradeModal }}">{{ confirmDowngradeModalLabel }}</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- Leaving the Subscription tab with a Paid choice that has no completed checkout behind it (2026-09-20). Replaces the
+       persistent "you haven't completed subscribing" banner: the tab click is held until one of these two is chosen. -->
+  <sc-if value="{{ subscribeLeaveModalOpen }}" hint-placeholder-val="{{ false }}">
+    <div class="dialog-backdrop">
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="subscribe-leave-title">
+        <div class="dialog-title" id="subscribe-leave-title">Finish subscribing?</div>
+        <div class="dialog-body">You chose the Paid plan but haven't completed checkout, so nothing has been charged and your account is still on the Free plan. Choose "Not now" to go back to Free and continue to the tab you clicked.</div>
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-secondary" id="subscribe-leave-notnow" sc-camel-on-click="{{ subscribeLeaveNotNow }}">Not now</button>
+          <button type="button" class="btn btn-primary" id="subscribe-leave-continue" sc-camel-on-click="{{ subscribeLeaveContinue }}">Continue to subscribe</button>
         </div>
       </div>
     </div>
@@ -7330,7 +7339,7 @@ class Component extends DCLogic {
     tierSelection: 'free', billingCycle: 'monthly', changePlanOpen: false,
     // Item B (2026-09-08 regression session): real Stripe test-mode checkout state — see
     // startRealCheckout/handleCheckoutReturn's own headers.
-    checkoutPending: false, checkoutError: null, checkoutIncompleteNotice: false, checkoutSuccessNotice: false, subscribeAbandonedNotice: false, existingAccountNotice: false, checkoutAwaitingWebhook: false,
+    checkoutPending: false, checkoutError: null, checkoutIncompleteNotice: false, checkoutSuccessNotice: false, subscribeLeaveModalOpen: false, existingAccountNotice: false, checkoutAwaitingWebhook: false,
     // Item 7 (2026-09-08 regression session): confirmDowngrade already made a real, checked backend
     // write (set-candidate-tier) before this fix -- the tier genuinely changed -- but nothing told
     // the candidate it worked; the modal just closed silently. Mirrors checkoutSuccessNotice's own
@@ -7821,13 +7830,11 @@ class Component extends DCLogic {
 
   componentDidUpdate(prevProps, prevState) {
     // Opening the Subscription tab: re-verify any local Paid selection against the real account (same check the
-    // browser-tab-visibility listener runs) and retire the "you left without subscribing" banner, since the
-    // persistent inline notice on this tab now carries the message.
+    // browser-tab-visibility listener runs).
     // (The tab change is tracked here rather than read off prevState: the wrapper that hosts this class calls
     // componentDidUpdate with prevProps only, so prevState is undefined.)
     const tabNow = this.state.screen === 'account' ? this.state.accountTab : null;
     if (tabNow === 'subscription' && this._lastAccountTab !== 'subscription') {
-      if (this.state.subscribeAbandonedNotice) this.setState({ subscribeAbandonedNotice: false });
       this.recheckStaleTierSelection();
     }
     this._lastAccountTab = tabNow;
@@ -8222,13 +8229,14 @@ class Component extends DCLogic {
   // it won't navigate them anywhere.
   async recheckStaleTierSelection() {
     const s = this.state;
-    if (s.checkoutPending) return;
+    if (s.checkoutPending || s.subscribeLeaveModalOpen) return;
     const staleSubscription = s.accountTab === 'subscription' && s.tierSelection === 'paid' && s.accountTier !== 'paid';
     const staleSignupTier = s.screen === 'tiers' && s.tier === 'paid';
     if (!staleSubscription && !staleSignupTier) return;
     const resolved = await this.resolveSession();
     if (!resolved) return;
     if (this.state.accountTier === 'paid') return; // a real webhook landed after all — nothing stale
+    if (this.state.subscribeLeaveModalOpen) return; // the leave-the-tab question opened while this was in flight; it owns the choice now
     this.setState({
       tierSelection: staleSubscription ? this.state.accountTier : this.state.tierSelection,
       tier: staleSignupTier ? 'free' : this.state.tier,
@@ -9315,7 +9323,7 @@ class Component extends DCLogic {
     // back to s.billingCycle otherwise, unchanged for every existing call site.
     const product = (opts && opts.product) || 'resume_pro';
     const billingCycle = (opts && opts.billingCycle) || s.billingCycle;
-    this.setState({ checkoutPending: true, checkoutError: null, checkoutIncompleteNotice: false, subscribeAbandonedNotice: false });
+    this.setState({ checkoutPending: true, checkoutError: null, checkoutIncompleteNotice: false });
     try {
       localStorage.setItem('verifi_checkout_return', JSON.stringify({
         upgradeReturnTab: s.upgradeReturnTab || null,
@@ -10679,21 +10687,28 @@ class Component extends DCLogic {
     return (result && result.res.ok && result.data.ok) ? result.data : null;
   }
 
+  // Every account-tab click (desktop tab bar and the phone-width menu) comes through here. Leaving the Subscription tab with a Paid
+  // choice that has no completed checkout behind it (accountTier is the real, webhook-backed value) used to be announced afterwards by a
+  // persistent banner (2026-09-19). It is now asked at the moment of the click (2026-09-20): the click is held and a modal offers
+  // "Continue to subscribe" (cancel the navigation, nothing changes) or "Not now" (back to the real plan, then the held click completes).
+  // Only tab clicks are held. Logging off / "Not you?" and closing the browser tab still drop the local choice silently, as scoped.
+  guardedTabNav(targetKey, action) {
+    const s = this.state;
+    if (s.accountTab === 'subscription' && s.tierSelection === 'paid' && s.accountTier !== 'paid' && !s.checkoutPending) {
+      if (targetKey === 'subscription') return; // the tab you are already on is not a navigation
+      this._pendingSubscribeLeave = action;
+      this.setState({ subscribeLeaveModalOpen: true });
+      return;
+    }
+    this.guardedNav(action);
+  }
+
   guardedNav(action) {
     if (this.isDirty() && !window.confirm('You have unsaved changes on this tab. Leave without saving?')) return;
     const prevTab = this.state.accountTab;
-    // Subscription-tab warning gap (2026-09-19): this reset used to be silent. A candidate who picked Paid and then
-    // moved to another tab, never having touched Stripe, came back to Free with no word that nothing was completed
-    // (the only re-check ran on browser-tab visibility, and only while already on this tab). Leaving with a Paid
-    // choice that has no confirmed subscription behind it is now said out loud: the persistent inline notice on the
-    // Subscription tab, plus a banner on whichever tab they land on (cleared once they open Subscription, where the
-    // inline notice stays). accountTier is the real, webhook-backed value, so this never depends on Stripe having
-    // been reached at all.
-    const abandonedPaidChoice = this.state.tierSelection === 'paid' && this.state.accountTier !== 'paid' && !this.state.checkoutPending;
     action();
     this.setState(st => ({
       viewsTabPartner: '', tierSelection: st.accountTier, changePlanOpen: false, deactReason: '', deactNote: '',
-      ...(abandonedPaidChoice ? { checkoutIncompleteNotice: true, subscribeAbandonedNotice: st.accountTab !== 'subscription' } : {}),
       ...(prevTab === 'sharing' && st.accountTab !== 'sharing' ? { arrivedFromDeactivationPause: false } : {}),
     }));
   }
@@ -10785,7 +10800,7 @@ class Component extends DCLogic {
       showKycNotCompletedBanner: !s.kycVerifiedAt,
       tabIsProfile: s.accountTab === 'profile',
       tabProfileClass: s.accountTab === 'profile' ? 'btn-secondary' : 'btn-ghost',
-      selectTabProfile: () => this.guardedNav(() => this.setState({ accountTab: 'profile' })),
+      selectTabProfile: () => this.guardedTabNav('profile', () => this.setState({ accountTab: 'profile' })),
       accountEmail: s.email || 'you@email.com',
       profileFirst: s.profileFirst,
       profileLast: s.profileLast,
@@ -10862,7 +10877,7 @@ class Component extends DCLogic {
       tierRadiosDisabled: s.accountTier === 'paid',
       tierRadiosEnabled: s.accountTier !== 'paid',
       selectTierFree: () => { if (s.accountTier === 'paid') return; this.setState({ tierSelection: 'free' }); },
-      selectTierPaid: () => { if (s.accountTier === 'paid') return; this.setState({ tierSelection: 'paid', checkoutIncompleteNotice: false, subscribeAbandonedNotice: false }); },
+      selectTierPaid: () => { if (s.accountTier === 'paid') return; this.setState({ tierSelection: 'paid', checkoutIncompleteNotice: false }); },
       isCurrentlyPaid: s.accountTier === 'paid',
       // Item 11: license_only's own Subscription-tab facts — licenseSubscriptionStartedAt is real,
       // persisted state (candidates.license_subscription_started_at, written by test-stripe-webhook —
@@ -10918,7 +10933,15 @@ class Component extends DCLogic {
         ? "Your plan change wasn't completed. Your current subscription is unchanged."
         : "You haven't completed subscribing — your account remains on the Free plan.",
       changePlanOpen: s.changePlanOpen,
-      subscribeAbandonedNotice: s.subscribeAbandonedNotice && s.accountTier !== 'paid',
+      subscribeLeaveModalOpen: s.subscribeLeaveModalOpen,
+      // "Continue to subscribe": cancel the held tab click; nothing changes (Paid stays selected, still on Subscription).
+      subscribeLeaveContinue: () => { this._pendingSubscribeLeave = null; this.setState({ subscribeLeaveModalOpen: false }); },
+      // "Not now": the choice goes back to the real plan and the tab click that was held now completes.
+      subscribeLeaveNotNow: () => {
+        const go = this._pendingSubscribeLeave; this._pendingSubscribeLeave = null;
+        this.setState({ subscribeLeaveModalOpen: false, tierSelection: this.state.accountTier, changePlanOpen: false });
+        if (go) this.guardedNav(go);
+      },
       checkoutAwaitingWebhook: s.checkoutAwaitingWebhook,
       checkoutSuccessNotice: s.checkoutSuccessNotice,
       downgradeSuccessNotice: s.downgradeSuccessNotice,
@@ -11130,7 +11153,7 @@ class Component extends DCLogic {
       // seedCzSummaryDefaults fix above, to whatever the summaryId placeholder happened to
       // resolve to). Same real-dead-end pattern already fixed for resumeExtraction via
       // ensureResumeExtractionLoaded, applied here.
-      selectTabViews: () => this.guardedNav(() => { this.ensureSummariesLoaded(); this.setState({ accountTab: 'views' }, () => this.renderPdfPreview()); }),
+      selectTabViews: () => this.guardedTabNav('views', () => { this.ensureSummariesLoaded(); this.setState({ accountTab: 'views' }, () => this.renderPdfPreview()); }),
       downloadPdf: () => {
         if (!this._pdfBlobUrl) return;
         const a = document.createElement('a');
@@ -11149,7 +11172,7 @@ class Component extends DCLogic {
       // per-target summary dropdown offering only "No summary" (summaryOptionsForTarget
       // filters off the still-empty savedSummaries) with no way to know real saved
       // summaries existed until they happened to visit Content Manager first.
-      selectTabCustomization: () => this.guardedNav(() => { this.ensureSummariesLoaded(); this.setState({ accountTab: 'customization' }); }),
+      selectTabCustomization: () => this.guardedTabNav('customization', () => { this.ensureSummariesLoaded(); this.setState({ accountTab: 'customization' }); }),
       customizeTarget: s.customizeTarget,
       setCustomizeTarget: (e) => {
         const val = e.target.value;
@@ -11237,7 +11260,7 @@ class Component extends DCLogic {
       summarySavedFadeStyle: s.czFlashFading ? 'transition:opacity 0.5s ease;opacity:0' : 'transition:opacity 0.15s ease;opacity:1',
       tabIsContentManager: s.accountTab === 'contentManager',
       tabContentManagerClass: s.accountTab === 'contentManager' ? 'btn-secondary' : 'btn-ghost',
-      selectTabContentManager: () => this.guardedNav(() => { this.setState({ accountTab: 'contentManager' }); this.ensureSummariesLoaded(); }),
+      selectTabContentManager: () => this.guardedTabNav('contentManager', () => { this.setState({ accountTab: 'contentManager' }); this.ensureSummariesLoaded(); }),
       cmRoles: this.getCzCategories().find(c => c.key === 'experience').items.map(it => ({
         label: it.label,
         description: this.roleDescription(it.key),
@@ -11568,14 +11591,14 @@ class Component extends DCLogic {
       tabSubscriptionClass: s.accountTab === 'subscription' ? 'btn-secondary' : 'btn-ghost',
       tabActivityClass: s.accountTab === 'activity' ? 'btn-secondary' : 'btn-ghost',
       tabDeactivationClass: s.accountTab === 'deactivation' ? 'btn-secondary' : 'btn-ghost',
-      selectTabVerification: () => this.guardedNav(() => {
+      selectTabVerification: () => this.guardedTabNav('verification', () => {
         this.setState({ accountTab: 'verification' });
         if (s.accountType === 'license_only') this.ensureLicenseItemsLoaded(); else this.ensureVerificationItemsLoaded();
       }),
-      selectTabSharing: () => this.guardedNav(() => this.setState({ accountTab: 'sharing' })),
-      selectTabSubscription: () => this.guardedNav(() => this.setState({ accountTab: 'subscription' })),
-      selectTabActivity: () => this.guardedNav(() => { this.setState({ accountTab: 'activity' }); if (s.accountType === 'license_only') { this.ensureLicenseActivityLoaded(true); this.ensureComparisonLoaded(true); } else this.ensureComparisonLoaded(true); }),
-      selectTabDeactivation: () => this.guardedNav(() => this.setState({ accountTab: 'deactivation' })),
+      selectTabSharing: () => this.guardedTabNav('sharing', () => this.setState({ accountTab: 'sharing' })),
+      selectTabSubscription: () => this.guardedTabNav('subscription', () => this.setState({ accountTab: 'subscription' })),
+      selectTabActivity: () => this.guardedTabNav('activity', () => { this.setState({ accountTab: 'activity' }); if (s.accountType === 'license_only') { this.ensureLicenseActivityLoaded(true); this.ensureComparisonLoaded(true); } else this.ensureComparisonLoaded(true); }),
+      selectTabDeactivation: () => this.guardedTabNav('deactivation', () => this.setState({ accountTab: 'deactivation' })),
       mobileNavOpen: s.mobileNavOpen,
       mobileNavOpenStr: s.mobileNavOpen ? 'true' : 'false',
       toggleMobileNav: () => this.setState(st => ({ mobileNavOpen: !st.mobileNavOpen })),
@@ -11586,11 +11609,13 @@ class Component extends DCLogic {
         activeStyle: s.accountTab === t.key ? 'color:var(--color-accent)' : '',
         onSelect: () => {
           this.setState({ mobileNavOpen: false });
-          this.guardedNav(() => this.setState({ accountTab: t.key }));
-          if (t.key === 'verification') {
-            if (s.accountType === 'license_only') this.ensureLicenseItemsLoaded(); else this.ensureVerificationItemsLoaded();
-          }
-          if (t.key === 'activity' && s.accountType === 'license_only') this.ensureLicenseActivityLoaded(true);
+          this.guardedTabNav(t.key, () => {
+            this.setState({ accountTab: t.key });
+            if (t.key === 'verification') {
+              if (s.accountType === 'license_only') this.ensureLicenseItemsLoaded(); else this.ensureVerificationItemsLoaded();
+            }
+            if (t.key === 'activity' && s.accountType === 'license_only') this.ensureLicenseActivityLoaded(true);
+          });
         },
       })),
       isSignupDetails: s.screen === 'signupDetails',
@@ -12070,7 +12095,7 @@ class Component extends DCLogic {
       continueFromInterstitial: () => { this.setState({ interstitialLearnMoreOpen: false }); this.enterAccount(); },
       placeholderModalOpen: s.placeholderModalOpen,
       closePlaceholderModal: () => this.setState({ placeholderModalOpen: false }),
-      showHelpButton: s.screen === 'account' && !s.kycModalOpen && !s.connectModalOpen && !s.phoneModalOpen && !s.downgradeModalOpen && !s.tourActive && !s.helpTabModalTab && !s.placeholderModalOpen,
+      showHelpButton: s.screen === 'account' && !s.kycModalOpen && !s.connectModalOpen && !s.phoneModalOpen && !s.downgradeModalOpen && !s.subscribeLeaveModalOpen && !s.tourActive && !s.helpTabModalTab && !s.placeholderModalOpen,
       helpMenuOpen: s.helpMenuOpen,
       helpMenuOpenStr: s.helpMenuOpen ? 'true' : 'false',
       openHelpMenu: () => this.setState({ helpMenuOpen: true }),
