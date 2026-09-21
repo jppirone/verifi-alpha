@@ -390,6 +390,14 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   in the freeform heading rule below (empty "heading", section_type "needs_review"), which the
   upload pipeline merges into the correctly-headed part from the prior page.
 
+- skills' "skills_heading" field = the literal heading/label text of the section the skills list sits
+  under, exactly as printed (e.g. "CORE COMPETENCIES", "Technical Skills"), copied verbatim — not
+  reworded, not invented, not guessed. It is one string for the whole skills block, like
+  "skills_position". Use an empty string "" when the skills list has no visible heading above it, or
+  when there are no skills at all. This is additive only, like work_history's own "heading" field above
+  — it does not change how anything is classified or which terms belong in skills, only what section
+  title the output can reproduce.
+
 - Deduplication: if the same role, credential, or skill term appears more than once anywhere in the
   document (e.g. listed once under "Experience" and again under a separate "Leadership" or
   "Highlights" section), extract it ONCE. Do not create duplicate entries for repeated mentions of
@@ -491,6 +499,7 @@ const SCHEMA_SHAPE = `{
       "extraction_confidence": "high" | "medium" | "low", "position": number, "heading": string }
   ],
   "skills": [ string ],
+  "skills_heading": string,
   "skills_position": number | null,
   "freeform": [
     { "section_type": "summary" | "hobbies_other" | "needs_review", "heading": string, "content": string, "position": number }
@@ -553,6 +562,17 @@ type BoundarySection = {
 };
 
 type BoundaryResult = { sections: BoundarySection[] };
+
+// The Skills block's own literal heading (2026-09-21), captured the same way the other sections' headings are. The section-boundary step already
+// reads every section's heading to classify it; that reading is used FIRST (it is a single-purpose call), and the extraction's own
+// "skills_heading" is the fallback for a page where the boundary step failed or found no skills section. Nothing is stored when no skills were
+// extracted (a heading with nothing under it belongs to nothing). One string per resume; whitespace collapsed, length-capped.
+function cleanHeading(s: unknown): string { return typeof s === "string" ? s.replace(/\s+/g, " ").trim().slice(0, 200) : ""; }
+function resolveSkillsHeading(boundaries: BoundaryResult | null | undefined, extraction: { skills?: unknown; skills_heading?: unknown }): string {
+  if (!Array.isArray(extraction.skills) || !extraction.skills.some((x) => typeof x === "string" && x.trim())) return "";
+  const b = boundaries ? boundaries.sections.find((s) => s.category === "skills" && cleanHeading(s.heading)) : undefined;
+  return b ? cleanHeading(b.heading) : cleanHeading(extraction.skills_heading);
+}
 
 const BOUNDARY_SCHEMA_SHAPE = `{
   "sections": [
@@ -886,6 +906,7 @@ type ExtractionResult = {
   education: Array<{ institution: string; degree: string; field_of_study: string; location?: string; start_date: string; end_date: string; extraction_confidence: string; position?: number; heading?: string }>;
   certifications: Array<{ name: string; issuing_body: string; license_number?: string; issue_date: string; expiration_date: string; extraction_confidence: string; position?: number; heading?: string }>;
   skills: Array<string>;
+  skills_heading?: string;
   skills_position?: number | null;
   freeform: Array<{ section_type: string; heading: string; content: string; position?: number }>;
 };
@@ -1539,6 +1560,7 @@ export default {
         extraction = await runHaikuExtraction(ocrText, trailingContext, sectionBoundaries, modelCalls);
         extractionMs = Date.now() - haikuStart;
       }
+      extraction.skills_heading = resolveSkillsHeading(sectionBoundaries, extraction);
 
       return new Response(JSON.stringify({
         ok: true,

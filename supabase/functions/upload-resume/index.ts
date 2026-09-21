@@ -205,6 +205,17 @@ function isValidBoundaryResult(x: unknown): x is BoundaryResult {
   );
 }
 
+// The Skills block's own literal heading (2026-09-21), captured the same way the other sections' headings are. The section-boundary step already
+// reads every section's heading to classify it; that reading is used FIRST (it is a single-purpose call), and the extraction's own
+// "skills_heading" is the fallback for a page where the boundary step failed or found no skills section. Nothing is stored when no skills were
+// extracted (a heading with nothing under it belongs to nothing). One string per resume; whitespace collapsed, length-capped.
+function cleanHeading(s: unknown): string { return typeof s === "string" ? s.replace(/\s+/g, " ").trim().slice(0, 200) : ""; }
+function resolveSkillsHeading(boundaries: BoundaryResult | null | undefined, extraction: { skills?: unknown; skills_heading?: unknown }): string {
+  if (!Array.isArray(extraction.skills) || !extraction.skills.some((x) => typeof x === "string" && x.trim())) return "";
+  const b = boundaries ? boundaries.sections.find((s) => s.category === "skills" && cleanHeading(s.heading)) : undefined;
+  return b ? cleanHeading(b.heading) : cleanHeading(extraction.skills_heading);
+}
+
 // STEP 2 OF 2 support: renders step 1's already-decided boundaries into the block step 2's prompt
 // includes — this is what actually enforces "do not independently re-judge category". Mirrors
 // rasterize-pdf-page's buildSectionBoundaryBlock exactly, minus the continuation-context branch,
@@ -278,6 +289,7 @@ Return ONLY a single JSON object, no prose before or after it, matching exactly 
       "extraction_confidence": "high" | "medium" | "low", "position": number, "heading": string }
   ],
   "skills": [ string ],
+  "skills_heading": string,
   "skills_position": number | null,
   "freeform": [
     { "section_type": "summary" | "hobbies_other" | "needs_review", "heading": string, "content": string, "position": number }
@@ -554,6 +566,14 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   document is NOT automatically more of the same skills block just because its individual phrases
   look similar; check each item for its own explanatory clause before adding anything to skills.
 
+- skills' "skills_heading" field = the literal heading/label text of the section the skills list sits
+  under, exactly as printed (e.g. "CORE COMPETENCIES", "Technical Skills"), copied verbatim — not
+  reworded, not invented, not guessed. It is one string for the whole skills block, like
+  "skills_position". Use an empty string "" when the skills list has no visible heading above it, or
+  when there are no skills at all. This is additive only, like work_history's own "heading" field above
+  — it does not change how anything is classified or which terms belong in skills, only what section
+  title the output can reproduce.
+
 - Deduplication: if the same role, credential, or skill term appears more than once anywhere in the
   document (e.g. listed once under "Experience" and again under a separate "Leadership" or
   "Highlights" section), extract it ONCE. Do not create duplicate entries for repeated mentions of
@@ -660,6 +680,7 @@ type ExtractionResult = {
   education: Array<{ institution: string; degree: string; field_of_study: string; location?: string; start_date: string; end_date: string; extraction_confidence: string; position?: number; heading?: string }>;
   certifications: Array<{ name: string; issuing_body: string; license_number?: string; issue_date: string; expiration_date: string; extraction_confidence: string; position?: number; heading?: string }>;
   skills: Array<string>;
+  skills_heading?: string;
   skills_position?: number | null;
   freeform: Array<{ section_type: string; heading: string; content: string; position?: number }>;
 };
@@ -1318,6 +1339,11 @@ function mergeExtractions(pages: Array<{ pageNumber: number; extraction: Extract
     certifications: pages.flatMap(({ pageNumber, extraction }) =>
       extraction.certifications.map((c) => ({ ...c, position: globalizePosition(pageNumber, c.position) ?? undefined }))),
     skills: pages.flatMap(({ extraction }) => extraction.skills),
+    // the first page that reported the skills block's heading (a skills list that runs onto a later page has no heading there)
+    skills_heading: (() => {
+      const withHeading = pages.find(({ extraction }) => !!cleanHeading(extraction.skills_heading));
+      return withHeading ? cleanHeading(withHeading.extraction.skills_heading) : "";
+    })(),
     // Only one page can sensibly claim "the" skills block position — the first page that actually
     // reported one. A resume with skills split oddly across pages is a real edge case this doesn't
     // try to solve; it just doesn't crash or silently pick an arbitrary later page instead.
@@ -1533,6 +1559,7 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
     p_certifications: merged.certifications,
     p_skills: merged.skills,
     p_skills_position: merged.skills_position ?? null,
+    p_skills_heading: merged.skills_heading || null,
     p_freeform: merged.freeform,
     p_ocr_text: combinedOcrText,
     p_candidate_location: merged.candidate_location || null,
@@ -1829,6 +1856,7 @@ export default {
         let extraction: ExtractionResult;
         try {
           extraction = dedupePositions(await runVisionExtraction(sanitized_base64, sectionBoundaries));
+          extraction.skills_heading = resolveSkillsHeading(sectionBoundaries, extraction);
         } catch (visionErr) {
           await supabase.from("resume_documents").update({ extraction_status: "failed" }).eq("id", docId);
           return new Response(JSON.stringify({ ok: false, error: "vision_extraction_failed", detail: String(visionErr), resume_document_id: docId }), {
@@ -1850,6 +1878,7 @@ export default {
           p_certifications: extraction.certifications,
           p_skills: extraction.skills,
           p_skills_position: extraction.skills_position ?? null,
+          p_skills_heading: extraction.skills_heading || null,
           p_freeform: extraction.freeform,
           // Explicit null, not omitted: this path is vision-only by construction (that's the whole
           // reason it exists — see this branch's own header), so there is no OCR text and never
