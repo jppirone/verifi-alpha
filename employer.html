@@ -2441,9 +2441,14 @@ const __ds_scope = {};
           <div style="font-size:12px;color:#e2735c;line-height:1.6">Opening approved requests and starting new ones are paused until the payment problem above is fixed. Nothing is used while they are paused.</div>
         </sc-if>
 
+        <div style="display:flex;flex-direction:column;gap:var(--space-2);align-items:flex-start">
+          <button type="button" id="acct-check-candidate" class="btn btn-primary" sc-camel-on-click="{{ checkCandidateFromAccount }}">Check a candidate</button>
+          <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Start here: look the candidate up, then confirm the link we email to {{ acctEmail }}. Once a record is found, it appears below and you can request it.</div>
+        </div>
+
         <div style="font-size:11px;letter-spacing:0.04em;text-transform:uppercase;color:var(--color-neutral-500)">Your lookups (last 30 days, matched)</div>
         <sc-if value="{{ noLookupRows }}" hint-placeholder-val="{{ true }}">
-          <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">None. Run a check for a candidate with this email address; if a record exists, it appears here.</div>
+          <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">None yet. Use Check a candidate above. If a record exists and you confirm the emailed link, it appears here.</div>
         </sc-if>
         <sc-for list="{{ lookupRows }}" as="row" hint-placeholder-count="2">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap;font-size:13px">
@@ -2562,7 +2567,7 @@ const __ds_scope = {};
       </button>
       <button type="button" id="landing-compare" class="card elev-sm" style="flex:1;min-width:240px;text-align:left;cursor:pointer;display:flex;flex-direction:column;gap:var(--space-2);color:inherit;font:inherit" sc-camel-on-click="{{ openResumeComparison }}">
         <span style="font-size:18px;font-family:var(--font-heading)">Verified records</span>
-        <span style="font-size:13px;color:var(--color-accent-300)">Sign in or create account</span>
+        <span style="font-size:13px;color:var(--color-accent-300)">{{ landingCompareSub }}</span>
       </button>
     </div>
   </div>
@@ -3147,6 +3152,17 @@ class Component extends DCLogic {
       : code === 'candidate_contact_required' ? 'Please give the candidate’s email address or a 10-digit phone number.'
       : "We couldn't send the confirmation email. Please try again.";
     this.setState({ lookupSending: false, lookupFormError: msg });
+  }
+
+  // A signed-in person's own details for the requester part of the lookup form (only fields still empty are filled). The confirmation email goes to this
+  // address, and a signed-in organization member can request a record only when the lookup was confirmed with their own address.
+  lookupPrefill() {
+    const s = this.state; const u = s.real && s.real.user; if (!u) return {};
+    const p = {};
+    if (!(s.reqNameInput || '').trim() && u.name) p.reqNameInput = u.name;
+    if (!(s.reqCompanyInput || '').trim() && s.real.org && s.real.org.name) p.reqCompanyInput = s.real.org.name;
+    if (!(s.reqEmailInput || '').trim() && u.email) p.reqEmailInput = u.email;
+    return p;
   }
 
   domainTypeFor(email) {
@@ -4017,8 +4033,10 @@ class Component extends DCLogic {
 
       backToLookup: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'lookup', lookupResult: null, lookup: null, request: null, pendingEmail: '' }); },
       isLanding: s.screen === 'landing',
+      landingCompareSub: s.real ? 'Your account, requests and checks' : 'Sign in or create account',
       goHome: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'landing' }); },
-      openCheckForAccount: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'lookup' }); },
+      openCheckForAccount: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState(Object.assign({ screen: 'lookup' }, this.lookupPrefill())); },
+      checkCandidateFromAccount: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState(Object.assign({ screen: 'lookup', lookupFormError: null }, this.lookupPrefill())); },
       openResumeComparison: (e) => {
         if (e && e.preventDefault) e.preventDefault();
         if (s.real) { this.setState({ screen: 'acct', acctNotice: null, acctErr: null }); this.loadReal(); }
