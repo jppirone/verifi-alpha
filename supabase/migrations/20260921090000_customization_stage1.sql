@@ -224,7 +224,7 @@ begin
     where s.candidate_id = p_candidate and s.candidate_confirmed and s.resume_document_id = any (v_docs)
       and (not p_delivered_only or coalesce(o.included, true))
     union all
-    select 1, a.position, a.id, jsonb_build_object('id', a.id, 'kind', 'skill_added', 'position', a.position, 'text', a.text_override, 'source', 'candidate_added', 'included', a.included)
+    select 1, a.position, a.item_id, jsonb_build_object('id', a.item_id, 'kind', 'skill_added', 'position', a.position, 'text', a.text_override, 'source', 'candidate_added', 'included', a.included)
     from candidate_item_overrides a
     where v_apply and a.candidate_id = p_candidate and a.kind = 'skill_added' and (not p_delivered_only or a.included)
   ) x;
