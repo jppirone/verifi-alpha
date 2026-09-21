@@ -3196,7 +3196,7 @@ a:hover{color:var(--color-accent)}
 
         <sc-if value="{{ section.isSkills }}" hint-placeholder-val="{{ false }}">
         <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
-          <div class="card-kicker">Skills</div>
+          <div class="card-kicker">{{ section.skillsHeading }}</div>
           <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Read straight from your resume, one field per skill — not capped at any count, and each is delivered exactly as written.</div>
           <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,200px),1fr));gap:var(--space-2)">
             <sc-for list="{{ section.skillRows }}" as="skillRow" hint-placeholder-count="6">
@@ -4590,7 +4590,7 @@ a:hover{color:var(--color-accent)}
             </div>
 
             <div style="display:flex;flex-direction:column;gap:4px">
-              <div style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--color-neutral-500)">Skills</div>
+              <div style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--color-neutral-500)">{{ skillsHeadingLabel }}</div>
               <div style="display:flex;flex-direction:column">
                 <sc-for list="{{ freeSkillsPreview }}" as="sk" hint-placeholder-count="5">
                   <div style="font-size:12px;color:var(--color-neutral-600);line-height:1.6;padding:9px 0;border-bottom:1px solid var(--color-divider)">{{ sk }}</div>
@@ -4640,7 +4640,7 @@ a:hover{color:var(--color-accent)}
 
           <div style="display:flex;flex-direction:column;gap:var(--space-3)">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3)">
-              <div class="card-kicker">Skills</div>
+              <div class="card-kicker">{{ skillsHeadingLabel }}</div>
               <div style="font-size:11px;color:var(--color-neutral-600)">{{ skillCountLabel }}</div>
             </div>
             <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
@@ -6070,7 +6070,7 @@ class Component extends DCLogic {
         // source did not say (this used to append "(Graduated Jan 1990)" to any education row that had an end date).
         label: [e.degree, e.field_of_study, [e.institution, e.location].filter(Boolean).join(', ')].filter(Boolean).join(', ') + this.parenDateRange(e.start_date, e.start_date_precision, e.end_date, e.end_date_precision),
       })) },
-      { key: 'skills', label: 'Skills' },
+      { key: 'skills', label: this.skillsHeading() },
       { key: 'certifications', label: 'Certifications', items: certifications.map(c => ({
         key: c.id,
         // Item 7 (2026-09-12 live-testing session): license_number rendered alongside name here too
@@ -7119,13 +7119,12 @@ class Component extends DCLogic {
         // its own line once wrapText renders it (wrapText already preserves embedded "\n" -- see its
         // own header) -- one line per skill, matching how the source document itself presents them,
         // without claiming the source's specific two-column visual LAYOUT (a design choice this
-        // plain-text PDF was never going to reproduce either way). Skills doesn't capture a literal
-        // heading in this pass (Item #3 point 1 scoped that to work_history/education/certifications
-        // only) -- keeps its existing fixed "SKILLS" label, applied in the render loop below.
+        // plain-text PDF was never going to reproduce either way). Skills' own literal heading
+        // (skill_items.heading, 2026-09-21) rides along on the group and prints as its section title in the render loop below.
         const skillLine = this.deliveredSkills().join('\n');
         if (skillLine) {
           const positions = ex.skills.map(sk => sk.section_position).filter(p => typeof p === 'number');
-          grouped.push({ kind: 'skills', position: positions.length ? Math.min(...positions) : Infinity, body: skillLine });
+          grouped.push({ kind: 'skills', position: positions.length ? Math.min(...positions) : Infinity, body: skillLine, heading: this.skillsHeading() });
         }
       }
       // Item 3 (2026-09-11 status-check session): needs_review now reads per-item catVal like every
@@ -7161,8 +7160,8 @@ class Component extends DCLogic {
     // heading text, or nothing if the source genuinely has none. No generic label is ever
     // substituted or stacked alongside the real one -- confirmed as a deliberate, strict reading:
     // this replaces the old fixed EXPERIENCE/EDUCATION/CERTIFICATIONS labels AND the old
-    // 'ADDITIONAL INFORMATION' fallback for headless misc content. 'skills' is the one exception,
-    // since it doesn't capture a literal heading in this pass (see above) and keeps its fixed label.
+    // 'ADDITIONAL INFORMATION' fallback for headless misc content. 'skills' now carries its own captured
+    // heading too (skillsHeading), falling back to "Skills" only when the resume had none.
     let lastHeading = null;
     grouped.forEach(g => {
       if (g.items) {
@@ -7177,8 +7176,10 @@ class Component extends DCLogic {
         return;
       }
       if (g.kind === 'skills') {
-        if ('SKILLS' !== lastHeading) push('SKILLS', true);
-        lastHeading = 'SKILLS';
+        // the resume's own Skills heading when one was captured, "Skills" otherwise (see skillsHeading)
+        const skillsHeading = g.heading || 'Skills';
+        if (skillsHeading !== lastHeading) push(skillsHeading, true);
+        lastHeading = skillsHeading;
         this.wrapText(g.body, 90).forEach(w => push(w));
         push('');
         return;
@@ -7722,6 +7723,15 @@ class Component extends DCLogic {
 
   deliveredSkills() {
     return (this.state.skillItems || []).map(x => (x || '').trim()).filter(Boolean);
+  }
+
+  // The Skills section's own literal heading as printed on the resume ("Core Competencies", "Technical Skills", ...), captured at extraction and stored on every
+  // skill row of the block (skill_items.heading), the same way work/education/certification rows carry theirs. Rows extracted before that column existed, and
+  // resumes whose skills have no visible heading, have none, so every place that names the section falls back to "Skills".
+  skillsHeading() {
+    const rows = (this.state.resumeExtraction && this.state.resumeExtraction.skills) || [];
+    const row = rows.find(r => r && typeof r.heading === 'string' && r.heading.trim());
+    return row ? row.heading.trim().replace(/\s+/g, ' ') : 'Skills';
   }
 
   // Real dead end this closes (2026-09-07 wiring audit): skillItems (Content Manager's editable
@@ -11957,6 +11967,7 @@ class Component extends DCLogic {
       hasFlaggedContent: !!(s.resumeExtraction && s.resumeExtraction.freeform && s.resumeExtraction.freeform.some(f => f.section_type === 'needs_review')),
       freeSummaryPreview: this.getSummaryText(''),
       freeSkillsPreview: this.deliveredSkills(),
+      skillsHeadingLabel: this.skillsHeading(),
       skillFields: s.skillItems.map((val, i) => ({
         id: 'skill-field-' + i,
         value: val,
@@ -12622,6 +12633,7 @@ class Component extends DCLogic {
           const positions = s.resumeExtraction.skills.map(sk => sk.section_position).filter(p => typeof p === 'number');
           blocks.push({
             kind: 'skills', position: positions.length ? Math.min(...positions) : Infinity,
+            skillsHeading: this.skillsHeading(),
             skillRows: s.resumeExtraction.skills.map(sk => ({
               skillText: sk.skill_text || '',
               onChange: (e) => this.updateResumeSkill(sk.id, e.target.value),
