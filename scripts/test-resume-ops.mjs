@@ -182,6 +182,20 @@ console.log("== a reset follows the same flag rule as a new certification");
   t("an UNMATCHED certification stays flagged after a reset", r3.queue.status === "Needs Reconciliation");
 }
 
+console.log("== TRADE picked on the review screen (STAGE 3): decides the queue status of a new/changed certification");
+{
+  const sc = ce("Certified Scrum Master", "Scrum Alliance", { trade_soc_code: null });
+  const none = build(ctx({ sC: [sc] })).ops.added[0], picked = M.buildOps(ctx({ sC: [sc] }), OPT, "NEWDOC", "OLDDOC", { [sc.id]: "47-2152" }).ops.added[0];
+  t("a new certification with NO trade chosen: Needs Reconciliation (unchanged rule), no trade written", none.queue.status === "Needs Reconciliation" && none.trade_soc_code === null);
+  t("...with a trade chosen: New, and the trade is carried to be written", picked.queue.status === "New" && picked.trade_soc_code === "47-2152" && picked.queue.internal_note === null);
+  const unm = ce("Odd", "Body", { source_match: "unmatched", trade_soc_code: null });
+  t("an UNMATCHED certification stays flagged even with a trade chosen", M.buildOps(ctx({ sC: [unm] }), OPT, "N", "O", { [unm.id]: "47-2152" }).ops.added[0].queue.status === "Needs Reconciliation");
+  t("not opted in + trade chosen: still no queue row (the trade does not force verification)", M.buildOps(ctx({ sC: [sc] }), NO, "N", "O", { [sc.id]: "47-2152" }).ops.added[0].queue === null);
+  const old = ce("Trade Cert", "Board", { trade_soc_code: null }), q = vqRow("Certification", old.id, "Confirmed", "Trade Cert, Board");
+  const ch = M.buildOps(ctx({ aC: [old], sC: [copyOf(old, { issue_date: "2025-01-01", issue_date_precision: "year" })], vq: [q] }), OPT, "N", "O", { [old.id]: "47-2111" }).ops.changed[0];
+  t("a CHANGED certification with a trade chosen: the trade is written with the change and the reset is New, not Needs Reconciliation", ch.fields.trade_soc_code === "47-2111" && ch.queue.status === "New");
+}
+
 console.log("== freeform and skills");
 {
   const oldNr = { id: uid(), section_type: "needs_review", heading: "AI PROJECTS", content: "Old project text", position: 3, updated_at: TS }, newNr = { id: uid(), section_type: "needs_review", heading: "OTHER", content: "Completely different new text here", position: 4 };

@@ -3589,6 +3589,248 @@ a:hover{color:var(--color-accent)}
   </div>
 
   <div style="min-height:280px">
+    <!-- Resume update panel (Stage 3): choose file -> working -> review -> applied (+ contact details for new/changed items) -->
+    <sc-if value="{{ tabIsResumeUpdate }}" hint-placeholder-val="{{ false }}">
+      <div id="resub-panel" style="display:flex;flex-direction:column;gap:var(--space-4);min-width:0">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap">
+          <h2 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:20px;margin:0">Update my resume</h2>
+          <button type="button" class="btn btn-ghost" id="resub-back" sc-camel-on-click="{{ resubBackToProfile }}">← Back to profile</button>
+        </div>
+
+        <sc-if value="{{ resubStageChoose }}" hint-placeholder-val="{{ false }}">
+          <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+            <div style="font-size:14px;line-height:1.6">Choose the updated resume file (PDF, or a photo of it). We'll read it and show you what would change. <b>Nothing is applied yet.</b></div>
+            <input type="file" id="resub-file-input" accept="image/jpeg,image/png,image/heic,image/heif,image/webp,application/pdf" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden" sc-camel-on-change="{{ onPickResubFile }}">
+            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+              <label for="resub-file-input" class="btn btn-primary" id="resub-choose" style="cursor:pointer">Choose file</label>
+              <button type="button" class="btn btn-secondary" id="resub-cancel-choose" disabled="{{ resubBusy }}" sc-camel-on-click="{{ cancelResub }}">Cancel</button>
+            </div>
+            <sc-if value="{{ resubError }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:12px;color:#e2735c;line-height:1.5">{{ resubError }}</div>
+            </sc-if>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ resubStageWorking }}" hint-placeholder-val="{{ false }}">
+          <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+            <div style="font-size:14px" id="resub-working">{{ resubWorkingText }}</div>
+            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.5">This usually takes under a minute. You can leave this page and come back; your profile isn't touched.</div>
+            <div><button type="button" class="btn btn-secondary" id="resub-cancel-working" disabled="{{ resubBusy }}" sc-camel-on-click="{{ cancelResub }}">Cancel</button></div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ resubStageFailed }}" hint-placeholder-val="{{ false }}">
+          <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+            <div style="font-size:14px;line-height:1.6" id="resub-failed">{{ resubFailedText }}</div>
+            <div style="font-size:12px;color:var(--color-neutral-500)">Your profile is unchanged.</div>
+            <div><button type="button" class="btn btn-primary" id="resub-startover" disabled="{{ resubBusy }}" sc-camel-on-click="{{ resubStartOver }}">Start over</button></div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ resubStageReview }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:var(--space-4);min-width:0" id="resub-review">
+            <div style="font-size:14px;line-height:1.6">Nothing has changed yet. This is exactly what will happen if you confirm: <b id="resub-summary">{{ rvSummary }}</b></div>
+
+            <sc-if value="{{ resubNoticeInReview }}" hint-placeholder-val="{{ false }}">
+              <div id="resub-plan-changed" style="font-size:13px;line-height:1.5;padding:10px 12px;border:1px solid var(--color-accent);border-radius:6px">{{ resubNoticeInReview }}</div>
+            </sc-if>
+
+            <sc-if value="{{ rvHasWarnings }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:6px;padding:10px 12px;border:1px solid #e2735c;border-radius:6px" id="resub-warnings">
+                <sc-for list="{{ rvWarnings }}" as="w" hint-placeholder-count="1">
+                  <div style="font-size:13px;line-height:1.5">⚠ {{ w.text }}</div>
+                </sc-for>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ rvHasRemoved }}" hint-placeholder-val="{{ false }}">
+              <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3);border:1px solid #e2735c" id="resub-removed">
+                <div class="card-kicker" style="color:#e2735c">Will be removed</div>
+                <div style="font-size:13px;line-height:1.5">{{ rvRemovedTitle }}</div>
+                <sc-for list="{{ rvRemovedRows }}" as="r" hint-placeholder-count="2">
+                  <div style="display:flex;flex-direction:column;gap:2px;padding:6px 0;border-top:1px solid var(--color-divider)">
+                    <div style="font-size:13px;overflow-wrap:anywhere"><span style="color:var(--color-neutral-500)">{{ r.kind }}:</span> {{ r.label }} <span class="tag tag-outline" style="font-size:10px">{{ r.badge }}</span></div>
+                    <sc-if value="{{ r.warn }}" hint-placeholder-val="{{ false }}">
+                      <div style="font-size:12px;color:#e2735c;line-height:1.5">{{ r.warn }}</div>
+                    </sc-if>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ rvHasChanged }}" hint-placeholder-val="{{ false }}">
+              <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)" id="resub-changed">
+                <div class="card-kicker">Changed — will be re-verified</div>
+                <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.5">These facts differ from what was verified, so each item goes back through verification.</div>
+                <sc-for list="{{ rvChangedRows }}" as="r" hint-placeholder-count="2">
+                  <div style="display:flex;flex-direction:column;gap:2px;padding:6px 0;border-top:1px solid var(--color-divider)">
+                    <div style="font-size:13px;overflow-wrap:anywhere"><span style="color:var(--color-neutral-500)">{{ r.kind }}:</span> {{ r.label }}</div>
+                    <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.5;overflow-wrap:anywhere">{{ r.what }}</div>
+                    <div style="font-size:11px;color:var(--color-neutral-500)">{{ r.before }}</div>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ rvHasMinor }}" hint-placeholder-val="{{ false }}">
+              <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)" id="resub-minor">
+                <div style="display:flex;justify-content:space-between;gap:var(--space-3);align-items:center;flex-wrap:wrap">
+                  <div style="font-size:13px;line-height:1.5;flex:1;min-width:180px">{{ rvMinorLine }}</div>
+                  <button type="button" class="btn btn-ghost" style="font-size:12px" sc-camel-on-click="{{ toggleMinor }}">{{ rvMinorToggle }}</button>
+                </div>
+                <sc-if value="{{ rvMinorOpen }}" hint-placeholder-val="{{ false }}">
+                  <sc-for list="{{ rvMinorRows }}" as="r" hint-placeholder-count="1">
+                    <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.5;padding:4px 0;border-top:1px solid var(--color-divider);overflow-wrap:anywhere">{{ r.label }} — {{ r.what }}</div>
+                  </sc-for>
+                </sc-if>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ rvHasAdded }}" hint-placeholder-val="{{ false }}">
+              <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)" id="resub-added">
+                <div class="card-kicker">New</div>
+                <sc-for list="{{ rvAddedRows }}" as="r" hint-placeholder-count="2">
+                  <div style="font-size:13px;padding:4px 0;border-top:1px solid var(--color-divider);overflow-wrap:anywhere"><span style="color:var(--color-neutral-500)">{{ r.kind }}:</span> {{ r.label }} <span style="font-size:11px;color:#e2735c">{{ r.flag }}</span></div>
+                </sc-for>
+              </div>
+            </sc-if>
+
+            <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)" id="resub-kept">
+              <div style="display:flex;justify-content:space-between;gap:var(--space-3);align-items:center;flex-wrap:wrap">
+                <div style="font-size:13px;line-height:1.5;flex:1;min-width:180px">{{ rvKeptLine }}</div>
+                <sc-if value="{{ rvHasKept }}" hint-placeholder-val="{{ false }}">
+                  <button type="button" class="btn btn-ghost" style="font-size:12px" sc-camel-on-click="{{ toggleKept }}">{{ rvKeptToggle }}</button>
+                </sc-if>
+              </div>
+              <sc-if value="{{ rvKeptOpen }}" hint-placeholder-val="{{ false }}">
+                <sc-for list="{{ rvKeptRows }}" as="r" hint-placeholder-count="2">
+                  <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.5;padding:4px 0;border-top:1px solid var(--color-divider);overflow-wrap:anywhere">{{ r.kind }}: {{ r.label }} <span style="color:var(--color-neutral-500)">{{ r.note }}</span></div>
+                </sc-for>
+              </sc-if>
+            </div>
+
+            <sc-if value="{{ rvHasSkills }}" hint-placeholder-val="{{ false }}">
+              <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)" id="resub-skills">
+                <div style="display:flex;justify-content:space-between;gap:var(--space-3);align-items:center;flex-wrap:wrap">
+                  <div style="font-size:13px;line-height:1.5;flex:1;min-width:180px">{{ rvSkillsLine }}</div>
+                  <button type="button" class="btn btn-ghost" style="font-size:12px" sc-camel-on-click="{{ toggleSkills }}">{{ rvSkillsToggle }}</button>
+                </div>
+                <sc-if value="{{ rvSkillsOpen }}" hint-placeholder-val="{{ false }}">
+                  <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.6;overflow-wrap:anywhere"><b>No longer listed:</b> {{ rvSkillsRemovedText }}</div>
+                  <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.6;overflow-wrap:anywhere"><b>Now listed:</b> {{ rvSkillsAddedText }}</div>
+                </sc-if>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ rvHasOther }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.5">{{ rvOtherLine }}</div>
+            </sc-if>
+
+            <sc-if value="{{ rvHasHolders }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.5" id="resub-holders">{{ rvHoldersLine }}</div>
+            </sc-if>
+
+            <sc-if value="{{ rvHasVerify }}" hint-placeholder-val="{{ false }}">
+              <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)" id="resub-verify">
+                <div class="card-kicker">What should we verify?</div>
+                <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.5">New and changed items in a checked category are sent for verification. Items already verified and unchanged keep their verification either way.</div>
+                <sc-for list="{{ rvVerifyRows }}" as="v" hint-placeholder-count="2">
+                  <label style="display:flex;gap:8px;align-items:center;font-size:13px;color:var(--color-neutral-300);cursor:pointer">
+                    <input type="checkbox" checked="{{ v.checked }}" sc-camel-on-change="{{ v.onToggle }}">
+                    <span>{{ v.label }}</span>
+                  </label>
+                </sc-for>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ rvHasTrades }}" hint-placeholder-val="{{ false }}">
+              <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)" id="resub-trades">
+                <div class="card-kicker">Trade or occupation</div>
+                <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.5">Used to route each certification to the right licensing board for automated checks. A certification left blank goes to manual review by our team first.</div>
+                <sc-for list="{{ rvTradeRows }}" as="t" hint-placeholder-count="1">
+                  <div class="field">
+                    <label style="overflow-wrap:anywhere">{{ t.label }}</label>
+                    <sc-raw-select class="input" value="{{ t.value }}" sc-camel-on-change="{{ t.onChange }}">
+                      <option value="">No trade selected (manual review)</option>
+                      <sc-for list="{{ socTradeOptions }}" as="opt" hint-placeholder-count="3">
+                        <option value="{{ opt.code }}">{{ opt.label }}</option>
+                      </sc-for>
+                    </sc-raw-select>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ resubError }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:12px;color:#e2735c;line-height:1.5" id="resub-error">{{ resubError }}</div>
+            </sc-if>
+            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+              <button type="button" class="btn btn-primary" id="resub-confirm" disabled="{{ resubBusy }}" sc-camel-on-click="{{ resubApply }}">{{ resubConfirmLabel }}</button>
+              <button type="button" class="btn btn-secondary" id="resub-cancel-review" disabled="{{ resubBusy }}" sc-camel-on-click="{{ cancelResub }}">Cancel — keep my current profile</button>
+            </div>
+            <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.5">Cancelling discards this submission completely. Your current profile stays exactly as it is.</div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ resubStageDone }}" hint-placeholder-val="{{ false }}">
+          <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)" id="resub-done">
+            <div class="card-kicker">Profile updated</div>
+            <div style="font-size:14px;line-height:1.6">{{ resubDoneText }}</div>
+            <sc-if value="{{ resubDoneLicenses }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.5">{{ resubDoneLicenses }}</div>
+            </sc-if>
+            <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+              <sc-if value="{{ resubDoneHasContact }}" hint-placeholder-val="{{ false }}">
+                <button type="button" class="btn btn-primary" id="resub-done-contact" sc-camel-on-click="{{ openResubContact }}">Add contact details</button>
+              </sc-if>
+              <button type="button" class="btn btn-secondary" id="resub-done-back" sc-camel-on-click="{{ resubBackToProfile }}">Back to profile</button>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ resubStageContact }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:var(--space-3);min-width:0" id="resub-contact">
+            <div style="font-size:13px;font-weight:600;color:var(--color-neutral-200);line-height:1.6;padding:var(--space-3);border:1px solid var(--color-accent-700);border-radius:var(--radius-md)">Contact details for your new or changed items. Everything here is optional; items we can't verify automatically may take longer without it.</div>
+            <sc-if value="{{ hasResubContactWork }}" hint-placeholder-val="{{ false }}">
+              <div class="card-kicker">Employer contact details</div>
+              <sc-for list="{{ resubContactWorkRows }}" as="row" hint-placeholder-count="1">
+                <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+                  <div style="font-size:14px;font-weight:600;overflow-wrap:anywhere">{{ row.label }}</div>
+                  <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+                    <div class="field" style="flex:1;min-width:200px"><label>Registered business name (if different)</label><input class="input" value="{{ row.employerNameOverride }}" sc-camel-on-change="{{ row.onEmployerNameOverride }}"></div>
+                    <div class="field" style="flex:1;min-width:200px"><label>Registered business location (if different)</label><input class="input" placeholder="City, ST" value="{{ row.employerLocationOverride }}" sc-camel-on-change="{{ row.onEmployerLocationOverride }}"></div>
+                  </div>
+                  <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+                    <div class="field" style="flex:1;min-width:200px"><label>Contact phone (optional)</label><input class="input" value="{{ row.contactPhone }}" sc-camel-on-change="{{ row.onContactPhone }}"></div>
+                    <div class="field" style="flex:1;min-width:200px"><label>Contact name (optional)</label><input class="input" value="{{ row.contactName }}" sc-camel-on-change="{{ row.onContactName }}"></div>
+                  </div>
+                </div>
+              </sc-for>
+            </sc-if>
+            <sc-if value="{{ hasResubContactCerts }}" hint-placeholder-val="{{ false }}">
+              <div class="card-kicker">Certification contact details</div>
+              <sc-for list="{{ resubContactCertRows }}" as="row" hint-placeholder-count="1">
+                <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+                  <div style="font-size:14px;font-weight:600;overflow-wrap:anywhere">{{ row.label }}</div>
+                  <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+                    <div class="field" style="flex:1;min-width:200px"><label>Badge / verification link (optional)</label><input class="input" placeholder="https://" value="{{ row.verificationLink }}" sc-camel-on-change="{{ row.onVerificationLink }}"></div>
+                    <div class="field" style="flex:1;min-width:200px"><label>Contact phone at issuing body (optional)</label><input class="input" value="{{ row.contactPhone }}" sc-camel-on-change="{{ row.onContactPhone }}"></div>
+                  </div>
+                </div>
+              </sc-for>
+            </sc-if>
+            <sc-if value="{{ resubError }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:12px;color:#e2735c" id="resub-contact-error">{{ resubError }}</div>
+            </sc-if>
+            <div style="display:flex;gap:var(--space-3);flex-wrap:wrap">
+              <button type="button" class="btn btn-primary" id="resub-contact-save" disabled="{{ resubBusy }}" sc-camel-on-click="{{ saveResubContact }}">{{ resubContactSaveLabel }}</button>
+              <button type="button" class="btn btn-ghost" id="resub-contact-skip" disabled="{{ resubBusy }}" sc-camel-on-click="{{ skipResubContact }}">Skip for now</button>
+            </div>
+          </div>
+        </sc-if>
+      </div>
+    </sc-if>
+
     <sc-if value="{{ tabIsProfile }}" hint-placeholder-val="{{ true }}">
       <div style="display:flex;flex-direction:column;gap:var(--space-6)">
 
@@ -3611,6 +3853,36 @@ a:hover{color:var(--color-accent)}
             <div style="font-size:12px;color:var(--color-neutral-400)">{{ profileNameNotice }}</div>
           </sc-if>
         </div>
+
+        <sc-if value="{{ resubCardVisible }}" hint-placeholder-val="{{ false }}">
+          <div class="card elev-sm" id="resub-card" style="display:flex;flex-direction:column;gap:var(--space-3)">
+            <div class="card-kicker">Your resume</div>
+            <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">Your verified profile comes from your resume. To change it, submit an updated resume. It replaces your current record, and you review exactly what will change before anything takes effect.</div>
+            <sc-if value="{{ resubNotice }}" hint-placeholder-val="{{ false }}">
+              <div id="resub-notice" style="font-size:12px;color:var(--color-neutral-200);line-height:1.5;padding:8px 10px;border:1px solid var(--color-divider);border-radius:6px">{{ resubNotice }}</div>
+            </sc-if>
+            <sc-if value="{{ resubContactBannerVisible }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;gap:var(--space-3);align-items:center;flex-wrap:wrap;padding:8px 10px;border:1px solid var(--color-accent-700);border-radius:6px">
+                <span style="font-size:12px;line-height:1.5;flex:1;min-width:200px">{{ resubContactBannerText }}</span>
+                <button type="button" class="btn btn-secondary" id="resub-contact-open" sc-camel-on-click="{{ openResubContact }}">Add details</button>
+              </div>
+            </sc-if>
+            <sc-if value="{{ resubHasOpenAttempt }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.5">{{ resubOpenText }}</div>
+              <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+                <button type="button" class="btn btn-primary" id="resub-continue" sc-camel-on-click="{{ continueResub }}">Continue this update</button>
+                <button type="button" class="btn btn-secondary" id="resub-cancel-open" disabled="{{ resubBusy }}" sc-camel-on-click="{{ cancelResubFromCard }}">Cancel this update</button>
+              </div>
+              <div style="font-size:11px;color:var(--color-neutral-500)">An update you don't finish is discarded after 7 days. Your profile stays exactly as it is until you confirm.</div>
+            </sc-if>
+            <sc-if value="{{ resubCanStart }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;align-items:center">
+                <button type="button" class="btn btn-primary" id="resub-start" sc-camel-on-click="{{ openResubAck }}">Update my resume</button>
+                <span style="font-size:11px;color:var(--color-neutral-500)">Up to 3 updates a day.</span>
+              </div>
+            </sc-if>
+          </div>
+        </sc-if>
 
         <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
           <div class="card-kicker">Email</div>
@@ -5285,6 +5557,28 @@ a:hover{color:var(--color-accent)}
         <div class="dialog-actions">
           <button type="button" class="btn btn-secondary" disabled="{{ checkoutPending }}" sc-camel-on-click="{{ closeDowngradeModal }}">Cancel</button>
           <button type="button" class="btn btn-secondary" disabled="{{ checkoutPending }}" sc-camel-on-click="{{ confirmDowngradeModal }}">{{ confirmDowngradeModalLabel }}</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- Resume update (Stage 3, 2026-09-21): the acknowledgement that must be accepted before an update starts. The server records that it was accepted
+       (with this wording's version) and refuses the upload without it. -->
+  <sc-if value="{{ resubAckOpen }}" hint-placeholder-val="{{ false }}">
+    <div class="dialog-backdrop">
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="resub-ack-title" style="width:min(520px,100%);max-height:90vh;overflow-y:auto">
+        <div class="dialog-title" id="resub-ack-title">This becomes your complete current record</div>
+        <div class="dialog-body" style="display:flex;flex-direction:column;gap:var(--space-3);line-height:1.6">
+          <div>The resume you submit replaces your current record. <b>Anything not included in the new resume will be removed from your verified profile</b> — skills, jobs, education, certifications and licenses — <b>even items that were already verified</b>.</div>
+          <div>If that isn't what you intend, update your resume file first and then submit it.</div>
+          <div style="font-size:12px;color:var(--color-neutral-500)">Nothing changes yet. After we read your file you will see exactly what will be added, kept, changed and removed, and you can cancel and leave your profile exactly as it is.</div>
+        </div>
+        <sc-if value="{{ resubError }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:#e2735c;line-height:1.5">{{ resubError }}</div>
+        </sc-if>
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-secondary" id="resub-ack-cancel" disabled="{{ resubBusy }}" sc-camel-on-click="{{ closeResubAck }}">Cancel</button>
+          <button type="button" class="btn btn-primary" id="resub-ack-continue" disabled="{{ resubBusy }}" sc-camel-on-click="{{ confirmResubAck }}">{{ resubAckButtonLabel }}</button>
         </div>
       </div>
     </div>
@@ -7286,6 +7580,9 @@ class Component extends DCLogic {
     kycVerifiedAt: null, licenseSubscriptionStartedAt: null,
     licenseItems: [], licenseItemsLoading: false, licenseItemsError: null, licenseItemsLoadedFor: null,
     resumeFileStaged: null, resumeFileError: null,
+    // Resume update (Stage 3): see the RESUME UPDATE header
+    resub: { attempt: null, contactPending: null, loaded: false }, resubAckOpen: false, resubStage: 'idle', resubBusy: false, resubError: null, resubNotice: null, resubNoticeInReview: null,
+    resubPlan: null, resubPlanHash: null, resubOptIn: null, resubTrades: {}, resubExpanded: {}, resubResult: null, resubContactVals: {}, resubWorkingText: 'Reading your resume…', resubFailedText: '',
     resumeEmailVerificationId: null, resumeDocumentId: null,
     resumeCandidateId: null, resumeExtraction: null, resumeExtractionLoading: false,
     // Item 9 (2026-09-12 live-testing session): pdfViewerScale/pdfViewerFitScale replace the old
@@ -7791,6 +8088,7 @@ class Component extends DCLogic {
     // itself. Loaded once per session here, covering all three tabs no matter which is opened first.
     this.ensureResumeExtractionLoaded();
     this.ensureComparisonLoaded();
+    this.loadResubStatus();
   }
 
   // Item 8 (2026-09-11 status-check session): the real backend write behind tour_completed_at —
@@ -10462,6 +10760,9 @@ class Component extends DCLogic {
     if (!res.ok || !data.ok) return false;
     if (!data.resume_document) return false; // no resume at all — resumeConfirm's own check owns this case
     if (data.resume_document.continued_without_data_at) return false; // resume flow explicitly skipped — nothing to ask about
+    // A resume UPDATE's document never routes into this first-signup screen: it lists and saves EVERY job and certification, and an update owes contact
+    // details only for its new or changed items (its own step in the account, scoped by the server).
+    if (data.resume_document.kind === 'resubmission') return false;
     const hasContactAskables = (data.work_history || []).length > 0 || (data.certifications || []).length > 0;
     if (!hasContactAskables) return false; // same "nothing real to show" reasoning as the forward-flow check
     return !data.resume_document.employer_contact_resolved_at;
@@ -10687,6 +10988,376 @@ class Component extends DCLogic {
     return (result && result.res.ok && result.data.ok) ? result.data : null;
   }
 
+  // ---------------------------------------------------------------------------------------------------------------------------------------
+  // RESUME UPDATE (Stage 3, 2026-09-21). A confirmed candidate submits a new resume that becomes their complete current record. The flow, all
+  // against the resume-resubmission function: start (records the acknowledgement) -> upload (upload-resume, attached to that attempt) -> poll plan
+  // -> REVIEW (what will be added / kept / changed / removed) -> apply, or cancel. Nothing touches the profile until apply, and apply refuses a plan
+  // the candidate did not review (409, and the fresh plan is shown instead).
+  RESUB_ACK_VERSION = 'v1-2026-09-21';
+
+  async resubCall(action, extra) {
+    try {
+      const res = await this.fetchWithTimeout(this.SUPABASE_FN_URL + '/resume-resubmission', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, candidate_id: this.state.resumeCandidateId, session_token: this.candidateSessionToken(), ...extra }),
+      }, 60000);
+      const data = await res.json().catch(() => ({}));
+      return { res, data };
+    } catch (e) {
+      return { res: null, data: {} };
+    }
+  }
+
+  async loadResubStatus() {
+    if (this.state.accountType === 'license_only' || !this.state.resumeCandidateId) return;
+    const { res, data } = await this.resubCall('status', {});
+    if (!res || !res.ok || !data.ok) return;
+    this.setState({ resub: { attempt: data.resubmission, contactPending: data.contact_pending, loaded: true } });
+  }
+
+  stopResubPolling() { if (this._resubTimer) { clearTimeout(this._resubTimer); this._resubTimer = null; } }
+
+  openResubAck() { this.setState({ resubAckOpen: true, resubError: null }); }
+  closeResubAck() { if (!this.state.resubBusy) this.setState({ resubAckOpen: false, resubError: null }); }
+
+  async confirmResubAck() {
+    if (this.state.resubBusy) return;
+    this.setState({ resubBusy: true, resubError: null });
+    const { res, data } = await this.resubCall('start', { acknowledged: true, ack_text_version: this.RESUB_ACK_VERSION });
+    if (!res) { this.setState({ resubBusy: false, resubError: "Couldn't reach the server. Please try again." }); return; }
+    if (res.ok && data.ok) {
+      this.setState(st => ({ resubBusy: false, resubAckOpen: false, resubNotice: null, resubError: null, resubStage: 'choose', resubPlan: null, resubNoticeInReview: null, accountTab: 'resumeUpdate', resub: { ...st.resub, attempt: { id: data.resubmission_id, status: 'uploading' } } }));
+      return;
+    }
+    if (data.error === 'resubmission_in_progress') { // an update is already open (another tab or device): carry on with it
+      this.setState({ resubBusy: false, resubAckOpen: false });
+      await this.loadResubStatus();
+      this.continueResub();
+      return;
+    }
+    const msg = data.error === 'rate_limited'
+      ? (data.window === 'day' ? "You've reached the limit of 3 resume updates in 24 hours. Please try again later." : "You've reached the limit of 10 resume updates in 30 days. Please try again later.")
+      : data.error === 'ack_required' ? 'This page is out of date. Please refresh it and try again.'
+      : data.error === 'no_confirmed_resume' ? "Your first resume isn't confirmed yet, so there is nothing to update." : "Couldn't start the update. Please try again.";
+    this.setState({ resubBusy: false, resubError: msg });
+  }
+
+  async continueResub() {
+    if (!this.state.resub.attempt) await this.loadResubStatus();
+    const a = this.state.resub.attempt;
+    if (!a) return;
+    this.stopResubPolling();
+    if (a.status === 'uploading') this.setState({ accountTab: 'resumeUpdate', resubStage: 'choose', resubError: null });
+    else if (a.status === 'failed') this.setState({ accountTab: 'resumeUpdate', resubStage: 'failed', resubFailedText: this.resubFailedCopy(a.failure_reason) });
+    else { this.setState({ accountTab: 'resumeUpdate', resubStage: 'working', resubWorkingText: 'Reading your resume…', resubError: null }); this.pollResub(true); }
+  }
+
+  resubFailedCopy(reason) {
+    return reason === 'license_detection_failed' ? "We couldn't finish checking your file for licenses. Please try again."
+      : "We couldn't read that file. A clearer copy, or a PDF, usually helps.";
+  }
+
+  pollResub(immediate) {
+    this.stopResubPolling();
+    const tick = async () => {
+      const s = this.state;
+      if (s.accountTab !== 'resumeUpdate' || s.resubStage !== 'working' || !s.resub.attempt) return;
+      const { res, data } = await this.resubCall('plan', { resubmission_id: s.resub.attempt.id });
+      if (res && res.ok && data.ok) {
+        if (data.status === 'ready') { this.showResubPlan(data.plan, data.plan_hash); return; }
+        if (data.status === 'failed') { this.setState(st => ({ resubStage: 'failed', resubFailedText: this.resubFailedCopy(data.reason), resub: { ...st.resub, attempt: { ...st.resub.attempt, status: 'failed', failure_reason: data.reason } } })); return; }
+        if (['cancelled', 'expired', 'applied'].includes(data.status)) { this.setState({ resubStage: 'idle', accountTab: 'profile', resubNotice: 'That update is no longer open.' }); this.loadResubStatus(); return; }
+        this.setState({ resubWorkingText: data.status === 'detecting_licenses' ? 'Checking your file for licenses…' : 'Reading your resume…' });
+      }
+      this._resubTimer = setTimeout(tick, 4000);
+    };
+    this._resubTimer = setTimeout(tick, immediate ? 0 : 4000);
+  }
+
+  showResubPlan(plan, hash) {
+    this.setState(st => {
+      const oi = st.resubOptIn || { work: !!plan.opt_in.work.default, education: !!plan.opt_in.education.default, certifications: !!plan.opt_in.certifications.default };
+      const trades = { ...st.resubTrades };
+      for (const r of this.resubTradeRows(plan)) if (trades[r.id] === undefined) trades[r.id] = r.current || this.suggestTradeSocCode(r.label, '') || '';
+      return { resubStage: 'review', resubPlan: plan, resubPlanHash: hash, resubOptIn: oi, resubTrades: trades, resubBusy: false };
+    });
+  }
+
+  // certifications in the plan that a trade can be chosen for: every new one, and a changed one that has none yet
+  resubTradeRows(plan) {
+    return [
+      ...(plan.added || []).filter(a => a.kind === 'certification').map(a => ({ id: a.staged_id, label: a.label, current: a.trade_soc_code || '' })),
+      ...(plan.changed || []).filter(c => c.kind === 'certification' && !c.trade_soc_code).map(c => ({ id: c.item_id, label: c.label, current: '' })),
+    ];
+  }
+
+  async onPickResubFile(e) {
+    const input = e.target;
+    const file = input.files && input.files[0];
+    const a = this.state.resub.attempt;
+    if (!file || !a) return;
+    this.setState({ resubError: null, resubBusy: true });
+    let staged;
+    try {
+      staged = file.type === 'application/pdf' ? await this.decodeResumePdf(file) : await this.decodeResumeImage(file);
+    } catch (err) {
+      this.setState({ resubBusy: false, resubError: (err && err.userMessage) || "Couldn't read that file." });
+      try { input.value = ''; } catch (e2) {}
+      return;
+    }
+    try { input.value = ''; } catch (e2) {}
+    this.setState({ resubStage: 'working', resubBusy: false, resubWorkingText: 'Uploading your resume…' });
+    let res, data;
+    try {
+      res = await this.fetchWithTimeout(this.SUPABASE_FN_URL + '/upload-resume', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          candidate_id: this.state.resumeCandidateId, session_token: this.candidateSessionToken(), resubmission_id: a.id,
+          original_filename: staged.fileName, mime_type: staged.mimeType, original_base64: staged.originalBase64,
+          sanitized_base64: staged.sanitizedBase64, rgba_base64: staged.rgbaBase64, width: staged.width, height: staged.height,
+        }),
+      }, 240000);
+      data = await res.json().catch(() => ({}));
+    } catch (err) {
+      this.setState({ resubStage: 'choose', resubError: "Couldn't reach the server. Please try again." });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      const msg = data.error === 'resubmission_not_open' ? 'This update is no longer open. Start again from your profile.' : (data.message || 'The upload failed. Please try again.');
+      this.setState({ resubStage: 'choose', resubError: msg });
+      return;
+    }
+    if (data.continue) this.continueResumeExtraction(data.resume_document_id);
+    this.setState(st => ({ resub: { ...st.resub, attempt: { ...st.resub.attempt, status: 'extracting' } }, resubWorkingText: 'Reading your resume…' }));
+    this.pollResub(false);
+  }
+
+  async resubApply() {
+    const s = this.state;
+    if (s.resubBusy || !s.resubPlan || !s.resub.attempt) return;
+    this.setState({ resubBusy: true, resubError: null });
+    const oi = s.resubOptIn;
+    // Trades are sent only for certifications this plan adds or changes, and only when certifications are being sent for verification.
+    const cert_trades = {};
+    if (oi.certifications) for (const r of this.resubTradeRows(s.resubPlan)) if (s.resubTrades[r.id]) cert_trades[r.id] = s.resubTrades[r.id];
+    const { res, data } = await this.resubCall('apply', {
+      resubmission_id: s.resub.attempt.id, plan_hash: s.resubPlanHash,
+      opt_in: { work: !!oi.work, education: !!oi.education, certifications: !!oi.certifications }, cert_trades,
+    });
+    if (!res) { this.setState({ resubBusy: false, resubError: "Couldn't reach the server. Nothing was changed. Please try again." }); return; }
+    if (res.ok && data.ok) {
+      const cid = s.resumeCandidateId;
+      this.setState(st => ({ resubBusy: false, resubStage: 'done', resubResult: data, resubPlan: null, resubNoticeInReview: null, resubOptIn: null, resubTrades: {}, resubExpanded: {},
+        resumeExtraction: null, verificationItems: [], verificationLicenses: [], verificationItemsLoadedFor: null, resub: { ...st.resub, attempt: null } }), () => { this.loadResumeExtraction(cid); });
+      this.loadResubStatus();
+      this.ensureComparisonLoaded(true);
+      return;
+    }
+    if (res.status === 409 && data.error === 'plan_changed' && data.plan) { // something changed during the review: show the fresh plan, apply nothing
+      this.setState(st => {
+        const trades = { ...st.resubTrades };
+        for (const r of this.resubTradeRows(data.plan)) if (trades[r.id] === undefined) trades[r.id] = r.current || this.suggestTradeSocCode(r.label, '') || '';
+        return { resubBusy: false, resubPlan: data.plan, resubPlanHash: data.plan_hash, resubTrades: trades, resubNoticeInReview: "Something changed while you were reviewing (for example, one of your items was just verified), so we've refreshed this review. Nothing was applied. Please look it over and confirm again." };
+      });
+      return;
+    }
+    if (res.status === 409) { this.setState({ resubBusy: false, resubStage: 'idle', accountTab: 'profile', resubNotice: 'That update is no longer open, so nothing was applied.' }); this.loadResubStatus(); return; }
+    this.setState({ resubBusy: false, resubError: "Couldn't apply the update. Nothing was changed. Please try again." });
+  }
+
+  async cancelResub() {
+    const a = this.state.resub.attempt;
+    if (this.state.resubBusy) return;
+    this.stopResubPolling();
+    this.setState({ resubBusy: true, resubError: null });
+    if (a) await this.resubCall('cancel', { resubmission_id: a.id });
+    this.setState(st => ({ resubBusy: false, resubStage: 'idle', accountTab: 'profile', resubPlan: null, resubNoticeInReview: null, resubOptIn: null, resubTrades: {}, resubExpanded: {}, resubAckOpen: false,
+      resubNotice: 'Update cancelled. Your profile is unchanged.', resub: { ...st.resub, attempt: null } }));
+    this.loadResubStatus();
+  }
+
+  async resubStartOver() {
+    await this.cancelResub();
+    this.openResubAck();
+  }
+
+  resubBackToProfile() {
+    this.stopResubPolling();
+    this.setState({ accountTab: 'profile', resubStage: 'idle', resubError: null });
+    this.loadResubStatus();
+  }
+
+  // Contact details for the items an applied update listed (contact_needed), and ONLY those: the server refuses any other id.
+  async openResubContact() {
+    await this.loadResubStatus();
+    this.setState({ resumeExtraction: null });
+    await this.loadResumeExtraction(this.state.resumeCandidateId);
+    this.setState({ accountTab: 'resumeUpdate', resubStage: 'contact', resubError: null, resubContactVals: {} });
+  }
+
+  resubContactPending() {
+    const s = this.state; const p = s.resub.contactPending || (s.resubResult && s.resubResult.contact_needed) || null;
+    const ex = s.resumeExtraction;
+    if (!p || !ex) return { work: [], certification: [] };
+    const have = (list) => new Set((list || []).map(x => x.id));
+    const hw = have(ex.work_history), hc = have(ex.certifications);
+    return { work: (p.work || []).filter(id => hw.has(id)), certification: (p.certification || []).filter(id => hc.has(id)) };
+  }
+
+  setResubContact(id, field, value) { this.setState(st => ({ resubContactVals: { ...st.resubContactVals, [id]: { ...(st.resubContactVals[id] || {}), [field]: value } } })); }
+
+  async saveResubContact() {
+    const s = this.state;
+    if (s.resubBusy) return;
+    const p = this.resubContactPending(); const ex = s.resumeExtraction; const v = s.resubContactVals;
+    const val = (id, field, item) => (v[id] && v[id][field] !== undefined ? v[id][field] : (item[field] || ''));
+    this.setState({ resubBusy: true, resubError: null });
+    const { res, data } = await this.resubCall('contacts', {
+      work_history: ex.work_history.filter(w => p.work.includes(w.id)).map(w => ({ id: w.id, employer_name_override: val(w.id, 'employer_name_override', w), employer_location_override: val(w.id, 'employer_location_override', w), contact_phone: val(w.id, 'contact_phone', w), contact_name: val(w.id, 'contact_name', w) })),
+      certifications: ex.certifications.filter(c => p.certification.includes(c.id)).map(c => ({ id: c.id, verification_link: val(c.id, 'verification_link', c), contact_phone: val(c.id, 'contact_phone', c) })),
+    });
+    if (res && res.ok && data.ok) { this.setState({ resubBusy: false, resubStage: 'idle', accountTab: 'profile', resubNotice: 'Contact details saved.', resubContactVals: {} }); this.loadResubStatus(); return; }
+    this.setState({ resubBusy: false, resubError: data.error === 'verification_link_invalid' ? 'A verification link must start with http:// or https://.' : "Couldn't save. Please try again." });
+  }
+
+  async skipResubContact() {
+    if (this.state.resubBusy) return;
+    this.setState({ resubBusy: true, resubError: null });
+    const { res, data } = await this.resubCall('contacts', { skip: true });
+    if (res && res.ok && data.ok) { this.setState({ resubBusy: false, resubStage: 'idle', accountTab: 'profile', resubNotice: null, resubContactVals: {} }); this.loadResubStatus(); return; }
+    this.setState({ resubBusy: false, resubError: "Couldn't save. Please try again." });
+  }
+
+  // Render values for the resume update flow (see the RESUME UPDATE header above).
+  resubVals(s) {
+    const attempt = s.resub.attempt;
+    const open = !!attempt && ['uploading', 'extracting', 'detecting_licenses', 'ready'].includes(attempt.status);
+    const stage = s.resubStage;
+    const out = {
+      resubAckOpen: s.resubAckOpen, resubError: s.resubError, resubBusy: s.resubBusy, resubNotice: s.resubNotice,
+      resubAckButtonLabel: s.resubBusy ? 'Starting…' : 'I understand — continue',
+      openResubAck: () => this.openResubAck(), closeResubAck: () => this.closeResubAck(), confirmResubAck: () => this.confirmResubAck(),
+      resubCardVisible: s.accountType !== 'license_only' && !!s.resumeCandidateId,
+      resubHasOpenAttempt: open, resubCanStart: !open,
+      resubOpenText: !attempt ? '' : attempt.status === 'uploading' ? "You started an update but haven't chosen a file yet."
+        : attempt.status === 'ready' ? 'Your update is ready to review. Nothing has changed yet.' : "We're reading the file you submitted.",
+      continueResub: () => this.continueResub(), cancelResubFromCard: () => this.cancelResub(),
+      tabIsResumeUpdate: s.accountTab === 'resumeUpdate',
+      resubBackToProfile: () => this.resubBackToProfile(),
+      resubStageChoose: stage === 'choose', resubStageWorking: stage === 'working', resubStageFailed: stage === 'failed', resubStageReview: stage === 'review',
+      resubStageDone: stage === 'done', resubStageContact: stage === 'contact',
+      onPickResubFile: (e) => this.onPickResubFile(e), cancelResub: () => this.cancelResub(), resubStartOver: () => this.resubStartOver(),
+      resubWorkingText: s.resubWorkingText, resubFailedText: s.resubFailedText,
+      resubApply: () => this.resubApply(), resubConfirmLabel: s.resubBusy ? 'Updating…' : 'Confirm and update',
+      resubNoticeInReview: s.resubNoticeInReview,
+      openResubContact: () => this.openResubContact(), saveResubContact: () => this.saveResubContact(), skipResubContact: () => this.skipResubContact(),
+      resubContactSaveLabel: s.resubBusy ? 'Saving…' : 'Save details',
+    };
+    // banner on the profile card: contact details still owed for the last applied update
+    const pendingNow = this.resubContactPending();
+    const owed = s.resub.contactPending ? ((s.resub.contactPending.work || []).length + (s.resub.contactPending.certification || []).length) : 0;
+    out.resubContactBannerVisible = owed > 0 && (s.resumeExtraction ? pendingNow.work.length + pendingNow.certification.length > 0 : true);
+    out.resubContactBannerText = `Add optional contact details for ${owed} new or changed item${owed === 1 ? '' : 's'} from your last update.`;
+
+    // done panel
+    const rs = s.resubResult;
+    const c = rs && rs.counts || {};
+    out.resubDoneText = rs ? `Your profile now matches your new resume: ${c.added || 0} added, ${c.kept || 0} kept, ${c.changed || 0} changed and sent back for verification, ${c.removed || 0} removed.` : '';
+    out.resubDoneLicenses = rs && (rs.licenses_verifying || []).length ? `We're checking ${rs.licenses_verifying.length} license${rs.licenses_verifying.length === 1 ? '' : 's'} against the state registry now. Results appear under Verification Status shortly.` : '';
+    const doneOwed = rs && rs.contact_needed ? (rs.contact_needed.work || []).length + (rs.contact_needed.certification || []).length : 0;
+    out.resubDoneHasContact = doneOwed > 0;
+
+    // contact step rows: only the items the update listed
+    const ex = s.resumeExtraction; const p = this.resubContactPending(); const v = s.resubContactVals || {};
+    const val = (id, field, item) => (v[id] && v[id][field] !== undefined ? v[id][field] : (item[field] || ''));
+    const workItems = ex ? (ex.work_history || []).filter(w => p.work.includes(w.id)) : [];
+    const certItems = ex ? (ex.certifications || []).filter(x => p.certification.includes(x.id)) : [];
+    out.hasResubContactWork = workItems.length > 0; out.hasResubContactCerts = certItems.length > 0;
+    out.resubContactWorkRows = workItems.map(w => ({
+      label: [w.title, w.company].filter(Boolean).join(' at ') || 'Job',
+      employerNameOverride: val(w.id, 'employer_name_override', w), employerLocationOverride: val(w.id, 'employer_location_override', w), contactPhone: val(w.id, 'contact_phone', w), contactName: val(w.id, 'contact_name', w),
+      onEmployerNameOverride: (e) => this.setResubContact(w.id, 'employer_name_override', e.target.value), onEmployerLocationOverride: (e) => this.setResubContact(w.id, 'employer_location_override', e.target.value),
+      onContactPhone: (e) => this.setResubContact(w.id, 'contact_phone', e.target.value), onContactName: (e) => this.setResubContact(w.id, 'contact_name', e.target.value),
+    }));
+    out.resubContactCertRows = certItems.map(x => ({
+      label: x.name || 'Certification', verificationLink: val(x.id, 'verification_link', x), contactPhone: val(x.id, 'contact_phone', x),
+      onVerificationLink: (e) => this.setResubContact(x.id, 'verification_link', e.target.value), onContactPhone: (e) => this.setResubContact(x.id, 'contact_phone', e.target.value),
+    }));
+
+    // the review
+    const plan = s.resubPlan;
+    const empty = { rvSummary: '', rvHasWarnings: false, rvWarnings: [], rvHasRemoved: false, rvRemovedTitle: '', rvRemovedRows: [], rvHasChanged: false, rvChangedRows: [], rvHasMinor: false, rvMinorLine: '', rvMinorToggle: '', rvMinorOpen: false, rvMinorRows: [],
+      rvHasAdded: false, rvAddedRows: [], rvKeptLine: '', rvHasKept: false, rvKeptToggle: '', rvKeptOpen: false, rvKeptRows: [], rvHasSkills: false, rvSkillsLine: '', rvSkillsToggle: '', rvSkillsOpen: false, rvSkillsRemovedText: '', rvSkillsAddedText: '',
+      rvHasOther: false, rvOtherLine: '', rvHasHolders: false, rvHoldersLine: '', rvHasVerify: false, rvVerifyRows: [], rvHasTrades: false, rvTradeRows: [], socTradeOptions: this.SOC_TRADE_OPTIONS,
+      toggleMinor: () => {}, toggleKept: () => {}, toggleSkills: () => {} };
+    if (!plan) return { ...out, ...empty };
+    const KIND = { work: 'Job', education: 'Education', certification: 'Certification' };
+    const FIELD = { company: 'Company', title: 'Title', start_date: 'Start date', end_date: 'End date', location: 'Location', institution: 'Institution', degree: 'Degree', field_of_study: 'Field of study', name: 'Name', issuing_body: 'Issuer', license_number: 'License number', issue_date: 'Issue date', expiration_date: 'Expiration date', license_state: 'License state' };
+    const chg = (ch) => ch.kind === 'added' ? `${FIELD[ch.field] || ch.field} newly read: ${ch.after}` : `${FIELD[ch.field] || ch.field}: ${ch.before || '(none)'} → ${ch.after || '(none)'}`;
+    const ex2 = s.resubExpanded || {};
+    const toggle = (k) => () => this.setState(st => ({ resubExpanded: { ...st.resubExpanded, [k]: !st.resubExpanded[k] } }));
+    const cnt = plan.counts || {};
+    const removed = plan.removed || [], changed = plan.changed || [], added = plan.added || [], kept = plan.kept || [];
+    const main = changed.filter(x => x.ambiguous || x.changes.some(ch => ch.kind === 'conflict'));
+    const minor = changed.filter(x => !main.includes(x));
+    const verifiedRemoved = removed.filter(r => r.verification && r.verification.status === 'Confirmed').length;
+    const warnText = (w) => w.code === 'large_removal' ? `This removes ${w.removed} of ${w.of} items on your profile. Make sure this is the right file.`
+      : w.code === 'possible_extraction_miss' ? `${w.count} item${w.count === 1 ? '' : 's'} slated for removal still appear in the text of your new file, so ${w.count === 1 ? 'it' : 'they'} may not have been read correctly. If you want to keep ${w.count === 1 ? 'it' : 'them'}, cancel and check your file.`
+      : w.code === 'incomplete_item' ? `"${w.label}" looks incomplete (a template placeholder, perhaps).`
+      : w.code === 'placeholder_text' ? `"${w.label}" contains template placeholder text.`
+      : w.code === 'ambiguous_match' ? `${w.count} item${w.count === 1 ? '' : 's'} could not be matched with certainty, so ${w.count === 1 ? 'it is' : 'they are'} treated as changed and will be re-verified.`
+      : w.code === 'no_text_to_check_removals' ? "We couldn't check the removals against the text of your new file." : null;
+    const warnings = (plan.warnings || []).map(w => ({ text: warnText(w) })).filter(w => w.text);
+    const skillsAdded = (plan.skills && plan.skills.added) || [], skillsRemoved = (plan.skills && plan.skills.removed) || [];
+    const listText = (arr) => arr.length ? arr.slice(0, 40).map(x => x.text).join('; ') + (arr.length > 40 ? ` …and ${arr.length - 40} more` : '') : '—';
+    const ff = plan.freeform || { added: [], removed: [] };
+    const holders = plan.employer_access && plan.employer_access.holders || 0;
+    const oi = s.resubOptIn || { work: false, education: false, certifications: false };
+    const verifyRows = [['work', 'job'], ['education', 'education entry'], ['certifications', 'certification']].map(([k, noun]) => {
+      const n = plan.opt_in && plan.opt_in[k] ? plan.opt_in[k].count : 0;
+      return n > 0 ? { label: `Send ${n} new or changed ${k === 'education' ? (n === 1 ? 'education entry' : 'education entries') : noun + (n === 1 ? '' : 's')} for verification`, checked: !!oi[k], onToggle: () => this.setState(st => ({ resubOptIn: { ...st.resubOptIn, [k]: !st.resubOptIn[k] } })) } : null;
+    }).filter(Boolean);
+    const tradeRows = this.resubTradeRows(plan).map(r => ({ label: r.label, value: s.resubTrades[r.id] || '', onChange: (e) => this.setState(st => ({ resubTrades: { ...st.resubTrades, [r.id]: e.target.value } })) }));
+    const keptVerified = kept.filter(k => k.verification && k.verification.status === 'Confirmed').length;
+    const flagNote = (k) => [...(k.flags || []).map(f => f === 'company_not_stated' ? 'company not stated in the new file; verified company kept' : f === 'end_date_not_stated' ? 'end date not stated in the new file; verified date kept' : f === 'date_precision_differs_kept_as_verified' ? 'date written differently; verified date kept' : f.endsWith('_not_stated') ? 'a detail was not stated in the new file; verified value kept' : ''), ...((k.descriptive_updates || []).length ? ['wording updated'] : [])].filter(Boolean).join('; ');
+    return {
+      ...out,
+      rvSummary: `${cnt.added || 0} added, ${cnt.kept || 0} kept, ${cnt.changed || 0} changed, ${cnt.removed || 0} removed.`,
+      rvHasWarnings: warnings.length > 0, rvWarnings: warnings,
+      rvHasRemoved: removed.length > 0,
+      rvRemovedTitle: `${removed.length} item${removed.length === 1 ? '' : 's'}${verifiedRemoved ? `, including ${verifiedRemoved} verified,` : ''} will be removed from your profile because ${removed.length === 1 ? 'it is' : 'they are'} not in the new resume.`,
+      rvRemovedRows: removed.map(r => ({ kind: KIND[r.kind] || r.kind, label: r.label, badge: r.verification ? (r.verification.status === 'Confirmed' ? 'Verified' : 'In review') : 'Not verified',
+        warn: r.still_in_new_file_text === true ? 'This still appears in your new file, so it may not have been read correctly. If you want to keep it, cancel and check your file.' : '' })),
+      rvHasChanged: main.length > 0,
+      rvChangedRows: main.map(x => ({ kind: KIND[x.kind] || x.kind, label: x.label, what: x.changes.length ? x.changes.map(chg).join('; ') : 'Could not be matched with certainty, so treated as changed.',
+        before: x.verification_before ? `Currently: ${x.verification_before === 'Confirmed' ? 'Verified' : x.verification_before}. It goes back through verification.` : 'It will be sent for verification if that category is checked below.' })),
+      rvHasMinor: minor.length > 0,
+      rvMinorLine: `${minor.length} item${minor.length === 1 ? '' : 's'} gained a small detail read from your new file (for example an issue date). ${minor.length === 1 ? 'It' : 'They'} will be re-verified.`,
+      rvMinorToggle: ex2.minor ? 'Hide' : 'Show', rvMinorOpen: !!ex2.minor, toggleMinor: toggle('minor'),
+      rvMinorRows: minor.map(x => ({ label: x.label, what: x.changes.map(chg).join('; ') })),
+      rvHasAdded: added.length > 0,
+      rvAddedRows: added.map(a => ({ kind: KIND[a.kind] || a.kind, label: a.label, flag: (a.flags || []).includes('incomplete') ? '(looks incomplete)' : (a.flags || []).includes('placeholder_text') ? '(template text)' : '' })),
+      rvHasKept: kept.length > 0,
+      rvKeptLine: `${kept.length} item${kept.length === 1 ? '' : 's'} kept exactly as ${kept.length === 1 ? 'it is' : 'they are'}${keptVerified ? ` — ${keptVerified} verified, and their verification is preserved` : ''}.`,
+      rvKeptToggle: ex2.kept ? 'Hide' : 'Show', rvKeptOpen: !!ex2.kept, toggleKept: toggle('kept'),
+      rvKeptRows: kept.map(k => ({ kind: KIND[k.kind] || k.kind, label: k.label, note: flagNote(k) ? `(${flagNote(k)})` : '' })),
+      rvHasSkills: skillsAdded.length + skillsRemoved.length > 0,
+      rvSkillsLine: skillsAdded.length && skillsRemoved.length
+        ? `Skills: ${skillsRemoved.length} no longer listed and ${skillsAdded.length} now listed${plan.skills.kept ? `, ${plan.skills.kept} unchanged` : ''}. This is often just rewording, or a list split differently. Skills aren't verified, so it doesn't affect your verification.`
+        : skillsRemoved.length ? `Skills: ${skillsRemoved.length} no longer listed${plan.skills.kept ? `, ${plan.skills.kept} unchanged` : ''}. Skills aren't verified.` : `Skills: ${skillsAdded.length} new${plan.skills.kept ? `, ${plan.skills.kept} unchanged` : ''}. Skills aren't verified.`,
+      rvSkillsToggle: ex2.skills ? 'Hide' : 'Show', rvSkillsOpen: !!ex2.skills, toggleSkills: toggle('skills'),
+      rvSkillsRemovedText: listText(skillsRemoved), rvSkillsAddedText: listText(skillsAdded),
+      rvHasOther: (ff.added || []).length + (ff.removed || []).length > 0,
+      rvOtherLine: `Summary and other sections: ${(ff.added || []).length} new, ${(ff.removed || []).length} no longer present (these aren't verified).`,
+      rvHasHolders: holders > 0,
+      rvHoldersLine: `${holders} employer${holders === 1 ? '' : 's'} currently ${holders === 1 ? 'holds' : 'hold'} a copy of your earlier profile. Copies employers already hold are a record of what you approved, and this update will not change them.`,
+      rvHasVerify: verifyRows.length > 0, rvVerifyRows: verifyRows,
+      rvHasTrades: !!oi.certifications && tradeRows.length > 0, rvTradeRows: tradeRows, socTradeOptions: this.SOC_TRADE_OPTIONS,
+    };
+  }
+
   // Every account-tab click (desktop tab bar and the phone-width menu) comes through here. Leaving the Subscription tab with a Paid
   // choice that has no completed checkout behind it (accountTier is the real, webhook-backed value) used to be announced afterwards by a
   // persistent banner (2026-09-19). It is now asked at the moment of the click (2026-09-20): the click is held and a modal offers
@@ -10724,6 +11395,7 @@ class Component extends DCLogic {
       this.setState({ accountTab: 'sharing', deactStep: 'default', deactReason: '', deactNote: '', deactChoice: null, arrivedFromDeactivationPause: true });
     };
     return {
+      ...this.resubVals(s),
       noop: openPlaceholder,
       // New item (2026-09-13, separate from Item 1): the proactive "logged in as" identity
       // indicator's own two render-vals — see the template's own comment on this same element for

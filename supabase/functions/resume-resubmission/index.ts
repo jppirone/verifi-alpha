@@ -18,6 +18,8 @@ import { withSupabase } from "jsr:@supabase/server@1";
 //                               items and create their queue rows per the opt-in, delete the staged duplicates, re-home everything to the new document.
 //                               A stale plan (anything changed since review) is refused with 409 and the fresh plan; nothing is written. After the commit:
 //                               real registry checks for new/changed licenses. The response lists the items whose employer contact details are now needed.
+//   contacts {work_history, certifications} | {skip:true}   (STAGE 3) saves employer contact details for an APPLIED update, restricted to the
+//                               ids apply listed as contact_needed: one id outside that list refuses the whole request before any write.
 //   cancel  {resubmission_id}   discards the attempt entirely: the staged rows, the stored file and the attempt's document. Only ever an
 //                               unconfirmed resubmission document; the existing profile is never touched.
 //
@@ -332,6 +334,19 @@ async function patch(path: string, body: unknown): Promise<any[]> {
 }
 
 const OPEN = ["uploading", "extracting", "detecting_licenses", "ready"];
+
+// The employer contact details still owed after an applied update: ONLY the new or changed items apply() listed (contact_needed), and only while the
+// current record's document has not been resolved. Everything the "contacts" action writes is limited to exactly this list.
+async function contactPending(cid: string): Promise<{ docId: string; need: { work: string[]; certification: string[] } } | null> {
+  const ap = (await rows(`resume_resubmissions?candidate_id=eq.${cid}&status=eq.applied&select=resume_document_id,counts&order=applied_at.desc&limit=1`))[0];
+  if (!ap?.resume_document_id) return null;
+  const newest = (await rows(`resume_documents?candidate_id=eq.${cid}&confirmed_at=not.is.null&select=id,employer_contact_resolved_at&order=confirmed_at.desc&limit=1`))[0];
+  if (!newest || newest.id !== ap.resume_document_id || newest.employer_contact_resolved_at) return null;
+  const need = ap.counts?.contact_needed;
+  const work: string[] = Array.isArray(need?.work) ? need.work : [], certification: string[] = Array.isArray(need?.certification) ? need.certification : [];
+  return work.length + certification.length ? { docId: newest.id, need: { work, certification } } : null;
+}
+const clip = (v: unknown, max: number): string | null => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null);
 // @@ops-start
 const printDate = (d: unknown, p: unknown): string => showDate(dv(d, p)) || "";
 const label = {
@@ -378,7 +393,7 @@ function mergeFacts(kind: string, o: Rec, n: Rec, changes: Change[]): { facts: R
 
 // ctx = what computePlan read and matched (active rows a*, staged rows s*, the queue rows, the match results). Returns the INSTRUCTIONS the SQL apply
 // executes, plus what must happen after the commit (license checks, contact details).
-function buildOps(c: any, optIn: OptIn, newDoc: string, baseDoc: string | null) {
+function buildOps(c: any, optIn: OptIn, newDoc: string, baseDoc: string | null, trades: Record<string, string> = {}) {
   const { aW, aE, aS, aF, aL, sW, sE, sS, sF, sL, vq, W, E, C, S, F, oldCert, newCert } = c;
   const aLic = new Map<string, any>(aL.map((l: any) => [l.linked_certification_id, l])), sLic = new Map<string, any>(sL.map((l: any) => [l.linked_certification_id, l]));
   const bySrc = new Map<string, any[]>();
@@ -444,8 +459,10 @@ function buildOps(c: any, optIn: OptIn, newDoc: string, baseDoc: string | null) 
       }
       // CHANGED: rewrite only the facts that changed; everything the new file omitted keeps its verified value
       const mf = mergeFacts(kind, o, n, p.changes);
-      const fields: Record<string, unknown> = { ...desc, ...mf.facts };
-      const merged = mf.merged;
+      // a trade the candidate picked for this certification (review screen) is applied with the change and counts for the flag rule below
+      const tradeChoice = kind === "certification" ? trades[o.id] : undefined;
+      const fields: Record<string, unknown> = { ...desc, ...mf.facts, ...(tradeChoice ? { trade_soc_code: tradeChoice } : {}) };
+      const merged = tradeChoice ? { ...mf.merged, trade_soc_code: tradeChoice } : mf.merged;
       const newClaim = (claim as any)[kind](merged);
       const existing = rowsOf(o.id, QTYPE[kind])[0] || null;
       const lic = kind === "certification" ? aLic.get(o.id) : null;
@@ -488,8 +505,9 @@ function buildOps(c: any, optIn: OptIn, newDoc: string, baseDoc: string | null) 
     }
     for (const j of sec.added) {
       const r = newR[j]; const licS = kind === "certification" ? sLic.get(r.id) : null;
-      const q = newQueue(kind, r);
-      ops.added.push({ kind, staged_id: r.id, queue: q, license_staged_id: licS ? licS.id : null });
+      const tradeChoice = kind === "certification" ? trades[r.id] : undefined;
+      const q = newQueue(kind, tradeChoice ? { ...r, trade_soc_code: tradeChoice } : r);
+      ops.added.push({ kind, staged_id: r.id, queue: q, license_staged_id: licS ? licS.id : null, trade_soc_code: tradeChoice || null });
       lineage(kind, r.id, "origin");
       if (q && (kind === "work" || kind === "certification")) contactNeeded[kind].push(r.id);
       if (licS) { lineage("license", licS.id, "origin"); if (licS.state) verifyIds.push(licS.id); }
@@ -610,7 +628,7 @@ async function computePlan(resub: any, doc: any): Promise<{ plan: any; fingerpri
           kind, item_id: o.id, staged_id: n.id, label: label[kind](o), changes: p.changes, ambiguous: p.ambiguous, flags: p.flags,
           verification_before: v ? (v as any).status ?? null : null,
           verification_after: v ? "New (re-verified)" : "not in verification (no queue row before)",
-          new_claim: claim[kind](mergeFacts(kind, o, n, p.changes).merged),
+          new_claim: claim[kind](mergeFacts(kind, o, n, p.changes).merged), ...(kind === "certification" ? { trade_soc_code: o.trade_soc_code || null } : {}),
         });
         if (v) optCount[kind]++;
       }
@@ -621,7 +639,7 @@ async function computePlan(resub: any, doc: any): Promise<{ plan: any; fingerpri
       if (kind === "work" && !clean(r.company) && !clean(r.title)) flags.push("incomplete");
       if (kind === "certification" && !clean(r.name)) flags.push("incomplete");
       if ([r.company, r.title, r.institution, r.degree, r.field_of_study, r.name].some((x) => x != null && PLACEHOLDER.test(String(x)))) flags.push("placeholder_text");
-      plan.added.push({ kind, staged_id: r.id, label: label[kind](r), claim: claim[kind](r), flags });
+      plan.added.push({ kind, staged_id: r.id, label: label[kind](r), claim: claim[kind](r), flags, ...(kind === "certification" ? { trade_soc_code: r.trade_soc_code || null } : {}) });
       if (flags.includes("incomplete") || flags.includes("placeholder_text")) plan.warnings.push({ code: flags.includes("incomplete") ? "incomplete_item" : "placeholder_text", kind, label: label[kind](r) });
     }
   };
@@ -710,8 +728,34 @@ export default {
       }
 
       if (action === "status") {
-        const r = (await rows(`resume_resubmissions?candidate_id=eq.${cid}&select=id,status,resume_document_id,created_at,failure_reason&order=created_at.desc&limit=1`))[0] || null;
-        return json({ ok: true, resubmission: r });
+        const r = (await rows(`resume_resubmissions?candidate_id=eq.${cid}&select=id,status,resume_document_id,created_at,updated_at,failure_reason&order=created_at.desc&limit=1`))[0] || null;
+        const pending = await contactPending(cid);
+        return json({ ok: true, resubmission: r, contact_pending: pending ? pending.need : null, ack_text_version: ACK_TEXT_VERSION });
+      }
+
+      if (action === "contacts") {
+        // Scoped save of employer contact details for an applied update. Every id must be one apply listed as needing them; a single id outside that
+        // list refuses the WHOLE request before anything is written (so nothing broader can ever be overwritten, whatever the client sends).
+        const pending = await contactPending(cid);
+        if (!pending) return json({ ok: false, error: "nothing_pending" }, 409);
+        const resolved = () => patch(`resume_documents?id=eq.${pending.docId}&candidate_id=eq.${cid}&employer_contact_resolved_at=is.null`, { employer_contact_resolved_at: new Date().toISOString() });
+        if (body.skip === true) { await resolved(); return json({ ok: true, skipped: true }); }
+        const W: any[] = Array.isArray(body.work_history) ? body.work_history : [], Cc: any[] = Array.isArray(body.certifications) ? body.certifications : [];
+        if (W.length > 100 || Cc.length > 100) return json({ ok: false, error: "too_many_items" }, 400);
+        for (const w of W) if (typeof w?.id !== "string" || !pending.need.work.includes(w.id)) return json({ ok: false, error: "id_not_pending", id: String(w?.id ?? "").slice(0, 40) }, 400);
+        for (const c of Cc) if (typeof c?.id !== "string" || !pending.need.certification.includes(c.id)) return json({ ok: false, error: "id_not_pending", id: String(c?.id ?? "").slice(0, 40) }, 400);
+        const link = (v: unknown) => { const t = clip(v, 500); return t && !/^https?:\/\//i.test(t) ? "bad" : t; };
+        for (const c of Cc) if (link(c.verification_link) === "bad") return json({ ok: false, error: "verification_link_invalid" }, 400);
+        for (const w of W) {
+          const done = await patch(`work_history_items?id=eq.${w.id}&candidate_id=eq.${cid}`, { employer_name_override: clip(w.employer_name_override, 200), employer_location_override: clip(w.employer_location_override, 200), contact_phone: clip(w.contact_phone, 60), contact_name: clip(w.contact_name, 120) });
+          if (!done.length) return json({ ok: false, error: "item_not_found", id: w.id }, 404);
+        }
+        for (const c of Cc) {
+          const done = await patch(`certification_items?id=eq.${c.id}&candidate_id=eq.${cid}`, { verification_link: link(c.verification_link), contact_phone: clip(c.contact_phone, 60) });
+          if (!done.length) return json({ ok: false, error: "item_not_found", id: c.id }, 404);
+        }
+        await resolved();
+        return json({ ok: true, saved: { work: W.length, certifications: Cc.length } });
       }
 
       if (typeof body.resubmission_id !== "string" || !UUID.test(body.resubmission_id)) return json({ ok: false, error: "resubmission_id_invalid" }, 400);
@@ -769,6 +813,17 @@ export default {
         const oi = body.opt_in;
         if (!oi || typeof oi.work !== "boolean" || typeof oi.education !== "boolean" || typeof oi.certifications !== "boolean") return json({ ok: false, error: "opt_in_invalid" }, 400);
         if (typeof body.plan_hash !== "string" || !/^[0-9a-f]{64}$/.test(body.plan_hash)) return json({ ok: false, error: "plan_hash_invalid" }, 400);
+        // Optional trade (SOC) codes for certifications, chosen on the review screen: { certification id -> "47-2152" }. Only a certification the plan
+        // adds or changes may be named; anything else is refused before anything is written.
+        const trades: Record<string, string> = {};
+        if (body.cert_trades !== undefined && body.cert_trades !== null) {
+          if (typeof body.cert_trades !== "object" || Array.isArray(body.cert_trades)) return json({ ok: false, error: "cert_trades_invalid" }, 400);
+          for (const [k, v] of Object.entries(body.cert_trades)) {
+            if (typeof v !== "string" || v === "") continue; // blank = no trade chosen
+            if (!UUID.test(k) || !/^\d{2}-\d{4}$/.test(v)) return json({ ok: false, error: "cert_trades_invalid" }, 400);
+            trades[k.toLowerCase()] = v;
+          }
+        }
         if (resub.status !== "ready") return json({ ok: false, error: "not_ready", status: resub.status }, 409);
         const doc = (await rows(`resume_documents?id=eq.${resub.resume_document_id}&candidate_id=eq.${cid}&select=id,kind,confirmed_at,extraction_status,license_detection_status`))[0];
         if (!doc || doc.kind !== "resubmission" || doc.confirmed_at || doc.extraction_status !== "extracted" || doc.license_detection_status !== "done") return json({ ok: false, error: "refused" }, 409);
@@ -782,7 +837,9 @@ export default {
         };
         const current = await computePlan(resub, doc);
         if (await sha256Hex(canonical(current.plan)) !== body.plan_hash) return await stale();
-        const built = buildOps(current.ctx, { work: oi.work, education: oi.education, certifications: oi.certifications }, doc.id, resub.base_document_id);
+        const tradable = new Set<string>([...current.plan.added.filter((a: any) => a.kind === "certification").map((a: any) => a.staged_id), ...current.plan.changed.filter((c: any) => c.kind === "certification").map((c: any) => c.item_id)]);
+        if (Object.keys(trades).some((id) => !tradable.has(id))) return json({ ok: false, error: "cert_trade_not_applicable" }, 400);
+        const built = buildOps(current.ctx, { work: oi.work, education: oi.education, certifications: oi.certifications }, doc.id, resub.base_document_id, trades);
         const rpc = await fetch(`${SUPABASE_URL}/rest/v1/rpc/apply_resume_resubmission`, {
           method: "POST", headers: { ...REST, "Content-Type": "application/json" }, body: JSON.stringify({ p_resubmission_id: resub.id, p_ops: built.ops }),
         });

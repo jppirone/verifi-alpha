@@ -46,7 +46,7 @@ declare
   allowed constant jsonb := '{
     "work_history_items": ["company","title","location","start_date","start_date_precision","end_date","end_date_precision","job_responsibilities","extraction_confidence","position","heading","employer_name_override","employer_location_override","contact_phone","contact_name"],
     "education_items": ["institution","degree","field_of_study","location","start_date","start_date_precision","end_date","end_date_precision","extraction_confidence","position","heading"],
-    "certification_items": ["name","issuing_body","license_number","issue_date","issue_date_precision","expiration_date","expiration_date_precision","extraction_confidence","position","heading"],
+    "certification_items": ["name","issuing_body","license_number","issue_date","issue_date_precision","expiration_date","expiration_date_precision","extraction_confidence","position","heading","trade_soc_code"],
     "skill_items": ["position","section_position"],
     "candidate_freeform_sections": ["position","heading"]}';
   new_queue jsonb := '[]'::jsonb;
@@ -170,6 +170,9 @@ begin
       using (x->>'staged_id')::uuid, cand, newd;
     get diagnostics n = row_count;
     if n <> 1 then raise exception 'staged_row_missing: %', x->>'staged_id'; end if;
+    if kind = 'certification' and nullif(x->>'trade_soc_code', '') is not null then
+      update certification_items set trade_soc_code = x->>'trade_soc_code' where id = (x->>'staged_id')::uuid and candidate_id = cand;
+    end if;
     if x->>'license_staged_id' is not null then
       update license_items set candidate_confirmed = true, updated_at = now() where id = (x->>'license_staged_id')::uuid and candidate_id = cand and resume_document_id = newd;
     end if;
