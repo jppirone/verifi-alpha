@@ -11149,7 +11149,7 @@ class Component extends DCLogic {
     if (!res) { this.setState({ resubBusy: false, resubError: "Couldn't reach the server. Nothing was changed. Please try again." }); return; }
     if (res.ok && data.ok) {
       const cid = s.resumeCandidateId;
-      this.setState(st => ({ resubBusy: false, resubStage: 'done', resubResult: data, resubPlan: null, resubNoticeInReview: null, resubOptIn: null, resubTrades: {}, resubExpanded: {},
+      this.setState(st => ({ resubBusy: false, resubStage: 'done', resubResult: { ...data, reviewed: s.resubPlan.counts }, resubPlan: null, resubNoticeInReview: null, resubOptIn: null, resubTrades: {}, resubExpanded: {},
         resumeExtraction: null, verificationItems: [], verificationLicenses: [], verificationItemsLoadedFor: null, resub: { ...st.resub, attempt: null } }), () => { this.loadResumeExtraction(cid); });
       this.loadResubStatus();
       this.ensureComparisonLoaded(true);
@@ -11263,7 +11263,7 @@ class Component extends DCLogic {
 
     // done panel
     const rs = s.resubResult;
-    const c = rs && rs.counts || {};
+    const c = rs && (rs.reviewed || rs.counts) || {};
     out.resubDoneText = rs ? `Your profile now matches your new resume: ${c.added || 0} added, ${c.kept || 0} kept, ${c.changed || 0} changed and sent back for verification, ${c.removed || 0} removed.` : '';
     out.resubDoneLicenses = rs && (rs.licenses_verifying || []).length ? `We're checking ${rs.licenses_verifying.length} license${rs.licenses_verifying.length === 1 ? '' : 's'} against the state registry now. Results appear under Verification Status shortly.` : '';
     const doneOwed = rs && rs.contact_needed ? (rs.contact_needed.work || []).length + (rs.contact_needed.certification || []).length : 0;
@@ -11309,8 +11309,13 @@ class Component extends DCLogic {
       : w.code === 'placeholder_text' ? `"${w.label}" contains template placeholder text.`
       : w.code === 'ambiguous_match' ? `${w.count} item${w.count === 1 ? '' : 's'} could not be matched with certainty, so ${w.count === 1 ? 'it is' : 'they are'} treated as changed and will be re-verified.`
       : w.code === 'no_text_to_check_removals' ? "We couldn't check the removals against the text of your new file." : null;
-    const warnings = (plan.warnings || []).map(w => ({ text: warnText(w) })).filter(w => w.text);
     const skillsAdded = (plan.skills && plan.skills.added) || [], skillsRemoved = (plan.skills && plan.skills.removed) || [];
+    // The server counts skills in possible_extraction_miss too. Skills are not verified and their "misses" are almost always rewording, so only a
+    // removed JOB, EDUCATION or CERTIFICATION that still appears in the file raises the warning; skills get a quiet note on their own line.
+    const missVerified = removed.filter(r => r.still_in_new_file_text === true).length;
+    const missSkills = skillsRemoved.filter(x => x.still_in_new_file_text === true).length;
+    const warnings = (plan.warnings || []).filter(w => w.code !== 'possible_extraction_miss').map(w => ({ text: warnText(w) })).filter(w => w.text);
+    if (missVerified > 0) warnings.push({ text: warnText({ code: 'possible_extraction_miss', count: missVerified }) });
     const listText = (arr) => arr.length ? arr.slice(0, 40).map(x => x.text).join('; ') + (arr.length > 40 ? ` …and ${arr.length - 40} more` : '') : '—';
     const ff = plan.freeform || { added: [], removed: [] };
     const holders = plan.employer_access && plan.employer_access.holders || 0;
@@ -11345,7 +11350,7 @@ class Component extends DCLogic {
       rvKeptRows: kept.map(k => ({ kind: KIND[k.kind] || k.kind, label: k.label, note: flagNote(k) ? `(${flagNote(k)})` : '' })),
       rvHasSkills: skillsAdded.length + skillsRemoved.length > 0,
       rvSkillsLine: skillsAdded.length && skillsRemoved.length
-        ? `Skills: ${skillsRemoved.length} no longer listed and ${skillsAdded.length} now listed${plan.skills.kept ? `, ${plan.skills.kept} unchanged` : ''}. This is often just rewording, or a list split differently. Skills aren't verified, so it doesn't affect your verification.`
+        ? `Skills: ${skillsRemoved.length} no longer listed and ${skillsAdded.length} now listed${plan.skills.kept ? `, ${plan.skills.kept} unchanged` : ''}. This is often just rewording, or a list split differently. Skills aren't verified, so it doesn't affect your verification.${missSkills ? ` ${missSkills} of the ones no longer listed still appear in your file, so they were most likely reworded.` : ''}`
         : skillsRemoved.length ? `Skills: ${skillsRemoved.length} no longer listed${plan.skills.kept ? `, ${plan.skills.kept} unchanged` : ''}. Skills aren't verified.` : `Skills: ${skillsAdded.length} new${plan.skills.kept ? `, ${plan.skills.kept} unchanged` : ''}. Skills aren't verified.`,
       rvSkillsToggle: ex2.skills ? 'Hide' : 'Show', rvSkillsOpen: !!ex2.skills, toggleSkills: toggle('skills'),
       rvSkillsRemovedText: listText(skillsRemoved), rvSkillsAddedText: listText(skillsAdded),
