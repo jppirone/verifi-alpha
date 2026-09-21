@@ -10,7 +10,9 @@
   const out = [];
   const LAPSED = 'CGC1518507', ACTIVE = 'SCC131151265';
   // n = account number (hex), spec: who, what, and what state the license is in
+  // globalThis.__ONLY (optional array of account numbers) limits the output to those accounts
   const acct = (n, s) => {
+    if (globalThis.__ONLY && !globalThis.__ONLY.includes(n)) return;
     const cid = U('a' + n), cert = U('c' + n), lic = U('1' + n), qid = 'VQ-RC' + n.toUpperCase();
     const type = s.accountType || 'full_resume';
     out.push(`insert into candidates (id,email,phone,first_name,last_name,full_name,account_type,discoverable,tier,tour_completed_at${s.deactivated ? ',deletion_scheduled_at' : ''}) values (${q(cid)},${q('delivered+rc' + n + '@resend.dev')},${q('+1555555070' + n)},${q(s.first)},${q(s.last)},${q(s.first + ' ' + s.last)},${q(type)},true,'free',now()${s.deactivated ? ",now()-interval '1 day'" : ''});`);
@@ -35,7 +37,7 @@
   acct('04', { first: 'John', last: 'Smith', number: LAPSED, statusChangedDaysAgo: 3, staffTimeline: true });
   // 5 renamed after verification (registry has the old name)                           -> DOWNGRADED, reason no_exact_name_match
   acct('05', { first: 'Sam', last: 'Renamed', number: ACTIVE });
-  out.push(`insert into candidate_name_changes (candidate_id,old_first_name,old_last_name,new_first_name,new_last_name,changed_at) values (${q(U('a05'))},'Christopher','Whitfield','Sam','Renamed',now()-interval '20 days');`);
+  if (!globalThis.__ONLY || globalThis.__ONLY.includes('05')) out.push(`insert into candidate_name_changes (candidate_id,old_first_name,old_last_name,new_first_name,new_last_name,changed_at) values (${q(U('a05'))},'Christopher','Whitfield','Sam','Renamed',now()-interval '20 days');`);
   // 6 registry lookup cannot be made (number the registry rejects)                     -> error + back-off, NOT downgraded
   acct('06', { first: 'Erin', last: 'Errorcase', number: '<b>x</b>' });
   // 7 license-only account (out of scope: its report already re-checks live)           -> never looked at
@@ -53,5 +55,7 @@
   // timing tests (transient / unstable second lookup): parked out of the due list until a test brings them in
   acct('0e', { first: 'Christopher', last: 'Whitfield', number: ACTIVE, extra: { cols: 'next_recheck_at', vals: "now()+interval '30 days'" } });
   acct('0f', { first: 'Christopher', last: 'Whitfield', number: ACTIVE, extra: { cols: 'next_recheck_at', vals: "now()+interval '30 days'" } });
+  // 12 rate-guard test: four more renamed accounts (registry has the old name); with 05 they are five no_exact_name_match findings. Parked out of the due list.
+  for (const n of ['1a', '1b', '1c', '1d']) acct(n, { first: 'Sam', last: 'Renamed' + n.toUpperCase(), number: ACTIVE, extra: { cols: 'next_recheck_at', vals: "now()+interval '30 days'" } });
   return out.join('\n');
 })()
