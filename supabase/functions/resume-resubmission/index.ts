@@ -440,12 +440,14 @@ async function computePlan(resub: any, doc: any): Promise<{ plan: any; fingerpri
   if (plan.changed.some((c: any) => c.ambiguous)) plan.warnings.push({ code: "ambiguous_match", count: plan.changed.filter((c: any) => c.ambiguous).length });
 
   // Employers who hold an approved snapshot right now (frozen copies: this resubmission does not change them).
-  let holders = 0;
+  let holders = 0, heldSnapshots = 0;
   if (snaps.length) {
+    // resume comparisons only: a license report snapshot does not contain the resume items this update changes
     const reqs = await rows(`comparison_requests?id=in.(${snaps.map((s) => s.request_id).join(",")})&kind=eq.resume_comparison&select=id,org_id,requester_email`);
+    heldSnapshots = reqs.length;
     holders = new Set(reqs.map((r) => r.org_id || (r.requester_email || "").toLowerCase())).size;
   }
-  plan.employer_access = { holders, snapshots: snaps.length, note: "Comparisons an employer already holds are frozen copies and are not changed by this update." };
+  plan.employer_access = { holders, snapshots: heldSnapshots, note: "Comparisons an employer already holds are frozen copies and are not changed by this update." };
   const has = (types: string[]) => vq.some((v) => types.includes(v.type));
   plan.opt_in = {
     work: { count: plan.added.filter((a: any) => a.kind === "work").length + plan.changed.filter((c: any) => c.kind === "work").length, default: has(["Job Experience"]) },
