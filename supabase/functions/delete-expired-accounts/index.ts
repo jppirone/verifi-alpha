@@ -15,9 +15,11 @@ import { withSupabase } from "jsr:@supabase/server@1";
 //      it may still be billed. A customer that cannot be deleted does not leave a billing risk (its subscriptions are already canceled), so it
 //      is retried on the next runs and, after the third attempt, the deletion goes ahead anyway and the customer id is written to the log so it
 //      can be removed by hand.
-//   2. Then the ONE database call, delete_candidate_account(candidate, billing_cleared = true), which re-checks the 30 days, the exempt list and
-//      the reactivation race under a row lock and deletes everything in one transaction.
-//   3. Then the storage purge is nudged so the deleted account's files are gone within seconds rather than at the next 15-minute run.
+//   2. Then it only RECORDS "billing cleared for this deactivation" (record_account_billing_cleared). It does not delete anything itself: the
+//      database deletion runs from pg_cron ten minutes later (run_account_deletions, see 20260921040000_account_deletion_split.sql) because a
+//      PostgREST call is capped at 8 seconds and a large account can take longer. That pass refuses any account without a clearance recorded for
+//      its CURRENT deactivation, re-checks the 30 days, the exempt list and the reactivation race under a row lock, and deletes everything in one
+//      transaction; the 15-minute storage purge then removes the files.
 // Results go to account_deletion_log (no personal data). The response lists candidate ids and outcomes only.
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -112,7 +114,7 @@ export default {
     if (!due.ok || !Array.isArray(due.data)) return json({ ok: false, error: "due_lookup_failed" }, 500);
 
     const results: Array<{ candidate_id: string; outcome: string }> = [];
-    let deleted = 0;
+    let cleared = 0;
     for (const d of due.data as Array<{ candidate_id: string; stripe_subscription_id: string | null; attempts: number }>) {
       try {
         const billing = await clearBilling(d.candidate_id, d.stripe_subscription_id, Number(d.attempts) || 0);
@@ -121,32 +123,20 @@ export default {
           results.push({ candidate_id: d.candidate_id, outcome: `blocked_billing:${billing.blocked}` });
           continue;
         }
-        const res = await rpc("delete_candidate_account", { p_candidate: d.candidate_id, p_billing_cleared: true, p_billing_detail: billing.detail });
-        if (!res.ok || !res.data) {
+        const res = await rpc("record_account_billing_cleared", { p_candidate: d.candidate_id, p_detail: billing.detail });
+        if (!res.ok) {
           await rpc("record_account_deletion_attempt", { p_candidate: d.candidate_id, p_outcome: "error", p_detail: { error: res.text.slice(0, 500), ...billing.detail } });
           results.push({ candidate_id: d.candidate_id, outcome: "error" });
           continue;
         }
-        const outcome = String(res.data.outcome || "unknown");
-        if (outcome === "deleted") deleted++;   // the SQL function wrote the log row itself, Stripe result included
-        results.push({ candidate_id: d.candidate_id, outcome });
+        cleared++;
+        results.push({ candidate_id: d.candidate_id, outcome: "billing_cleared" });
       } catch (e) {
         await rpc("record_account_deletion_attempt", { p_candidate: d.candidate_id, p_outcome: "error", p_detail: { error: String(e).slice(0, 500) } });
         results.push({ candidate_id: d.candidate_id, outcome: "error" });
       }
     }
 
-    if (deleted > 0) {
-      try {
-        const sec = await fetch(`${SUPABASE_URL}/rest/v1/internal_job_secrets?name=eq.purge_resume_storage&select=value`, { headers: REST });
-        const ps = sec.ok ? ((await sec.json())[0]?.value ?? "") : "";
-        if (ps) await fetch(`${SUPABASE_URL}/functions/v1/purge-resume-storage`, {
-          method: "POST", signal: AbortSignal.timeout(30000),
-          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${SERVICE_KEY}`, "x-purge-secret": ps },
-          body: JSON.stringify({ mode: "queue" }),
-        });
-      } catch (_e) { /* the scheduled purge still runs */ }
-    }
-    return json({ ok: true, due: due.data.length, deleted, results });
+    return json({ ok: true, due: due.data.length, billing_cleared: cleared, results });
   }),
 };
