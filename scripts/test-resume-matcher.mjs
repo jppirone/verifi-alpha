@@ -131,6 +131,9 @@ const doc = M.fold("Experience  Truven Health Analytics  Business Integration Ma
 t("company name present in the new file's text -> true", M.presentInText(doc, "QPharma") === true);
 t("OCR variant of the name still found (l/I fold)", M.presentInText(M.fold("Workplace Productivity certificate"), "Workpiace Productivity") === true);
 t("not present -> false", M.presentInText(doc, "Letraset") === false);
+t("REAL CASE: the company alias 'Independent' must not match the phrase 'independent AI projects' (whole words, distinctive needles only)", M.presentInText(M.fold("a demonstrated portfolio of independent Al projects. Core competencies"), "Independent Freelance") === false && M.presentInText(M.fold("a demonstrated portfolio of independent Al projects"), "Independent") === true /* a bare one-word needle would match: the caller must not pass it */);
+t("a needle inside a longer word does not count ('QPharma' vs 'QPharmacy')", M.presentInText(M.fold("worked at QPharmacy"), "QPharma") === false);
+t("the full title in the text -> true", M.presentInText(M.fold("AI Solutions Consultant & Customer Success Advisor, 2023"), "AI Solutions Consultant & Customer Success Advisor") === true);
 t("no document text to check against -> null (unknown, said so)", M.presentInText(null, "QPharma") === null);
 t("needles under 5 characters are not trusted", M.presentInText(doc, "Lab") === false);
 

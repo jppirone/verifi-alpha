@@ -294,9 +294,12 @@ function matchTexts(oldT: string[], newT: string[], thr: number): { pairs: { i: 
 
 // Would this text plausibly still be in the new file? (an item proposed for removal whose name appears in the new document's text was probably
 // missed by extraction, not removed by the candidate). true / false, or null when the new document has no text to check against.
+// Whole words only (a needle inside a longer word does not count), and the caller passes only distinctive needles: found live, a company alias
+// "Independent" (from "Independent / Freelance") matched the ordinary phrase "independent AI projects" and flagged a job that is NOT in the file.
 function presentInText(foldedDoc: string | null, ...needles: unknown[]): boolean | null {
   if (foldedDoc === null) return null;
-  for (const n of needles) { const f = fold(n); if (f.length >= 5 && foldedDoc.includes(f)) return true; }
+  const hay = ` ${foldedDoc} `;
+  for (const n of needles) { const f = fold(n); if (f.length >= 5 && hay.includes(` ${f} `)) return true; }
   return false;
 }
 // @@matcher-end
@@ -392,7 +395,8 @@ async function computePlan(resub: any, doc: any): Promise<{ plan: any; fingerpri
     };
     for (const i of sec.removed) {
       const r = oldR[i];
-      const seen = kind === "work" ? presentInText(docText, clean(r.employer_name_override) || aliases(r.company)[0], r.title)
+      // work: the full title, the full company name, or a multi-word alias (never a one-word alias such as "Independent")
+      const seen = kind === "work" ? presentInText(docText, r.title, clean(r.employer_name_override) || clean(r.company), ...aliases(r.company).filter((x) => x.trim().split(/\s+/).length >= 2))
         : kind === "education" ? presentInText(docText, r.institution) : presentInText(docText, r.license_number ? lnorm(r.license_number) : null, r.name);
       plan.removed.push({ kind, item_id: r.id, label: label[kind](r), verification: vOf(r), has_open_queue_item: !!(vOf(r) as any)?.open, still_in_new_file_text: seen });
     }
