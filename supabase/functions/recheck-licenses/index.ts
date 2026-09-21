@@ -7,10 +7,10 @@ import { withSupabase } from "jsr:@supabase/server@1";
 // Run hourly by pg_cron (over pg_net) with a shared secret (x-recheck-secret) that lives only in the database (internal_job_secrets); nothing else
 // can call it. Each run takes the licenses that are due (due_license_rechecks: a registry pass that is still Confirmed and was never touched by
 // staff, on a full-resume account that is not deactivated; most overdue first, at most MAX_PER_RUN), and for each one:
-//   1. asks verify-license (action recheck_lookup: read-only, the same adapter and decide() as every other check) what the registry says now;
+//   1. (phase 1) asks verify-license (action recheck_lookup: read-only, the same adapter and decide() as every other check) what the registry says now;
 //   2. a clean pass  -> bookkeeping only (next check in 7 days, sooner right after the registry's own expiration date);
 //      a lookup that failed / an incomplete license -> bookkeeping only (retry later with back-off), NEVER a downgrade;
-//      anything else -> looks AGAIN after CONFIRM_WAIT_MS. Only if the second lookup is not a pass either AND gives the same reason is it
+//      anything else -> (phase 2, once phase 1 is done, after CONFIRM_WAIT_MS) looks AGAIN. Only if the second lookup is not a pass either AND gives the same reason is it
 //      queued for a downgrade. Anything else about the two lookups (second one passes, or a different problem) leaves the license Confirmed and
 //      tries again tomorrow: one odd registry response never downgrades anyone.
 //   3. At the END of the run the queued downgrades are applied through apply_license_downgrade, which can only move Confirmed -> Needs
@@ -19,7 +19,7 @@ import { withSupabase } from "jsr:@supabase/server@1";
 //      license is inactive under the holder's own name (exact_match_not_active): a parser that broke does not produce that. So if more than
 //      RATE_GUARD_MIN queued findings are of any OTHER kind and they are more than half of the licenses that got an answer this run, none of
 //      those is applied (they are retried tomorrow and the run log says downgrade_rate_guard); real lapses in the same run are applied as usual.
-// Rate: MAX_PER_RUN licenses per run, LOOKUP_SPACING_MS apart, and the run stops taking new licenses after TIME_BUDGET_MS; three lookup failures
+// Rate: at most MAX_PER_RUN licenses per run (in practice ~14: a lookup takes ~3 s and they are LOOKUP_SPACING_MS apart), no new license after PHASE1_BUDGET_MS; three lookup failures
 // in a row (registry down) end the run without touching anything. Each run is recorded in license_recheck_runs (ids and counts only).
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -27,7 +27,8 @@ const REST = { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}`, 
 const MAX_PER_RUN = 25;
 const LOOKUP_SPACING_MS = 3000;
 const CONFIRM_WAIT_MS = 20000;
-const TIME_BUDGET_MS = 95000;
+const PHASE1_BUDGET_MS = 85000;   // no new license is started after this
+const DEADLINE_MS = 135000;       // the second-look phase stops here (the function's own limit is 150 s)
 const MAX_CONSECUTIVE_FAILURES = 3;
 const RATE_GUARD_MIN = 3;
 
@@ -76,8 +77,10 @@ export default {
     const note = async (id: string, result: string) => { detail.push({ license_item_id: id, result }); };
     const book = (id: string, result: string) => rpc("record_license_recheck", { p_license: id, p_result: result });
 
+    // ---- phase 1: one lookup per due license, spaced. Clean passes are booked; anything else waits for phase 2.
+    const adverse: Array<{ d: { license_item_id: string; candidate_id: string }; a: any }> = [];
     for (const d of dueRows) {
-      if (Date.now() - startedAt.getTime() > TIME_BUDGET_MS) break;
+      if (Date.now() - startedAt.getTime() > PHASE1_BUDGET_MS) break;
       if (attempted > 0) await sleep(LOOKUP_SPACING_MS);
       attempted++;
       const id = d.license_item_id;
@@ -93,17 +96,31 @@ export default {
         if (a.status === "not_eligible") { skipped++; await note(id, "not_eligible"); continue; }   // changed since the list was taken; nothing recorded
         if (a.status !== "checked") { skipped++; await book(id, "skipped"); await note(id, "skipped_" + String(a.why || "unknown")); continue; }
         if (a.outcome === "verified") { stillVerified++; await book(id, "still_verified"); await note(id, "still_verified"); continue; }
-
-        // not a clean pass: look again before believing it
-        await sleep(CONFIRM_WAIT_MS);
-        const b = await lookup(d.candidate_id, id);
-        if (!b || b.ok !== true || b.status !== "checked") { errors++; await book(id, "error"); await note(id, "unconfirmed_second_lookup_failed"); continue; }
-        if (b.outcome === "verified") { stillVerified++; await book(id, "still_verified"); await note(id, "transient_adverse_then_verified"); continue; }
-        if (b.outcome !== a.outcome || b.reason !== a.reason) { skipped++; await book(id, "unstable"); await note(id, "unstable_two_different_results"); continue; }
-
-        pending.push({ id, expect: b.expect, decision: { outcome: b.outcome, reason: b.reason, detail: b.detail }, lapse: b.reason === "exact_match_not_active" });
-      } catch (e) {
+        adverse.push({ d, a });
+      } catch (_e) {
         errors++; await book(id, "error"); await note(id, "exception");
+      }
+    }
+
+    // ---- phase 2: look again at everything that was not a clean pass, once, after CONFIRM_WAIT_MS. Only a second lookup that is not a pass
+    // either AND gives the same reason is queued; every other combination leaves the license Confirmed and tries again tomorrow.
+    if (adverse.length) {
+      await sleep(CONFIRM_WAIT_MS);
+      let first = true;
+      for (const { d, a } of adverse) {
+        const id = d.license_item_id;
+        if (Date.now() - startedAt.getTime() > DEADLINE_MS) { skipped++; await book(id, "unstable"); await note(id, "confirm_deferred_out_of_time"); continue; }
+        if (!first) await sleep(LOOKUP_SPACING_MS);
+        first = false;
+        try {
+          const b = await lookup(d.candidate_id, id);
+          if (!b || b.ok !== true || b.status !== "checked") { errors++; await book(id, "error"); await note(id, "unconfirmed_second_lookup_failed"); continue; }
+          if (b.outcome === "verified") { stillVerified++; await book(id, "still_verified"); await note(id, "transient_adverse_then_verified"); continue; }
+          if (b.outcome !== a.outcome || b.reason !== a.reason) { skipped++; await book(id, "unstable"); await note(id, "unstable_two_different_results"); continue; }
+          pending.push({ id, expect: b.expect, decision: { outcome: b.outcome, reason: b.reason, detail: b.detail }, lapse: b.reason === "exact_match_not_active" });
+        } catch (_e) {
+          errors++; await book(id, "error"); await note(id, "exception");
+        }
       }
     }
 
