@@ -2277,6 +2277,19 @@ const __ds_scope = {};
   </div>
   </sc-if>
 
+  <sc-if value="{{ isBillingReturn }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:440px;margin:0 auto;padding-top:72px;display:flex;flex-direction:column;gap:var(--space-4)">
+    <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3)">
+      <div class="card-kicker">{{ billingReturnKicker }}</div>
+      <div style="font-size:17px;line-height:1.5">{{ billingReturnTitle }}</div>
+      <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">{{ billingReturnBody }}</div>
+      <sc-if value="{{ billingReturnFailed }}" hint-placeholder-val="{{ false }}">
+        <button type="button" class="btn btn-primary" style="align-self:flex-start" sc-camel-on-click="{{ retryBillingReturn }}">Try again</button>
+      </sc-if>
+    </div>
+  </div>
+  </sc-if>
+
   <sc-if value="{{ isPaymentReturn }}" hint-placeholder-val="{{ false }}">
   <div style="max-width:440px;margin:0 auto;padding-top:72px;display:flex;flex-direction:column;gap:var(--space-4)">
     <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3)">
@@ -3050,7 +3063,17 @@ class Component extends DCLogic {
     if (billingReturn || paymentReturn || comparisonToken) { try { window.history.replaceState(null, '', window.location.pathname); } catch (e) { /* not critical */ } }
     if (comparisonToken) this.enterGuest(comparisonToken, paymentReturn);
     else if (paymentReturn) this.setState({ screen: 'paymentReturn', paymentReturnKind: paymentReturn });
-    if (stored && !token) { this.setState({ realToken: stored }, async () => { await this.loadReal(); if (billingReturn && !paymentReturn) this.afterBillingReturn(billingReturn); }); }
+    const isBillingReturn = !!billingReturn && !paymentReturn && !comparisonToken && !token && !loginToken;
+    if (isBillingReturn) this._billingKind = billingReturn;
+    if (stored && !token && !loginToken) {
+      this.setState({ realToken: stored }, async () => { const loaded = await this.loadReal(); if (isBillingReturn) this.afterBillingReturn(billingReturn, loaded); });
+    } else if (stored && loginToken) {
+      // A sign-in link takes priority: the stored session is NOT resumed alongside it (two account loads racing, each for a different person, is exactly
+      // what put the wrong organization on screen). If the link turns out not to work, the stored session is resumed afterwards (resumeDeferredStored).
+      this._deferredStored = stored;
+    } else if (isBillingReturn && !stored) {
+      this.setState({ screen: 'signin', signinErr: 'Sign in to see your organization and its subscription.' });
+    }
     if (loginToken) {
       try { window.history.replaceState(null, '', window.location.pathname); } catch (e) { /* not critical */ }
       this.confirmEmployerLogin(loginToken);
@@ -3068,12 +3091,18 @@ class Component extends DCLogic {
     try {
       const q = new URLSearchParams(window.location.search);
       if (q.get('comparison')) return 'guest';
-      if (q.get('lookup_token') || q.get('employer_login') || q.get('payment') || q.get('billing')) return 'lookup';
+      // A return from Stripe's billing pages gets its own neutral screen (never the lookup form) until the account has loaded.
+      if (q.get('billing')) return 'billingReturn';
+      if (q.get('lookup_token') || q.get('employer_login') || q.get('payment')) return 'lookup';
     } catch (e) { /* fall through */ }
     return 'landing';
   }
 
-  state = Object.assign(this.blank(), this.realBlank(), { screen: this.initialScreen() });
+  initialBillingKind() {
+    try { return new URLSearchParams(window.location.search).get('billing') || ''; } catch (e) { return ''; }
+  }
+
+  state = Object.assign(this.blank(), this.realBlank(), { screen: this.initialScreen(), billingReturnKind: this.initialBillingKind() });
 
   norm(v) { return (v || '').trim().toLowerCase(); }
   digits(v) { return (v || '').replace(/\D/g, ''); }
@@ -3139,43 +3168,87 @@ class Component extends DCLogic {
     };
   }
 
-  async empCall(action, params) {
+  // `token` is the session this call is made for. An account load passes the token it captured when it started, so it can never pick up a different
+  // session half-way through. A 401 (the server positively saying "this session is not valid") signs out only if that token is STILL the session in use: a late
+  // answer for an older token can never sign out the current one. A server or network error (5xx, 0) never signs anyone out.
+  async empCall(action, params, token) {
+    const tok = token !== undefined ? token : (this.state.realToken || '');
     let res, data;
     try {
       res = await fetch(this.SUPABASE_FN_URL + '/employer-api', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_token: this.state.realToken || '', action: action, params: params || {} }),
+        body: JSON.stringify({ session_token: tok, action: action, params: params || {} }),
       });
       data = await res.json().catch(() => ({}));
     } catch (e) { return { status: 0, data: { ok: false, error: 'network' } }; }
-    if (res.status === 401) this.dropRealSession(true);
+    if (res.status === 401 && tok && tok === (this.state.realToken || '')) this.dropRealSession(true);
     return { status: res.status, data: data || {} };
   }
 
   dropRealSession(expired) {
+    this._loadGen = (this._loadGen || 0) + 1; // an account load still in flight must not bring a signed-out session back
+    this._loadP = null;
     try { localStorage.removeItem(this.EMP_TOKEN_KEY); } catch (e) { /* not critical */ }
     const wasAcct = this.state.screen === 'acct';
     this.setState(Object.assign(this.realBlank(), (expired && wasAcct) ? { screen: 'signin', signinErr: 'Your session ended. Please sign in again.' } : {}));
   }
 
-  async loadReal() {
-    const me = await this.empCall('me');
+  // Loads the signed-in person's account, ORGANIZATION and billing in one go, and applies it in ONE setState at the end.
+  //  * Single-flight: every load takes a generation number and captures the session token ONCE. If a newer load starts (or the session changes) while this one
+  //    is in flight, this one's answers are discarded and it resolves with the NEWER load's result: an older load can never overwrite a newer one, and can
+  //    never show another person's organization.
+  //  * Parallel: `me` first (it says whether there is an organization at all), then everything the account screen needs at once. An account with no
+  //    organization makes no organization-only calls, so nothing is asked that the server has to refuse.
+  //  * Each read is retried once on a server / network error (never on a definite answer).
+  // Resolves true when the account is loaded (by this load or the newer one that replaced it), false when it could not be.
+  loadReal() {
+    const p = this.runLoad();
+    this._loadP = p;
+    return p;
+  }
+
+  async runLoad() {
+    const token = this.state.realToken || '';
+    if (!token) return false;
+    const gen = this._loadGen = (this._loadGen || 0) + 1;
+    const call = async (action) => {
+      let r = await this.empCall(action, {}, token);
+      if (r.status === 0 || r.status >= 500) { await new Promise(res => setTimeout(res, 300)); r = await this.empCall(action, {}, token); }
+      return r;
+    };
+    // null = still the current load; otherwise what this load should resolve with
+    const superseded = async () => {
+      if (gen !== this._loadGen) return this._loadP ? await this._loadP : false;
+      if (token !== (this.state.realToken || '')) return false;
+      return null;
+    };
+    const me = await call('me');
+    let sup = await superseded(); if (sup !== null) return sup;
     if (!me.data.ok) return false;
-    let members = [];
-    let invites = [];
+    let members = [], invites = [], billing = null;
+    let cmp = { lookups: [], comparisons: [], cmpLoaded: false, cmpLoadErr: null };
     if (me.data.org) {
-      const lm = await this.empCall('list_members');
-      if (lm.data.ok) { members = lm.data.members || []; invites = lm.data.pending_invites || []; }
+      const got = await Promise.all([call('list_members'), call('billing_status'), call('list_lookups'), call('list_comparisons')]);
+      sup = await superseded(); if (sup !== null) return sup;
+      if (got[0].data.ok) { members = got[0].data.members || []; invites = got[0].data.pending_invites || []; }
+      if (got[1].data.ok) billing = got[1].data;
+      cmp = this.cmpPatch(got[2].data, got[3].data);
     }
-    let billing = null;
-    if (me.data.org) { const bs = await this.empCall('billing_status'); if (bs.data.ok) billing = bs.data; }
-    if (me.data.org) await this.loadComparisons();
-    this.setState({
+    this.setState(Object.assign({
       real: me.data, realMembers: members, realOrgInvites: invites, billing: billing,
       acctNameDraft: (me.data.user && me.data.user.name) || '', orgNameDraft: (me.data.org && me.data.org.name) || '',
-    });
+    }, cmp));
     return true;
+  }
+
+  // A sign-in link that did not work (used, expired, invalid, or the network failed) must not make an already signed-in person look signed out: the session that
+  // was stored when the page opened is resumed NOW, after the link has been dealt with, never alongside it.
+  resumeDeferredStored() {
+    const stored = this._deferredStored;
+    this._deferredStored = null;
+    if (!stored) return;
+    this.setState({ realToken: stored }, () => { this.loadReal(); });
   }
 
   // ----- billing (owner-only actions are enforced by the gateway; the buttons are only hidden here) -----
@@ -3206,15 +3279,27 @@ class Component extends DCLogic {
     return false;
   }
 
-  async afterBillingReturn(kind) {
-    this.setState({ screen: 'acct', billingNote: kind === 'success' ? 'Confirming your subscription with Stripe…' : null, billingErr: null });
+  // Back from Stripe. The neutral 'billingReturn' screen is showing until the account has loaded; only then does the account screen appear.
+  async afterBillingReturn(kind, loaded) {
+    if (!loaded) {
+      // No stored session left (it ended, or the server said it is invalid): sign in again. Otherwise it was only a failed load: say so and offer a retry.
+      if (!this.state.realToken) this.setState({ screen: 'signin', signinErr: 'Your session ended. Please sign in again.' });
+      else this.setState({ screen: 'billingReturn', billingReturnFailed: true });
+      return;
+    }
+    this.setState({ screen: 'acct', billingReturnFailed: false, billingNote: kind === 'success' ? 'Confirming your subscription with Stripe…' : null, billingErr: null });
     if (kind === 'success') {
       const done = await this.pollBilling(b => !!(b && b.subscription && b.subscription.live));
       this.setState({ billingNote: done ? 'Subscription active.' : "Stripe hasn't confirmed it yet. Check back in a moment." });
     } else {
-      await this.loadReal();
       this.setState({ billingNote: kind === 'cancel' ? 'No subscription was started.' : null });
     }
+  }
+
+  async retryBillingReturn() {
+    this.setState({ billingReturnFailed: false });
+    const loaded = await this.loadReal();
+    this.afterBillingReturn(this._billingKind || 'return', loaded);
   }
 
   async submitSignin() {
@@ -3256,13 +3341,14 @@ class Component extends DCLogic {
         body: JSON.stringify({ token: token }),
       });
       data = await res.json().catch(() => ({}));
-    } catch (e) { this.setState({ screen: 'signinProblem', signinProblem: "We couldn't reach the server. Try the link again." }); return; }
-    if (res.status === 409) { this.setState({ screen: 'signinProblem', signinProblem: 'That sign-in link has already been used.' }); return; }
-    if (res.status === 410) { this.setState({ screen: 'signinProblem', signinProblem: 'That sign-in link has expired.' }); return; }
-    if (res.status === 400 || res.status === 404) { this.setState({ screen: 'signinProblem', signinProblem: "That sign-in link isn't valid." }); return; }
-    if (!res.ok || !data || !data.ok) { this.setState({ screen: 'signinProblem', signinProblem: "We couldn't sign you in. Please get a new link." }); return; }
+    } catch (e) { this.setState({ screen: 'signinProblem', signinProblem: "We couldn't reach the server. Try the link again." }); this.resumeDeferredStored(); return; }
+    if (res.status === 409) { this.setState({ screen: 'signinProblem', signinProblem: 'That sign-in link has already been used.' }); this.resumeDeferredStored(); return; }
+    if (res.status === 410) { this.setState({ screen: 'signinProblem', signinProblem: 'That sign-in link has expired.' }); this.resumeDeferredStored(); return; }
+    if (res.status === 400 || res.status === 404) { this.setState({ screen: 'signinProblem', signinProblem: "That sign-in link isn't valid." }); this.resumeDeferredStored(); return; }
+    if (!res.ok || !data || !data.ok) { this.setState({ screen: 'signinProblem', signinProblem: "We couldn't sign you in. Please get a new link." }); this.resumeDeferredStored(); return; }
+    this._deferredStored = null; // the link won: the older stored session is replaced, never resumed
     try { localStorage.setItem(this.EMP_TOKEN_KEY, data.session_token); } catch (e) { /* session then lasts this page only */ }
-    this.setState({ realToken: data.session_token });
+    await new Promise((resolve) => this.setState({ realToken: data.session_token }, resolve));
     const loaded = await this.loadReal();
     this.setState({ screen: loaded ? 'acct' : 'signinProblem', signinProblem: loaded ? null : "We couldn't load your account. Please sign in again." });
   }
@@ -3343,13 +3429,18 @@ class Component extends DCLogic {
 
 
   // ===== Comparisons (Stage 2 of the comparison delivery): real, server-enforced requests from a signed-in organization member =====
-  async loadComparisons() {
-    const both = await Promise.all([this.empCall('list_lookups'), this.empCall('list_comparisons')]);
-    const lk = both[0].data, cm = both[1].data;
-    this.setState({
+  cmpPatch(lk, cm) {
+    return {
       lookups: lk && lk.ok ? (lk.lookups || []) : [], comparisons: cm && cm.ok ? (cm.comparisons || []) : [], cmpLoaded: true,
       cmpLoadErr: (lk && lk.ok && cm && cm.ok) ? null : "We couldn't load your requests. Please try again.",
-    });
+    };
+  }
+
+  async loadComparisons() {
+    const token = this.state.realToken || '';
+    const both = await Promise.all([this.empCall('list_lookups', {}, token), this.empCall('list_comparisons', {}, token)]);
+    if (token !== (this.state.realToken || '')) return; // the session changed while this was loading: these belong to someone else now
+    this.setState(this.cmpPatch(both[0].data, both[1].data));
   }
 
   // From the lookup result screen (same browser, straight after the check) or from a past lookup in the account.
@@ -3639,6 +3730,13 @@ class Component extends DCLogic {
     const cmp = s.compare || {};
     const content = cmp.content || {};
     return {
+      isBillingReturn: s.screen === 'billingReturn',
+      billingReturnFailed: !!s.billingReturnFailed,
+      billingReturnKicker: s.billingReturnFailed ? 'Account' : (s.billingReturnKind === 'success' ? 'Checking your payment' : 'Loading your account'),
+      billingReturnTitle: s.billingReturnFailed ? "We couldn't load your account just now." : 'One moment\u2026',
+      billingReturnBody: s.billingReturnFailed ? 'Nothing was lost. Your payment, if you made one, is safe with Stripe. Try again in a moment.'
+        : (s.billingReturnKind === 'success' ? 'We are confirming your subscription with Stripe and loading your organization. This page moves on by itself.' : 'We are loading your organization. This page moves on by itself.'),
+      retryBillingReturn: () => { this.retryBillingReturn(); },
       isPaymentReturn: s.screen === 'paymentReturn',
       paymentReturnKicker: s.paymentReturnKind === 'success' ? 'Payment submitted' : 'No payment made',
       paymentReturnTitle: s.paymentReturnKind === 'success' ? 'Thank you.' : 'Nothing was charged.',

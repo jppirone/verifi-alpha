@@ -84,6 +84,15 @@ async function rows(path: string): Promise<any[] | null> {
   const j = await r.json();
   return Array.isArray(j) ? j : null;
 }
+// A read made to AUTHENTICATE a request. null means the read itself failed (a database / network hiccup); [] means the database answered and there is no such
+// row. The two must never be confused: only "no such row" is an invalid session. One quick retry, because these are plain idempotent reads.
+async function authRead(path: string): Promise<any[] | null> {
+  for (let i = 0; i < 2; i++) {
+    try { const r = await rows(path); if (r) return r; } catch (_e) { /* retried once below */ }
+    if (i === 0) await new Promise((res) => setTimeout(res, 150));
+  }
+  return null;
+}
 function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
@@ -593,15 +602,23 @@ export default {
       const raw = typeof body.session_token === "string" ? body.session_token : "";
       if (!raw || raw.length > 200) return send(fail(401, "invalid_session"));
       const hash = await sha256Hex(raw);
-      const sess = (await rows(`employer_sessions?token_hash=eq.${hash}&select=id,employer_user_id,expires_at,revoked_at`))?.[0];
+      // 401 invalid_session ONLY when the database positively says the session is not valid. If the lookup itself failed we do not know, so 503: the client
+      // keeps its stored session and tries again instead of signing the person out.
+      const sessRows = await authRead(`employer_sessions?token_hash=eq.${hash}&select=id,employer_user_id,expires_at,revoked_at`);
+      if (!sessRows) return send(fail(503, "temporarily_unavailable"));
+      const sess = sessRows[0];
       if (!sess || sess.revoked_at || new Date(sess.expires_at) < new Date()) return send(fail(401, "invalid_session"));
 
       // 2. DERIVE identity (org + role) from the database on this request
-      const user = (await rows(`employer_users?id=eq.${sess.employer_user_id}&select=id,email,name,org_id,role`))?.[0] as User | undefined;
+      const userRows = await authRead(`employer_users?id=eq.${sess.employer_user_id}&select=id,email,name,org_id,role`);
+      if (!userRows) return send(fail(503, "temporarily_unavailable"));
+      const user = userRows[0] as User | undefined;
       if (!user) return send(fail(401, "invalid_session"));
       let org: Org | null = null;
       if (user.org_id) {
-        const o = (await rows(`employer_orgs?id=eq.${user.org_id}&select=id,name`))?.[0];
+        const orgRows = await authRead(`employer_orgs?id=eq.${user.org_id}&select=id,name`);
+        if (!orgRows) return send(fail(503, "temporarily_unavailable"));
+        const o = orgRows[0];
         if (!o) return send(fail(401, "invalid_session"));
         org = o as Org;
       }
