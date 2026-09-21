@@ -769,6 +769,9 @@ export default {
         const doc = (await rows(`resume_documents?id=eq.${resub.resume_document_id}&candidate_id=eq.${cid}&select=id,kind,confirmed_at,extraction_status,license_detection_status`))[0];
         if (!doc || doc.kind !== "resubmission" || doc.confirmed_at || doc.extraction_status !== "extracted" || doc.license_detection_status !== "done") return json({ ok: false, error: "refused" }, 409);
         const stale = async () => {
+          // If the attempt is no longer open (a concurrent apply won the race, or it was cancelled) there is no "fresh plan" to offer: say so.
+          const cur = (await rows(`resume_resubmissions?id=eq.${resub.id}&select=status`))[0];
+          if (!cur || cur.status !== "ready") return json({ ok: false, error: "not_ready", status: cur?.status ?? null }, 409);
           const fresh = await computePlan(resub, doc); const h = await sha256Hex(canonical(fresh.plan));
           await patch(`resume_resubmissions?id=eq.${resub.id}&status=eq.ready`, { plan: fresh.plan, plan_hash: h, base_fingerprint: fresh.fingerprint, counts: fresh.plan.counts, updated_at: new Date().toISOString() });
           return json({ ok: false, error: "plan_changed", plan_hash: h, plan: fresh.plan }, 409);
