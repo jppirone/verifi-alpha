@@ -168,6 +168,20 @@ console.log("== the plan and the apply build the SAME claim (found live: an extr
   t("mergeFacts: a company change clears the old contact details and the merged record carries the new company", mf.clearContact && mf.merged.company === "IBM Watson Health" && mf.merged.contact_phone === null && mf.merged.title === "Manager");
 }
 
+console.log("== a reset follows the same flag rule as a new certification");
+{
+  const noTrade = ce("Trade Cert", "Board", { trade_soc_code: null, issue_date: null }), q = vqRow("Certification", noTrade.id, "Needs Reconciliation", "Trade Cert, Board");
+  const staged = copyOf(noTrade, { issue_date: "2025-01-01", issue_date_precision: "year" });
+  const r = build(ctx({ aC: [noTrade], sC: [staged], vq: [q] })).ops.changed[0];
+  t("a changed certification with no trade selected is reset to Needs Reconciliation, not New (no automated check could route)", r.queue.mode === "reset" && r.queue.status === "Needs Reconciliation" && /After: Trade Cert, Board, 2025 \(status Needs Reconciliation\)/.test(r.queue.note), JSON.stringify(r.queue));
+  const traded = ce("Good Cert", "Board"), q2 = vqRow("Certification", traded.id, "Confirmed", "Good Cert, Board");
+  const r2 = build(ctx({ aC: [traded], sC: [copyOf(traded, { issue_date: "2025-01-01", issue_date_precision: "year" })], vq: [q2] })).ops.changed[0];
+  t("a changed certification WITH a trade and a matched name is reset to New", r2.queue.status === "New");
+  const unm = ce("Odd Cert", "Body", { source_match: "unmatched" }), q3 = vqRow("Certification", unm.id, "Needs Reconciliation", "Odd Cert, Body");
+  const r3 = build(ctx({ aC: [unm], sC: [copyOf(unm, { issue_date: "2025-01-01", issue_date_precision: "year" })], vq: [q3] })).ops.changed[0];
+  t("an UNMATCHED certification stays flagged after a reset", r3.queue.status === "Needs Reconciliation");
+}
+
 console.log("== freeform and skills");
 {
   const oldNr = { id: uid(), section_type: "needs_review", heading: "AI PROJECTS", content: "Old project text", position: 3, updated_at: TS }, newNr = { id: uid(), section_type: "needs_review", heading: "OTHER", content: "Completely different new text here", position: 4 };

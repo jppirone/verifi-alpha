@@ -454,7 +454,11 @@ function buildOps(c: any, optIn: OptIn, newDoc: string, baseDoc: string | null) 
       const what = p.changes.map((ch: Change) => `${ch.field.replace(/_/g, " ")}: ${ch.before ?? "(none)"} → ${ch.after ?? "(none)"}${ch.kind === "added" ? " (new detail)" : ""}`).join("; ") || "matched ambiguously, so treated as changed";
       let queue: any = null;
       if (existing) {
-        queue = optIn[CAT[kind]] ? { mode: "reset", id: existing.id, claim: newClaim, note: `Before: ${existing.claim || "(no claim)"} (status ${existing.status}). After: ${newClaim} (status New). Changed: ${what}.` } : { mode: "delete", ids: [existing.id] };
+        // the same flag rule a NEW certification gets: an unmatched name, or no trade selected (so no automated check can ever route), is Needs
+        // Reconciliation, not New, whatever the row's previous status was
+        const flagged = kind === "certification" && (merged.source_match === "unmatched" || !merged.trade_soc_code);
+        const status = flagged ? "Needs Reconciliation" : "New";
+        queue = optIn[CAT[kind]] ? { mode: "reset", id: existing.id, claim: newClaim, status, note: `Before: ${existing.claim || "(no claim)"} (status ${existing.status}). After: ${newClaim} (status ${status}). Changed: ${what}.` } : { mode: "delete", ids: [existing.id] };
       } else {
         const q = newQueue(kind, merged);
         if (q) queue = { mode: "insert", row: q };

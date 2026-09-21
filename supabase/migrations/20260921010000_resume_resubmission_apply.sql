@@ -116,10 +116,10 @@ begin
     -- opt this category into verification, removed (the archive above holds it); or created when there was none and they did opt in
     q := x->'queue';
     if q->>'mode' = 'reset' then
-      update verification_items set claim = q->>'claim', status = 'New', correction_requested = false, correction_note = null, correction_field = null,
-        correction_value = null, bundle_id = newd where id = q->>'id' and candidate_id = cand;
+      update verification_items set claim = q->>'claim', status = coalesce(nullif(q->>'status', ''), 'New'), correction_requested = false, correction_note = null,
+        correction_field = null, correction_value = null, bundle_id = newd where id = q->>'id' and candidate_id = cand;
       insert into verification_item_timeline (item_id, event_date, actor, action, note)
-        values (q->>'id', now(), 'Candidate', 'Candidate resubmitted their resume; a verified fact changed, so this item was reset to New.', q->>'note');
+        values (q->>'id', now(), 'Candidate', 'Candidate resubmitted their resume; a verified fact changed, so this item was reset to ' || coalesce(nullif(q->>'status', ''), 'New') || '.', q->>'note');
     elsif q->>'mode' = 'delete' then
       delete from verification_item_timeline where item_id = any(array(select jsonb_array_elements_text(q->'ids')));
       delete from verification_items where id = any(array(select jsonb_array_elements_text(q->'ids'))) and candidate_id = cand;
