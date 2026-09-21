@@ -80,17 +80,6 @@ type BoundarySection = { heading: string; category: BoundaryCategory };
 
 type BoundaryResult = { sections: BoundarySection[] };
 
-// The Skills block's own literal heading (2026-09-21), captured the same way the other sections' headings are. The section-boundary step already
-// reads every section's heading to classify it; that reading is used FIRST (it is a single-purpose call), and the extraction's own
-// "skills_heading" is the fallback for a page where the boundary step failed or found no skills section. Nothing is stored when no skills were
-// extracted (a heading with nothing under it belongs to nothing). One string per resume; whitespace collapsed, length-capped.
-function cleanHeading(s: unknown): string { return typeof s === "string" ? s.replace(/\s+/g, " ").trim().slice(0, 200) : ""; }
-function resolveSkillsHeading(boundaries: BoundaryResult | null | undefined, extraction: { skills?: unknown; skills_heading?: unknown }): string {
-  if (!Array.isArray(extraction.skills) || !extraction.skills.some((x) => typeof x === "string" && x.trim())) return "";
-  const b = boundaries ? boundaries.sections.find((s) => s.category === "skills" && cleanHeading(s.heading)) : undefined;
-  return b ? cleanHeading(b.heading) : cleanHeading(extraction.skills_heading);
-}
-
 const BOUNDARY_SCHEMA_SHAPE = `{
   "sections": [
     { "heading": string, "category": "work_history" | "education" | "certifications" | "skills" | "summary" | "hobbies_other" | "unknown" }
@@ -242,7 +231,6 @@ Return ONLY a single JSON object, no prose before or after it, matching exactly 
       "extraction_confidence": "high" | "medium" | "low", "position": number, "heading": string }
   ],
   "skills": [ string ],
-  "skills_heading": string,
   "skills_position": number | null,
   "freeform": [
     { "section_type": "summary" | "hobbies_other" | "needs_review", "heading": string, "content": string, "position": number }
@@ -519,14 +507,6 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   document is NOT automatically more of the same skills block just because its individual phrases
   look similar; check each item for its own explanatory clause before adding anything to skills.
 
-- skills' "skills_heading" field = the literal heading/label text of the section the skills list sits
-  under, exactly as printed (e.g. "CORE COMPETENCIES", "Technical Skills"), copied verbatim — not
-  reworded, not invented, not guessed. It is one string for the whole skills block, like
-  "skills_position". Use an empty string "" when the skills list has no visible heading above it, or
-  when there are no skills at all. This is additive only, like work_history's own "heading" field above
-  — it does not change how anything is classified or which terms belong in skills, only what section
-  title the output can reproduce.
-
 - Deduplication: if the same role, credential, or skill term appears more than once anywhere in the
   document (e.g. listed once under "Experience" and again under a separate "Leadership" or
   "Highlights" section), extract it ONCE. Do not create duplicate entries for repeated mentions of
@@ -632,7 +612,6 @@ type ExtractionResult = {
   education: Array<{ institution: string; degree: string; field_of_study: string; location?: string; start_date: string; end_date: string; extraction_confidence: string; position?: number; heading?: string }>;
   certifications: Array<{ name: string; issuing_body: string; license_number?: string; issue_date: string; expiration_date: string; extraction_confidence: string; position?: number; heading?: string }>;
   skills: Array<string>;
-  skills_heading?: string;
   skills_position?: number | null;
   freeform: Array<{ section_type: string; heading: string; content: string; position?: number }>;
 };
@@ -809,7 +788,6 @@ export default {
       const currentCandidateId = freshDoc?.candidate_id ?? doc.candidate_id;
 
       dedupePositions(parsed);
-      parsed.skills_heading = resolveSkillsHeading(sectionBoundaries, parsed);
       const { error: rpcErr } = await supabase.rpc("insert_resume_extraction", {
         p_resume_document_id: resume_document_id,
         p_candidate_id: currentCandidateId,
@@ -818,7 +796,6 @@ export default {
         p_certifications: parsed.certifications,
         p_skills: parsed.skills,
         p_skills_position: parsed.skills_position ?? null,
-        p_skills_heading: parsed.skills_heading || null,
         p_freeform: parsed.freeform,
         // This path only ever runs once real OCR text exists — extraction_status must already be
         // 'ocr_done' to reach here at all (see the check above) — so doc.ocr_raw_text (already
