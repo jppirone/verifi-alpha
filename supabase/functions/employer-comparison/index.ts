@@ -115,6 +115,52 @@ export default {
       try { body = await req.json(); } catch (_e) { body = {}; }
       const action = typeof body.action === "string" ? body.action : "";
 
+      // ---- TEMPORARY test-only debug actions (2026-09-22 authorize-then-capture verification; removed before final deploy) ----
+      if (action === "_debug_inspect") {
+        const p = (await rows(`employer_payments?id=eq.${body.payment_id}&select=*`))[0];
+        if (!p) return json({ ok: false, error: "not_found" }, 404);
+        const sess = p.stripe_checkout_session_id ? await stripe("GET", `/v1/checkout/sessions/${encodeURIComponent(p.stripe_checkout_session_id)}`) : null;
+        const pi = p.stripe_payment_intent_id ? await stripe("GET", `/v1/payment_intents/${encodeURIComponent(p.stripe_payment_intent_id)}`) : null;
+        return json({ ok: true, row: p, session: sess?.data ? { id: sess.data.id, payment_method_types: sess.data.payment_method_types, payment_intent: sess.data.payment_intent } : null, pi: pi?.data ? { id: pi.data.id, status: pi.data.status, capture_method: pi.data.capture_method, amount: pi.data.amount, amount_capturable: pi.data.amount_capturable, amount_received: pi.data.amount_received, latest_charge: pi.data.latest_charge } : null });
+      }
+      if (action === "_debug_place_hold") {
+        const p = (await rows(`employer_payments?id=eq.${body.payment_id}&select=*`))[0];
+        if (!p) return json({ ok: false, error: "not_found" }, 404);
+        const sess = await stripe("GET", `/v1/checkout/sessions/${encodeURIComponent(p.stripe_checkout_session_id)}`);
+        const form = new URLSearchParams();
+        form.set("amount", String(p.amount_cents));
+        form.set("currency", p.currency);
+        form.set("capture_method", "manual");
+        form.set("confirm", "true");
+        form.set("payment_method", "pm_card_visa");
+        form.set("payment_method_types[0]", "card");
+        form.set("metadata[product]", "employer_guest_comparison");
+        form.set("metadata[payment_id]", p.id);
+        if (p.comparison_request_id) form.set("metadata[comparison_request_id]", p.comparison_request_id);
+        const cr = p.comparison_request_id ? (await rows(`comparison_requests?id=eq.${p.comparison_request_id}&select=kind`))[0] : null;
+        form.set("metadata[kind]", (cr && cr.kind) || "resume_comparison");
+        const pi = await stripe("POST", "/v1/payment_intents", form);
+        if (pi.ok) await rest(`employer_payments?id=eq.${p.id}`, { method: "PATCH", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ stripe_payment_intent_id: pi.data.id }) });
+        return json({ ok: pi.ok, sessionOk: sess.ok, status: pi.data?.status, id: pi.data?.id, error: pi.ok ? undefined : pi.data });
+      }
+      if (action === "_debug_capture_pi_raw") {
+        // Bypasses our own captureGuestHold/DB write entirely: a real Stripe capture with no local state change, to prove
+        // the webhook backstop alone converges the row to 'paid'.
+        const p = (await rows(`employer_payments?id=eq.${body.payment_id}&select=*`))[0];
+        if (!p || !p.stripe_payment_intent_id) return json({ ok: false, error: "no_pi" }, 404);
+        const cap = await stripe("POST", `/v1/payment_intents/${encodeURIComponent(p.stripe_payment_intent_id)}/capture`, new URLSearchParams());
+        return json({ ok: cap.ok, status: cap.data?.status, error: cap.ok ? undefined : cap.data });
+      }
+      if (action === "_debug_cancel_pi") {
+        // Simulates the hold's own ~7 day window running out: Stripe's cancel produces the exact same status/webhook a
+        // natural expiry would, just immediately instead of after 7 real days.
+        const p = (await rows(`employer_payments?id=eq.${body.payment_id}&select=*`))[0];
+        if (!p || !p.stripe_payment_intent_id) return json({ ok: false, error: "no_pi" }, 404);
+        const c = await stripe("POST", `/v1/payment_intents/${encodeURIComponent(p.stripe_payment_intent_id)}/cancel`, new URLSearchParams());
+        return json({ ok: c.ok, status: c.data?.status, error: c.ok ? undefined : c.data });
+      }
+      // ---- end temporary debug actions ----
+
       if (action === "price") {
         const p = await guestPrice();
         return p ? json({ ok: true, amount_cents: p.amount_cents, currency: p.currency }) : json({ ok: false, error: "pricing_unavailable" }, 500);
