@@ -1,8 +1,11 @@
 -- Customization rebuild closeout, minor follow-up 2 of 2 (2026-09-22): delete_candidate_account already correctly removes
 -- candidate_customization and candidate_item_overrides (both FK candidate_id on delete cascade -- confirmed by a real live
 -- delete test against a real override during the Stage 3 pre-check), but its own audit counts never mentioned them, so a
--- future review of account_deletion_log.detail could not see they were ever there. Purely additive logging: counted
--- (read-only) just before the cascading delete, changes nothing about what is deleted or when.
+-- future review of account_deletion_log.detail could not see they were ever there. Purely additive logging, changes
+-- nothing about what is deleted or when -- but it has to count them FIRST, before anything else runs: a 'work' / 'education'
+-- / 'certification' / 'skill' / 'freeform' override is often already gone well before the end of this function, cleaned up
+-- by the per-item AFTER DELETE trigger the moment its own item row is deleted a few statements below (correct, and already
+-- the case before this change); counting late would silently under-report exactly the rows this is meant to make visible.
 create or replace function delete_candidate_account(p_candidate uuid)
 returns jsonb
 language plpgsql security definer set search_path = public, storage as $$
@@ -39,6 +42,15 @@ begin
     perform record_account_deletion_attempt(p_candidate, 'blocked_billing', jsonb_build_object('reason', 'billing_not_cleared'));
     return jsonb_build_object('outcome', 'blocked_billing');
   end if;
+
+  -- Customization (2026-09-22): counted here, read-only, BEFORE anything else runs. Their eventual removal is unchanged (still the
+  -- candidate_id FK cascade on the final `delete from candidates`, or, for a 'work'/'education'/'certification'/'skill'/'freeform' override,
+  -- often earlier still -- the per-item AFTER DELETE trigger fires the moment its own item row is deleted a few statements below). Counting
+  -- late would silently undercount (that trigger already runs before the bottom of this function), so this has to happen first to be honest.
+  select count(*) into n from candidate_item_overrides where candidate_id = p_candidate;
+  counts := counts || jsonb_build_object('candidate_item_overrides', n);
+  select count(*) into n from candidate_customization where candidate_id = p_candidate;
+  counts := counts || jsonb_build_object('candidate_customization', n);
 
   v_email := lower(btrim(coalesce(c.email, '')));
   v_digits := regexp_replace(coalesce(c.phone, ''), '\D', '', 'g');
@@ -115,13 +127,6 @@ begin
   get diagnostics n = row_count; counts := counts || jsonb_build_object('candidate_summary_versions', n);
   delete from candidate_name_changes where candidate_id = p_candidate;
   get diagnostics n = row_count; counts := counts || jsonb_build_object('candidate_name_changes', n);
-
-  -- Customization (2026-09-22): counted here, read-only, so the audit trail shows them; the actual removal still happens via
-  -- the candidate_id FK cascade when the candidates row is deleted below (unchanged -- this adds visibility, not a new delete).
-  select count(*) into n from candidate_item_overrides where candidate_id = p_candidate;
-  counts := counts || jsonb_build_object('candidate_item_overrides', n);
-  select count(*) into n from candidate_customization where candidate_id = p_candidate;
-  counts := counts || jsonb_build_object('candidate_customization', n);
 
   delete from candidate_sessions where candidate_id = p_candidate;
   get diagnostics n = row_count; counts := counts || jsonb_build_object('candidate_sessions', n);
