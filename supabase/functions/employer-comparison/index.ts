@@ -164,10 +164,12 @@ export default {
       //   * paid and unredeemed -> redeems once (a second, simultaneous visit is served the same snapshot with first_open false);
       //   * already redeemed and the 30 minute window is still open -> serves it again, free, without extending the window.
       if (action === "enter") {
+        const windowOpen = (x: any) => !!x.first_delivered_at && x.status === "approved" && !!x.view_window_ends_at && new Date(x.view_window_ends_at).getTime() > now;
         let serve = false;
         if (r.status === "approved" && await snapshotExists()) {
-          if (r.first_delivered_at) serve = !!r.view_window_ends_at && new Date(r.view_window_ends_at).getTime() > now;
-          else serve = (await payments()).some((p) => p.status === "paid" && !p.refunded_at && !p.redeemed_at);
+          serve = windowOpen(r) || (!r.first_delivered_at && (await payments()).some((p) => p.status === "paid" && !p.refunded_at && !p.redeemed_at));
+          // A simultaneous visit may have redeemed it between the reads above: look again, so this visit is also served rather than told "open".
+          if (!serve && !r.first_delivered_at) { const cur = await requestByToken(body.token); serve = !!cur && windowOpen(cur); }
         }
         if (serve) {
           const res = (await rpc("open_guest_comparison", { p_token_hash: tokenHash }))?.[0];
