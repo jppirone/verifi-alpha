@@ -41,7 +41,12 @@ type EducationEdit = { id: string; institution?: string; degree?: string; field_
 // trade_soc_code (Item 8, 2026-09-12 live-testing session): the candidate's chosen (or auto-suggested
 // and left as-is) SOC trade/occupation code, echoed back the same way license_number already is —
 // see the queueInserts loop below for what happens when it's missing.
-type CertificationEdit = { id: string; name?: string; issuing_body?: string; license_number?: string; issue_date?: string; expiration_date?: string; issue_date_precision?: string | null; expiration_date_precision?: string | null; source_match?: string; trade_soc_code?: string | null; heading?: string | null };
+// verification_link (2026-09-22, license/certification confirm screen split): the certification-appropriate
+// counterpart to a license's issuing-state check -- offered only for a non-license certification now, but
+// accepted here regardless of which the item turns out to be, same as every other field on this row. Same
+// validation as the later employer-contact-details screen already applies to the same column: http(s) only,
+// capped at 500 chars, blank clears it.
+type CertificationEdit = { id: string; name?: string; issuing_body?: string; license_number?: string; verification_link?: string | null; issue_date?: string; expiration_date?: string; issue_date_precision?: string | null; expiration_date_precision?: string | null; source_match?: string; trade_soc_code?: string | null; heading?: string | null };
 // License edits (automatic license verification): a license is a certification row (edited through
 // CertificationEdit above — name, number, dates) plus a 1:1 license_items extension holding only the
 // issuing state. state is only ever a 2-letter US state/DC code (validated below) and is never
@@ -63,6 +68,17 @@ type SkillEdit = { id: string; skill_text?: string };
 
 function dateOrNull(v: unknown): string | null {
   return typeof v === "string" && v.trim() !== "" ? v : null;
+}
+
+// Same rule the employer-contact-details screen already applies to this exact column: http(s) only, capped at
+// 500 chars, blank clears it.
+function isBadVerificationLink(v: unknown): boolean {
+  const t = typeof v === "string" ? v.trim() : "";
+  return !!t && !/^https?:\/\//i.test(t);
+}
+function cleanVerificationLink(v: unknown): string | null {
+  const t = typeof v === "string" ? v.trim().slice(0, 500) : "";
+  return t || null;
 }
 
 // Dates print exactly as precisely as the source did (date precision, 2026-09-19): "2007", "Mar 2007", "Mar 15, 2007",
@@ -216,6 +232,13 @@ export default {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
+      // Validated before anything is claimed or written, same as every other malformed-request check on this
+      // function: a bad link fails the whole confirm cleanly rather than leaving a partial write behind.
+      if (certifications.some((c) => isBadVerificationLink(c.verification_link))) {
+        return new Response(JSON.stringify({ ok: false, error: "verification_link_invalid" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
 
       // Cross-tab session awareness (2026-09-11 status-check session): the real, atomic guard
       // against this function running twice for the same resume_document — confirmed live during
@@ -326,6 +349,7 @@ export default {
       for (const c of certifications) {
         const { data, error } = await supabase.from("certification_items").update({
           name: c.name ?? null, issuing_body: c.issuing_body ?? null, license_number: c.license_number ?? null,
+          verification_link: cleanVerificationLink(c.verification_link),
           issue_date: dateOrNull(c.issue_date), expiration_date: dateOrNull(c.expiration_date),
           ...(c.issue_date_precision !== undefined || c.expiration_date_precision !== undefined ? {
             issue_date_precision: cleanPrecision(c.issue_date_precision, dateOrNull(c.issue_date), false),
@@ -482,10 +506,26 @@ export default {
       // it in the first place. unmatched and missingTrade are independent and can both be true at
       // once, in which case both reasons land in the same internal_note rather than one overwriting
       // the other.
+      //
+      // Fix (2026-09-22, license/certification confirm screen work): missingTrade only ever meant
+      // anything for a certification that IS a detected license — the trade/occupation field routes
+      // to a licensing board, which a genuine certification (PMP, a vendor badge, ...) never has and
+      // was never asked to have. Applying it unconditionally silently sent every non-license
+      // certification a candidate opted into verification to manual review with a misleading note.
+      // Read the definitive, POST-write license linkage (after the license edits above, including
+      // any "this isn't a license" removal) rather than trust request-echoed data for this decision.
+      const { data: linkedLicenseRows, error: linkedLicenseErr } = await supabase.from("license_items")
+        .select("linked_certification_id").eq("candidate_id", candidate_id).not("linked_certification_id", "is", null);
+      if (linkedLicenseErr) {
+        return await failReleasing(JSON.stringify({ ok: false, error: "license_lookup_failed", detail: linkedLicenseErr.message }), {
+          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const licenseLinkedCertIds = new Set((linkedLicenseRows || []).map((r: any) => r.linked_certification_id as string));
       for (const c of certifications) {
         const unmatched = c.source_match === "unmatched";
         if (!unmatched && !opt_in.certifications) continue;
-        const missingTrade = !c.trade_soc_code;
+        const missingTrade = licenseLinkedCertIds.has(c.id) && !c.trade_soc_code;
         const { data: idRow } = await supabase.rpc("nextval_verification_item_id");
         if (unmatched || missingTrade) {
           const reasons: string[] = [];
@@ -493,7 +533,7 @@ export default {
             reasons.push(`this certification's name did not fuzzy-match anything in the candidate's own uploaded document (OCR'd text) — see certification_source_match. Not proof of fabrication (OCR coverage has real, documented gaps: vision-routed pages have no OCR text at all), but real enough to warrant a human look before treating it as verified. Name as extracted: ${JSON.stringify(c.name || "")}`);
           }
           if (missingTrade) {
-            reasons.push(`no trade/occupation type (SOC code) was selected for this certification — see certification_items.trade_soc_code. No automated licensing-board check can be routed without it, so this needs a human look rather than silently sitting as a normal queue item with no check that will ever fire.`);
+            reasons.push(`this is a detected license (see license_items.linked_certification_id) but no trade/occupation type (SOC code) was selected — see certification_items.trade_soc_code. No automated licensing-board check can be routed without it, so this needs a human look rather than silently sitting as a normal queue item with no check that will ever fire.`);
           }
           queueInserts.push({
             id: idRow, candidate_id, type: "Certification", claim: claimForCertification(c), received: today,

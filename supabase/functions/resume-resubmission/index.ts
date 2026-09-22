@@ -420,15 +420,19 @@ function buildOps(c: any, optIn: OptIn, newDoc: string, baseDoc: string | null, 
   const CAT: Record<string, keyof OptIn> = { work: "work", education: "education", certification: "certifications" };
   const QTYPE: Record<string, string> = { work: "Job Experience", education: "Education", certification: "Certification" };
 
-  // the queue row a NEW item (or a changed item that had none) gets, under the same rules confirm-resume-data applies
-  const newQueue = (kind: string, r: Rec) => {
+  // the queue row a NEW item (or a changed item that had none) gets, under the same rules confirm-resume-data applies.
+  // isLicense (2026-09-22 fix): missingTrade only ever means anything for a certification that IS a detected license —
+  // the trade/occupation field routes to a licensing board, which a genuine certification never has. The caller passes
+  // whether THIS item is currently license-linked (aLic for an existing/changed item, sLic for a newly added one), so
+  // an ordinary certification is never flagged just for lacking a field it was never asked to have.
+  const newQueue = (kind: string, r: Rec, isLicense: boolean) => {
     if (kind === "certification") {
-      const unmatched = r.source_match === "unmatched", missingTrade = !r.trade_soc_code;
+      const unmatched = r.source_match === "unmatched", missingTrade = isLicense && !r.trade_soc_code;
       if (!unmatched && !optIn.certifications) return null;
       if (unmatched || missingTrade) {
         const reasons: string[] = [];
         if (unmatched) reasons.push(`this certification's name did not fuzzy-match anything in the candidate's own uploaded document (OCR'd text) — see certification_source_match. Not proof of fabrication (OCR coverage has real, documented gaps: vision-routed pages have no OCR text at all), but real enough to warrant a human look before treating it as verified. Name as extracted: ${JSON.stringify(r.name || "")}`);
-        if (missingTrade) reasons.push("no trade/occupation type (SOC code) was selected for this certification — see certification_items.trade_soc_code. No automated licensing-board check can be routed without it, so this needs a human look rather than silently sitting as a normal queue item with no check that will ever fire.");
+        if (missingTrade) reasons.push("this is a detected license (see license_items.linked_certification_id) but no trade/occupation type (SOC code) was selected — see certification_items.trade_soc_code. No automated licensing-board check can be routed without it, so this needs a human look rather than silently sitting as a normal queue item with no check that will ever fire.");
         return { type: "Certification", claim: claim.certification(r), status: "Needs Reconciliation", internal_note: `Auto-flagged: ${reasons.join(" Also: ")}` };
       }
       return { type: "Certification", claim: claim.certification(r), status: "New", internal_note: null };
@@ -471,13 +475,14 @@ function buildOps(c: any, optIn: OptIn, newDoc: string, baseDoc: string | null, 
       const what = p.changes.map((ch: Change) => `${ch.field.replace(/_/g, " ")}: ${ch.before ?? "(none)"} → ${ch.after ?? "(none)"}${ch.kind === "added" ? " (new detail)" : ""}`).join("; ") || "matched ambiguously, so treated as changed";
       let queue: any = null;
       if (existing) {
-        // the same flag rule a NEW certification gets: an unmatched name, or no trade selected (so no automated check can ever route), is Needs
-        // Reconciliation, not New, whatever the row's previous status was
-        const flagged = kind === "certification" && (merged.source_match === "unmatched" || !merged.trade_soc_code);
+        // the same flag rule a NEW certification gets: an unmatched name, or (only for a detected license) no trade
+        // selected so no automated check can ever route, is Needs Reconciliation, not New, whatever the row's previous
+        // status was. A genuine certification is never flagged for missing a field it was never asked to have.
+        const flagged = kind === "certification" && (merged.source_match === "unmatched" || (!!lic && !merged.trade_soc_code));
         const status = flagged ? "Needs Reconciliation" : "New";
         queue = optIn[CAT[kind]] ? { mode: "reset", id: existing.id, claim: newClaim, status, note: `Before: ${existing.claim || "(no claim)"} (status ${existing.status}). After: ${newClaim} (status ${status}). Changed: ${what}.` } : { mode: "delete", ids: [existing.id] };
       } else {
-        const q = newQueue(kind, merged);
+        const q = newQueue(kind, merged, kind === "certification" ? !!lic : false);
         if (q) queue = { mode: "insert", row: q };
       }
       if (queue && queue.mode !== "delete" && (kind === "work" || kind === "certification")) contactNeeded[kind].push(o.id); // education has no contact step
@@ -506,7 +511,7 @@ function buildOps(c: any, optIn: OptIn, newDoc: string, baseDoc: string | null, 
     for (const j of sec.added) {
       const r = newR[j]; const licS = kind === "certification" ? sLic.get(r.id) : null;
       const tradeChoice = kind === "certification" ? trades[r.id] : undefined;
-      const q = newQueue(kind, tradeChoice ? { ...r, trade_soc_code: tradeChoice } : r);
+      const q = newQueue(kind, tradeChoice ? { ...r, trade_soc_code: tradeChoice } : r, kind === "certification" ? !!licS : false);
       ops.added.push({ kind, staged_id: r.id, queue: q, license_staged_id: licS ? licS.id : null, trade_soc_code: tradeChoice || null });
       lineage(kind, r.id, "origin");
       if (q && (kind === "work" || kind === "certification")) contactNeeded[kind].push(r.id);
