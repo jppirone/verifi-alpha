@@ -3667,6 +3667,9 @@ a:hover{color:var(--color-accent)}
                     <div style="font-size:13px;overflow-wrap:anywhere"><span style="color:var(--color-neutral-500)">{{ r.kind }}:</span> {{ r.label }}</div>
                     <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.5;overflow-wrap:anywhere">{{ r.what }}</div>
                     <div style="font-size:11px;color:var(--color-neutral-500)">{{ r.before }}</div>
+                    <sc-if value="{{ r.hasCustomNote }}" hint-placeholder-val="{{ false }}">
+                      <div style="font-size:11px;color:#e2b93c">Your own edited description on this job will be flagged for another look on the Customization tab &mdash; it still shows, but the resume text under it changed.</div>
+                    </sc-if>
                   </div>
                 </sc-for>
               </div>
@@ -11236,11 +11239,12 @@ class Component extends DCLogic {
         warn: r.still_in_new_file_text === true ? 'This still appears in your new file, so it may not have been read correctly. If you want to keep it, cancel and check your file.' : '' })),
       rvHasChanged: main.length > 0,
       rvChangedRows: main.map(x => ({ kind: KIND[x.kind] || x.kind, label: x.label, what: x.changes.length ? x.changes.map(chg).join('; ') : 'Could not be matched with certainty, so treated as changed.',
-        before: x.verification_before ? `Currently: ${x.verification_before === 'Confirmed' ? 'Verified' : x.verification_before}. It goes back through verification.` : 'It will be sent for verification if that category is checked below.' })),
+        before: x.verification_before ? `Currently: ${x.verification_before === 'Confirmed' ? 'Verified' : x.verification_before}. It goes back through verification.` : 'It will be sent for verification if that category is checked below.',
+        hasCustomNote: !!x.has_customization_override })),
       rvHasMinor: minor.length > 0,
       rvMinorLine: `${minor.length} item${minor.length === 1 ? '' : 's'} gained a small detail read from your new file (for example an issue date). ${minor.length === 1 ? 'It' : 'They'} will be re-verified.`,
       rvMinorToggle: ex2.minor ? 'Hide' : 'Show', rvMinorOpen: !!ex2.minor, toggleMinor: toggle('minor'),
-      rvMinorRows: minor.map(x => ({ label: x.label, what: x.changes.map(chg).join('; ') })),
+      rvMinorRows: minor.map(x => ({ label: x.label, what: x.changes.map(chg).join('; ') + (x.has_customization_override ? ' · your customized description on this job will be flagged for another look' : '') })),
       rvHasAdded: added.length > 0,
       rvAddedRows: added.map(a => ({ kind: KIND[a.kind] || a.kind, label: a.label, flag: (a.flags || []).includes('incomplete') ? '(looks incomplete)' : (a.flags || []).includes('placeholder_text') ? '(template text)' : '' })),
       rvHasKept: kept.length > 0,

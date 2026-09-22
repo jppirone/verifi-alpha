@@ -570,7 +570,7 @@ async function computePlan(resub: any, doc: any): Promise<{ plan: any; fingerpri
   if (!confirmedDocs.length) throw new Error("no_confirmed_document");
   const active = `candidate_id=eq.${cid}&candidate_confirmed=eq.true&resume_document_id=in.(${confirmedDocs.join(",")})`;
   const staged = `candidate_id=eq.${cid}&resume_document_id=eq.${newDoc}`;
-  const [aW, aE, aC, aS, aF, aL, sW, sE, sC, sS, sF, sL, vq, snaps] = await Promise.all([
+  const [aW, aE, aC, aS, aF, aL, sW, sE, sC, sS, sF, sL, vq, snaps, customizedWork] = await Promise.all([
     rows(`work_history_items?${active}&select=*&order=position`), rows(`education_items?${active}&select=*&order=position`),
     rows(`certification_items?${active}&select=*&order=position`), rows(`skill_items?${active}&select=id,skill_text,position,section_position,updated_at&order=position`),
     rows(`candidate_freeform_sections?${active}&select=id,section_type,heading,content,position,updated_at&order=position`),
@@ -581,7 +581,11 @@ async function computePlan(resub: any, doc: any): Promise<{ plan: any; fingerpri
     rows(`license_items?${staged}&select=id,linked_certification_id,state,state_source,state_evidence`),
     rows(`verification_items?candidate_id=eq.${cid}&select=id,type,claim,status,status_changed_at,source_item_id,assigned_to,correction_requested`),
     rows(`comparison_snapshots?candidate_id=eq.${cid}&select=request_id`),
+    // Customization (2026-09-22): which active work items the candidate has edited text on, so the review can flag that a "changed" job's
+    // custom description will need a second look, rather than the candidate finding out later on the Customization tab.
+    rows(`candidate_item_overrides?candidate_id=eq.${cid}&kind=eq.work&text_override=not.is.null&select=item_id`),
   ]);
+  const customizedWorkIds = new Set((customizedWork || []).map((o: any) => o.item_id));
   const ocr = (await rows(`resume_documents?id=eq.${newDoc}&select=ocr_raw_text`))[0]?.ocr_raw_text as string | null | undefined;
   const docText: string | null = ocr && ocr.trim() ? fold(ocr) : null;
 
@@ -629,6 +633,9 @@ async function computePlan(resub: any, doc: any): Promise<{ plan: any; fingerpri
           verification_before: v ? (v as any).status ?? null : null,
           verification_after: v ? "New (re-verified)" : "not in verification (no queue row before)",
           new_claim: claim[kind](mergeFacts(kind, o, n, p.changes).merged), ...(kind === "certification" ? { trade_soc_code: o.trade_soc_code || null } : {}),
+          // Customization (2026-09-22): this job's facts are changing; the candidate's own edited description (if any) is NOT touched by this
+          // resubmission, but will be flagged stale on the Customization tab afterward. Say so here too, not only after the fact.
+          ...(kind === "work" && customizedWorkIds.has(o.id) ? { has_customization_override: true } : {}),
         });
         if (v) optCount[kind]++;
       }
