@@ -1,0 +1,25 @@
+-- Comparison feature redesign, Stage 1 (PRIORITY FIX) -- 2026-09-22.
+--
+-- Real, confirmed data-integrity bug (see this task's investigation report): staff.html's "Apply
+-- correction" action (the resolution of a candidate's dispute against a Discrepancy finding)
+-- rewrote verification_items.claim with the candidate's proposed value and flipped status straight
+-- to 'Confirmed' -- the original claimed value AND whatever was actually found (which had nowhere
+-- structured to live at all) were both gone from every queryable, externally-visible field, with
+-- only a staff-only timeline entry left as any trace. Going forward, applying a correction must
+-- never destroy the original finding.
+--
+-- found_value: parallel to the existing `claim` column (what the candidate/resume states), this is
+-- what verification actually found, populated by staff at the moment they set an item to
+-- 'Discrepancy' (reusing the existing "resolution evidence" text staff.html already requires before
+-- allowing a transition into any resolution status -- see RESOLUTION_STATUSES/resolutionEvidenceDraft
+-- in staff.html). Never touched by "Apply correction": claim and found_value are the permanent,
+-- structural record of the original finding.
+--
+-- correction_applied_at: set the moment staff apply a candidate's proposed correction (as opposed
+-- to merely declining it, which already only clears correction_requested and touches nothing else).
+-- correction_value already exists and already holds the candidate's proposed value; once applied it
+-- is repurposed (still on the same row) as the accepted value, alongside this new timestamp -- a
+-- second permanent, structural marker (not just a timeline entry) that a correction happened, sitting
+-- next to the untouched original claim/found_value rather than replacing them.
+alter table verification_items add column if not exists found_value text;
+alter table verification_items add column if not exists correction_applied_at timestamptz;

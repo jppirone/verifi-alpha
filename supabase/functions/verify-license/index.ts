@@ -683,13 +683,17 @@ export default {
           await supabase.from("verification_items").update({
             claim: claimFor(cert, state!),
             status, automated_check: prior ? historyLine + "\n\n---\n\n" + prior : historyLine,
-            ...(discrepancyNote ? { note: discrepancyNote } : {}),
+            // found_value (2026-09-22): the structural "what was actually found" record a Discrepancy needs for the
+            // Comparison redesign — same text already shown to the candidate as `note` for this automated path, so
+            // this is not new information, just also landing in the column a Comparison reads instead of only the
+            // free-text one. Never set for a non-Discrepancy outcome (Needs Reconciliation is not a conclusive finding).
+            ...(discrepancyNote ? { note: discrepancyNote, found_value: discrepancyNote } : {}),
           }).eq("id", queueId);
         } else {
           const { data: idRow } = await supabase.rpc("nextval_verification_item_id");
           const { error: qErr } = await supabase.from("verification_items").insert({
             id: idRow, candidate_id, type: "License", claim: claimFor(cert, state!), received: now.slice(0, 10),
-            status, automated_check: historyLine, ...(discrepancyNote ? { note: discrepancyNote } : {}),
+            status, automated_check: historyLine, ...(discrepancyNote ? { note: discrepancyNote, found_value: discrepancyNote } : {}),
             internal_note: outcome === "verified" ? null
               : nameHold ? `Held by the name-change safeguard: the registry match was clean, but the account name was changed ${nameHold.hours_ago}h ago (${nameHold.from || "(none)"} -> ${nameHold.to}). Not a negative determination — verify the license belongs to this person before confirming.`
               : `Auto-flagged by automatic license verification: ${reason}${afterCorrection ? " (after the candidate corrected the details)" : ""}. Not a negative determination — needs a human look.`,

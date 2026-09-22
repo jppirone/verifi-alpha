@@ -5239,7 +5239,7 @@ a:hover{color:var(--color-accent)}
                 <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">No document is available for this request.</div>
               </sc-if>
               <div style="display:flex;gap:var(--space-3)">
-                <button type="button" class="btn btn-primary" style="font-size:12px" disabled="{{ empBusy }}" sc-camel-on-click="{{ confirmEmpAllow }}">{{ empApproveLabel }}</button>
+                <button type="button" class="btn btn-primary" style="font-size:12px" disabled="{{ empApproveDisabled }}" sc-camel-on-click="{{ confirmEmpAllow }}">{{ empApproveLabel }}</button>
                 <button type="button" class="btn btn-ghost" style="font-size:12px" disabled="{{ empBusy }}" sc-camel-on-click="{{ cancelEmpAllow }}">Cancel</button>
               </div>
             </div>
@@ -6616,14 +6616,20 @@ class Component extends DCLogic {
   // this was built in): verification_items.status is the only real, populated status axis today —
   // work_history_items/education_items/certification_items.status (the Item-18-model vocabulary)
   // is never written by anything after insert and every row in those three tables is empty right
-  // now, so there is nothing real to join against there. That axis has 7 legal internal values,
-  // including 'Needs Reconciliation', which staff.html's status dropdown can set on any item today
-  // (confirmed live, not hypothetical) — so this mapping is a strict allowlist, never a pass-
-  // through of the raw column, specifically so an internal value never reaches this screen by
+  // now, so there is nothing real to join against there. That axis has 8 legal internal values
+  // (7 through 2026-09-21; 'Verification Not Possible' added 2026-09-22, Comparison feature
+  // redesign — a distinct terminal outcome from 'Unable to Verify', see that status's own note
+  // below), including 'Needs Reconciliation', which staff.html's status dropdown can set on any
+  // item today (confirmed live, not hypothetical) — so this mapping is a strict allowlist, never a
+  // pass-through of the raw column, specifically so an internal value never reaches this screen by
   // accident.
   VERIFICATION_STATUS_LABELS = {
     'Confirmed': 'Verified',
     'Unable to Verify': 'Unable to Verify',
+    // 'Unable to Verify' is a channel that existed and was actually tried — this is the case where
+    // no channel existed to try at all (no contact, a defunct company, no public record). Worded to
+    // read as a fact about the item, not the candidate.
+    'Verification Not Possible': 'No way to verify this was found',
     'Discrepancy': 'Under review, staff has a question about this item',
   };
   VERIFICATION_FALLBACK_LABEL = 'Submitted, pending review';
@@ -6642,14 +6648,15 @@ class Component extends DCLogic {
 
   // "Completed" for the Active/All/Completed filter: a real outcome has been reached on our side.
   // Discrepancy and Needs Reconciliation are still open questions from the candidate's point of
-  // view even though staff has them flagged internally, so they stay in "Active".
+  // view even though staff has them flagged internally, so they stay in "Active". Verification Not
+  // Possible is a real, reached outcome exactly like Unable to Verify — it belongs in Completed too.
   verificationIsTerminal(status) {
-    return status === 'Confirmed' || status === 'Unable to Verify';
+    return status === 'Confirmed' || status === 'Unable to Verify' || status === 'Verification Not Possible';
   }
 
   verificationTagClass(status) {
     if (status === 'Confirmed') return 'tag-accent';
-    if (status === 'Unable to Verify' || status === 'Discrepancy') return 'tag-outline';
+    if (status === 'Unable to Verify' || status === 'Verification Not Possible' || status === 'Discrepancy') return 'tag-outline';
     return 'tag-neutral';
   }
 
@@ -7834,28 +7841,24 @@ class Component extends DCLogic {
         canApprove: true,
       };
     }
-    const what = this.empWouldShareText();
-    if (!what) return { text: "You don't have any verified items yet, so there is nothing to share with " + who + '. You can decline, or wait until some of your items are verified.', lines: [], foot: '', canApprove: false };
-    const nc = this.empNotClearedText();
-    return { text: 'Approve ' + who + '? They will see the items you confirmed that Verifi has verified, as they stand right now: ' + what + '.' + (nc ? ' They will also see, by name, ' + (nc.indexOf('; ') < 0 ? 'this item that was checked and did not clear' : 'these items that were checked and did not clear') + ': ' + nc + '.' : '') + ' Your other items are not shown or described. ' + (e.access_method === 'guest'
-      ? 'They have no account: they can open it once, and only after paying for it. Once they open it they can read it for 30 minutes, and then it is gone and cannot be reopened. If they never open it, it is discarded after 7 days.'
-      : 'If they never open it, it is discarded after 7 days; once opened it stays available to them for up to 90 days.') + ' You cannot undo an approval.', lines: [], foot: '', canApprove: true };
+    // Redesigned 2026-09-22: this is an audit tool now, not a curated share — every job, education entry and
+    // certification the candidate has ever submitted goes, always, in its current state (one of five honest,
+    // non-judgmental statuses; a Discrepancy always shows both what was claimed and what was found). There is no
+    // "your other items are not shown" any more, and nothing here can be excluded — that control exists only on
+    // the separate Customization tab, a different product with its own purpose.
+    const w = s.comparison.would;
+    if (!w || !w.total) return { text: "You don't have anything on your record yet, so there is nothing to share with " + who + '. You can decline, or wait until you do.', lines: [], foot: '', canApprove: false };
+    return {
+      text: 'Approve ' + who + '? They will see every job, education entry and certification you have submitted (' + this.empItemSummaryText(w) + '), each with its current status: verified, in progress, verification not possible, unable to verify, or discrepancy (shown with both what you stated and what was found). Nothing is held back or excluded — this shows your whole record as it stands right now, and will keep reflecting your current record for as long as they have access. ' + (e.access_method === 'guest'
+        ? 'They have no account: they can open it once, and only after paying for it. Once they open it they can read it for 30 minutes, and then it is gone and cannot be reopened. If they never open it, it is discarded after 7 days.'
+        : 'If they never open it, it is discarded after 7 days; once opened it stays available to them for up to 90 days.') + ' You cannot undo an approval.',
+      lines: [], foot: '', canApprove: true,
+    };
   }
 
-  empWouldShareText() {
-    const w = this.state.comparison.would;
-    if (!w || !w.verified_total) return null;
+  empItemSummaryText(w) {
     const part = (n, one, many) => (n ? n + ' ' + (n === 1 ? one : many) : '');
-    return [part(w.work.verified, 'job', 'jobs'), part(w.education.verified, 'education entry', 'education entries'), part(w.certifications.verified, 'certification or license', 'certifications and licenses')].filter(Boolean).join(', ');
-  }
-
-  // Items a check was run on that did not clear: an approval shares their NAME and status (never the number or registry detail). The
-  // server returns the exact lines it would share; this is that list as one sentence, shown before the candidate decides.
-  empNotClearedText() {
-    const w = this.state.comparison.would;
-    const n = (w && w.not_cleared) || [];
-    if (!n.length) return '';
-    return n.map(x => x.label + ': ' + (x.status === 'discrepancy' ? 'discrepancy' : 'not verified') + (x.reason ? ' (' + String(x.reason).replace(/\.$/, '') + ')' : '')).join('; ');
+    return [part(w.work.total, 'job', 'jobs'), part(w.education.total, 'education entry', 'education entries'), part(w.certifications.total, 'certification or license', 'certifications and licenses')].filter(Boolean).join(', ');
   }
 
   async respondToRequest(id, decision) {
@@ -7891,15 +7894,24 @@ class Component extends DCLogic {
     if (!v || !v.content) return [];
     const c = v.content;
     if (c.kind === 'license_report') return (c.licenses || []).map(l => this.licenseLineText(l));
-    const how = (x) => (x.verification && x.verification.method === 'state_registry' ? 'checked against the state registry' : 'verified by Verifi review') + (x.verification && x.verification.verified_on ? ', ' + x.verification.verified_on : '');
+    // Redesigned 2026-09-22: every item, always, with its own status \u2014 see empConfirmView's own note. A discrepancy
+    // line always shows both what the candidate stated and what was found, never just the word "discrepancy".
+    const STATUS_LABEL = { verified: 'Verified', in_progress: 'In progress', not_possible: 'Verification not possible', unable: 'Unable to verify', discrepancy: 'Discrepancy' };
+    const how = (x) => {
+      const v2 = x.verification || {};
+      const label = STATUS_LABEL[v2.status] || 'In progress';
+      if (v2.status === 'verified') return label + ' \u2014 ' + (v2.method === 'state_registry' ? 'checked against the state registry' : 'verified by Verifi review') + (v2.verified_on ? ', ' + v2.verified_on : '');
+      if (v2.status === 'discrepancy') return label + ' \u2014 claimed: ' + (v2.claimed || '\u2014') + '; found: ' + (v2.found || '\u2014');
+      return label;
+    };
     const range = (a, b, cur) => [a, cur ? 'present' : b].filter(Boolean).join(' - ');
     const lines = [];
     (c.work || []).forEach(w => lines.push('Job: ' + [w.title, w.employer, w.location].filter(Boolean).join(', ') + (range(w.start, w.end, w.current) ? ' (' + range(w.start, w.end, w.current) + ')' : '') + ' \u2014 ' + how(w)));
     (c.education || []).forEach(e => lines.push('Education: ' + [e.degree, e.field_of_study, e.institution, e.location].filter(Boolean).join(', ') + (range(e.start, e.end) ? ' (' + range(e.start, e.end) + ')' : '') + ' \u2014 ' + how(e)));
     (c.certifications || []).forEach(x => lines.push('Certification: ' + [x.name, x.issuer, x.license_number ? 'Lic #' + x.license_number : '', x.license_state, x.issued].filter(Boolean).join(', ') + ' \u2014 ' + how(x)));
-    (c.not_cleared || []).forEach(n => lines.push('Checked, not verified: ' + n.label + ' \u2014 ' + (n.status === 'discrepancy' ? 'discrepancy' : 'not verified') + (n.reason ? ' (' + n.reason + ')' : '')));
     return lines;
   }
+  // (how() above already prefixes the status label itself, e.g. "Verified \u2014 checked against\u2026" or "Discrepancy \u2014 claimed: \u2026; found: \u2026")
 
   addActivityLog(activity) {
     this.setState(st => ({ activityLog: [...st.activityLog, { activity, timestamp: new Date().toISOString() }] }));
@@ -12080,7 +12092,16 @@ class Component extends DCLogic {
       licenseRequestsEmpty: (s.comparison.pending.length + s.comparison.history.length) === 0,
       empApproveLabel: s.empBusy ? 'Approving…' : 'Approve and share',
       empBusy: s.empBusy,
-      confirmEmpAllow: () => { if (this.empConfirmView().canApprove) this.respondToRequest(s.empConfirmId, 'approve'); else this.setState({ empConfirmId: null, empPreview: null }); },
+      // Real fix (2026-09-22): this used to silently close the confirm dialog with no feedback at all when canApprove was
+      // false — reachable live because the resume-comparison confirm button (unlike the license-report one) had no
+      // disabled binding of its own, so a candidate could click an apparently-live "Approve and share" button and watch
+      // it do nothing. The button is now correctly disabled too (empApproveDisabled); this branch stays as a second, real
+      // gate (not just a UI nicety) and now also leaves an actual notice instead of vanishing without a trace.
+      confirmEmpAllow: () => {
+        const v = this.empConfirmView();
+        if (v.canApprove) { this.respondToRequest(s.empConfirmId, 'approve'); return; }
+        this.setState({ empConfirmId: null, empPreview: null, empNotice: v.text || "There's nothing to approve for this request yet." });
+      },
       cancelEmpAllow: () => this.setState({ empConfirmId: null, empPreview: null }),
       empDocLinkOpen: !!s.empDocLink, empDocLinkUrl: s.empDocLink || '',
       empNoticeOpen: !!s.empNotice,

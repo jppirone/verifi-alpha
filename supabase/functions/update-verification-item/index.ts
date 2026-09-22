@@ -13,6 +13,7 @@ const corsHeaders = {
 const FIELD_MAP = {
   type: "type",
   claim: "claim",
+  foundValue: "found_value",
   received: "received",
   desired: "desired",
   followUp: "follow_up",
@@ -25,13 +26,14 @@ const FIELD_MAP = {
   correctionNote: "correction_note",
   correctionField: "correction_field",
   correctionValue: "correction_value",
+  correctionAppliedAt: "correction_applied_at",
 };
 const DATE_COLUMNS = new Set(["received", "desired", "follow_up"]);
 // The statuses staff.html offers (STATUS_OPTIONS). Nothing else is ever a valid status, for any role (this used to accept any string).
-const STATUS_VALUES = new Set(["New", "In Progress", "Awaiting Response", "Needs Reconciliation", "Confirmed", "Discrepancy", "Unable to Verify"]);
+const STATUS_VALUES = new Set(["New", "In Progress", "Awaiting Response", "Needs Reconciliation", "Confirmed", "Discrepancy", "Verification Not Possible", "Unable to Verify"]);
 // What a worker may change on an item assigned to them: exactly what staff.html lets a worker do. assignedTo, type, received, desired
 // and the candidate-side correction fields (correctionNote/correctionField, written by submit-candidate-correction-response) are not in it.
-const WORKER_PATCH_FIELDS = new Set(["status", "note", "internalNote", "followUp", "automatedCheck", "claim", "correctionValue", "correctionRequested"]);
+const WORKER_PATCH_FIELDS = new Set(["status", "note", "internalNote", "followUp", "automatedCheck", "claim", "foundValue", "correctionValue", "correctionRequested", "correctionAppliedAt"]);
 
 // ---------------------------------------------------------------------------------------------------
 // ---------------------------------------------------------------------------------------------------
@@ -138,6 +140,27 @@ export default {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
+      }
+
+      // found_value is the structural record of what verification actually found, required the moment an item is set to
+      // Discrepancy (2026-09-22 -- see the migration adding this column for the real data-integrity bug this closes): a
+      // real server-side gate, not just staff.html's own disabled-button check, so a stale click or a future caller can
+      // never slip a Discrepancy through with nothing recorded. Accepts found_value from THIS patch, or one already on
+      // the row (a later, unrelated edit -- e.g. internalNote -- while status stays Discrepancy needs no re-send).
+      if (dbPatch["status"] === "Discrepancy") {
+        const incoming = typeof dbPatch["found_value"] === "string" ? dbPatch["found_value"].trim() : "";
+        if (!incoming) {
+          const cur = await fetch(SUPABASE_URL + "/rest/v1/verification_items?id=eq." + encodeURIComponent(id) + "&select=found_value", {
+            headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": "Bearer " + SUPABASE_SERVICE_ROLE_KEY },
+          });
+          const curRows = cur.ok ? await cur.json() : [];
+          const existing = Array.isArray(curRows) && curRows[0] && typeof curRows[0].found_value === "string" ? curRows[0].found_value.trim() : "";
+          if (!existing) {
+            return new Response(JSON.stringify({ ok: false, error: "found_value_required" }), {
+              status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+        }
       }
 
       // A worker's update is CONDITIONAL on the item still being assigned to them, in the same statement (no check-then-write gap):

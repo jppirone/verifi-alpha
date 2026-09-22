@@ -91,7 +91,7 @@ export default {
     if (!caller) return UNAUTHORIZED();
     const onlyAssignedTo = workerName(caller); // null for admin/service: everything
     try {
-      const url = SUPABASE_URL + "/rest/v1/verification_items?select=id,type,claim,received,desired,follow_up,note,internal_note,automated_check,status,assigned_to,correction_requested,correction_note,correction_field,correction_value,source_item_id,candidate_note,candidate_note_at,verification_item_timeline(event_date,actor,action,note),candidates(id,full_name,first_name,last_name,email,phone)&order=id.asc&verification_item_timeline.order=event_date.asc" + (onlyAssignedTo ? "&assigned_to=eq." + encodeURIComponent(onlyAssignedTo) : "");
+      const url = SUPABASE_URL + "/rest/v1/verification_items?select=id,type,claim,found_value,received,desired,follow_up,note,internal_note,automated_check,status,assigned_to,correction_requested,correction_note,correction_field,correction_value,correction_applied_at,source_item_id,candidate_note,candidate_note_at,verification_item_timeline(event_date,actor,action,note),candidates(id,full_name,first_name,last_name,email,phone)&order=id.asc&verification_item_timeline.order=event_date.asc" + (onlyAssignedTo ? "&assigned_to=eq." + encodeURIComponent(onlyAssignedTo) : "");
       const res = await fetch(url, { headers: REST_HEADERS });
       if (!res.ok) {
         const errText = await res.text();
@@ -170,10 +170,12 @@ export default {
         })() : null,
         status: r.status,
         assignedTo: r.assigned_to,
+        foundValue: r.found_value || null,
         correctionRequested: r.correction_requested,
         correctionNote: r.correction_note,
         correctionField: r.correction_field,
         correctionValue: r.correction_value,
+        correctionAppliedAt: r.correction_applied_at || null,
         candidateNote: r.candidate_note || null,
         candidateNoteAt: r.candidate_note_at || null,
         // first_name/last_name is what a real signup writes now (see confirm-verification);

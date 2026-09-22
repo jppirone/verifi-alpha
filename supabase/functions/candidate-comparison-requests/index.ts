@@ -11,50 +11,80 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "content-type",
 };
 
-// EMPLOYER COMPARISON REQUESTS, CANDIDATE SIDE (2026-09-20, Stage 1). An employer asks (rows are created by the employer-side
-// endpoints through create_comparison_request); the candidate, signed in, approves or declines here. NOTHING IS ASSEMBLED OR SHOWN TO
-// THE EMPLOYER BEFORE APPROVAL: the snapshot is built inside the approve action and not before. See the migration
-// 20260920020000_comparison_requests.sql for the full flow, retention rules and the "verified enough" definition restated below.
+// EMPLOYER COMPARISON REQUESTS, CANDIDATE SIDE (2026-09-20, Stage 1; REDESIGNED 2026-09-22). An employer asks (rows are created
+// by the employer-side endpoints through create_comparison_request); the candidate, signed in, approves or declines here.
+// NOTHING IS ASSEMBLED OR SHOWN TO THE EMPLOYER BEFORE APPROVAL. See the migration 20260920020000_comparison_requests.sql for
+// the request/approval/retention lifecycle (UNCHANGED by the 2026-09-22 redesign below — same 72h answer window, same 7-day
+// unopened-approval expiry, same 90-day org resume-comparison / 30-day org license-report / 30-minute guest view windows).
 //
 // Actions (POST {action, ...}). The first three need the candidate's OWN live session (session_token + candidate_id, checked against
 // candidate_sessions on every call; every request is also scoped to that candidate, so another candidate's request id is a 404):
 //   list           pending requests, history, real Tier 1 lookups that matched this candidate, and what an approval would share (for a resume
-//                  comparison: counts and the named not-cleared lines; for a LICENSE REPORT: the exact license lines, from the last stored checks)
+//                  comparison: every item, live, one of the five statuses below; for a LICENSE REPORT: the exact license lines, from the last
+//                  stored checks)
 //   preview        same "what would be shared", but a license report is re-checked against the registry first (cached 10 minutes)
 //   respond        {request_id, decision: "approve" | "decline"}
-//   view_snapshot  {request_id}: exactly what an approved request shared
+//   view_snapshot  {request_id}: what an approved request currently shares — LIVE, re-assembled from the candidate's current profile on
+//                  every call, not a frozen record of what was true at approval (see REDESIGN below)
 //   document_link  {request_id}: a 60-second signed link to the employer's own document for one of THIS candidate's requests (private bucket, file unmodified)
 //
 // TWO KINDS of request (comparison_requests.kind), derived from the candidate's account type and never from anything a caller sends:
-//   resume_comparison  full-resume accounts: the assembler below (verified items + named not-cleared lines)
+//   resume_comparison  full-resume accounts: the assembler below (every work/education/certification item, one of five statuses)
 //   license_report     license-only accounts (no resume to compare): one line per license (assembleLicenseReport), status re-checked live at approval
 // Internal (never reachable by a candidate or an employer):
 //   notify_candidate  {request_id}: the "you have a request" email; service-role bearer only; sent at most once (claimed first)
 //   sweep             cron: expire what timed out (expire_comparison_requests), send the undifferentiated "not authorized" emails,
 //                     retry candidate notices that never went out; authenticated by the secret in internal_job_secrets
 //
-// WHAT COUNTS AS "VERIFIED ENOUGH" (assembleSnapshot below is the ONLY code that decides this):
-//   An item is included only if ALL of:
-//     * the candidate is a full-resume account that is not deactivated;
-//     * the item's row is candidate_confirmed = true, on a resume_documents row whose confirmed_at is set;
-//     * a verification_items row for this candidate has status = 'Confirmed' AND points at the row via source_item_id, where
-//         work_history_items  <- type 'Job Experience'
-//         education_items     <- type 'Education'
-//         certification_items <- type 'Certification', OR the license_items row linked to the certification has a queue_item_id
-//                                whose verification_items row (type 'License') is 'Confirmed'.
-//   Excluded, always: statuses New, In Progress, Awaiting Response, Needs Reconciliation, Discrepancy, Unable to Verify; rows of type
-//   'Needs Review'; items with no queue row (candidate-stated); job responsibilities (not part of what staff verify); skills, summary,
-//   hobbies and other sections; contact details. Non-included items are reported as counts ("confirmed" vs "verified"), so an employer
-//   cannot tell "unable to verify" from "still in review" from "not submitted", with ONE bounded exception (2026-09-20, snapshot
-//   version 2): an item where a check was actually run and did not clear is also listed by name in content.not_cleared, with a fixed-
-//   vocabulary status and, for licenses, a fixed one-sentence reason. That is: a Job / Education / Certification queue row at
-//   'Discrepancy' or 'Unable to Verify', or a license whose automatic check came back ambiguous / not found / inactive (queue row
-//   'Needs Reconciliation', 'Discrepancy' or 'Unable to Verify'). NEVER listed: rows still New / In Progress / Awaiting Response,
-//   'Needs Review' rows, a license whose check could not run (lookup_failed) or was held (recent_name_change), candidate-stated
-//   licenses with no check. Never included in a line: staff notes, the registry's own text, license numbers, other people's names.
-//   The candidate sees the exact same lines in the approval card BEFORE approving (would_share.not_cleared).
+// ============================================================================================================================
+// REDESIGN (2026-09-22) — a direction change, not a tweak. Full background/decisions in this task's own investigation report;
+// restated here because this is the ONE place the rule lives.
 //
-// Deletion rules live in the migration (expire_comparison_requests, purge_candidate_comparisons + the deactivation trigger).
+// The Comparison is an AUDIT tool: an employer already holds a resume/document from elsewhere and wants to check it against
+// what is actually true in the system. Because of that:
+//   1. EVERY item the candidate has ever submitted (candidate_confirmed = true, on a confirmed resume_documents row) appears,
+//      always, in its CURRENT state — never filtered out, never reduced to a bare count, and never something the candidate can
+//      exclude or hide from this product (that control exists ONLY in Customization — candidate_customization /
+//      candidate_item_overrides / assemble_customized_resume — and this assembler never reads any of those three; the two
+//      products stay structurally firewalled from each other, exactly as before this redesign).
+//   2. Every item shows exactly one of five honest, non-judgmental statuses, mapped from the internal verification_items.status
+//      (externalStatus() below is the ONLY code that decides this mapping):
+//        verified      internal 'Confirmed'.
+//        in_progress   internal 'New' / 'In Progress' / 'Awaiting Response' / 'Needs Reconciliation', OR the item was never
+//                       queued for verification at all in the normal flow (see 'no queue row' below).
+//        not_possible  internal 'Verification Not Possible' (added 2026-09-22: no viable path existed to attempt verification
+//                       at all — no contact, a defunct company, no public record) OR no verification_items row exists for this
+//                       item at all. The two are deliberately the same external bucket: from an employer's point of view, an
+//                       item nobody ever had a way to check reads identically whether the reason is "genuinely unreachable" or
+//                       "never queued" (e.g. the candidate opted a whole category out of verification at signup) — in neither
+//                       case was anything ever found, and 'not_possible' is the honest, non-judgmental word for that.
+//        unable        internal 'Unable to Verify' — a channel existed and outreach happened, but no conclusive answer came
+//                       back. Distinct from not_possible: this status means an attempt was actually made.
+//        discrepancy   internal 'Discrepancy' — a conclusive, conflicting answer came back. ALWAYS carries both `claimed`
+//                       (verification_items.claim) and `found` (verification_items.found_value, added 2026-09-22) — never just
+//                       the word "Discrepancy" alone. A candidate's dispute of a Discrepancy (submit-candidate-correction-
+//                       response) never changes what is shown here while it is pending, and an ACCEPTED correction (staff.html
+//                       "Apply correction") resolves the item to Confirmed/verified going forward without altering the
+//                       original claim/found_value that live here — see that migration's header for the full data-integrity
+//                       story. None of this wording ever implies anything about the candidate's honesty; a dispute is answered
+//                       by pointing back at the finding, never by softening or explaining it away.
+//      For a license-linked certification the LICENSE's own queue row (type 'License') is authoritative when one exists,
+//      exactly as before this redesign — same precedence, just extended to always show something rather than skip.
+//   3. LIVE, not a frozen snapshot: comparison_snapshots is still written at approval time (unchanged — see below), but it is
+//      now purely a gate ("has this request been approved, and does a row exist") and a historical "what was true when the
+//      candidate approved" record. Every actual VIEW of a comparison — view_snapshot here, open_comparison (employer-api.ts,
+//      org accounts), enter/open (employer-comparison/index.ts, guests) — calls assembleSnapshot() fresh, on every open, for
+//      as long as the request's existing access window (72h / 7 days / 90 or 30 days / 30 minutes — ALL unchanged by this
+//      redesign) allows access at all. A brand-new item added by a later resume resubmission, or any status change on an
+//      item that already existed, is visible the next time the employer opens the comparison — not just at approval.
+//   4. Scope unchanged: skills, summary, hobbies/other freeform sections, job responsibilities, and contact details are still
+//      never part of a Comparison (this redesign is about the verification STATUS of submitted work/education/certification
+//      items, not about widening what categories are covered).
+// ============================================================================================================================
+//
+// Deletion rules live in the migration (expire_comparison_requests, purge_candidate_comparisons + the deactivation trigger) —
+// unchanged by this redesign; comparison_snapshots is still inserted at approval (gating + history) even though its `content`
+// is no longer what a view actually serves.
 const REST = { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` };
 const JSON_H = { ...REST, "Content-Type": "application/json" };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -121,7 +151,16 @@ function partialDate(date: unknown, precision: unknown): string | null {
 const dayOf = (iso: unknown) => (typeof iso === "string" && iso.length >= 10 ? iso.slice(0, 10) : null);
 const clean = (o: Record<string, unknown>) => { for (const k of Object.keys(o)) if (o[k] === null || o[k] === undefined || o[k] === "") delete o[k]; return o; };
 
-type NotCleared = { kind: "license" | "job" | "education" | "certification"; label: string; status: "not_verified" | "discrepancy"; reason?: string };
+// The five external statuses (2026-09-22 redesign) — see the REDESIGN block above for the full mapping rule and reasoning.
+type ExternalStatus = "verified" | "in_progress" | "not_possible" | "unable" | "discrepancy";
+function externalStatus(internal: string | null | undefined): ExternalStatus {
+  if (!internal) return "not_possible"; // no verification_items row at all — never queued
+  if (internal === "Confirmed") return "verified";
+  if (internal === "Verification Not Possible") return "not_possible";
+  if (internal === "Unable to Verify") return "unable";
+  if (internal === "Discrepancy") return "discrepancy";
+  return "in_progress"; // New, In Progress, Awaiting Response, Needs Reconciliation
+}
 // The kind of request is a fact about the CANDIDATE, never something a caller chooses: it is derived from the account type here and in
 // create_comparison_request (SQL), and an approval refuses if the two ever disagree.
 type Kind = "resume_comparison" | "license_report";
@@ -138,7 +177,7 @@ type LicenseLine = {
   license_number?: string;      // ONLY when verified
   reason?: string;              // one of LICENSE_REPORT_REASON, only when not verified
 };
-type Assembled = { kind: Kind; content: any; notCleared: NotCleared[]; licenses: LicenseLine[]; counts: Record<string, any> };
+type Assembled = { kind: Kind; content: any; licenses: LicenseLine[]; counts: Record<string, any> };
 
 // The ONLY sentences an employer can ever see about WHY a license did not clear. Keyed by license_items.verification_reason; anything
 // not listed gets the generic sentence. Deliberately says nothing about name changes, lookup failures, the registry's own status text,
@@ -151,8 +190,6 @@ const LICENSE_REASON: Record<string, string> = {
   no_records: "No record was found in the state registry for this license number.",
 };
 const LICENSE_REASON_GENERIC = "The automatic check could not confirm this license.";
-// checks that did not run to a result, or a clean result held for review: not "checked and did not clear", so never listed
-const LICENSE_NEVER_LISTED_REASONS = new Set(["lookup_failed", "recent_name_change"]);
 
 // LICENSE REPORT reasons: the resume-comparison sentences above plus the ones a report needs because it lists EVERY license, including ones no
 // check ran on. Still a closed set; never the registry's text, never a name change, never who a mismatched record belongs to.
@@ -174,11 +211,12 @@ function reportReasonKey(outcome: unknown, reason: unknown): string {
 const REPORT_FRESH_CHECK_CAP = 6; // live registry checks per report; the rest fall back to their last stored check
 
 const emptyAssembled = (kind: Kind): Assembled => ({
-  kind, content: null, notCleared: [], licenses: [],
+  kind, content: null, licenses: [],
   counts: kind === "license_report"
     ? { summary: { total: 0, verified: 0, not_verified: 0, discrepancy: 0 }, verified_total: 0, not_cleared_total: 0 }
-    : { work: { confirmed: 0, verified: 0 }, education: { confirmed: 0, verified: 0 }, certifications: { confirmed: 0, verified: 0 }, verified_total: 0, not_cleared_total: 0 },
+    : { work: emptyStatusCounts(), education: emptyStatusCounts(), certifications: emptyStatusCounts(), total: 0, verified_total: 0 },
 });
+const emptyStatusCounts = () => ({ total: 0, verified: 0, in_progress: 0, not_possible: 0, unable: 0, discrepancy: 0 });
 
 // The ONE entry point. What is assembled depends only on the candidate's account type; `opts.fresh` (license reports) asks the registry again.
 async function assembleSnapshot(candidateId: string, opts: { fresh?: boolean; maxAge?: number } = {}): Promise<Assembled> {
@@ -188,8 +226,11 @@ async function assembleSnapshot(candidateId: string, opts: { fresh?: boolean; ma
   return kind === "license_report" ? await assembleLicenseReport(candidateId, opts) : await assembleResumeSnapshot(candidateId);
 }
 
+// REDESIGNED 2026-09-22 (see the REDESIGN header block above for the full rule): every candidate_confirmed work/education/
+// certification item on a confirmed document, always, each carrying exactly one of the five external statuses
+// (externalStatus() above). Called fresh on every actual view (see view_snapshot/open_comparison/enter below), not just once
+// at approval, so a later resubmission's new items and any status change are both visible without a new request.
 async function assembleResumeSnapshot(candidateId: string): Promise<Assembled> {
-  const empty = { confirmed: 0, verified: 0 };
   const cand = (await rows(`candidates?id=eq.${candidateId}&select=id,first_name,last_name,account_type,deletion_scheduled_at`))[0];
   const emptyResult = (): Assembled => emptyAssembled("resume_comparison");
   if (!cand || cand.account_type !== "full_resume" || cand.deletion_scheduled_at) return emptyResult();
@@ -198,114 +239,104 @@ async function assembleResumeSnapshot(candidateId: string): Promise<Assembled> {
   const docs = await rows(`resume_documents?candidate_id=eq.${candidateId}&confirmed_at=not.is.null&select=id`);
   const docList = docs.map((d) => d.id).join(",");
   const base = `candidate_id=eq.${candidateId}&candidate_confirmed=eq.true&resume_document_id=in.(${docList})`; // only used when docList is non-empty
-  const [work, edu, certs, vis, lics, notClearedQ] = await Promise.all([
+  const [work, edu, certs, vis, lics] = await Promise.all([
     docList ? rows(`work_history_items?${base}&select=id,company,title,location,start_date,start_date_precision,end_date,end_date_precision,position&order=position.asc`) : Promise.resolve([]),
     docList ? rows(`education_items?${base}&select=id,institution,degree,field_of_study,location,start_date,start_date_precision,end_date,end_date_precision,position&order=position.asc`) : Promise.resolve([]),
     docList ? rows(`certification_items?${base}&select=id,name,issuing_body,license_number,issue_date,issue_date_precision,position&order=position.asc`) : Promise.resolve([]),
-    rows(`verification_items?candidate_id=eq.${candidateId}&status=eq.Confirmed&type=in.(Job%20Experience,Education,Certification,License)&select=id,type,source_item_id,status_changed_at`),
-    rows(`license_items?candidate_id=eq.${candidateId}&select=id,linked_certification_id,state,queue_item_id,verified_at,verification_outcome,verification_reason`),
-    // rows where a check was run and did not clear (see the header: only these can ever become a named line)
-    rows(`verification_items?candidate_id=eq.${candidateId}&status=in.(Discrepancy,Unable%20to%20Verify,Needs%20Reconciliation)&type=in.(Job%20Experience,Education,Certification,License)&select=id,type,status,source_item_id`),
+    // EVERY queue row for these four types, any status — the old version only ever fetched a status subset (Confirmed, or
+    // the bounded not-cleared set); this one needs all of them to place every item into one of the five external buckets.
+    rows(`verification_items?candidate_id=eq.${candidateId}&type=in.(Job%20Experience,Education,Certification,License)&select=id,type,source_item_id,status,claim,found_value,status_changed_at`),
+    rows(`license_items?candidate_id=eq.${candidateId}&select=id,linked_certification_id,state,queue_item_id,verified_at,verification_outcome`),
   ]);
-  const confirmedBySource = (type: string) => new Map(vis.filter((v) => v.type === type && v.source_item_id).map((v) => [v.source_item_id as string, v]));
-  const jobV = confirmedBySource("Job Experience");
-  const eduV = confirmedBySource("Education");
-  const certV = confirmedBySource("Certification");
+  const bySource = (type: string) => new Map(vis.filter((v) => v.type === type && v.source_item_id).map((v) => [v.source_item_id as string, v]));
+  const jobV = bySource("Job Experience");
+  const eduV = bySource("Education");
+  const certV = bySource("Certification");
   const licenseQueueV = new Map(vis.filter((v) => v.type === "License").map((v) => [v.id as string, v]));
   const licByCert = new Map(lics.filter((l) => l.linked_certification_id).map((l) => [l.linked_certification_id as string, l]));
 
-  const workOut: any[] = [];
-  for (const w of work) {
+  // One shared shape for every item's verification block, regardless of category — status is always present; claimed/found
+  // only for discrepancy (never blank the word "Discrepancy" alone), verified_on only for verified.
+  const verificationBlock = (v: { status?: string; claim?: string; found_value?: string; status_changed_at?: string } | null | undefined, method: string) => {
+    const status = externalStatus(v?.status);
+    return clean({
+      status,
+      method: status === "verified" ? method : undefined,
+      verified_on: status === "verified" ? dayOf(v?.status_changed_at) : undefined,
+      claimed: status === "discrepancy" ? (v?.claim || undefined) : undefined,
+      found: status === "discrepancy" ? (v?.found_value || undefined) : undefined,
+    });
+  };
+  const tally = (counts: ReturnType<typeof emptyStatusCounts>, status: ExternalStatus) => {
+    counts.total++;
+    if (status === "verified") counts.verified++;
+    else if (status === "in_progress") counts.in_progress++;
+    else if (status === "not_possible") counts.not_possible++;
+    else if (status === "unable") counts.unable++;
+    else counts.discrepancy++;
+  };
+
+  const workCounts = emptyStatusCounts();
+  const workOut = work.map((w) => {
     const v = jobV.get(w.id);
-    if (!v) continue;
-    workOut.push(clean({
+    const vb = verificationBlock(v, "verifi_review");
+    tally(workCounts, vb.status);
+    return clean({
       employer: w.company, title: w.title, location: w.location,
       start: partialDate(w.start_date, w.start_date_precision),
       end: w.end_date_precision === "present" ? null : partialDate(w.end_date, w.end_date_precision),
       current: w.end_date_precision === "present" ? true : null,
-      verification: clean({ status: "verified", method: "verifi_review", verified_on: dayOf(v.status_changed_at) }),
-    }));
-  }
-  const eduOut: any[] = [];
-  for (const e of edu) {
+      verification: vb,
+    });
+  });
+  const eduCounts = emptyStatusCounts();
+  const eduOut = edu.map((e) => {
     const v = eduV.get(e.id);
-    if (!v) continue;
-    eduOut.push(clean({
+    const vb = verificationBlock(v, "verifi_review");
+    tally(eduCounts, vb.status);
+    return clean({
       institution: e.institution, degree: e.degree, field_of_study: e.field_of_study, location: e.location,
       start: partialDate(e.start_date, e.start_date_precision), end: partialDate(e.end_date, e.end_date_precision),
-      verification: clean({ status: "verified", method: "verifi_review", verified_on: dayOf(v.status_changed_at) }),
-    }));
-  }
-  const certOut: any[] = [];
-  const verifiedCertIds = new Set<string>();
-  for (const c of certs) {
+      verification: vb,
+    });
+  });
+  const certCounts = emptyStatusCounts();
+  const certOut = certs.map((c) => {
     const own = certV.get(c.id);
     const lic = licByCert.get(c.id);
     const licQ = lic && lic.queue_item_id ? licenseQueueV.get(lic.queue_item_id) : null;
-    if (!own && !licQ) continue;
-    verifiedCertIds.add(c.id);
-    certOut.push(clean({
+    // A license-linked certification's own queue row (if any) is never used when the license's row exists — same
+    // precedence as before this redesign, just extended to "always show" instead of "skip when neither exists".
+    const effective = licQ || own || null;
+    const method = licQ ? (lic!.verification_outcome === "verified" ? "state_registry" : "verifi_review") : "verifi_review";
+    const vb = verificationBlock(effective, method);
+    if (licQ && vb.status === "verified") vb.verified_on = dayOf(lic!.verified_at) || vb.verified_on;
+    tally(certCounts, vb.status);
+    return clean({
       name: c.name, issuer: c.issuing_body, license_number: c.license_number, license_state: lic ? lic.state : null,
       issued: partialDate(c.issue_date, c.issue_date_precision),
-      // A License queue row is 'Confirmed' either because the state registry matched (license_items.verification_outcome = 'verified')
-      // or because staff confirmed it by hand after an ambiguous or failed check. Only the first is a registry verification.
-      verification: licQ
-        ? clean({ status: "verified", method: lic!.verification_outcome === "verified" ? "state_registry" : "verifi_review", verified_on: dayOf(lic!.verified_at) || dayOf(licQ.status_changed_at) })
-        : clean({ status: "verified", method: "verifi_review", verified_on: dayOf(own.status_changed_at) }),
-    }));
-  }
-
-  // ---- checked and did not clear: named lines (bounded; see the header) ----
-  const notCleared: NotCleared[] = [];
-  const ncBySource = (type: string) => new Map(notClearedQ.filter((v) => v.type === type && v.source_item_id).map((v) => [v.source_item_id as string, v]));
-  const ncById = new Map(notClearedQ.filter((v) => v.type === "License").map((v) => [v.id as string, v]));
-  const statusOf = (queueStatus: string): "not_verified" | "discrepancy" => (queueStatus === "Discrepancy" ? "discrepancy" : "not_verified");
-  const certById = new Map(certs.map((c) => [c.id as string, c]));
-  const licenseCertIds = new Set<string>();
-  for (const l of lics) {
-    const q = l.queue_item_id ? ncById.get(l.queue_item_id) : null;
-    const c = l.linked_certification_id ? certById.get(l.linked_certification_id) : null;
-    if (!q || !c || verifiedCertIds.has(c.id)) continue;
-    licenseCertIds.add(c.id);
-    // a Needs Reconciliation row is only a "did not clear" when the automatic check produced a result; Discrepancy / Unable to Verify are
-    // human determinations and always listed
-    if (q.status === "Needs Reconciliation" && (LICENSE_NEVER_LISTED_REASONS.has(String(l.verification_reason)) || (l.verification_outcome !== "ambiguous" && l.verification_outcome !== "not_found"))) continue;
-    const base = String(c.name || "License").trim();
-    notCleared.push({
-      kind: "license",
-      label: `${/licen[sc]e/i.test(base) ? base : base + " license"}${l.state ? ` (${l.state})` : ""}`,
-      status: statusOf(q.status),
-      reason: LICENSE_REASON[String(l.verification_reason)] || LICENSE_REASON_GENERIC,
+      verification: vb,
     });
-  }
-  const humanOnly = (q: any) => q && (q.status === "Discrepancy" || q.status === "Unable to Verify");
-  const jobN = ncBySource("Job Experience"), eduN = ncBySource("Education"), certN = ncBySource("Certification");
-  for (const w of work) { const q = jobN.get(w.id); if (humanOnly(q)) notCleared.push({ kind: "job", label: [w.title, w.company].filter(Boolean).join(" at ") || "Job", status: statusOf(q!.status) }); }
-  for (const e of edu) { const q = eduN.get(e.id); if (humanOnly(q)) notCleared.push({ kind: "education", label: [[e.degree, e.field_of_study].filter(Boolean).join(", "), e.institution].filter(Boolean).join(" - ") || "Education", status: statusOf(q!.status) }); }
-  for (const c of certs) { const q = certN.get(c.id); if (humanOnly(q) && !verifiedCertIds.has(c.id) && !licenseCertIds.has(c.id)) notCleared.push({ kind: "certification", label: String(c.name || "Certification"), status: statusOf(q!.status) }); }
+  });
 
   const counts = {
-    work: { confirmed: work.length, verified: workOut.length },
-    education: { confirmed: edu.length, verified: eduOut.length },
-    certifications: { confirmed: certs.length, verified: certOut.length },
-    verified_total: workOut.length + eduOut.length + certOut.length,
-    not_cleared_total: notCleared.length,
+    work: workCounts, education: eduCounts, certifications: certCounts,
+    total: workCounts.total + eduCounts.total + certCounts.total,
+    verified_total: workCounts.verified + eduCounts.verified + certCounts.verified,
   };
   const name = [cand.first_name, cand.last_name].filter(Boolean).join(" ");
   return {
     kind: "resume_comparison",
     counts,
-    notCleared,
     licenses: [],
     content: {
-      version: 2,
+      version: 3,
       kind: "resume_comparison",
       assembled_at: new Date().toISOString(),
       candidate: { name },
-      basis: "Items the candidate confirmed and that Verifi verified are shown as verified. Items where a check was run and did not clear are listed separately by name. Any other item that is not shown was not verified, for any reason; that is not evidence either way. This is the record as of the assembly time above.",
+      basis: "Every job, education entry and certification the candidate has submitted is shown, in its current state, with exactly one status: Verified (Verifi confirmed it); In progress (still being checked); Verification not possible (no viable way to check it existed); Unable to verify (a check was attempted but came back inconclusive); or Discrepancy (a conclusive, conflicting answer came back — shown with both the claimed and the found value). This is the record as of the moment this was opened, not a fixed-in-time snapshot.",
       coverage: { work: counts.work, education: counts.education, certifications: counts.certifications },
       work: workOut, education: eduOut, certifications: certOut,
-      not_cleared: notCleared,
     },
   };
 }
@@ -395,7 +426,7 @@ async function assembleLicenseReport(candidateId: string, opts: { fresh?: boolea
   const counts = { summary: { total: lines.length, verified, not_verified: lines.length - verified - discrepancy, discrepancy }, verified_total: verified, not_cleared_total: lines.length - verified };
   const name = [cand.first_name, cand.last_name].filter(Boolean).join(" ");
   return {
-    kind: "license_report", counts, notCleared: [], licenses: lines,
+    kind: "license_report", counts, licenses: lines,
     content: {
       version: 1, kind: "license_report", assembled_at: new Date().toISOString(), candidate: { name },
       basis: "Every license on the candidate's account is listed with its status. Verified means Verifi checked it against the issuing state's registry, or Verifi staff confirmed it. Anything else says why it is not verified. Each license shows the date of the check its status rests on. This is the record as of the assembly time above.",
@@ -407,9 +438,11 @@ async function assembleLicenseReport(candidateId: string, opts: { fresh?: boolea
 
 // What the candidate is shown before deciding, and gets back after approving: by kind. For a license report these ARE the lines an employer will
 // see (the number of a verified license included); "stored" means built from the last stored checks only, "live" means re-checked against the registry.
+// For a resume comparison this is now (2026-09-22) the exact same always-every-item content an employer's own view uses — no separate
+// "not cleared" summary shape, since nothing is held back from either audience any more.
 const wouldShare = (a: Assembled, preview: "stored" | "live") => a.kind === "license_report"
   ? { kind: a.kind, preview, ...a.counts, licenses: a.licenses }
-  : { kind: a.kind, ...a.counts, not_cleared: a.notCleared };
+  : { kind: a.kind, ...a.counts, work: a.content?.work || [], education: a.content?.education || [], certifications: a.content?.certifications || [] };
 
 // ---------------------------------------------------------------------------------------------------
 // EMAIL. Everything an employer typed (name, company, email, source) is escaped before it goes into HTML.
@@ -529,6 +562,19 @@ export default {
         if (typeof body.request_id !== "string" || !UUID.test(body.request_id)) return json({ ok: false, error: "request_id_invalid" }, 400);
         return json({ ok: true, ...(await notifyCandidate(body.request_id)) });
       }
+      // assemble_live (2026-09-22 redesign): the ONE place employer-api.ts (org accounts) and employer-comparison/index.ts
+      // (guests) reach to get what a comparison currently shares — assembleSnapshot stays defined in exactly one file (this
+      // one, "the ONLY code that decides this", per the header above); those two never duplicate the assembly rule, they
+      // just call it. Service-role bearer only: the CALLER (employer-api.ts / employer-comparison/index.ts) is what already
+      // verifies the request is approved, owned by the right org/guest token, and inside its access window — this action
+      // trusts that check happened and only ever runs after it, exactly like every other internal-only action here.
+      if (action === "assemble_live") {
+        if (!isServiceCaller(req)) return UNAUTHORIZED();
+        if (typeof body.candidate_id !== "string" || !UUID.test(body.candidate_id)) return json({ ok: false, error: "candidate_id_invalid" }, 400);
+        const live = await assembleSnapshot(body.candidate_id);
+        if (!live.content) return json({ ok: false, error: "unavailable" }, 409);
+        return json({ ok: true, content: live.content, assembled_at: live.content.assembled_at });
+      }
 
       // ---- candidate-session actions ----
       const candidateId = typeof body.candidate_id === "string" ? body.candidate_id : "";
@@ -615,8 +661,13 @@ export default {
         // candidate's account type and must equal the request's own: if they ever disagree (account changed, row altered) nothing is shared.
         const snap = await assembleSnapshot(candidateId, { fresh: true, maxAge: 0 });
         if (!snap.content || snap.kind !== r.kind) return json({ ok: false, error: "unavailable" }, 409);
-        const nothing = snap.kind === "license_report" ? snap.counts.summary.total === 0 : snap.counts.verified_total === 0;
+        // "Nothing to share" (2026-09-22 redesign): since every item now shows regardless of status, this can only mean the candidate has
+        // literally no work/education/certification items (or no licenses) at all — not "nothing verified yet", which used to be the bar.
+        const nothing = snap.kind === "license_report" ? snap.counts.summary.total === 0 : snap.counts.total === 0;
         if (nothing) return json({ ok: false, error: "nothing_to_share", would_share: wouldShare(snap, "live") }, 409);
+        // comparison_snapshots is still written here (unchanged) as the approval GATE and a historical "what was true when
+        // approved" record — but no view of this comparison ever reads its `content` back any more (see the REDESIGN header
+        // block above and view_snapshot below): every open re-assembles fresh from current data instead.
         const ins = await rest("comparison_snapshots", { method: "POST", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ request_id: r.id, candidate_id: candidateId, content: snap.content, counts: snap.counts }) });
         if (ins.status === 409) return json({ ok: false, error: "not_pending" }, 409); // a simultaneous approval already stored one
         if (!ins.ok) return json({ ok: false, error: "assemble_failed" }, 500);
@@ -638,9 +689,14 @@ export default {
         if (typeof body.request_id !== "string" || !UUID.test(body.request_id)) return json({ ok: false, error: "request_id_invalid" }, 400);
         const r = (await rows(`comparison_requests?id=eq.${body.request_id}&candidate_id=eq.${candidateId}&status=eq.approved&select=id`))[0];
         if (!r) return json({ ok: false, error: "not_found" }, 404);
-        const s = (await rows(`comparison_snapshots?request_id=eq.${r.id}&candidate_id=eq.${candidateId}&select=content,assembled_at`))[0];
-        if (!s) return json({ ok: false, error: "not_found" }, 404);
-        return json({ ok: true, content: s.content, assembled_at: s.assembled_at });
+        // comparison_snapshots is only checked for EXISTENCE here (the approval gate) — its stored `content` is never read.
+        // What a candidate sees when they check "what was shared" is the same live, current content an employer would see
+        // opening this request right now, not a frozen record of what was true at approval (2026-09-22 redesign).
+        const has = (await rows(`comparison_snapshots?request_id=eq.${r.id}&candidate_id=eq.${candidateId}&select=id`))[0];
+        if (!has) return json({ ok: false, error: "not_found" }, 404);
+        const live = await assembleSnapshot(candidateId);
+        if (!live.content) return json({ ok: false, error: "not_found" }, 404);
+        return json({ ok: true, content: live.content, assembled_at: live.content.assembled_at });
       }
 
       return json({ ok: false, error: "unknown_action" }, 404);

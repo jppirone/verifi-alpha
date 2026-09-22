@@ -3172,7 +3172,7 @@ const __ds_scope = {};
       <sc-for list="{{ coverageLines }}" as="line" hint-placeholder-count="3">
         <div style="font-size:15px;line-height:1.6">{{ line }}</div>
       </sc-for>
-      <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">Anything listed under "Checked, not verified" had a check that did not clear. Any other item that is not shown was not verified, for any reason; that is not evidence either way. Job descriptions are not part of what is verified, so they are not shown.</div>
+      <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">Every job, education entry and certification the candidate has submitted is shown below, with its current status. Job descriptions are not part of what is verified, so they are not shown.</div>
       <div style="display:grid;grid-template-columns:auto 1fr;gap:var(--space-2) var(--space-4);font-size:12px;align-items:baseline;border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
         <div style="color:var(--color-neutral-500)">Record as of</div><div>{{ compareAsOf }}</div>
         <div style="color:var(--color-neutral-500)">Approved</div><div>{{ compareApproved }}</div>
@@ -3181,7 +3181,7 @@ const __ds_scope = {};
     </div>
 
     <div class="card elev-md" style="border:1px solid var(--color-accent-700);padding:var(--space-6)">
-      <div style="font-size:15px;line-height:1.6;color:var(--color-neutral-100)">This is the candidate's verified record as of the time above, frozen at that moment. Your copy may differ. If it does, that is worth a conversation with the candidate before drawing conclusions.</div>
+      <div style="font-size:15px;line-height:1.6;color:var(--color-neutral-100)">This is the candidate's verified record as of the time above — current as of right now, not a fixed-in-time snapshot; reopening this comparison later reflects whatever is true then. Your copy may differ. If it does, that is worth a conversation with the candidate before drawing conclusions.</div>
     </div>
 
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:var(--space-4);align-items:start">
@@ -3200,32 +3200,20 @@ const __ds_scope = {};
         <sc-if value="{{ compareEmpty }}" hint-placeholder-val="{{ false }}">
           <div style="font-size:13px;color:var(--color-neutral-400)">No items to show.</div>
         </sc-if>
-        <sc-for list="{{ verifiedRows }}" as="row" hint-placeholder-count="4">
+        <sc-for list="{{ itemRows }}" as="row" hint-placeholder-count="4">
           <div style="display:flex;flex-direction:column;gap:4px;padding-bottom:var(--space-3);border-bottom:1px solid var(--color-divider)">
             <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap">
               <div style="font-size:14px;line-height:1.5">{{ row.headline }}</div>
-              <span class="tag tag-outline" style="white-space:nowrap">Verified</span>
+              <span class="{{ row.statusClass }}" style="white-space:nowrap;{{ row.statusStyle }}">{{ row.statusLabel }}</span>
             </div>
             <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.6">{{ row.detail }}</div>
+            <sc-if value="{{ row.isDiscrepancy }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.6"><b>Claimed:</b> {{ row.claimed }}</div>
+              <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.6"><b>Found:</b> {{ row.found }}</div>
+            </sc-if>
             <div style="font-size:11px;color:var(--color-neutral-500)">{{ row.kind }} · {{ row.how }}</div>
           </div>
         </sc-for>
-        <sc-if value="{{ hasNotCleared }}" hint-placeholder-val="{{ false }}">
-          <div class="card-kicker" style="margin-top:var(--space-3)">Checked, not verified</div>
-          <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">A check was run on each of these and did not clear. That is a fact about the check, not a finding about the candidate: the reason line says what the check found.</div>
-          <sc-for list="{{ notClearedRows }}" as="nc" hint-placeholder-count="1">
-            <div style="display:flex;flex-direction:column;gap:4px;padding-bottom:var(--space-3);border-bottom:1px solid var(--color-divider)">
-              <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap">
-                <div style="font-size:14px;line-height:1.5">{{ nc.headline }}</div>
-                <span class="tag tag-outline" style="white-space:nowrap;color:#b26a00;border-color:#b26a00">{{ nc.statusLabel }}</span>
-              </div>
-              <sc-if value="{{ nc.hasReason }}" hint-placeholder-val="{{ false }}">
-                <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.6">{{ nc.reason }}</div>
-              </sc-if>
-              <div style="font-size:11px;color:var(--color-neutral-500)">{{ nc.kind }} · not verified</div>
-            </div>
-          </sc-for>
-        </sc-if>
       </div>
     </div>
   </div>
@@ -4407,9 +4395,12 @@ class Component extends DCLogic {
       comparisonRows: comparisonRowsFor('acct'),
       comparisonRowsReq: comparisonRowsFor('request'),
       compareName: (content.candidate && content.candidate.name) || cmp.label || '',
+      // Redesigned 2026-09-22: coverage is now a breakdown across all five statuses, not "N of M verified" (which used to
+      // silently fold four different real states — still in progress, no viable way to check, checked and inconclusive,
+      // checked and conflicting — into one undifferentiated remainder).
       coverageLines: (() => {
         const cv = content.coverage || {};
-        const line = (x, one, many) => x ? (x.verified + ' of ' + x.confirmed + ' ' + (x.confirmed === 1 ? one : many) + ' verified') : '';
+        const line = (x, one, many) => x ? (x.total + ' ' + (x.total === 1 ? one : many) + ': ' + x.verified + ' verified, ' + x.in_progress + ' in progress, ' + x.not_possible + ' verification not possible, ' + x.unable + ' unable to verify, ' + x.discrepancy + ' discrepancy') : '';
         return [line(cv.work, 'job', 'jobs'), line(cv.education, 'education entry', 'education entries'), line(cv.certifications, 'certification or license', 'certifications and licenses')].filter(Boolean);
       })(),
       compareAsOf: this.fmtDateTime(cmp.assembledAt),
@@ -4420,23 +4411,37 @@ class Component extends DCLogic {
         : (cmp.metered && cmp.quota ? 'This used 1 lookup (' + cmp.quota.remaining + ' of ' + cmp.quota.included + ' left this period).' : 'No lookup used by this view (it was counted when first opened).'),
       compareBackLabel: cmp.guest ? 'Close this one-time view' : (s.compareFrom === 'request' ? 'Back to your requests' : 'Back to your account'),
       compareEmpty: !(content.work || []).length && !(content.education || []).length && !(content.certifications || []).length,
-      verifiedRows: (() => {
-        const how = (x) => (x.verification && x.verification.method === 'state_registry' ? 'checked against the state registry' : 'verified by Verifi review') + (x.verification && x.verification.verified_on ? ', ' + x.verification.verified_on : '');
+      // Redesigned 2026-09-22: every submitted item shows, always, with exactly one of five statuses — no more
+      // exclusion into a bare count, no more separate bounded "checked, not verified" list. A Discrepancy always
+      // carries both the claimed and the found value, never just the word "Discrepancy" alone.
+      itemRows: (() => {
+        const STATUS_LABEL = { verified: 'Verified', in_progress: 'In progress', not_possible: 'Verification not possible', unable: 'Unable to verify', discrepancy: 'Discrepancy' };
+        const STATUS_CLASS = { verified: 'tag tag-accent', in_progress: 'tag tag-neutral', not_possible: 'tag tag-outline', unable: 'tag tag-outline', discrepancy: 'tag tag-outline' };
         const range = (a, b, cur) => [a, cur ? 'present' : b].filter(Boolean).join(' - ');
+        const how = (v) => {
+          if (!v || !v.status) return '';
+          if (v.status === 'verified') return (v.method === 'state_registry' ? 'Checked against the state registry' : 'Verified by Verifi review') + (v.verified_on ? ', ' + v.verified_on : '') + '.';
+          if (v.status === 'in_progress') return 'Still being checked.';
+          if (v.status === 'not_possible') return 'No viable way to verify this was found.';
+          if (v.status === 'unable') return 'A check was attempted, but came back inconclusive.';
+          return '';
+        };
+        const row = (kind, headline, detail, item) => {
+          const v = item.verification || {};
+          return {
+            kind, headline, detail,
+            statusLabel: STATUS_LABEL[v.status] || 'In progress', statusClass: STATUS_CLASS[v.status] || 'tag tag-neutral',
+            statusStyle: v.status === 'discrepancy' ? 'color:#b26a00;border-color:#b26a00' : '',
+            isDiscrepancy: v.status === 'discrepancy', claimed: v.claimed || '—', found: v.found || '—',
+            how: how(v),
+          };
+        };
         const out = [];
-        (content.work || []).forEach(w => out.push({ kind: 'Job', headline: [w.title, w.employer].filter(Boolean).join(' at '), detail: [w.location, range(w.start, w.end, w.current)].filter(Boolean).join(' · '), how: how(w) }));
-        (content.education || []).forEach(e => out.push({ kind: 'Education', headline: [e.degree, e.field_of_study].filter(Boolean).join(', ') || e.institution || '', detail: [e.institution, e.location, range(e.start, e.end)].filter(Boolean).join(' · '), how: how(e) }));
-        (content.certifications || []).forEach(x => out.push({ kind: 'Certification', headline: x.name || '', detail: [x.issuer, x.license_number ? 'Lic #' + x.license_number : '', x.license_state, x.issued].filter(Boolean).join(' · '), how: how(x) }));
+        (content.work || []).forEach(w => out.push(row('Job', [w.title, w.employer].filter(Boolean).join(' at '), [w.location, range(w.start, w.end, w.current)].filter(Boolean).join(' · '), w)));
+        (content.education || []).forEach(e => out.push(row('Education', [e.degree, e.field_of_study].filter(Boolean).join(', ') || e.institution || '', [e.institution, e.location, range(e.start, e.end)].filter(Boolean).join(' · '), e)));
+        (content.certifications || []).forEach(x => out.push(row('Certification', x.name || '', [x.issuer, x.license_number ? 'Lic #' + x.license_number : '', x.license_state, x.issued].filter(Boolean).join(' · '), x)));
         return out;
       })(),
-      // snapshot version 2+: items a check was run on that did not clear (older snapshots have none)
-      hasNotCleared: (content.not_cleared || []).length > 0,
-      notClearedRows: (content.not_cleared || []).map(n => ({
-        headline: n.label || '',
-        statusLabel: n.status === 'discrepancy' ? 'Discrepancy' : 'Not verified',
-        hasReason: !!n.reason, reason: n.reason || '',
-        kind: ({ license: 'License', job: 'Job', education: 'Education', certification: 'Certification' })[n.kind] || 'Item',
-      })),
       onPickCopy: (e) => this.onPickCopy(e),
       closeCompare: (e) => { if (e && e.preventDefault) e.preventDefault(); if (cmp.guest) { this.closeGuestView(); return; } if (this._copyUrl) { try { URL.revokeObjectURL(this._copyUrl); } catch (x) { /* ignore */ } this._copyUrl = null; } this.setState({ screen: s.compareFrom === 'request' ? 'request' : 'acct', compare: null }); this.loadReal(); },
 

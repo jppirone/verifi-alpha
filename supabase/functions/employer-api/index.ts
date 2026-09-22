@@ -579,11 +579,22 @@ const ACTIONS: Record<string, Action> = {
     run: async ({ user, org, p }) => {
       if (typeof p.request_id !== "string" || !UUID.test(p.request_id)) return fail(400, "request_id_invalid");
       // Only the person who asked can open it, and only while still in the organization the request was made for.
-      const r = (await rows(`comparison_requests?id=eq.${p.request_id}&employer_user_id=eq.${user.id}&select=id,status,org_id,first_delivered_at,snapshot_expires_at`))?.[0];
+      const r = (await rows(`comparison_requests?id=eq.${p.request_id}&employer_user_id=eq.${user.id}&select=id,status,org_id,candidate_id,first_delivered_at,snapshot_expires_at`))?.[0];
       if (!r || r.org_id !== org!.id) return fail(404, "not_found");
       if (r.status !== "approved") return fail(404, "not_available");
-      const snap = (await rows(`comparison_snapshots?request_id=eq.${r.id}&select=content,assembled_at`))?.[0];
-      if (!snap) return fail(404, "not_available");
+      // A comparison_snapshots row is only checked for EXISTENCE (the approval gate, and proof the 90/30-day post-open
+      // window in expire_comparison_requests hasn't already deleted it) — its stored `content` is never read. What this
+      // serves is assembled LIVE, fresh, from the candidate's current profile on every open (2026-09-22 redesign; see
+      // candidate-comparison-requests/index.ts's own REDESIGN header for the full rule) — the ONE place that logic lives.
+      const gate = (await rows(`comparison_snapshots?request_id=eq.${r.id}&select=id`))?.[0];
+      if (!gate) return fail(404, "not_available");
+      const live = await fetch(`${SUPABASE_URL}/functions/v1/candidate-comparison-requests`, {
+        method: "POST", headers: { "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "assemble_live", candidate_id: r.candidate_id }),
+      });
+      const liveJson = live.ok ? await live.json().catch(() => null) : null;
+      if (!liveJson || !liveJson.ok) return fail(500, "assemble_failed");
+      const snap = { content: liveJson.content, assembled_at: liveJson.assembled_at };
 
       let quota: { used: number; included: number; remaining: number } | null = null;
       let metered = false;

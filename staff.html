@@ -2443,6 +2443,25 @@ th.sortable{cursor:pointer;user-select:none}
           <span class="{{ detailStatusTagClass }}">{{ detailStatus }}</span>
         </div>
 
+        <!-- found_value (2026-09-22): the structural record of what verification actually found for a Discrepancy.
+             Shown whenever populated, regardless of the item's current status, so it stays visible through a later
+             Apply correction rather than disappearing the moment the item resolves. -->
+        <sc-if value="{{ detailHasFoundValue }}" hint-placeholder-val="{{ false }}">
+          <div>
+            <div style="font-size:11px;color:var(--color-neutral-500);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:2px">Found value</div>
+            <div style="font-size:13px;color:var(--color-neutral-200);line-height:1.5">{{ detailFoundValue }}</div>
+          </div>
+        </sc-if>
+
+        <!-- A correction was accepted (2026-09-22): a permanent marker, separate from the timeline, that stays visible
+             regardless of current status -- the original claim/found value above are never touched by this. -->
+        <sc-if value="{{ detailCorrectionApplied }}" hint-placeholder-val="{{ false }}">
+          <div style="padding:10px 12px;border:1px solid var(--color-accent-700);border-radius:6px;background:var(--color-neutral-900);display:flex;flex-direction:column;gap:2px">
+            <div style="font-size:11px;color:var(--color-accent-300);text-transform:uppercase;letter-spacing:0.04em">Correction applied</div>
+            <div style="font-size:13px;color:var(--color-neutral-200);line-height:1.5">A candidate-proposed correction was accepted on {{ detailCorrectionAppliedAt }}: <b>{{ detailCorrectionAppliedValue }}</b>. The original claim and found value above are unchanged.</div>
+          </div>
+        </sc-if>
+
         <div style="display:flex;align-items:center;gap:var(--space-3)">
           <button type="button" class="btn btn-ghost" style="font-size:12px;padding:4px 10px" disabled="{{ sourceDocLoading }}" onClick="{{ viewSourceDocument }}">{{ sourceDocLabel }}</button>
           <sc-if value="{{ sourceDocError }}" hint-placeholder-val="{{ false }}">
@@ -2943,13 +2962,17 @@ class Component extends DCLogic {
   // calls with no email/SMS/webhook code path — and by checking this project's Supabase Database
   // Webhooks, which has none configured on any table). Staff still resolve it into a real status
   // manually, exactly like every other status here.
-  STATUS_OPTIONS = ['New', 'In Progress', 'Awaiting Response', 'Needs Reconciliation', 'Confirmed', 'Discrepancy', 'Unable to Verify'];
+  STATUS_OPTIONS = ['New', 'In Progress', 'Awaiting Response', 'Needs Reconciliation', 'Confirmed', 'Discrepancy', 'Verification Not Possible', 'Unable to Verify'];
   // Item 10 (2026-09-07 wiring audit): the real gap this closes — a status change to any of these
   // three saved instantly with an empty timeline note (confirmStatusChange used to hardcode
   // note: ''), so "why was this confirmed" had no real answer anywhere. 'Needs Reconciliation' is
   // deliberately excluded — per its own comment above, it's a staff-internal working flag, not a
-  // resolution outcome.
-  RESOLUTION_STATUSES = ['Confirmed', 'Discrepancy', 'Unable to Verify'];
+  // resolution outcome. 'Verification Not Possible' added 2026-09-22 (Comparison feature redesign):
+  // a real, distinct terminal outcome — no viable path existed to attempt verification at all — not
+  // a sub-reason of 'Unable to Verify' (which stays what it always was: a channel existed, outreach
+  // happened, but no conclusive answer came back). Requires the same resolution evidence as every
+  // other status in this list.
+  RESOLUTION_STATUSES = ['Confirmed', 'Discrepancy', 'Verification Not Possible', 'Unable to Verify'];
 
   // True for a License queue item whose last automatic check found the license in the registry with a correct name match, but the
   // registry lists it as not currently valid (verify-license reason code exact_match_not_active). Read from stored data only.
@@ -4058,17 +4081,25 @@ class Component extends DCLogic {
       openApplyCorrection: () => this.setState({ correctionMode: 'apply', correctionDraft: selected ? (selected.correctionValue || '') : '' }),
       openDeclineCorrection: () => this.setState({ correctionMode: 'decline', declineDraft: '' }),
       cancelCorrection: () => this.setState({ correctionMode: null, correctionDraft: '', declineDraft: '' }),
+      // Real data-integrity fix (2026-09-22 -- see the migration adding found_value for the full story): this used to
+      // overwrite `claim` with the candidate's proposed value and flip straight to Confirmed, destroying the original
+      // finding (claim AND whatever was found, which had nowhere structured to live before found_value existed) with
+      // only a staff-only timeline entry left as any trace. claim and found_value are now NEVER touched here -- the
+      // original finding is permanent. Applying a correction records that a correction was accepted (correctionValue,
+      // now repurposed as the ACCEPTED value, + correctionAppliedAt, a second structural marker alongside the timeline
+      // entry) without erasing what it was a correction TO. Status still resolves to Confirmed (the queue item itself
+      // is genuinely settled), but detailCorrectionApplied's own card below keeps the original claim/found_value and
+      // the fact that a correction was applied both permanently visible, not a clean slate.
       submitCorrection: () => {
         if (!selected) return;
         const next = (s.correctionDraft || '').trim();
-        const before = selected.correctionValue || '';
-        if (!next || next === before) return;
-        const claim = before && selected.claim.indexOf(before) !== -1 ? selected.claim.split(before).join(next) : selected.claim;
-        this.updateItem(selected.id, { claim, correctionValue: next, correctionRequested: false, status: 'Confirmed' });
+        if (!next) return;
+        const now = new Date().toISOString();
+        this.updateItem(selected.id, { correctionValue: next, correctionRequested: false, correctionAppliedAt: now, status: 'Confirmed' });
         this.addTimelineEntry(selected.id, {
-          date: new Date().toISOString(), actor: s.currentUser,
+          date: now, actor: s.currentUser,
           action: 'Correction applied to ' + (selected.correctionField || 'claim detail') + '.',
-          note: 'Before: ' + before + '. After: ' + next + '. Changed by ' + s.currentUser + '. Status returned to Confirmed.',
+          note: 'Accepted value: ' + next + '. Original claim and found value are unchanged and remain on record. Applied by ' + s.currentUser + '. Status set to Confirmed.',
         });
         this.setState({ correctionMode: null, correctionDraft: '', declineDraft: '' });
       },
@@ -4102,6 +4133,15 @@ class Component extends DCLogic {
       detailId: selected ? selected.id : '',
       detailType: selected ? selected.type : '',
       detailClaim: selected ? selected.claim : '',
+      // found_value (2026-09-22): the structural record of what verification actually found for a Discrepancy --
+      // read-only display, same treatment as claim (neither has a direct free-edit path; both are set once, at the
+      // moment a real determination is made, and persist unchanged after that, including through a later Apply
+      // correction). Shown whenever populated, regardless of the item's CURRENT status, so it survives resolution.
+      detailHasFoundValue: !!(selected && selected.foundValue),
+      detailFoundValue: selected ? (selected.foundValue || '') : '',
+      detailCorrectionApplied: !!(selected && selected.correctionAppliedAt),
+      detailCorrectionAppliedAt: selected && selected.correctionAppliedAt ? new Date(selected.correctionAppliedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '',
+      detailCorrectionAppliedValue: selected ? (selected.correctionValue || '') : '',
       detailStatus: selected ? selected.status : '',
       detailStatusTagClass: selected ? this.statusTagClass(selected.status) : 'tag tag-neutral',
       detailReceivedDisp: selected ? this.fmt(selected.received) : '',
@@ -4286,7 +4326,13 @@ class Component extends DCLogic {
         // evidence is blank, so a stale click (or anything else that could reach this handler
         // without the UI's own disabled state) can't slip an unexplained resolution through.
         if (this.RESOLUTION_STATUSES.includes(newStatus) && !evidence) return;
-        this.updateItem(selected.id, { status: newStatus });
+        // found_value (2026-09-22): the same evidence text IS the structural "what was actually
+        // found" record for a Discrepancy -- staff already had to type this before this change was
+        // ever allowed; it now also lands on the row itself (found_value), not just the timeline, so
+        // a Comparison can show it and it survives everything, including a later Apply correction.
+        const patch = { status: newStatus };
+        if (newStatus === 'Discrepancy') patch.foundValue = evidence;
+        this.updateItem(selected.id, patch);
         this.addTimelineEntry(selected.id, { date: new Date().toISOString(), actor: s.currentUser, action: 'Status changed to ' + newStatus + '.', note: evidence });
         this.setState({ statusConfirmOpen: false, pendingStatus: null, resolutionEvidenceDraft: '' });
       },

@@ -87,6 +87,20 @@ async function requestByToken(token: unknown): Promise<any | null> {
   return (await rows(`comparison_requests?guest_token_hash=eq.${await sha256Hex(token.toLowerCase())}&access_method=eq.guest&select=*`))[0] || null;
 }
 
+// The ONE place candidate-comparison-requests/index.ts's assembler gets called from here (2026-09-22 redesign; see that
+// file's own REDESIGN header for the full rule) — never duplicated. A guest's 30-minute view window is short enough that
+// "live" rarely changes anything mid-window, but it's still assembled fresh on every visit for the same reason every other
+// access path is: what an approved comparison shows is always the candidate's current state, not a frozen record of
+// whatever was true at approval.
+async function liveContent(candidateId: string): Promise<{ content: any; assembled_at: string } | null> {
+  const r = await fetch(`${SUPABASE_URL}/functions/v1/candidate-comparison-requests`, {
+    method: "POST", headers: { "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "assemble_live", candidate_id: candidateId }),
+  });
+  const j = r.ok ? await r.json().catch(() => null) : null;
+  return j && j.ok ? { content: j.content, assembled_at: j.assembled_at } : null;
+}
+
 // The real charge (2026-09-22): capture an authorized, capturable hold. Idempotency-keyed by the payment's own id, so a
 // concurrent capture of the same hold (two visits redeeming at once) gets Stripe's identical answer back, never a second
 // charge. Marks the row paid on success so the caller can proceed straight to redemption. A hold that can no longer be
@@ -213,7 +227,7 @@ export default {
         if (serve) {
           const res = (await rpc("open_guest_comparison", { p_token_hash: tokenHash }))?.[0];
           if (res?.ok) {
-            const snap = (await rows(`comparison_snapshots?request_id=eq.${r.id}&select=content,assembled_at`))[0];
+            const snap = await liveContent(r.candidate_id);
             if (snap) {
               const fresh = (await requestByToken(body.token)) || r;
               return json({ ...(await statusOf(fresh)), delivered: { content: snap.content, assembled_at: snap.assembled_at, window_ends_at: res.window_ends_at, first_open: !!res.first_open } });
@@ -304,7 +318,7 @@ export default {
           const [status, error] = map[res.reason] || [500, "request_failed"];
           return json({ ok: false, error }, status);
         }
-        const snap = (await rows(`comparison_snapshots?request_id=eq.${r.id}&select=content,assembled_at`))[0];
+        const snap = await liveContent(r.candidate_id);
         if (!snap) return json({ ok: false, error: "not_available" }, 410);
         return json({ ok: true, content: snap.content, assembled_at: snap.assembled_at, window_ends_at: res.window_ends_at, first_open: !!res.first_open });
       }
