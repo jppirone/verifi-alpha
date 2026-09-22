@@ -95,6 +95,11 @@ export default {
           content: typeof content === "string" ? content : "",
           origin: "candidate_created",
           partner_key: typeof partner_key === "string" ? partner_key : "",
+          // candidate_edited (2026-09-22): a version created here is candidate-authored from its very first
+          // row — never the auto-seeded placeholder assemble_customized_resume's untouched-default substitution
+          // is meant for (see that migration's header) — so it starts already "edited", same end state a fresh
+          // auto-seed reaches only after update-candidate-summary's first real edit.
+          candidate_edited: true,
         }),
       });
       if (!res.ok) {

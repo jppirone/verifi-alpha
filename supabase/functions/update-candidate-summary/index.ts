@@ -92,7 +92,11 @@ export default {
 
       const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
       if (typeof name === "string") patch.name = name.trim() || "Untitled summary";
-      if (typeof content === "string") patch.content = content;
+      // candidate_edited (2026-09-22): once the candidate's own content lands on this row, it's their words from then
+      // on — assemble_customized_resume's untouched-default substitution (see that migration's own header for the
+      // real bug this closed) must never fire again for this row, even if a later resubmission's own Summary text
+      // changes. Set unconditionally on any content write, matching origin's own "immutable once true" treatment.
+      if (typeof content === "string") { patch.content = content; patch.candidate_edited = true; }
       if (typeof partner_key === "string") patch.partner_key = partner_key;
 
       const res = await fetch(

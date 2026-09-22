@@ -140,6 +140,50 @@ export default {
         summaries = await insertRes.json();
       }
 
+      // Lazy staleness repair (2026-09-22): the untouched (candidate_edited = false) default version is meant to
+      // always mirror the resume's own CURRENT summary — see the migration adding candidate_edited for the real
+      // bug this closes (a resubmission re-extracted a clean summary, but the frozen default snapshot from the
+      // original upload kept showing the old, un-split text, alongside the newly correct Skills section, so the
+      // candidate's PDF showed "Experience Areas" twice). assemble_customized_resume already reads around this
+      // at request time; this repairs the STORED row too, so the Content Manager edit box the candidate actually
+      // sees agrees with what the PDF shows, rather than only fixing one of the two surfaces.
+      if (Array.isArray(summaries)) {
+        const stale = summaries.find((s: any) => s && s.partner_key === "" && s.candidate_edited === false);
+        if (stale) {
+          const docsRes = await fetch(
+            `${SUPABASE_URL}/rest/v1/resume_documents?candidate_id=eq.${encodeURIComponent(candidate_id)}&confirmed_at=not.is.null&select=id`,
+            { headers: SB_HEADERS },
+          );
+          const docIds: string[] = docsRes.ok ? (await docsRes.json()).map((d: any) => d.id) : [];
+          if (docIds.length) {
+            const inList = docIds.map((id: string) => `"${id}"`).join(",");
+            const currRes = await fetch(
+              `${SUPABASE_URL}/rest/v1/candidate_freeform_sections?candidate_id=eq.${encodeURIComponent(candidate_id)}&section_type=eq.summary&candidate_confirmed=eq.true&resume_document_id=in.(${inList})&select=content&order=position.asc.nullslast&limit=1`,
+              { headers: SB_HEADERS },
+            );
+            const currRows = currRes.ok ? await currRes.json() : [];
+            const currentContent = Array.isArray(currRows) && currRows.length ? (currRows[0].content ?? "") : null;
+            if (currentContent !== null && currentContent !== stale.content) {
+              const fixRes = await fetch(
+                `${SUPABASE_URL}/rest/v1/candidate_summary_versions?id=eq.${encodeURIComponent(stale.id)}`,
+                {
+                  method: "PATCH",
+                  headers: { ...SB_HEADERS, "Content-Type": "application/json", "Prefer": "return=representation" },
+                  body: JSON.stringify({ content: currentContent, updated_at: new Date().toISOString() }),
+                },
+              );
+              if (fixRes.ok) {
+                const fixed = await fixRes.json();
+                if (Array.isArray(fixed) && fixed.length) {
+                  summaries = summaries.map((s: any) => (s.id === stale.id ? fixed[0] : s));
+                }
+              }
+              // best-effort: a failed repair here still returns the (stale) row rather than erroring the whole read
+            }
+          }
+        }
+      }
+
       return new Response(JSON.stringify({ ok: true, summaries }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
