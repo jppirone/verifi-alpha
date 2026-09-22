@@ -2911,7 +2911,7 @@ const __ds_scope = {};
       <div class="card-kicker">Request the verified record</div>
       <div style="font-size:17px;line-height:1.5">{{ accessCandidateLabel }}</div>
       <sc-if value="{{ accessGuestForm }}" hint-placeholder-val="{{ false }}">
-        <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">The candidate is asked to approve. Nothing is prepared or shown to you before they do, and a request that is declined or not answered costs nothing. If they approve, we email a link to {{ guestEmailLine }}. Opening it is a <b>one-time view</b>: {{ guestPriceLabel }}, charged only when you choose to open it, and you can then read it for 30 minutes. After that it is gone and cannot be reopened, by you or by us.</div>
+        <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">The candidate is asked to approve. Nothing is prepared or shown to you before they do, and a request that is declined or not answered costs nothing. If they approve, we email a link to {{ guestEmailLine }}. Opening it is a <b>one-time view</b>: {{ guestPriceLabel }}, charged only when you choose to pay to open it. It opens by itself the moment your payment is confirmed, and you can then read it for 30 minutes. After that it is gone and cannot be reopened, by you or by us.</div>
         <div class="field">
           <label for="rq-att-g">How did you obtain this candidate's information?</label>
           <textarea class="input" id="rq-att-g" rows="3" style="resize:vertical;font-family:var(--font-body);line-height:1.6" value="{{ attestationDraft }}" sc-camel-on-change="{{ setAttestationDraft }}" placeholder="e.g. Applied through LinkedIn on Sep 3; recruiter Jane Smith sent me this resume"></textarea>
@@ -3007,7 +3007,7 @@ const __ds_scope = {};
             <div class="dialog-title" id="req-confirm-title" style="font-size:22px;line-height:1.3">A one-time {{ confirmPriceLabel }} charge applies only if you open the result</div>
             <div style="display:flex;flex-direction:column;gap:var(--space-3);font-size:14px;line-height:1.6;color:var(--color-text)">
               <div><b>Nothing is charged now.</b> Sending this request is free.</div>
-              <div>If the candidate approves, we email you a link. You are charged <b>{{ confirmPriceLabel }}</b>, on Stripe's own page, only when you choose to pay to open it. That opens a one-time view that stays open for 30 minutes.</div>
+              <div>If the candidate approves, we email you a link. You are charged <b>{{ confirmPriceLabel }}</b>, on Stripe's own page, only when you choose to pay to open it. It opens by itself the moment your payment is confirmed and stays open for 30 minutes.</div>
               <div>If the candidate declines, does not answer within 72 hours, or you never pay to open an approved result (it is held for 7 days), <b>you are never charged</b>.</div>
             </div>
           </sc-if>
@@ -3065,11 +3065,11 @@ const __ds_scope = {};
       </sc-if>
       <sc-if value="{{ guestAwaiting }}" hint-placeholder-val="{{ false }}">
         <div style="font-size:17px;line-height:1.5">{{ guestLabel }} approved your request.</div>
-        <div style="font-size:14px;line-height:1.6">Opening {{ guestThe }} is a <b>one-time view</b>: {{ guestPriceLabel }}, charged only when you pay below. Once you open it you can read it for 30 minutes. After that it is gone and cannot be reopened, by you or by us.</div>
+        <div style="font-size:14px;line-height:1.6">Opening {{ guestThe }} is a <b>one-time view</b>: {{ guestPriceLabel }}, charged only when you pay below. <b>The moment your payment is confirmed it opens by itself</b> and you can read it for 30 minutes. After that it is gone and cannot be reopened, by you or by us.</div>
         <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">{{ guestAwaitingHint }}</div>
         <label style="display:flex;gap:var(--space-2);align-items:flex-start;font-size:12px;color:var(--color-neutral-300);line-height:1.6">
           <input type="checkbox" checked="{{ guestAck }}" sc-camel-on-change="{{ toggleGuestAck }}" style="accent-color:var(--color-accent);margin-top:3px">
-          <span>I understand this is a one-time view that closes 30 minutes after I open it and cannot be reopened.</span>
+          <span>I understand this is a one-time view that opens as soon as my payment is confirmed, closes 30 minutes later, and cannot be reopened.</span>
         </label>
         <sc-if value="{{ guestError }}" hint-placeholder-val="{{ false }}">
           <div style="font-size:12px;color:#e2735c;line-height:1.6">{{ guestError }}</div>
@@ -3079,7 +3079,7 @@ const __ds_scope = {};
       </sc-if>
       <sc-if value="{{ guestPending }}" hint-placeholder-val="{{ false }}">
         <div style="font-size:17px;line-height:1.5">Confirming your payment with Stripe…</div>
-        <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">This usually takes a few seconds. Nothing has been opened, and your 30 minutes have not started.</div>
+        <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">This usually takes a few seconds. Nothing has been opened and your 30 minutes have not started: as soon as it is confirmed, the result opens by itself. If you leave this page, open the same link again and it opens then.</div>
         <sc-if value="{{ guestError }}" hint-placeholder-val="{{ false }}">
           <div style="font-size:12px;color:#e2735c;line-height:1.6">{{ guestError }}</div>
         </sc-if>
@@ -3807,27 +3807,44 @@ class Component extends DCLogic {
 
   // Landing from the emailed link (?comparison=TOKEN), or back from Stripe (&payment=success|cancel).
   async enterGuest(token, paymentReturn) {
+    this._guestEnded = false;
     this.setState({ screen: 'guest', guestToken: token, guest: null, guestErr: null, guestAck: false, compare: null });
     try { window.sessionStorage.setItem('verifi_guest_cmp', token); } catch (e) { /* the emailed link still works */ }
     this.loadGuestPrice();
+    // EVERY visit to the link asks the server to "enter": if a paid, unredeemed payment exists it is redeemed right then and the result comes straight
+    // back (no separate open click), so a redirect from Stripe that never completed costs nothing: the next visit shows it.
     await this.refreshGuest();
-    if (paymentReturn === 'success') {
-      // Stripe confirms the payment to the server, not to this browser: wait for the server to say so.
+    if (paymentReturn === 'cancel') {
+      this.setState({ guestErr: 'You left the payment page without paying. Nothing was charged.' });
+    } else {
+      // Stripe confirms the payment to the server, not to this browser: keep asking until the server has it (a return from Stripe may also still be
+      // awaiting the payment record; any other visit only waits while a payment is known to be in flight).
+      const waiting = paymentReturn === 'success' ? ['payment_pending', 'awaiting_payment'] : ['payment_pending'];
       const until = Date.now() + 45000;
-      while (this.state.screen === 'guest' && this.state.guest && (this.state.guest.state === 'payment_pending' || this.state.guest.state === 'awaiting_payment') && Date.now() < until) {
+      while (this.state.screen === 'guest' && this.state.guest && waiting.indexOf(this.state.guest.state) !== -1 && Date.now() < until) {
         await new Promise(r => setTimeout(r, 2500));
         await this.refreshGuest();
       }
-    } else if (paymentReturn === 'cancel') {
-      this.setState({ guestErr: 'You left the payment page without paying. Nothing was charged.' });
     }
   }
 
   async refreshGuest() {
-    const r = await this.gcall({ action: 'status', token: this.state.guestToken });
+    const r = await this.gcall({ action: 'enter', token: this.state.guestToken });
     if (r.status === 404) { this.setState({ guest: { state: 'not_found' } }); return; }
     if (!r.data || !r.data.ok) { this.setState({ guest: this.state.guest || { state: 'error' }, guestErr: "We couldn't reach the server. Please try again." }); return; }
+    if (r.data.delivered && !this._guestEnded) { this.showGuestDelivered(r.data); return; }
     this.setState({ guest: r.data, guestPrice: r.data.price ? { cents: r.data.price.amount_cents, currency: r.data.price.currency } : this.state.guestPrice });
+  }
+
+  // The result, shown the moment the server has redeemed the payment (or is serving an already-open window again).
+  showGuestDelivered(d) {
+    const x = d.delivered;
+    this.setState({
+      guest: d, guestBusy: false, guestErr: null, screen: 'compare',
+      guestPrice: d.price ? { cents: d.price.amount_cents, currency: d.price.currency } : this.state.guestPrice,
+      compare: { id: 'guest', label: d.candidate_label || 'Candidate', content: x.content, assembledAt: x.assembled_at, guest: true, windowEnds: x.window_ends_at, firstOpen: !!x.first_open },
+    });
+    this.startGuestTimer();
   }
 
   async guestPayNow() {
@@ -3869,6 +3886,7 @@ class Component extends DCLogic {
   }
 
   endGuestView() {
+    this._guestEnded = true; // a late answer to an earlier visit must not bring a closed view back
     if (this._guestTimer) { clearInterval(this._guestTimer); this._guestTimer = null; }
     if (this._copyUrl) { try { URL.revokeObjectURL(this._copyUrl); } catch (x) { /* ignore */ } this._copyUrl = null; }
     // keep the kind (the guest has just seen it) so the closed screen names what was closed
@@ -4258,10 +4276,10 @@ class Component extends DCLogic {
       guestAwaitingHint: (() => {
         const k = s.guest && s.guest.kind; const until = s.guest && s.guest.available_until ? this.fmtDate(s.guest.available_until) : '';
         return k === 'license_report'
-          ? 'You have no account, so nothing is stored for you. The report lists each license on the candidate\u2019s account and whether it is verified. This link stays valid until ' + until + ' if you do not open it.'
+          ? 'You have no account, so nothing is stored for you. The report lists each license on the candidate\u2019s account and whether it is verified. This link stays valid until ' + until + ' if you do not pay.'
           : k === 'resume_comparison'
-            ? 'You have no account, so nothing is stored for you. Have your own copy of the candidate\u2019s resume ready first: you can show it next to the record while it is open. This link stays valid until ' + until + ' if you do not open it.'
-            : 'You have no account, so nothing is stored for you. This link stays valid until ' + until + ' if you do not open it.';
+            ? 'You have no account, so nothing is stored for you. Have your own copy of the candidate\u2019s resume ready first: you can show it next to the record while it is open. This link stays valid until ' + until + ' if you do not pay.'
+            : 'You have no account, so nothing is stored for you. This link stays valid until ' + until + ' if you do not pay.';
       })(),
       guestReadyText: (() => { const k = s.guest && s.guest.kind; return k === 'license_report' ? 'Opening the report now starts your 30 minutes. It cannot be reopened after that.' : k === 'resume_comparison' ? 'Opening it now starts your 30 minutes. It cannot be reopened after that. Have your own copy ready, then open it.' : 'Opening it now starts your 30 minutes. It cannot be reopened after that.'; })(),
       guestClosedText: (() => { const k = s.guest && s.guest.kind; const what = k === 'license_report' ? 'license status report' : k === 'resume_comparison' ? 'comparison' : ''; return 'It cannot be reopened, by you or by us, and nothing of it is kept for you. ' + (what ? 'A new ' + what + ' would need a new request to the candidate.' : 'A new request to the candidate would be needed.'); })(),
@@ -4270,7 +4288,7 @@ class Component extends DCLogic {
       toggleGuestAck: (e) => this.setState({ guestAck: !!e.target.checked }),
       guestError: s.guestErr, guestBusy: s.guestBusy,
       guestPayDisabled: s.guestBusy || !s.guestAck,
-      guestPayLabel: s.guestBusy ? 'Opening the payment page…' : 'Pay ' + this.money(s.guestPrice) + ' and continue',
+      guestPayLabel: s.guestBusy ? 'Opening the payment page…' : 'Pay ' + this.money(s.guestPrice) + ' and open it',
       guestPay: () => this.guestPayNow(),
       guestRecheck: () => this.refreshGuest(),
       guestOpen: () => this.guestOpenNow(),

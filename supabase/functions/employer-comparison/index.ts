@@ -22,11 +22,14 @@ const corsHeaders = {
 // Actions (POST {action, ...}):
 //   price    -> the current one-time price (from employer_pricing; the page never carries a price of its own)
 //   request  -> {lookup_id, claim_token, attestation}: create the request (create_comparison_request, method "guest") and tell the candidate
-//   status   -> {token}: where this request stands (awaiting_payment | payment_pending | ready_to_open | open | closed | unavailable)
+//   status   -> {token}: where this request stands (awaiting_payment | payment_pending | ready_to_open | open | closed | unavailable); read-only
+//   enter    -> {token}: A VISIT TO THE LINK, and THE NORMAL DELIVERY POINT (2026-09-21). Same answer as status, but if a paid, unredeemed payment
+//               exists it is redeemed right then and the result comes back in `delivered`; inside an open 30 minute window it is served again
+//               free. Idempotent: safe on every visit, so a redirect that never finished costs nothing (the next visit delivers)
 //   pay      -> {token}: start (or resume) the ONE payment for this request; returns the Stripe hosted Checkout URL. Only for an approved,
 //               unopened request whose snapshot still has time; the amount is the server's price at that moment
-//   open     -> {token}: THE DELIVERY POINT. open_guest_comparison (SQL) redeems the paid payment exactly once and starts a 30 minute view
-//               window; opens inside the window re-serve the snapshot free; after it, 410 window_closed
+//   open     -> {token}: the same redemption as `enter`, on request (kept as the fallback button). open_guest_comparison (SQL) redeems the paid
+//               payment exactly once and starts a 30 minute view window; opens inside the window re-serve the snapshot free; after it, 410 window_closed
 //   close    -> {token}: end the view now (the window closes and the snapshot is deleted)
 //
 // Payment is marked paid only by the verified Stripe webhook (employer-stripe-events), never by the browser returning from Stripe, and
@@ -126,7 +129,8 @@ export default {
       const snapshotExists = async () => ((await rows(`comparison_snapshots?request_id=eq.${r.id}&select=id`)).length > 0);
       const payments = async () => await rows(`employer_payments?comparison_request_id=eq.${r.id}&select=id,status,stripe_checkout_session_id,refunded_at,redeemed_at,created_at&order=created_at.desc`);
 
-      if (action === "status") {
+      // Where this request stands, read from the rows passed in (never changes anything).
+      const statusOf = async (r: any) => {
         const price = await guestPrice();
         const label = (await rows(`employer_lookup_requests?id=eq.${r.lookup_id}&select=candidate_label`))[0]?.candidate_label || "Candidate";
         let state: string;
@@ -146,7 +150,36 @@ export default {
         // The kind of request is disclosed only once the candidate has approved it (before that, an employer must not be able to tell what sort of
         // account the candidate has). "unavailable" covers pending, declined and expired alike, so it never carries one. "closed" only happens after
         // the guest opened it, so they have already seen what it was.
-        return json({ ok: true, state, kind: state === "unavailable" ? null : (r.kind || "resume_comparison"), candidate_label: label, window_ends_at: windowEnds, available_until: state === "unavailable" || state === "closed" || state === "open" ? null : r.snapshot_expires_at, price: price ? { amount_cents: price.amount_cents, currency: price.currency } : null });
+        return { ok: true, state, kind: state === "unavailable" ? null : (r.kind || "resume_comparison"), candidate_label: label, window_ends_at: windowEnds, available_until: state === "unavailable" || state === "closed" || state === "open" ? null : r.snapshot_expires_at, price: price ? { amount_cents: price.amount_cents, currency: price.currency } : null };
+      };
+
+      // Read-only: never redeems anything.
+      if (action === "status") return json(await statusOf(r));
+
+      // A VISIT to the link (2026-09-21). Redemption follows the PAYMENT's real state, not a second click or one redirect finishing: every time the guest
+      // lands on their link (straight back from Stripe, or any later visit) this checks whether a paid, unredeemed payment exists for the request and, if
+      // so, redeems it right now (open_guest_comparison: the row is locked, the payment can be spent exactly once, the 30 minute window starts NOW) and
+      // hands the result back in the same answer. Safe to call as often as you like:
+      //   * nothing paid, or nothing left to serve -> only reports the state, changes nothing;
+      //   * paid and unredeemed -> redeems once (a second, simultaneous visit is served the same snapshot with first_open false);
+      //   * already redeemed and the 30 minute window is still open -> serves it again, free, without extending the window.
+      if (action === "enter") {
+        let serve = false;
+        if (r.status === "approved" && await snapshotExists()) {
+          if (r.first_delivered_at) serve = !!r.view_window_ends_at && new Date(r.view_window_ends_at).getTime() > now;
+          else serve = (await payments()).some((p) => p.status === "paid" && !p.refunded_at && !p.redeemed_at);
+        }
+        if (serve) {
+          const res = (await rpc("open_guest_comparison", { p_token_hash: tokenHash }))?.[0];
+          if (res?.ok) {
+            const snap = (await rows(`comparison_snapshots?request_id=eq.${r.id}&select=content,assembled_at`))[0];
+            if (snap) {
+              const fresh = (await requestByToken(body.token)) || r;
+              return json({ ...(await statusOf(fresh)), delivered: { content: snap.content, assembled_at: snap.assembled_at, window_ends_at: res.window_ends_at, first_open: !!res.first_open } });
+            }
+          }
+        }
+        return json(await statusOf((await requestByToken(body.token)) || r));
       }
 
       if (action === "pay") {
