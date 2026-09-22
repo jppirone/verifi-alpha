@@ -2247,9 +2247,11 @@ const __ds_scope = {};
       <a href="#" style="font-size:12px" sc-camel-on-click="{{ goHome }}">Home</a>
       <sc-if value="{{ realSignedIn }}" hint-placeholder-val="{{ false }}">
         <a href="#" id="header-account" style="font-size:12px" title="Your account" sc-camel-on-click="{{ openAccount }}">{{ realEmailLabel }}</a>
+        <a href="#" id="header-payment-history" style="font-size:12px" sc-camel-on-click="{{ openPaymentHistory }}">Payment history</a>
         <a href="#" style="font-size:12px" sc-camel-on-click="{{ signOutReal }}">Sign out</a>
       </sc-if>
       <sc-if value="{{ realNotSignedIn }}" hint-placeholder-val="{{ true }}">
+        <a href="#" id="header-payment-history" style="font-size:12px" sc-camel-on-click="{{ openPaymentHistory }}">Payment history</a>
         <a href="#" id="header-signin" style="font-size:12px" sc-camel-on-click="{{ openSigninHeader }}">Sign in</a>
       </sc-if>
       <span class="tag tag-outline">Alpha prototype</span>
@@ -2729,6 +2731,51 @@ const __ds_scope = {};
         </sc-for>
       </div>
     </sc-if>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isPaymentHistoryLoading }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:440px;margin:0 auto;padding-top:72px;display:flex;flex-direction:column;gap:var(--space-4)">
+    <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3)">
+      <div class="card-kicker">{{ paymentHistoryLoadKicker }}</div>
+      <div style="font-size:17px;line-height:1.5">{{ paymentHistoryLoadTitle }}</div>
+      <sc-if value="{{ paymentsLoadFailed }}" hint-placeholder-val="{{ false }}">
+        <button type="button" class="btn btn-primary" style="align-self:flex-start" sc-camel-on-click="{{ retryPaymentHistoryLoad }}">Try again</button>
+      </sc-if>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isPaymentHistory }}" hint-placeholder-val="{{ false }}">
+  <div id="payment-history-screen" style="max-width:640px;margin:0 auto;padding-top:40px;display:flex;flex-direction:column;gap:var(--space-4)">
+    <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:26px;margin:0">Payment history</h1>
+    <p style="margin:0;color:var(--color-neutral-400);font-size:14px;line-height:1.5">Every payment you've made through Verifi, under {{ acctEmail }}.</p>
+
+    <sc-if value="{{ paymentsErr }}" hint-placeholder-val="{{ false }}">
+      <div class="card elev-sm" style="font-size:13px;color:#e2735c;display:flex;flex-direction:column;gap:var(--space-2);align-items:flex-start">
+        <span>{{ paymentsErr }}</span>
+        <button type="button" class="btn btn-secondary" style="font-size:12px" sc-camel-on-click="{{ retryPaymentHistoryLoad }}">Try again</button>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ noPaymentRows }}" hint-placeholder-val="{{ true }}">
+      <div class="card elev-sm" style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">No payments yet. A one-time payment appears here once it's been charged.</div>
+    </sc-if>
+
+    <sc-for list="{{ paymentRows }}" as="row" hint-placeholder-count="3">
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:4px">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap">
+          <span style="font-size:14px">{{ row.kindLabel }} &middot; {{ row.candidateLabel }}</span>
+          <span style="font-size:15px;font-family:var(--font-heading)">{{ row.amountLabel }}</span>
+        </div>
+        <div style="font-size:12px;color:var(--color-neutral-500)">{{ row.dateLabel }}<sc-if value="{{ row.hasCompany }}" hint-placeholder-val="{{ false }}"> &middot; {{ row.company }}</sc-if> &middot; {{ row.statusLabel }}</div>
+        <sc-if value="{{ row.hasReceipt }}" hint-placeholder-val="{{ false }}">
+          <a href="{{ row.receiptUrl }}" target="_blank" rel="noopener" style="font-size:12px;margin-top:2px">View Stripe receipt</a>
+        </sc-if>
+      </div>
+    </sc-for>
+
+    <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6;border-top:1px solid var(--color-divider);padding-top:var(--space-3)">Paying for each check one at a time works fine for occasional use. If your team ends up doing this often, a plan that covers many checks at once may be worth it down the road &mdash; not something we offer yet, just something we're weighing.</div>
   </div>
   </sc-if>
 
@@ -3398,6 +3445,7 @@ class Component extends DCLogic {
       realToken: null, real: null, realMembers: [], realOrgInvites: [], billing: null, billingBusy: false, billingNote: null, billingErr: null,
       signinEmail: '', signinName: '', signinBusy: false, signinErr: null, signinProblem: null, signinSentTo: '',
       acctNameDraft: '', orgNameDraft: '', newOrgNameDraft: '', inviteEmailDraft: '', acctNotice: null, acctErr: null, acctBusy: false,
+      payments: [], paymentsLoaded: false, paymentsErr: null, paymentsLoadFailed: false,
     };
   }
 
@@ -3423,8 +3471,9 @@ class Component extends DCLogic {
     this._loadGen = (this._loadGen || 0) + 1; // an account load still in flight must not bring a signed-out session back
     this._loadP = null;
     try { localStorage.removeItem(this.EMP_TOKEN_KEY); } catch (e) { /* not critical */ }
-    const wasAcct = this.state.screen === 'acct' || this.state.screen === 'request';
+    const wasAcct = this.state.screen === 'acct' || this.state.screen === 'request' || this.state.screen === 'paymentHistory';
     if (expired && this.state.screen === 'request') this.setFlag(this.EMP_INTENT_KEY, 'request');
+    if (expired && this.state.screen === 'paymentHistory') this.setFlag(this.EMP_INTENT_KEY, 'payments');
     this.setState(Object.assign(this.realBlank(), (expired && wasAcct) ? { screen: 'signin', signinErr: 'Your session ended. Please sign in again.' } : {}));
   }
 
@@ -3587,11 +3636,13 @@ class Component extends DCLogic {
     try { localStorage.setItem(this.EMP_TOKEN_KEY, data.session_token); } catch (e) { /* session then lasts this page only */ }
     await new Promise((resolve) => this.setState({ realToken: data.session_token }, resolve));
     const loaded = await this.loadReal();
-    // Where the person meant to go: the Request a comparison screen when they came from that tile (no detour through the account page), else the account page.
-    const toRequest = loaded && this.getFlag(this.EMP_INTENT_KEY, 60 * 60 * 1000) === 'request';
+    // Where the person meant to go: whichever tile or header link they came from (no detour through the account page), else the account page.
+    const intent = loaded ? this.getFlag(this.EMP_INTENT_KEY, 60 * 60 * 1000) : '';
     if (loaded) this.setFlag(this.EMP_INTENT_KEY, '');
-    this.setState(Object.assign({ screen: loaded ? (toRequest ? 'request' : 'acct') : 'signinProblem', signinProblem: loaded ? null : "We couldn't load your account. Please sign in again." },
-      toRequest ? Object.assign({ lookupFormError: null }, this.lookupPrefill()) : {}));
+    if (!loaded) { this.setState({ screen: 'signinProblem', signinProblem: "We couldn't load your account. Please sign in again." }); return; }
+    if (intent === 'request') { this.setState(Object.assign({ screen: 'request', lookupFormError: null }, this.lookupPrefill())); return; }
+    if (intent === 'payments') { this.setState({ screen: 'paymentHistory' }); this.loadPayments(); return; }
+    this.setState({ screen: 'acct' });
   }
 
   // The Request a comparison screen. Signed in: straight there. A stored session that has not finished loading: there, showing a loading card until it has.
@@ -3614,6 +3665,36 @@ class Component extends DCLogic {
     }
     this.setFlag(this.EMP_INTENT_KEY, 'request');
     this.setState({ screen: 'signin', signinErr: null });
+  }
+
+  // The Payment history screen (2026-09-22): same shape as enterRequest -- signed in goes straight there; a stored
+  // session still loading shows a loading card; signed out goes through the sign-in gate first, remembering to land
+  // here (not on the Account page) once the link is confirmed.
+  async enterPaymentHistory() {
+    const s = this.state;
+    if (s.real) {
+      this.setState({ screen: 'paymentHistory' });
+      this.loadPayments();
+      return;
+    }
+    if (s.realToken) {
+      this.setState({ screen: 'paymentHistory', paymentsLoadFailed: false });
+      const loaded = await this.loadReal();
+      if (this.state.screen !== 'paymentHistory') return;
+      if (loaded) this.loadPayments();
+      else if (this.state.realToken) this.setState({ paymentsLoadFailed: true });
+      return;
+    }
+    this.setFlag(this.EMP_INTENT_KEY, 'payments');
+    this.setState({ screen: 'signin', signinErr: null });
+  }
+
+  async loadPayments() {
+    this.setState({ paymentsErr: null });
+    const r = await this.empCall('list_payments', {});
+    if (r.status === 401) return;
+    if (r.data && r.data.ok) this.setState({ payments: r.data.payments || [], paymentsLoaded: true, paymentsErr: null });
+    else this.setState({ paymentsLoaded: true, paymentsErr: "We couldn't load your payment history. Please try again." });
   }
 
   // One wrapper for every account action: run it, show the outcome, reload the account.
@@ -4076,6 +4157,24 @@ class Component extends DCLogic {
       requestLoadTitle: s.requestLoadFailed ? "We couldn't load your account just now." : 'One moment\u2026',
       retryRequestLoad: () => { this.enterRequest(); },
       enterRequest: (e) => { if (e && e.preventDefault) e.preventDefault(); this.enterRequest(); },
+      isPaymentHistory: s.screen === 'paymentHistory' && !!s.real,
+      isPaymentHistoryLoading: s.screen === 'paymentHistory' && !s.real,
+      paymentsLoadFailed: !!s.paymentsLoadFailed,
+      paymentHistoryLoadKicker: s.paymentsLoadFailed ? 'Payment history' : 'Loading',
+      paymentHistoryLoadTitle: s.paymentsLoadFailed ? "We couldn't load your account just now." : 'One moment…',
+      retryPaymentHistoryLoad: () => { this.enterPaymentHistory(); },
+      openPaymentHistory: (e) => { if (e && e.preventDefault) e.preventDefault(); this.enterPaymentHistory(); },
+      paymentsErr: s.paymentsErr,
+      noPaymentRows: s.paymentsLoaded && (s.payments || []).length === 0,
+      paymentRows: (s.payments || []).map(p => ({
+        kindLabel: p.kind === 'license_report' ? 'License status report' : 'Comparison',
+        candidateLabel: p.candidate_label || 'Candidate',
+        amountLabel: this.money({ cents: p.amount_cents, currency: p.currency }),
+        dateLabel: this.fmtDate(p.date),
+        hasCompany: !!p.company, company: p.company || '',
+        statusLabel: p.status === 'refunded' ? 'Refunded' : p.status === 'needs_review' ? 'Paid, under review' : 'Paid',
+        hasReceipt: !!p.receipt_url, receiptUrl: p.receipt_url || '',
+      })),
       openBillingPortal: () => this.billingAct('billing_portal'),
       cancelAtPeriodEnd: () => { if (window.confirm('Cancel at the end of the current period? The organization keeps its remaining lookups until then.')) this.billingAct('cancel_subscription', { when: 'period_end' }, { until: b => !!(b && b.subscription && b.subscription.cancel_at_period_end), done: 'Cancellation scheduled.' }); },
       cancelNow: () => { if (window.confirm('Cancel immediately? The organization loses its remaining lookups right away and nothing is refunded.')) this.billingAct('cancel_subscription', { when: 'now' }, { until: b => !!(b && b.subscription && !b.subscription.live), done: 'Subscription canceled.' }); },

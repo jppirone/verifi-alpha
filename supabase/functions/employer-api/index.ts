@@ -164,6 +164,24 @@ const ACTIONS: Record<string, Action> = {
       return r.ok ? ok() : fail(500, "logout_failed");
     },
   },
+  // Payment history (2026-09-22): every one-off payment made under the signed-in person's own email, whether or not
+  // they had an account at the time -- same trick list_lookups already uses for pre-account activity, matched purely
+  // by email string, not by a link recorded at payment time. Read-only.
+  list_payments: {
+    access: "any",
+    run: async ({ user }) => {
+      const r = await rest("rpc/list_employer_payments", { method: "POST", body: JSON.stringify({ p_email: user.email }) });
+      if (!r.ok) return fail(500, "list_failed");
+      const list = await r.json();
+      return ok({
+        payments: (Array.isArray(list) ? list : []).map((p: any) => ({
+          id: p.id, amount_cents: p.amount_cents, currency: p.currency, kind: p.kind || "resume_comparison",
+          candidate_label: p.candidate_label || null, company: p.company || null, status: p.status,
+          date: p.paid_at || p.created_at, receipt_url: p.receipt_url || null,
+        })),
+      });
+    },
+  },
   update_profile: {
     access: "any",
     run: async ({ user, p }) => {
