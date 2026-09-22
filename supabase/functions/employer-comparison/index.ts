@@ -245,9 +245,14 @@ export default {
           await rest(`employer_payments?id=eq.${live.id}&status=eq.created`, { method: "PATCH", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ status: "failed" }) });
         }
 
+        // Payment history (2026-09-22): snapshot what this was for onto the row itself, at the moment it is known and
+        // still live -- the candidate's label and the company typed on this request can both be scrubbed or deleted
+        // later (a 30 day cleanup, or the candidate deleting their account outright), long after the payment itself
+        // must keep meaning something to the guest who made it.
+        const label = (await rows(`employer_lookup_requests?id=eq.${r.lookup_id}&select=candidate_label`))[0]?.candidate_label || null;
         const ins = await rest("employer_payments", {
           method: "POST", headers: { "Prefer": "return=representation" },
-          body: JSON.stringify({ amount_cents: price.amount_cents, currency: price.currency, payer_email: r.requester_email, access_token_hash: await sha256Hex(randomHex(32)), lookup_id: r.lookup_id, comparison_request_id: r.id }),
+          body: JSON.stringify({ amount_cents: price.amount_cents, currency: price.currency, payer_email: r.requester_email, access_token_hash: await sha256Hex(randomHex(32)), lookup_id: r.lookup_id, comparison_request_id: r.id, request_kind: r.kind || "resume_comparison", requester_company: r.requester_company || null, candidate_label: label }),
         });
         if (ins.status === 409) return json({ ok: true, payment_pending: true }); // a simultaneous "pay" already created it
         if (!ins.ok) return json({ ok: false, error: "request_failed" }, 500);
