@@ -2911,7 +2911,7 @@ const __ds_scope = {};
       <div class="card-kicker">Request the verified record</div>
       <div style="font-size:17px;line-height:1.5">{{ accessCandidateLabel }}</div>
       <sc-if value="{{ accessGuestForm }}" hint-placeholder-val="{{ false }}">
-        <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">The candidate is asked to approve. Nothing is prepared or shown to you before they do, and a request that is declined or not answered costs nothing. If they approve, we email a link to {{ guestEmailLine }}. Opening it is a <b>one-time view</b>: {{ guestPriceLabel }}, charged only when you choose to pay to open it. It opens by itself the moment your payment is confirmed, and you can then read it for 30 minutes. After that it is gone and cannot be reopened, by you or by us.</div>
+        <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">The candidate is asked to approve. Nothing is prepared or shown to you before they do, and a request that is declined or not answered costs nothing. If they approve, we email a link to {{ guestEmailLine }}. From that link you enter your card once: this places a hold for {{ guestPriceLabel }}, it does not charge you. The <b>real charge only happens the moment you are actually shown the result</b> &mdash; the same link opens it automatically once that happens, as a <b>one-time view</b> you can read for 30 minutes. If you never come back to that link, the hold simply expires on its own within about a week and you are never charged at all.</div>
         <div class="field">
           <label for="rq-att-g">How did you obtain this candidate's information?</label>
           <textarea class="input" id="rq-att-g" rows="3" style="resize:vertical;font-family:var(--font-body);line-height:1.6" value="{{ attestationDraft }}" sc-camel-on-change="{{ setAttestationDraft }}" placeholder="e.g. Applied through LinkedIn on Sep 3; recruiter Jane Smith sent me this resume"></textarea>
@@ -3004,11 +3004,11 @@ const __ds_scope = {};
             </div>
           </sc-if>
           <sc-if value="{{ confirmIsGuest }}" hint-placeholder-val="{{ false }}">
-            <div class="dialog-title" id="req-confirm-title" style="font-size:22px;line-height:1.3">A one-time {{ confirmPriceLabel }} charge applies only if you open the result</div>
+            <div class="dialog-title" id="req-confirm-title" style="font-size:22px;line-height:1.3">You place a {{ confirmPriceLabel }} hold, not a charge, when you pay</div>
             <div style="display:flex;flex-direction:column;gap:var(--space-3);font-size:14px;line-height:1.6;color:var(--color-text)">
               <div><b>Nothing is charged now.</b> Sending this request is free.</div>
-              <div>If the candidate approves, we email you a link. You are charged <b>{{ confirmPriceLabel }}</b>, on Stripe's own page, only when you choose to pay to open it. It opens by itself the moment your payment is confirmed and stays open for 30 minutes.</div>
-              <div>If the candidate declines, does not answer within 72 hours, or you never pay to open an approved result (it is held for 7 days), <b>you are never charged</b>.</div>
+              <div>If the candidate approves, we email you a link. From it you enter your card once on Stripe's own page: that places a <b>{{ confirmPriceLabel }} hold</b>, not a charge. The <b>real charge only happens the moment you are actually shown the result</b> &mdash; it opens by itself at that moment and stays open for 30 minutes.</div>
+              <div>If the candidate declines or does not answer within 72 hours, nothing is ever placed on your card. If you place a hold but never come back to the link, the hold simply expires on its own within about a week and <b>you are never charged</b>.</div>
             </div>
           </sc-if>
           <div class="dialog-actions" style="justify-content:space-between;flex-wrap:wrap">
@@ -3065,11 +3065,11 @@ const __ds_scope = {};
       </sc-if>
       <sc-if value="{{ guestAwaiting }}" hint-placeholder-val="{{ false }}">
         <div style="font-size:17px;line-height:1.5">{{ guestLabel }} approved your request.</div>
-        <div style="font-size:14px;line-height:1.6">Opening {{ guestThe }} is a <b>one-time view</b>: {{ guestPriceLabel }}, charged only when you pay below. <b>The moment your payment is confirmed it opens by itself</b> and you can read it for 30 minutes. After that it is gone and cannot be reopened, by you or by us.</div>
+        <div style="font-size:14px;line-height:1.6">Opening {{ guestThe }} is a <b>one-time view</b> you can read for 30 minutes. Paying below places a hold of {{ guestPriceLabel }} on your card &mdash; <b>it does not charge you yet</b>. The <b>real charge happens only once you are actually shown the result</b>: if that is right now, it opens by itself the moment the hold is confirmed. If you leave and come back to this same link later, it opens (and you are charged) then instead. If you never come back at all, the hold simply expires on its own within about a week and you are never charged.</div>
         <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">{{ guestAwaitingHint }}</div>
         <label style="display:flex;gap:var(--space-2);align-items:flex-start;font-size:12px;color:var(--color-neutral-300);line-height:1.6">
           <input type="checkbox" checked="{{ guestAck }}" sc-camel-on-change="{{ toggleGuestAck }}" style="accent-color:var(--color-accent);margin-top:3px">
-          <span>I understand this is a one-time view that opens as soon as my payment is confirmed, closes 30 minutes later, and cannot be reopened.</span>
+          <span>I understand this places a hold, not a charge; the actual charge only happens once I am shown the result, which then closes 30 minutes later and cannot be reopened.</span>
         </label>
         <sc-if value="{{ guestError }}" hint-placeholder-val="{{ false }}">
           <div style="font-size:12px;color:#e2735c;line-height:1.6">{{ guestError }}</div>
@@ -3079,7 +3079,7 @@ const __ds_scope = {};
       </sc-if>
       <sc-if value="{{ guestPending }}" hint-placeholder-val="{{ false }}">
         <div style="font-size:17px;line-height:1.5">Confirming your payment with Stripe…</div>
-        <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">This usually takes a few seconds. Nothing has been opened and your 30 minutes have not started: as soon as it is confirmed, the result opens by itself. If you leave this page, open the same link again and it opens then.</div>
+        <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">This usually takes a few seconds. Nothing has been charged yet and your 30 minutes have not started: as soon as the hold is confirmed, the result opens by itself, and that is the moment you are charged. If you leave this page, open the same link again and it opens (and charges) then.</div>
         <sc-if value="{{ guestError }}" hint-placeholder-val="{{ false }}">
           <div style="font-size:12px;color:#e2735c;line-height:1.6">{{ guestError }}</div>
         </sc-if>
@@ -4288,7 +4288,7 @@ class Component extends DCLogic {
       toggleGuestAck: (e) => this.setState({ guestAck: !!e.target.checked }),
       guestError: s.guestErr, guestBusy: s.guestBusy,
       guestPayDisabled: s.guestBusy || !s.guestAck,
-      guestPayLabel: s.guestBusy ? 'Opening the payment page…' : 'Pay ' + this.money(s.guestPrice) + ' and open it',
+      guestPayLabel: s.guestBusy ? 'Opening the payment page…' : 'Authorize ' + this.money(s.guestPrice) + ' and continue',
       guestPay: () => this.guestPayNow(),
       guestRecheck: () => this.refreshGuest(),
       guestOpen: () => this.guestOpenNow(),
@@ -4297,7 +4297,7 @@ class Component extends DCLogic {
       requestSentIsOrg: s.requestSentKind !== 'guest',
       requestSentIsGuest: s.requestSentKind === 'guest',
       requestSentDetail: s.requestSentKind === 'guest'
-        ? 'If they approve, we email a link to ' + (s.reqLookupRequesterEmail || 'the address you confirmed this lookup with') + '. That link is the only way in, so keep the email: opening it is a one-time view (paid then, not before). If they decline, or do not answer within 72 hours, we email only that the request was not authorized: we do not say which, and you are not charged.'
+        ? 'If they approve, we email a link to ' + (s.reqLookupRequesterEmail || 'the address you confirmed this lookup with') + '. That link is the only way in, so keep the email: you place a card hold from it, not a charge, and the real charge only happens the moment you are actually shown the one-time view. If you never come back to that link, the hold simply expires on its own and you are never charged. If they decline, or do not answer within 72 hours, we email only that the request was not authorized: we do not say which, and you are never charged either way.'
         : 'You will get an email either way. If they approve, it says so and you open it from Request a comparison. If they decline, or do not answer within 72 hours, the email says only that the request was not authorized: we do not say which, and nothing is used from your plan.',
       cmpNote: s.cmpNote, cmpError: s.cmpErr || s.cmpLoadErr, cmpBusy: s.cmpBusy,
       noLookupRows: (s.lookups || []).length === 0,

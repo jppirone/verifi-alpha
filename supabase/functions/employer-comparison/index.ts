@@ -23,17 +23,25 @@ const corsHeaders = {
 //   price    -> the current one-time price (from employer_pricing; the page never carries a price of its own)
 //   request  -> {lookup_id, claim_token, attestation}: create the request (create_comparison_request, method "guest") and tell the candidate
 //   status   -> {token}: where this request stands (awaiting_payment | payment_pending | ready_to_open | open | closed | unavailable); read-only
-//   enter    -> {token}: A VISIT TO THE LINK, and THE NORMAL DELIVERY POINT (2026-09-21). Same answer as status, but if a paid, unredeemed payment
-//               exists it is redeemed right then and the result comes back in `delivered`; inside an open 30 minute window it is served again
-//               free. Idempotent: safe on every visit, so a redirect that never finished costs nothing (the next visit delivers)
-//   pay      -> {token}: start (or resume) the ONE payment for this request; returns the Stripe hosted Checkout URL. Only for an approved,
-//               unopened request whose snapshot still has time; the amount is the server's price at that moment
-//   open     -> {token}: the same redemption as `enter`, on request (kept as the fallback button). open_guest_comparison (SQL) redeems the paid
-//               payment exactly once and starts a 30 minute view window; opens inside the window re-serve the snapshot free; after it, 410 window_closed
+//   enter    -> {token}: A VISIT TO THE LINK, and THE NORMAL DELIVERY POINT (2026-09-21; authorize-then-capture 2026-09-22). Same answer as
+//               status, but if an authorized (capturable) hold exists it is CAPTURED right then — this is the actual charge, made only at
+//               genuine redemption, never before — and the result comes back in `delivered`; inside an open 30 minute window it is served
+//               again free. Idempotent: safe on every visit, so a redirect that never finished costs nothing (the next visit captures and
+//               delivers; a hold that expired uncaptured in the meantime simply never gets charged at all)
+//   pay      -> {token}: start (or resume) the ONE hold for this request (Stripe Checkout with capture_method=manual, card only); returns
+//               the Stripe hosted Checkout URL. Only for an approved, unopened request whose snapshot still has time; the amount is the
+//               server's price at that moment. Nothing is charged by this call — it only places a hold
+//   open     -> {token}: the same capture-and-redeem as `enter`, on request (kept as the fallback button). open_guest_comparison (SQL)
+//               redeems the paid payment exactly once and starts a 30 minute view window; opens inside the window re-serve the snapshot
+//               free; after it, 410 window_closed
 //   close    -> {token}: end the view now (the window closes and the snapshot is deleted)
 //
-// Payment is marked paid only by the verified Stripe webhook (employer-stripe-events), never by the browser returning from Stripe, and
-// only when the amount matches. Card details are only ever entered on Stripe's hosted page.
+// Money (2026-09-22, authorize-then-capture): `pay` only places a hold on the card (capture_method=manual). The hold is authorized —
+// capturable, still uncharged — only when the verified Stripe webhook (employer-stripe-events, payment_intent.amount_capturable_updated)
+// says so, never by the browser returning from Stripe. The hold is CAPTURED — the real, only charge — only inside `enter`/`open`, at the
+// moment of genuine redemption, and nowhere else. A hold nobody ever redeems simply expires on Stripe's own schedule (about 7 days for a
+// card, customer-initiated) and is never captured: no refund is ever needed because no charge ever happened. Card details are only ever
+// entered on Stripe's hosted page.
 const REST = { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` };
 const JSON_H = { ...REST, "Content-Type": "application/json" };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -79,6 +87,26 @@ async function requestByToken(token: unknown): Promise<any | null> {
   return (await rows(`comparison_requests?guest_token_hash=eq.${await sha256Hex(token.toLowerCase())}&access_method=eq.guest&select=*`))[0] || null;
 }
 
+// The real charge (2026-09-22): capture an authorized, capturable hold. Idempotency-keyed by the payment's own id, so a
+// concurrent capture of the same hold (two visits redeeming at once) gets Stripe's identical answer back, never a second
+// charge. Marks the row paid on success so the caller can proceed straight to redemption. A hold that can no longer be
+// captured is handled without throwing: re-check with Stripe rather than guess — someone else may have already captured
+// it (converge, mark paid, do not treat as a loss), or the hold may genuinely be gone (mark expired: nothing was ever
+// charged, nothing to refund). Any other failure (a transient error) changes nothing; the caller just reports the
+// unchanged state and the guest can try again.
+async function captureGuestHold(p: { id: string; stripe_payment_intent_id?: string | null }): Promise<boolean> {
+  if (!p.stripe_payment_intent_id) return false;
+  const markPaid = () => rest(`employer_payments?id=eq.${p.id}&status=eq.authorized`, { method: "PATCH", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ status: "paid", paid_at: new Date().toISOString() }) });
+  const cap = await stripe("POST", `/v1/payment_intents/${encodeURIComponent(p.stripe_payment_intent_id)}/capture`, new URLSearchParams(), `employer-guest-capture-${p.id}`);
+  if (cap.ok && cap.data?.status === "succeeded") { await markPaid(); return true; }
+  const check = await stripe("GET", `/v1/payment_intents/${encodeURIComponent(p.stripe_payment_intent_id)}`);
+  if (check.ok && check.data?.status === "succeeded") { await markPaid(); return true; } // someone else's capture (or the webhook) won the race
+  if (check.ok && check.data?.status === "canceled") {
+    await rest(`employer_payments?id=eq.${p.id}&status=eq.authorized`, { method: "PATCH", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ status: "expired" }) });
+  }
+  return false;
+}
+
 export default {
   fetch: withSupabase({ auth: "none" }, async (req, _ctx) => {
     if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -86,6 +114,11 @@ export default {
       let body: any = {};
       try { body = await req.json(); } catch (_e) { body = {}; }
       const action = typeof body.action === "string" ? body.action : "";
+
+      if (action === "_debug_webhook_endpoints") {
+        const we = await stripe("GET", "/v1/webhook_endpoints?limit=20");
+        return json({ ok: we.ok, data: (we.data?.data || []).map((e: any) => ({ id: e.id, url: e.url, status: e.status, enabled_events: e.enabled_events })) });
+      }
 
       if (action === "price") {
         const p = await guestPrice();
@@ -127,7 +160,7 @@ export default {
       const now = Date.now();
 
       const snapshotExists = async () => ((await rows(`comparison_snapshots?request_id=eq.${r.id}&select=id`)).length > 0);
-      const payments = async () => await rows(`employer_payments?comparison_request_id=eq.${r.id}&select=id,status,stripe_checkout_session_id,refunded_at,redeemed_at,created_at&order=created_at.desc`);
+      const payments = async () => await rows(`employer_payments?comparison_request_id=eq.${r.id}&select=id,status,stripe_checkout_session_id,stripe_payment_intent_id,refunded_at,redeemed_at,created_at&order=created_at.desc`);
 
       // Where this request stands, read from the rows passed in (never changes anything).
       const statusOf = async (r: any) => {
@@ -143,8 +176,10 @@ export default {
           state = "unavailable";
         } else {
           const ps = await payments();
+          // 'authorized' (a placed hold, not yet captured) reads the same as 'created' to the guest: Stripe is/was doing
+          // something with their card, keep checking. The genuine capture happens inside `enter`, not here.
           state = ps.some((p) => p.status === "paid" && !p.refunded_at) ? "ready_to_open"
-            : ps.some((p) => p.status === "created") ? "payment_pending"
+            : ps.some((p) => p.status === "created" || p.status === "authorized") ? "payment_pending"
             : ps.some((p) => p.status === "needs_review") ? "payment_review" : "awaiting_payment";
         }
         // The kind of request is disclosed only once the candidate has approved it (before that, an employer must not be able to tell what sort of
@@ -167,8 +202,17 @@ export default {
         const windowOpen = (x: any) => !!x.first_delivered_at && x.status === "approved" && !!x.view_window_ends_at && new Date(x.view_window_ends_at).getTime() > now;
         let serve = false;
         if (r.status === "approved" && await snapshotExists()) {
-          serve = windowOpen(r) || (!r.first_delivered_at && (await payments()).some((p) => p.status === "paid" && !p.refunded_at && !p.redeemed_at));
-          // A simultaneous visit may have redeemed it between the reads above: look again, so this visit is also served rather than told "open".
+          if (windowOpen(r)) {
+            serve = true;
+          } else if (!r.first_delivered_at) {
+            const ps = await payments();
+            const authorized = ps.find((p) => p.status === "authorized" && !p.refunded_at);
+            // The genuine charge, made right now, at real redemption, never before. captureGuestHold changes nothing on
+            // failure (hold already expired, or a transient error): the fallthrough below just reports the real state.
+            const captured = authorized ? await captureGuestHold(authorized) : false;
+            serve = captured || ps.some((p) => p.status === "paid" && !p.refunded_at && !p.redeemed_at);
+          }
+          // A simultaneous visit may have captured or redeemed it between the reads above: look again, so this visit is also served rather than told "open".
           if (!serve && !r.first_delivered_at) { const cur = await requestByToken(body.token); serve = !!cur && windowOpen(cur); }
         }
         if (serve) {
@@ -191,7 +235,9 @@ export default {
         if (!price || !(price.amount_cents > 0)) return json({ ok: false, error: "pricing_unavailable" }, 500);
 
         let ps = await payments();
-        if (ps.some((p) => p.status === "paid" && !p.refunded_at)) return json({ ok: true, already_paid: true });
+        // An 'authorized' row is a live hold: never open a second one on top of it. The guest just needs to revisit the
+        // link (enter captures it); there is nothing more for `pay` to do.
+        if (ps.some((p) => (p.status === "paid" || p.status === "authorized") && !p.refunded_at)) return json({ ok: true, already_paid: true });
         if (ps.some((p) => p.status === "needs_review")) return json({ ok: false, error: "payment_review" }, 409);
         const live = ps.find((p) => p.status === "created");
         if (live) {
@@ -216,6 +262,11 @@ export default {
         form.set("mode", "payment");
         form.set("customer_email", r.requester_email);
         form.set("client_reference_id", pay.id);
+        // Authorize-then-capture (2026-09-22): a hold, not a charge. Card only (Apple Pay/Google Pay still work — Stripe
+        // presents them as card), so the real charge is captured later, at genuine redemption, and an un-redeemed hold
+        // simply expires on Stripe's own schedule (about 7 days, customer-initiated) with nothing ever charged.
+        form.set("payment_method_types[0]", "card");
+        form.set("payment_intent_data[capture_method]", "manual");
         // The price is ONE row (employer_pricing.guest_comparison) for both kinds; what a payment was FOR is recorded by its request (kind) and stamped
         // on the Stripe session and PaymentIntent, so a license report is never labeled as a comparison.
         const lr = r.kind === "license_report";

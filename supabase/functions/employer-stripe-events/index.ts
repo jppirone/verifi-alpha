@@ -18,9 +18,19 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 // customer.subscription.* event says, and older events cannot overwrite newer state (last_event_created).
 //
 // Handled:
-//   checkout.session.completed                 guest payment: link the session's PaymentIntent (paid -> mark paid)
-//   payment_intent.succeeded                   guest payment: mark paid, fetch the receipt, email it once
-//   payment_intent.payment_failed              guest payment: mark failed (only while still unpaid)
+//   checkout.session.completed                 guest payment: link the session's PaymentIntent (paid -> mark paid; with manual capture this
+//                                               fires with payment_status "unpaid" — correctly a no-op until the capture events below)
+//   payment_intent.amount_capturable_updated    guest payment, authorize-then-capture (2026-09-22): the HOLD succeeded — capturable, still
+//                                               uncharged. Mark 'authorized' and extend the approved snapshot's floor to authorized_at + 7
+//                                               days (Stripe's own hold window for a card), never shortening a later expiry
+//   payment_intent.succeeded                   guest payment: mark paid, fetch the receipt, email it once. With manual capture this fires
+//                                               only when employer-comparison's `enter` action actually captures the hold — the real charge,
+//                                               and the backstop if that capture's own DB write was interrupted after Stripe's real capture
+//   payment_intent.canceled                    guest payment, authorize-then-capture: the hold's own window ran out uncaptured and Stripe
+//                                               released it by itself (or it was explicitly canceled). Mark 'expired' — nothing was ever
+//                                               charged, nothing to refund — but ONLY from 'authorized', so this can never clobber a row a
+//                                               capture has already turned into 'paid'
+//   payment_intent.payment_failed              guest payment: mark failed (only while still unpaid — a card declined at authorization time)
 //   charge.refunded                            guest payment: mark refunded when FULLY refunded
 //   customer.subscription.created|updated|deleted   org subscription: upsert status, period, cancel flag
 //   invoice.payment_failed                     org subscription RENEWAL failed: record it (banner), email the org owner ONCE per invoice
@@ -74,6 +84,41 @@ async function sendReceipt(paymentId: string): Promise<string> {
   return "receipt_sent";
 }
 
+// The HOLD succeeded (2026-09-22): capturable, still uncharged. This is the moment the snapshot's own floor is extended
+// to cover the real Stripe hold window, so an approved-but-unopened request is never purged while a genuine, still-live
+// hold could still be redeemed — and, symmetrically, is never kept alive past the point the hold could ever be captured.
+async function markGuestAuthorized(paymentId: string, piId: string): Promise<string> {
+  const p = (await rows(`employer_payments?id=eq.${paymentId}&select=*`))[0];
+  if (!p) return "unknown_payment";
+  const nowIso = new Date().toISOString();
+  const upd = await rest(`employer_payments?id=eq.${paymentId}&status=eq.created`, {
+    method: "PATCH", headers: { "Prefer": "return=representation" },
+    body: JSON.stringify({ status: "authorized", authorized_at: nowIso, stripe_payment_intent_id: piId }),
+  });
+  const changed = upd.ok ? await upd.json() : [];
+  if (!Array.isArray(changed) || !changed.length) return "authorize_ignored_not_created"; // already authorized/paid/etc: a duplicate delivery
+  if (p.comparison_request_id) {
+    // Card holds run about 7 days for a customer-initiated online payment (every major network); never shorten an existing later expiry.
+    const cr = (await rows(`comparison_requests?id=eq.${p.comparison_request_id}&status=eq.approved&first_delivered_at=is.null&select=id,snapshot_expires_at`))[0];
+    const floor = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    if (cr && (!cr.snapshot_expires_at || cr.snapshot_expires_at < floor)) await rest(`comparison_requests?id=eq.${cr.id}&first_delivered_at=is.null`, { method: "PATCH", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ snapshot_expires_at: floor }) });
+  }
+  return "authorized";
+}
+
+// The hold's own window ran out uncaptured, or it was explicitly canceled: Stripe released it by itself. Nothing was ever
+// charged, so there is nothing to refund — this is the clean "never paid" outcome, not a failure needing cleanup. Guarded
+// to ONLY apply from 'authorized', so a capture that already won (this row is 'paid') can never be clobbered by a
+// same-moment cancel-vs-capture race.
+async function markGuestExpired(paymentId: string): Promise<string> {
+  const r = await rest(`employer_payments?id=eq.${paymentId}&status=eq.authorized`, { method: "PATCH", headers: { "Prefer": "return=representation" }, body: JSON.stringify({ status: "expired" }) });
+  const changed = r.ok ? await r.json() : [];
+  return Array.isArray(changed) && changed.length ? "expired" : "cancel_ignored_not_authorized";
+}
+
+// The real charge (2026-09-22: normally made by employer-comparison's `enter` action capturing the hold at genuine
+// redemption; this webhook is the backstop if that capture's own DB write was interrupted after Stripe's real capture
+// succeeded, and the sole trigger for the receipt email either way).
 async function markGuestPaid(paymentId: string, piId: string): Promise<string> {
   const p = (await rows(`employer_payments?id=eq.${paymentId}&select=*`))[0];
   if (!p) return "unknown_payment";
@@ -84,18 +129,12 @@ async function markGuestPaid(paymentId: string, piId: string): Promise<string> {
     return "amount_mismatch_needs_review";
   }
   const charge = pi.latest_charge && typeof pi.latest_charge === "object" ? pi.latest_charge : null;
-  await rest(`employer_payments?id=eq.${paymentId}&status=in.(created,failed)`, {
+  await rest(`employer_payments?id=eq.${paymentId}&status=in.(created,failed,authorized)`, {
     method: "PATCH", headers: { "Prefer": "return=minimal" },
     body: JSON.stringify({ status: "paid", paid_at: new Date().toISOString(), stripe_payment_intent_id: piId, stripe_charge_id: charge ? charge.id : null, receipt_url: charge ? charge.receipt_url || null : null }),
   });
-  // Comparison Stage 3: a guest who has PAID must be able to open. Keep their approved, unopened snapshot alive for at least 24 more hours
-  // (it would otherwise be discarded 7 days after approval, possibly right after they paid).
-  if (p.comparison_request_id) {
-    const cr = (await rows(`comparison_requests?id=eq.${p.comparison_request_id}&status=eq.approved&first_delivered_at=is.null&select=id,snapshot_expires_at`))[0];
-    const floor = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    if (cr && (!cr.snapshot_expires_at || cr.snapshot_expires_at < floor)) await rest(`comparison_requests?id=eq.${cr.id}&first_delivered_at=is.null`, { method: "PATCH", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ snapshot_expires_at: floor }) });
-  }
-  // Receipt details may arrive after the status flips; make sure they are stored even if another event won the transition.
+  // Receipt details may arrive after the status flips; make sure they are stored even if another event (or `enter`'s own
+  // capture, which sets only status/paid_at) won the transition.
   if (charge && charge.receipt_url) await rest(`employer_payments?id=eq.${paymentId}&receipt_url=is.null`, { method: "PATCH", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ receipt_url: charge.receipt_url, stripe_charge_id: charge.id }) });
   return "paid:" + (await sendReceipt(paymentId));
 }
@@ -242,9 +281,17 @@ async function handle(event: any): Promise<string> {
       if (piId) await rest(`employer_payments?id=eq.${paymentId}&stripe_payment_intent_id=is.null`, { method: "PATCH", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ stripe_payment_intent_id: piId, stripe_checkout_session_id: obj.id }) });
       return obj.payment_status === "paid" && piId ? await markGuestPaid(paymentId, piId) : "guest_session_completed_unpaid";
     }
+    case "payment_intent.amount_capturable_updated": {
+      if (obj.metadata?.product !== GUEST || !obj.metadata?.payment_id) return "ignored";
+      return await markGuestAuthorized(obj.metadata.payment_id, obj.id);
+    }
     case "payment_intent.succeeded": {
       if (obj.metadata?.product !== GUEST || !obj.metadata?.payment_id) return "ignored";
       return await markGuestPaid(obj.metadata.payment_id, obj.id);
+    }
+    case "payment_intent.canceled": {
+      if (obj.metadata?.product !== GUEST || !obj.metadata?.payment_id) return "ignored";
+      return await markGuestExpired(obj.metadata.payment_id);
     }
     case "payment_intent.payment_failed": {
       if (obj.metadata?.product !== GUEST || !obj.metadata?.payment_id) return "ignored";
