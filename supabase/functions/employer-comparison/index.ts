@@ -115,21 +115,6 @@ export default {
       try { body = await req.json(); } catch (_e) { body = {}; }
       const action = typeof body.action === "string" ? body.action : "";
 
-      if (action === "_debug_webhook_endpoints") {
-        const we = await stripe("GET", "/v1/webhook_endpoints?limit=20");
-        return json({ ok: we.ok, data: (we.data?.data || []).map((e: any) => ({ id: e.id, url: e.url, status: e.status, enabled_events: e.enabled_events })) });
-      }
-      if (action === "_debug_update_webhook") {
-        if (typeof body.id !== "string") return json({ ok: false, error: "id_required" }, 400);
-        const cur = await stripe("GET", `/v1/webhook_endpoints/${encodeURIComponent(body.id)}`);
-        if (!cur.ok) return json({ ok: false, error: "get_failed", detail: cur.data }, 500);
-        const events: string[] = Array.from(new Set([...(cur.data.enabled_events || []), "payment_intent.amount_capturable_updated", "payment_intent.canceled"]));
-        const form = new URLSearchParams();
-        events.forEach((e, i) => form.set(`enabled_events[${i}]`, e));
-        const upd = await stripe("POST", `/v1/webhook_endpoints/${encodeURIComponent(body.id)}`, form);
-        return json({ ok: upd.ok, before: cur.data.enabled_events, after: upd.data?.enabled_events, error: upd.ok ? undefined : upd.data });
-      }
-
       if (action === "price") {
         const p = await guestPrice();
         return p ? json({ ok: true, amount_cents: p.amount_cents, currency: p.currency }) : json({ ok: false, error: "pricing_unavailable" }, 500);
