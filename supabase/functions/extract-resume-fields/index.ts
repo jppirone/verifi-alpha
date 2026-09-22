@@ -74,6 +74,34 @@ and is unconditionally flagged for a human to review (never silently dropped, ne
 category it doesn't belong in just to avoid "unknown") — this is the anti-gaming design: a candidate
 cannot route real content around verification by mislabeling its own section header.`;
 
+// Inline label + enumerated list as an undressed section boundary (2026-09-22 — a real, confirmed
+// failure mode: a resume's Summary paragraph ended with "Experience Areas: o software development
+// o technology infrastructure o ..." and the whole list landed as trailing Summary text instead of
+// being split into skills, because it never looked like a heading — no standalone line, no blank-line
+// break from the prose before it). Deliberately narrow and structural (glyph-pattern based, not a
+// content-shape judgment) so it doesn't reopen the door Decision 38 closed on Step 2 re-judging
+// category by shape — this only decides where one section ENDS and the next begins, never what's
+// inside either one.
+const INLINE_LABEL_LIST_BOUNDARY_RULE = `INLINE LABEL + LIST AS A SECTION BOUNDARY (a narrow, structural exception — most section boundaries
+are ordinary standalone headings and need none of this): sometimes a document shifts from flowing prose
+directly into an enumerated list with no standalone heading line of its own — just a short label ending
+in a colon (e.g. "Experience Areas:", "Key Skills:", "Areas of Expertise:") immediately followed by 3 or
+more bullet/dash-marked items that each read as a short term or phrase, not a full sentence. Treat that
+label as a heading and END the section it would otherwise be trailing inside right before it, starting a
+new section there — heading = the label text (drop the trailing colon), category decided the normal way,
+by matching that label's meaning against the KNOWN INTERNAL CATEGORIES above (an "Experience Areas" or
+"Key Skills" label matches skills the same as any standalone heading would).
+
+This is scoped narrowly: it does NOT apply when the label+list sits inside a single work-history job's
+own bulleted description — e.g. "Responsibilities:" or "Key initiatives included:" followed by several
+bullets UNDER a specific company/title entry is part of that job's own content, not a new top-level
+section; never split a job entry apart this way. Judge the difference structurally, not by the label's
+wording: a free-standing paragraph transition (typically closing out a Summary/Objective, with no
+enclosing job heading directly above the label) is a real boundary; a label appearing as one more bullet
+within a job's existing bulleted duties list is not. When you cannot confidently tell which of the two
+this is, do not guess — leave the content inside its current section exactly as you would have without
+this rule.`;
+
 type BoundaryCategory = "work_history" | "education" | "certifications" | "skills" | "summary" | "hobbies_other" | "unknown";
 
 type BoundarySection = { heading: string; category: BoundaryCategory };
@@ -119,6 +147,8 @@ into one just because they're topically similar; a genuinely different heading s
 new section.
 
 ${KNOWN_CATEGORIES_GUIDE}
+
+${INLINE_LABEL_LIST_BOUNDARY_RULE}
 
 Return ONLY a single JSON object, no prose before or after it, matching exactly this shape:
 
