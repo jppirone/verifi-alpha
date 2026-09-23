@@ -1360,13 +1360,35 @@ type TrailingItemContext = {
 // function's own buildContinuationContext for how it's used. Deliberately excludes education: a
 // degree entry is one complete fact, not an open-ended list a following page would plausibly
 // continue, so including it would just be noise the model has to read past.
+// Fix for the OPEN bug this comment used to only describe (2026-09-23, see
+// [[verifi-describeTrailingItem-wrong-selection-open-item]] for the full root-cause writeup and the
+// confirmed-live regression that forced this now rather than later): "highest position on this page"
+// is not the same thing as "genuinely still open, continuing onto the next page." A work_history entry
+// with its own explicit closing date, or a certifications/license entry (a complete, self-sufficient
+// fact once extracted — never itself still being described further down), can still happen to be the
+// LAST thing positionally on a page while being fully closed. Wrongly treating either as "trailing"
+// injects a false CONTINUATION AWARENESS note into the next page's boundary-detection prompt — and
+// live reproduction (2026-09-23, real upload-resume + rasterize-pdf-page pipeline, not the
+// extract-resume-fields-direct shortcut) showed this doesn't just risk dropping genuine continuation
+// content (the original finding): it also measurably degrades that SAME call's unrelated
+// SAME-COMPANY-MULTIPLE-ROLES judgment for content entirely within the next page, with no actual
+// cross-page continuation involved at all. Isolating the next page's own content with no
+// previous_page_context produced the correct merge; feeding it the wrong trailing hint broke it.
+function isOpenEndedDate(endDate?: string): boolean {
+  const v = (endDate || "").trim().toLowerCase();
+  return v === "" || v === "present" || v === "current" || v === "now";
+}
 function describeTrailingItem(extraction: ExtractionResult): TrailingItemContext | undefined {
-  type Candidate = { position: number; build: () => TrailingItemContext };
+  type Candidate = { position: number; open: boolean; build: () => TrailingItemContext };
   const candidates: Candidate[] = [];
   for (const w of extraction.work_history) {
     if (typeof w.position !== "number") continue;
     candidates.push({
       position: w.position,
+      // Open only when the role has no fixed closing date (blank, or "Present"/"Current"/"Now") — a
+      // role stating its own end date is a complete, closed fact and isn't plausibly still being
+      // described on the next page.
+      open: isOpenEndedDate(w.end_date),
       build: () => ({ kind: "work_history", company: w.company || "", title: w.title || "", heading: w.heading || "", snippet: (w.job_responsibilities || "").slice(-220) }),
     });
   }
@@ -1374,6 +1396,10 @@ function describeTrailingItem(extraction: ExtractionResult): TrailingItemContext
     if (typeof c.position !== "number") continue;
     candidates.push({
       position: c.position,
+      // Never open: a cert/license entry (name, issuer, date) is complete the moment it's extracted.
+      // The multi-item-list-continuation case (a certifications LIST whose remaining items spill onto
+      // the next page) is handled separately and doesn't depend on this flag.
+      open: false,
       build: () => ({ kind: "certifications_list", name: c.name || "", issuingBody: c.issuing_body || "", heading: c.heading || "", snippet: c.name || "" }),
     });
   }
@@ -1381,12 +1407,16 @@ function describeTrailingItem(extraction: ExtractionResult): TrailingItemContext
     if (typeof f.position !== "number") continue;
     candidates.push({
       position: f.position,
+      // Freeform sections (summary, hobbies/other, needs_review) have no analogous closing-date
+      // signal — keep treating the position-last one as plausibly open, unchanged from before this fix.
+      open: true,
       build: () => ({ kind: "freeform", heading: f.heading || "", sectionType: f.section_type || "needs_review", snippet: (f.content || "").slice(-220) }),
     });
   }
-  if (candidates.length === 0) return undefined;
-  candidates.sort((a, b) => b.position - a.position);
-  return candidates[0].build();
+  const openCandidates = candidates.filter((c) => c.open);
+  if (openCandidates.length === 0) return undefined;
+  openCandidates.sort((a, b) => b.position - a.position);
+  return openCandidates[0].build();
 }
 
 // The other half of the fix: even when the previous-page context above works exactly as intended,
