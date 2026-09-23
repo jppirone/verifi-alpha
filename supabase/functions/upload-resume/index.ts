@@ -475,6 +475,29 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   name. When genuinely unsure whether two same-company entries are one continuous tenure or two
   separate stints, extract them as separate entries rather than guessing at a merge.
 
+  THE DECISIVE SIGNAL FOR WHETHER TO MERGE AT ALL IS HOW MANY INDEPENDENT HEADER LINES THE SOURCE
+  GIVES THE TENURE — NEVER whether the roles happen to read like a promotion (a real, confirmed
+  failure mode, 2026-09-23): merge only when there is exactly ONE full header line for the whole
+  tenure (one company/location/date-range line), with any earlier or later role mentioned as a
+  SUBORDINATE note sitting under that single header — a parenthetical, an italicized aside, a short
+  line like "Promoted mid-year from Desktop Publishing Manager (1996-1997)" — never its own complete
+  header. Do NOT merge when each role instead has its OWN complete, independent header line — its own
+  full "Title | Company | Location | Dates" line (or whatever header shape this resume actually uses)
+  — even when the company name repeats, the dates run back-to-back with no gap between them, and the
+  roles plainly read as a promotion. Two independently, fully-headed entries reflect the resume
+  author's own choice to present them as separate entries; respect that choice — extract each as its
+  OWN separate work_history entry, each with its own title and its own start_date/end_date exactly as
+  printed for THAT entry alone. Never borrow a later entry's end_date for an earlier one, never borrow
+  an earlier entry's start_date for a later one, and never combine the two titles into one when this is
+  the shape you're looking at. A real, confirmed failure mode: two independently headed entries at the
+  same company — "Business Education Teacher | School District of Indian River County | Sebastian, FL
+  | 2018 - 2025" and "Associate Dean of Discipline | School District of Indian River County |
+  Sebastian, FL | 2025 - 2026" — got merged into ONE entry reading "Associate Dean of Discipline to
+  Business Education Teacher," with end_date fabricated as open-ended/"Present" even though the source
+  explicitly ends that role in 2026. That must not happen: each of those two lines is its own complete
+  header, so they stay two separate entries, each keeping its own real, printed end date — the header
+  count decides the shape, not how senior-sounding the titles are or how tightly the dates abut.
+
 - education = DEGREE-GRANTING PROGRAMS ONLY (e.g. B.A., B.S., M.S., MBA, Ph.D., Associate's).
 
 - education's "location" field = the institution's city/state (or city/country outside the US) as
@@ -529,6 +552,21 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   (e.g. "Plumber") are both real, correct values for "name"; a license number being present is
   never a reason to invent a more formal name than what's printed. Use an empty string "" when no
   license/permit/registration number is printed for that credential — never guess or fabricate one.
+
+- A COMPACT, DELIMITER-LESS LICENSE LINE IS ONE ENTRY, NEVER TWO (applies generally, inside any
+  certifications-category section, whether or not that section has its own visible heading — this is
+  not limited to the headerless fallback above): a single line that packs a trade/credential name, a
+  2-letter US state abbreviation, and a license-number marker together with nothing but plain spaces
+  between them and no comma, pipe, dash, or other delimiter — e.g. "Plumber FL Lic # CFC1425829" — is
+  ONE certifications entry, not two and not three. Read it as [trade/credential name] [state
+  abbreviation] [license marker + number]: "name" gets the trade/credential portion only (e.g.
+  "Plumber"), "license_number" gets the number after the marker (e.g. "CFC1425829"). The bare 2-letter
+  state token in the middle (e.g. "FL") is never itself a separate credential and must NEVER become
+  its own certifications entry, its own "name" value, or a standalone freeform/needs_review item — it
+  identifies which state issued THIS SAME license, nothing more; there is no dedicated field for it in
+  this schema (a separate downstream pass re-derives the issuing state independently), so simply leave
+  it out of the output rather than inventing a place to put it. One packed line, one entry — never let
+  a bare state abbreviation cause it to split into more than one.
 
 - certifications' "issuing_body" field = the organization, platform, or provider that issued,
   administers, or hosts the credential, when the resume actually identifies one. SHARED-CONTEXT

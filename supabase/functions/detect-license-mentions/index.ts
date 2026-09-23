@@ -119,6 +119,14 @@ function splitPartialDate(s: string | null): { date: string | null; precision: "
 function strOrNull(s: unknown): string | null {
   return typeof s === "string" && s.trim() ? s.trim() : null;
 }
+// A real, confirmed failure mode (2026-09-23): a compact, delimiter-less license line ("Plumber FL
+// Lic # CFC1425829") can leave the model's own "issuing_body" holding just the bare state token
+// ("FL") when it isn't confident about a real issuing agency name. If that ever happens, the create-
+// new-row fallback below must not turn a bare 2-letter state code into the credential's whole visible
+// "name" (a phantom "FL" item) — fall through to "Professional license" instead.
+function looksLikeBareStateCode(s: string | null): boolean {
+  return !!s && VALID_STATES.has(s.trim().toUpperCase()) && s.trim().length <= 3;
+}
 
 type ExistingCert = { id: string; name: string | null; issuing_body: string | null; license_number: string | null };
 
@@ -410,7 +418,7 @@ export default {
           // still has exactly one record and one card.
           const { data: created, error: createErr } = await supabase.from("certification_items").insert({
             candidate_id: candidateId, resume_document_id: doc.id,
-            name: m.license_name || m.issuing_body || "Professional license",
+            name: m.license_name || (looksLikeBareStateCode(m.issuing_body) ? null : m.issuing_body) || "Professional license",
             issuing_body: m.issuing_body, license_number: m.license_number,
             issue_date: splitPartialDate(m.issue_date).date, issue_date_precision: splitPartialDate(m.issue_date).precision,
             expiration_date: splitPartialDate(m.expiration_date).date, expiration_date_precision: splitPartialDate(m.expiration_date).precision,
