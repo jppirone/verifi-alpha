@@ -472,14 +472,28 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   OWN separate work_history entry, each with its own title and its own start_date/end_date exactly as
   printed for THAT entry alone. Never borrow a later entry's end_date for an earlier one, never borrow
   an earlier entry's start_date for a later one, and never combine the two titles into one when this is
-  the shape you're looking at. A real, confirmed failure mode: two independently headed entries at the
-  same company — "Business Education Teacher | School District of Indian River County | Sebastian, FL
-  | 2018 - 2025" and "Associate Dean of Discipline | School District of Indian River County |
-  Sebastian, FL | 2025 - 2026" — got merged into ONE entry reading "Associate Dean of Discipline to
-  Business Education Teacher," with end_date fabricated as open-ended/"Present" even though the source
-  explicitly ends that role in 2026. That must not happen: each of those two lines is its own complete
-  header, so they stay two separate entries, each keeping its own real, printed end date — the header
-  count decides the shape, not how senior-sounding the titles are or how tightly the dates abut.
+  the shape you're looking at.
+
+  A short aside NAMED AS a role transition (e.g. "Role transition; retained [prior title] title of
+  record," "Promoted from...") printed under one of two independently, fully-headed entries does NOT
+  change this decision — it does not turn two separate headers into one shared header, and it is not,
+  itself, a reason to merge. Count the header lines FIRST: if the other role you'd be merging this with
+  still has its own separate, complete header line somewhere on the page, this stays two entries no
+  matter how explicitly the aside describes it as a continuation of the same tenure — the aside is
+  additional context that belongs inside THAT entry's own job_responsibilities, not a signal to fold a
+  second, independently headed entry into it. Only fold a transition note away with its role when that
+  note sits under the ONLY header for the tenure (the true Shape-A case above).
+
+  A real, confirmed failure mode (this exact case, still wrong after a first attempt at this fix): two
+  independently headed entries at the same company — "Business Education Teacher | School District of
+  Indian River County | Sebastian, FL | 2018 - 2025" and "Associate Dean of Discipline | School
+  District of Indian River County | Sebastian, FL | 2025 - 2026," the second captioned "Role
+  transition; retained Business Education Teacher title of record per district process" — kept getting
+  merged into ONE entry even once the title-order and end-date sub-bugs were fixed, because the
+  transition caption was read as license to merge. It is not: each of those two lines is its own
+  complete header, so they stay two separate entries, each keeping its own real, printed end date. The
+  header count decides the shape — not how senior-sounding the titles are, how tightly the dates abut,
+  or how explicitly a caption frames it as continuous.
 
 - education = DEGREE-GRANTING PROGRAMS ONLY (e.g. B.A., B.S., M.S., MBA, Ph.D., Associate's).
 
