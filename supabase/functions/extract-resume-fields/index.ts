@@ -213,8 +213,6 @@ ${KNOWN_CATEGORIES_GUIDE}
 
 ${INLINE_LABEL_LIST_BOUNDARY_RULE}
 
-${MULTI_ENTRY_SECTION_BOUNDARY_RULE}
-
 A SEPARATE TASK, after boundaries — SAME-COMPANY, MULTIPLE ROLES: decide, for every employer name that
 appears more than once within whatever section(s) you judged as work_history above, whether it must
 merge into one work_history entry or stay as separate entries. Do NOT leave this decision to a later
@@ -252,6 +250,8 @@ title but has no company, no location, and no independent date range of its own 
 like the header line has) — list "Thomson Reuters" in "mergeCompanies". The test is whether the SECOND
 mention independently repeats the company name AND prints its own location AND its own date range as
 separate fields the way the first one does, not whether it names an earlier title at all.
+
+${MULTI_ENTRY_SECTION_BOUNDARY_RULE}
 
 Return ONLY a single JSON object, no prose before or after it, matching exactly this shape:
 
@@ -901,32 +901,6 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   the NEVER-FABRICATE rule above already warns about. It must stay as part of the education section's
   own content (or needs_review if it has no education content of its own to attach to) — never split
   out into its own certifications entry, regardless of which section physically contains it.
-  A second real example, subtler because it's ONE BULLET inside an otherwise-genuine bulleted
-  certifications list (being part of a real list does not by itself make an item real, but do NOT
-  overcorrect the other way either — most bullets in a real certifications list ARE real; this is about
-  correctly excluding the rare genuine outlier, never about second-guessing every item in a list just
-  because one item nearby turned out to be excluded): a CERTIFICATIONS section reading "• Google Project
-  Management Certificate | Google / Coursera" then "• Generative AI and Automation (Coursework,
-  2024–2026): applied GenAI for content creation, workflow automation, and productivity integration;
-  tooling exposure includes Jasper, Midjourney, Stable Diffusion, and rapid prototyping with Lovable."
-  then "• Self-directed exploration of project management platforms (including Jira) via trial access,
-  evaluating workflow, ticketing, and reporting capabilities." — use this GRAMMATICAL test, not a vaguer
-  "does it feel real" judgment: does the bullet's text OPEN with a specific program/course/credential
-  NAME (a noun phrase that could stand alone as a title, optionally followed by a colon or parenthetical
-  elaborating on it) — or does it OPEN with a verb/gerund phrase describing an activity the candidate
-  personally did ("Self-directed exploration of...", "Completed...", "Explored...", "Worked on...")? The
-  first two bullets both open by NAMING a program — "Google Project Management Certificate" and
-  "Generative AI and Automation (Coursework, 2024–2026)" are both title-shaped noun phrases, exactly
-  parallel to how a real named credential always reads (the same shape every other genuine certifications
-  entry in this document has) — both are genuine certifications entries, extract both in full, including
-  the second one's full descriptive clause after the colon. The third bullet opens with "Self-directed
-  exploration of..." — a verb-phrase describing an activity, naming no program, course, or credential
-  title at all — that is the ONLY one of the three that is not real. Sharing a bulleted list with real
-  credentials does not make a genuinely title-less bullet real, but being NEAR an excluded bullet never
-  makes a genuinely title-shaped bullet fake either — apply this opens-with-a-name-vs-opens-with-a-verb
-  test to each bullet independently, on its own text alone. The third bullet goes to needs_review
-  (heading = the section's own real heading, e.g. "CERTIFICATIONS"), not certifications, and never
-  becomes a certifications row under a DIFFERENT section's heading either.
 
 - "summary" (freeform) = any professional summary / objective / about-me blurb at the top of the
   resume. "hobbies_other" (freeform) = interests, hobbies, and volunteer/community activities ONLY
