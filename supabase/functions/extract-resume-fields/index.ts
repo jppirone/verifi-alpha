@@ -429,13 +429,45 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   This is additive only, like freeform's own "heading" field below — it does not change how content
   gets classified, only what section title the output can reproduce.
 
-- SAME COMPANY, MULTIPLE ROLES (an internal promotion or title change) — a real, confirmed structure:
-  when ONE employer shows a company-level header (its own overall date range, sometimes its own
-  company-level description or a note like an acquisition) followed by two or more distinct role
-  sub-entries under it — each with its own title and its own date range, typically an earlier, more
-  junior title followed by a later, more senior one after a promotion — this is ONE company tenure with
-  multiple roles, not several unrelated jobs that happen to share an employer name. Combine it into ONE
-  work_history entry, never one entry per role:
+- SAME COMPANY, MULTIPLE ROLES — RUN THIS GATING TEST FIRST, before weighing any promotion or
+  transition language, whenever a company name appears more than once in the work-history section
+  (still getting this wrong after two earlier, weaker-worded attempts at this exact fix, 2026-09-23 —
+  this version leads with the test itself rather than stating it as one consideration among several):
+
+  GATING TEST — count the COMPLETE header lines naming this company. A complete header line is one
+  that, by itself, states a title, this company, and a date range — the same shape every other
+  employer entry in this section uses (e.g. "Title | Company | Location | Dates", or whatever exact
+  header shape this resume uses elsewhere).
+    - Count == 1 (only one complete header line names this company; any other role is mentioned ONLY
+      as a subordinate aside UNDER that one header — a parenthetical, an italicized note, a short line
+      like "Promoted mid-year from Desktop Publishing Manager (1996-1997)" that does NOT itself state
+      its own title+company+dates as a standalone header) → MERGE-ELIGIBLE. Go to "HOW TO MERGE" below.
+    - Count >= 2 (two or more complete header lines each independently name this company, each with
+      its own title and its own date range) → NOT MERGE-ELIGIBLE. STOP HERE. Extract one work_history
+      entry per header line, each keeping its own real title and its own real start_date/end_date
+      exactly as printed on that line. Do not proceed to "HOW TO MERGE" for this company at all.
+      This stays NOT MERGE-ELIGIBLE even when one of the header lines carries a caption that explicitly
+      frames it as a continuation or promotion (e.g. "Role transition; retained [prior title] title of
+      record," "Promoted from...") — a caption on one header does not erase the fact that the OTHER
+      role still has its own separate, complete header line elsewhere. The caption is real content and
+      belongs inside that entry's own job_responsibilities; it is never, by itself, permission to fold
+      a second, independently headed entry into the first. Once the count comes back >= 2, the caption
+      cannot change the answer — do not re-run this test against the caption's wording.
+
+  A real, confirmed failure mode (this exact case — count == 2, both header lines complete — got
+  merged anyway, twice, across two earlier attempts at this fix): "Business Education Teacher | School
+  District of Indian River County | Sebastian, FL | 2018 - 2025" and "Associate Dean of Discipline |
+  School District of Indian River County | Sebastian, FL | 2025 - 2026," the second captioned "Role
+  transition; retained Business Education Teacher title of record per district process." Count the
+  headers: two complete header lines, so NOT MERGE-ELIGIBLE — this must produce two separate
+  work_history entries, "Business Education Teacher" ending 2025 and "Associate Dean of Discipline"
+  ending 2026, never a single merged "Business Education Teacher to Associate Dean of Discipline" entry
+  and never a fabricated open-ended/"Present" end date on either one.
+
+  HOW TO MERGE (only reached when the gating test above found exactly count == 1 — one company-level
+  header followed by one or more role sub-entries mentioned only as subordinate asides beneath it, an
+  internal promotion or title change within that single tenure): combine it into ONE work_history
+  entry, never one entry per role:
     - "company" = the employer's name, copied verbatim once.
     - "title" = every role's own title, in chronological order, joined as "First Title to Second Title"
       (extend the same way for three or more roles) — e.g. "Recruiter to Senior Recruiter" — never just
@@ -451,49 +483,13 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
       2024:"), followed by that role's own bullets exactly as printed, using "\n" between lines per the
       LINE-BREAK PRESERVATION rule above. Never shorten, summarize, or drop any real content from either
       role or from the company-level context while combining them — the combining is structural only.
-  Do NOT apply this when two entries merely share an employer NAME but read as genuinely separate,
-  disconnected stints — a real gap where the candidate left and later came back, or two different
-  contract engagements at the same staffing client years apart with no promotion language connecting
-  them. The signal is ONE continuous tenure with an internal role change, not just a repeated company
-  name. When genuinely unsure whether two same-company entries are one continuous tenure or two
-  separate stints, extract them as separate entries rather than guessing at a merge.
 
-  THE DECISIVE SIGNAL FOR WHETHER TO MERGE AT ALL IS HOW MANY INDEPENDENT HEADER LINES THE SOURCE
-  GIVES THE TENURE — NEVER whether the roles happen to read like a promotion (a real, confirmed
-  failure mode, 2026-09-23): merge only when there is exactly ONE full header line for the whole
-  tenure (one company/location/date-range line), with any earlier or later role mentioned as a
-  SUBORDINATE note sitting under that single header — a parenthetical, an italicized aside, a short
-  line like "Promoted mid-year from Desktop Publishing Manager (1996-1997)" — never its own complete
-  header. Do NOT merge when each role instead has its OWN complete, independent header line — its own
-  full "Title | Company | Location | Dates" line (or whatever header shape this resume actually uses)
-  — even when the company name repeats, the dates run back-to-back with no gap between them, and the
-  roles plainly read as a promotion. Two independently, fully-headed entries reflect the resume
-  author's own choice to present them as separate entries; respect that choice — extract each as its
-  OWN separate work_history entry, each with its own title and its own start_date/end_date exactly as
-  printed for THAT entry alone. Never borrow a later entry's end_date for an earlier one, never borrow
-  an earlier entry's start_date for a later one, and never combine the two titles into one when this is
-  the shape you're looking at.
-
-  A short aside NAMED AS a role transition (e.g. "Role transition; retained [prior title] title of
-  record," "Promoted from...") printed under one of two independently, fully-headed entries does NOT
-  change this decision — it does not turn two separate headers into one shared header, and it is not,
-  itself, a reason to merge. Count the header lines FIRST: if the other role you'd be merging this with
-  still has its own separate, complete header line somewhere on the page, this stays two entries no
-  matter how explicitly the aside describes it as a continuation of the same tenure — the aside is
-  additional context that belongs inside THAT entry's own job_responsibilities, not a signal to fold a
-  second, independently headed entry into it. Only fold a transition note away with its role when that
-  note sits under the ONLY header for the tenure (the true Shape-A case above).
-
-  A real, confirmed failure mode (this exact case, still wrong after a first attempt at this fix): two
-  independently headed entries at the same company — "Business Education Teacher | School District of
-  Indian River County | Sebastian, FL | 2018 - 2025" and "Associate Dean of Discipline | School
-  District of Indian River County | Sebastian, FL | 2025 - 2026," the second captioned "Role
-  transition; retained Business Education Teacher title of record per district process" — kept getting
-  merged into ONE entry even once the title-order and end-date sub-bugs were fixed, because the
-  transition caption was read as license to merge. It is not: each of those two lines is its own
-  complete header, so they stay two separate entries, each keeping its own real, printed end date. The
-  header count decides the shape — not how senior-sounding the titles are, how tightly the dates abut,
-  or how explicitly a caption frames it as continuous.
+  Separately, do NOT apply any of this (merge or not) when two entries merely share an employer NAME
+  but read as genuinely separate, disconnected stints — a real gap where the candidate left and later
+  came back, or two different contract engagements at the same staffing client years apart with no
+  connecting language at all. That is a different situation from the gating test above (which handles
+  same-tenure cases); when genuinely unsure whether two same-company entries are one continuous tenure
+  or two disconnected stints, extract them as separate entries rather than guessing at a merge.
 
 - education = DEGREE-GRANTING PROGRAMS ONLY (e.g. B.A., B.S., M.S., MBA, Ph.D., Associate's).
 
