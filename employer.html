@@ -4279,7 +4279,7 @@ class Component extends DCLogic {
   // this existed).
   renderProvidedDocument() {
     const container = document.getElementById('employer-copy-container');
-    if (!container) return;
+    if (!container) { requestAnimationFrame(() => this.renderProvidedDocument()); return; }
     const cmp = this.state.compare || {};
     const doc = cmp.document;
     container.innerHTML = '';
@@ -4300,7 +4300,7 @@ class Component extends DCLogic {
   // any kind -- all verification detail stays in the report section above; see assemble_plain_document.
   renderGeneratedDocument() {
     const container = document.getElementById('generated-doc-container');
-    if (!container) return;
+    if (!container) { requestAnimationFrame(() => this.renderGeneratedDocument()); return; }
     const cmp = this.state.compare || {};
     const resume = cmp.generatedDocument;
     container.innerHTML = '';
@@ -4329,8 +4329,10 @@ class Component extends DCLogic {
   }
 
   renderComparisonDocuments() {
-    // containers are inside the sc-if compare view; give the DOM a tick to attach after setState
-    requestAnimationFrame(() => { this.renderProvidedDocument(); this.renderGeneratedDocument(); });
+    // each renderer self-retries via requestAnimationFrame until its container exists (same pattern as
+    // candidate.html's renderPdfPreview), so no wrapping delay is needed here.
+    this.renderProvidedDocument();
+    this.renderGeneratedDocument();
   }
 
   orgFormOk() {
