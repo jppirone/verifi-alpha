@@ -575,6 +575,24 @@ export default {
         if (!live.content) return json({ ok: false, error: "unavailable" }, 409);
         return json({ ok: true, content: live.content, assembled_at: live.content.assembled_at });
       }
+      // assemble_plain_document (2026-09-23): the data behind the Comparison's system-generated document —
+      // an ordinary, unannotated resume rendering (employer.html's buildComparisonPdfBytes/buildComparisonLines),
+      // never carrying any verification indicator. Deliberately NOT assembleSnapshot (the verification-status
+      // assembler above): this calls assemble_customized_resume directly with p_ignore_overrides=true, the
+      // SAME RPC that already powers every non-paying candidate's own default resume view — with overrides
+      // forced off, candidate exclusion/customization can never influence it, which is the actual property the
+      // firewall between this feature and Customization requires (not that the two features share zero code).
+      // p_delivered_only=true so a needs_review-flagged freeform block a real employer wouldn't otherwise see
+      // stays out of it, same as every other candidate's own default delivered view.
+      if (action === "assemble_plain_document") {
+        if (!isServiceCaller(req)) return UNAUTHORIZED();
+        if (typeof body.candidate_id !== "string" || !UUID.test(body.candidate_id)) return json({ ok: false, error: "candidate_id_invalid" }, 400);
+        const r = await rest("rpc/assemble_customized_resume", { method: "POST", body: JSON.stringify({ p_candidate: body.candidate_id, p_ignore_overrides: true, p_delivered_only: true }) });
+        if (!r.ok) return json({ ok: false, error: "assemble_failed" }, 500);
+        const resume = await r.json();
+        if (!resume || !resume.available) return json({ ok: false, error: "unavailable" }, 409);
+        return json({ ok: true, resume });
+      }
 
       // ---- candidate-session actions ----
       const candidateId = typeof body.candidate_id === "string" ? body.candidate_id : "";

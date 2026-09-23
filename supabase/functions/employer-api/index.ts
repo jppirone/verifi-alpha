@@ -596,6 +596,32 @@ const ACTIONS: Record<string, Action> = {
       if (!liveJson || !liveJson.ok) return fail(500, "assemble_failed");
       const snap = { content: liveJson.content, assembled_at: liveJson.assembled_at };
 
+      // The document THIS employer already provided at request time (2026-09-23): a signed 60-second link to
+      // their own upload, if it hasn't been purged (21 days from request) — so the comparison screen can show
+      // it automatically instead of asking them to pick a fresh local copy every time they open this. Best-
+      // effort: a missing or expired document just means the client falls back to its own manual-upload prompt,
+      // never a hard failure of the whole open.
+      let document: { url: string; file_name: string; content_type: string; expires_in: number } | null = null;
+      const doc = (await rows(`comparison_request_documents?request_id=eq.${r.id}&select=storage_path,file_name,content_type,purge_after`))?.[0];
+      if (doc && new Date(doc.purge_after).getTime() > Date.now() && /^[0-9a-f-]{36}\.(pdf|png|jpg)$/.test(doc.storage_path)) {
+        const sres = await fetch(`${SUPABASE_URL}/storage/v1/object/sign/employer-documents/${doc.storage_path}`, { method: "POST", headers: JSON_H, body: JSON.stringify({ expiresIn: 60 }) });
+        const sj = sres.ok ? await sres.json().catch(() => null) : null;
+        if (sj && typeof sj.signedURL === "string") document = { url: `${SUPABASE_URL}/storage/v1${sj.signedURL}`, file_name: doc.file_name, content_type: doc.content_type, expires_in: 60 };
+      }
+
+      // The system-generated document (2026-09-23): the candidate's own default resume content, nothing
+      // excluded, carrying no verification indicators at all — see candidate-comparison-requests/index.ts's
+      // own assemble_plain_document for the full reasoning. Best-effort the same way: if this fails, the
+      // generated-document side of the screen just has nothing to render, the verification report above is
+      // unaffected either way.
+      let generatedDocument: unknown = null;
+      const gen = await fetch(`${SUPABASE_URL}/functions/v1/candidate-comparison-requests`, {
+        method: "POST", headers: { "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "assemble_plain_document", candidate_id: r.candidate_id }),
+      });
+      const genJson = gen.ok ? await gen.json().catch(() => null) : null;
+      if (genJson && genJson.ok) generatedDocument = genJson.resume;
+
       let quota: { used: number; included: number; remaining: number } | null = null;
       let metered = false;
       if (!r.first_delivered_at) {
@@ -614,7 +640,7 @@ const ACTIONS: Record<string, Action> = {
         // Stamp the first delivery once (a concurrent open that lost this race is still served: the lookup was counted once above).
         await rest(`comparison_requests?id=eq.${r.id}&first_delivered_at=is.null`, { method: "PATCH", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ first_delivered_at: new Date().toISOString() }) });
       }
-      return ok({ content: snap.content, assembled_at: snap.assembled_at, metered, quota, first_open: !r.first_delivered_at });
+      return ok({ content: snap.content, assembled_at: snap.assembled_at, metered, quota, first_open: !r.first_delivered_at, document, generated_document: generatedDocument });
     },
   },
 };

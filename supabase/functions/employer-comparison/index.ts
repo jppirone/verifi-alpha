@@ -101,6 +101,27 @@ async function liveContent(candidateId: string): Promise<{ content: any; assembl
   return j && j.ok ? { content: j.content, assembled_at: j.assembled_at } : null;
 }
 
+// The document this guest already provided at request time, and the system-generated plain document
+// (2026-09-23) — see employer-api.ts's open_comparison for the identical org-path version and the full
+// reasoning. Both best-effort: a failure here never blocks delivery of the live verification content.
+async function documentAndGenerated(requestId: string, candidateId: string): Promise<{ document: { url: string; file_name: string; content_type: string; expires_in: number } | null; generated_document: unknown }> {
+  let document: { url: string; file_name: string; content_type: string; expires_in: number } | null = null;
+  const doc = (await rows(`comparison_request_documents?request_id=eq.${requestId}&select=storage_path,file_name,content_type,purge_after`))[0];
+  if (doc && new Date(doc.purge_after).getTime() > Date.now() && /^[0-9a-f-]{36}\.(pdf|png|jpg)$/.test(doc.storage_path)) {
+    const sres = await fetch(`${SUPABASE_URL}/storage/v1/object/sign/employer-documents/${doc.storage_path}`, { method: "POST", headers: JSON_H, body: JSON.stringify({ expiresIn: 60 }) });
+    const sj = sres.ok ? await sres.json().catch(() => null) : null;
+    if (sj && typeof sj.signedURL === "string") document = { url: `${SUPABASE_URL}/storage/v1${sj.signedURL}`, file_name: doc.file_name, content_type: doc.content_type, expires_in: 60 };
+  }
+  let generatedDocument: unknown = null;
+  const gen = await fetch(`${SUPABASE_URL}/functions/v1/candidate-comparison-requests`, {
+    method: "POST", headers: { "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "assemble_plain_document", candidate_id: candidateId }),
+  });
+  const genJson = gen.ok ? await gen.json().catch(() => null) : null;
+  if (genJson && genJson.ok) generatedDocument = genJson.resume;
+  return { document, generated_document: generatedDocument };
+}
+
 // The real charge (2026-09-22): capture an authorized, capturable hold. Idempotency-keyed by the payment's own id, so a
 // concurrent capture of the same hold (two visits redeeming at once) gets Stripe's identical answer back, never a second
 // charge. Marks the row paid on success so the caller can proceed straight to redemption. A hold that can no longer be
@@ -230,7 +251,8 @@ export default {
             const snap = await liveContent(r.candidate_id);
             if (snap) {
               const fresh = (await requestByToken(body.token)) || r;
-              return json({ ...(await statusOf(fresh)), delivered: { content: snap.content, assembled_at: snap.assembled_at, window_ends_at: res.window_ends_at, first_open: !!res.first_open } });
+              const { document, generated_document } = await documentAndGenerated(r.id, r.candidate_id);
+              return json({ ...(await statusOf(fresh)), delivered: { content: snap.content, assembled_at: snap.assembled_at, window_ends_at: res.window_ends_at, first_open: !!res.first_open, document, generated_document } });
             }
           }
         }
@@ -320,7 +342,8 @@ export default {
         }
         const snap = await liveContent(r.candidate_id);
         if (!snap) return json({ ok: false, error: "not_available" }, 410);
-        return json({ ok: true, content: snap.content, assembled_at: snap.assembled_at, window_ends_at: res.window_ends_at, first_open: !!res.first_open });
+        const { document, generated_document } = await documentAndGenerated(r.id, r.candidate_id);
+        return json({ ok: true, content: snap.content, assembled_at: snap.assembled_at, window_ends_at: res.window_ends_at, first_open: !!res.first_open, document, generated_document });
       }
 
       if (action === "close") {

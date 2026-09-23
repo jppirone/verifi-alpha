@@ -3181,39 +3181,54 @@ const __ds_scope = {};
     </div>
 
     <div class="card elev-md" style="border:1px solid var(--color-accent-700);padding:var(--space-6)">
-      <div style="font-size:15px;line-height:1.6;color:var(--color-neutral-100)">This is the candidate's verified record as of the time above — current as of right now, not a fixed-in-time snapshot; reopening this comparison later reflects whatever is true then. Your copy may differ. If it does, that is worth a conversation with the candidate before drawing conclusions.</div>
+      <div style="font-size:15px;line-height:1.6;color:var(--color-neutral-100)">This is the candidate's verified record as of the time above — current as of right now, not a fixed-in-time snapshot; reopening this comparison later reflects whatever is true then.</div>
     </div>
+
+    <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+      <div class="card-kicker">Candidate's verified record</div>
+      <sc-if value="{{ compareEmpty }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:13px;color:var(--color-neutral-400)">No items to show.</div>
+      </sc-if>
+      <sc-for list="{{ itemRows }}" as="row" hint-placeholder-count="4">
+        <div style="display:flex;flex-direction:column;gap:4px;padding-bottom:var(--space-3);border-bottom:1px solid var(--color-divider)">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap">
+            <div style="font-size:14px;line-height:1.5">{{ row.headline }}</div>
+            <span class="{{ row.statusClass }}" style="white-space:nowrap;{{ row.statusStyle }}">{{ row.statusLabel }}</span>
+          </div>
+          <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.6">{{ row.detail }}</div>
+          <sc-if value="{{ row.isDiscrepancy }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.6"><b>Claimed:</b> {{ row.claimed }}</div>
+            <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.6"><b>Found:</b> {{ row.found }}</div>
+          </sc-if>
+          <div style="font-size:11px;color:var(--color-neutral-500)">{{ row.kind }} · {{ row.how }}</div>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="font-size:12px;color:var(--color-neutral-500);padding-top:var(--space-2)">Below: their document as originally submitted, next to a plain document generated from the candidate's current record above. The generated document carries no verification marks — read it as an ordinary resume and compare it side by side with theirs.</div>
 
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:var(--space-4);align-items:start">
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
-        <div class="card-kicker">Your copy (optional)</div>
-        <div class="field">
-          <label for="cp-file">Choose the copy you received</label>
-          <input class="input" id="cp-file" type="file" accept=".pdf,image/*" sc-camel-on-change="{{ onPickCopy }}">
-        </div>
+        <div class="card-kicker">Their document</div>
+        <sc-if value="{{ hasStoredDoc }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">The document they provided when this request was submitted.</div>
+        </sc-if>
+        <sc-if value="{{ noStoredDoc }}" hint-placeholder-val="{{ false }}">
+          <div class="field">
+            <label for="cp-file">This request has no stored copy any more (or was made before this was captured). Choose the copy you received</label>
+            <input class="input" id="cp-file" type="file" accept=".pdf,image/*" sc-camel-on-change="{{ onPickCopy }}">
+          </div>
+        </sc-if>
         <div id="employer-copy-container" style="width:100%;aspect-ratio:8.5 / 11;background:#ffffff;border-radius:2px;box-shadow:var(--shadow-lg);overflow:auto"></div>
-        <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Shown only in this browser, next to the record. It is not uploaded, stored, or visible to the candidate, and nothing is compared automatically: you read the two side by side. PDF and image files can be previewed; other types cannot.</div>
+        <sc-if value="{{ noStoredDoc }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">A file chosen here is shown only in this browser. It is not uploaded, stored, or visible to the candidate. PDF and image files can be previewed; other types cannot.</div>
+        </sc-if>
       </div>
 
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
-        <div class="card-kicker">Candidate's verified record</div>
-        <sc-if value="{{ compareEmpty }}" hint-placeholder-val="{{ false }}">
-          <div style="font-size:13px;color:var(--color-neutral-400)">No items to show.</div>
-        </sc-if>
-        <sc-for list="{{ itemRows }}" as="row" hint-placeholder-count="4">
-          <div style="display:flex;flex-direction:column;gap:4px;padding-bottom:var(--space-3);border-bottom:1px solid var(--color-divider)">
-            <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap">
-              <div style="font-size:14px;line-height:1.5">{{ row.headline }}</div>
-              <span class="{{ row.statusClass }}" style="white-space:nowrap;{{ row.statusStyle }}">{{ row.statusLabel }}</span>
-            </div>
-            <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.6">{{ row.detail }}</div>
-            <sc-if value="{{ row.isDiscrepancy }}" hint-placeholder-val="{{ false }}">
-              <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.6"><b>Claimed:</b> {{ row.claimed }}</div>
-              <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.6"><b>Found:</b> {{ row.found }}</div>
-            </sc-if>
-            <div style="font-size:11px;color:var(--color-neutral-500)">{{ row.kind }} · {{ row.how }}</div>
-          </div>
-        </sc-for>
+        <div class="card-kicker">Generated from their current record</div>
+        <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Built just now from the candidate's current profile data. No verification marks of any kind — the report above is where that detail lives.</div>
+        <div id="generated-doc-container" style="width:100%;aspect-ratio:8.5 / 11;background:#ffffff;border-radius:2px;box-shadow:var(--shadow-lg);overflow:auto"></div>
       </div>
     </div>
   </div>
@@ -3911,8 +3926,9 @@ class Component extends DCLogic {
     this.setState({
       guest: d, guestBusy: false, guestErr: null, screen: 'compare',
       guestPrice: d.price ? { cents: d.price.amount_cents, currency: d.price.currency } : this.state.guestPrice,
-      compare: { id: 'guest', label: d.candidate_label || 'Candidate', content: x.content, assembledAt: x.assembled_at, guest: true, windowEnds: x.window_ends_at, firstOpen: !!x.first_open },
+      compare: { id: 'guest', label: d.candidate_label || 'Candidate', content: x.content, assembledAt: x.assembled_at, guest: true, windowEnds: x.window_ends_at, firstOpen: !!x.first_open, document: x.document || null, generatedDocument: x.generated_document || null },
     });
+    this.renderComparisonDocuments();
     this.startGuestTimer();
   }
 
@@ -3935,7 +3951,8 @@ class Component extends DCLogic {
     const r = await this.gcall({ action: 'open', token: s.guestToken });
     const d = r.data || {};
     if (d.ok) {
-      this.setState({ guestBusy: false, screen: 'compare', compare: { id: 'guest', label: (s.guest && s.guest.candidate_label) || 'Candidate', content: d.content, assembledAt: d.assembled_at, guest: true, windowEnds: d.window_ends_at, firstOpen: !!d.first_open } });
+      this.setState({ guestBusy: false, screen: 'compare', compare: { id: 'guest', label: (s.guest && s.guest.candidate_label) || 'Candidate', content: d.content, assembledAt: d.assembled_at, guest: true, windowEnds: d.window_ends_at, firstOpen: !!d.first_open, document: d.document || null, generatedDocument: d.generated_document || null } });
+      this.renderComparisonDocuments();
       this.startGuestTimer();
       return;
     }
@@ -3958,6 +3975,7 @@ class Component extends DCLogic {
     this._guestEnded = true; // a late answer to an earlier visit must not bring a closed view back
     if (this._guestTimer) { clearInterval(this._guestTimer); this._guestTimer = null; }
     if (this._copyUrl) { try { URL.revokeObjectURL(this._copyUrl); } catch (x) { /* ignore */ } this._copyUrl = null; }
+    if (this._genDocUrl) { try { URL.revokeObjectURL(this._genDocUrl); } catch (x) { /* ignore */ } this._genDocUrl = null; }
     // keep the kind (the guest has just seen it) so the closed screen names what was closed
     const seen = (this.state.compare && this.state.compare.content && this.state.compare.content.kind) || (this.state.guest && this.state.guest.kind) || null;
     this.setState({ screen: 'guest', compare: null, guest: { state: 'closed', kind: seen } });
@@ -4007,7 +4025,8 @@ class Component extends DCLogic {
     const d = r.data || {};
     if (d.ok) {
       const c = (this.state.comparisons || []).find(x => x.id === id) || {};
-      this.setState({ cmpBusy: false, screen: 'compare', compareFrom: from === 'request' ? 'request' : 'acct', compare: { id: id, label: c.candidate_label || 'Candidate', content: d.content, assembledAt: d.assembled_at, metered: !!d.metered, firstOpen: !!d.first_open, quota: d.quota || null } });
+      this.setState({ cmpBusy: false, screen: 'compare', compareFrom: from === 'request' ? 'request' : 'acct', compare: { id: id, label: c.candidate_label || 'Candidate', content: d.content, assembledAt: d.assembled_at, metered: !!d.metered, firstOpen: !!d.first_open, quota: d.quota || null, document: d.document || null, generatedDocument: d.generated_document || null } });
+      this.renderComparisonDocuments();
       this.loadReal(); // the plan's usage line now includes this open
       return;
     }
@@ -4046,6 +4065,269 @@ class Component extends DCLogic {
     } else {
       note('This file type cannot be previewed here (only PDF and image files can). The file stays on your computer.');
     }
+  }
+
+  // ---- System-generated document (2026-09-22) ----
+  // Ported from candidate.html's buildAtsPdfBytes/buildResumeLines and their small helpers -- same
+  // dependency-free raw-PDF-byte approach, no external library. Fed by candidate-comparison-requests'
+  // assemble_plain_document action, which calls assemble_customized_resume(ignore_overrides=true,
+  // delivered_only=true) -- the complete, unexcludable "default resume" every non-paying candidate
+  // already sees, so there is no verification field anywhere in the source data to accidentally print.
+  czPartialLabel(p) {
+    const m = String(p || '').match(/^(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?$/);
+    if (!m) return '';
+    if (!m[2]) return m[1];
+    const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][parseInt(m[2], 10) - 1];
+    if (!mon) return m[1];
+    return m[3] ? mon + ' ' + parseInt(m[3], 10) + ', ' + m[1] : mon + ' ' + m[1];
+  }
+  czRange(start, end, current) {
+    const label = [this.czPartialLabel(start), current ? 'Present' : this.czPartialLabel(end)].filter(Boolean).join('-');
+    return label ? ' (' + label + ')' : '';
+  }
+  czWorkLabel(w) { return [w.title, w.employer].filter(Boolean).join(' at ') + this.czRange(w.start, w.end, w.current); }
+  czEduLabel(e) { return [e.degree, e.field_of_study, [e.institution, e.location].filter(Boolean).join(', ')].filter(Boolean).join(', ') + this.czRange(e.start, e.end, false); }
+  czCertLabel(c) { return [c.name, c.issuer, c.license_number ? 'Lic #' + c.license_number : ''].filter(Boolean).join(', ') + (c.issued ? ' (' + this.czPartialLabel(c.issued) + ')' : ''); }
+
+  sanitizeAts(text) {
+    return String(text)
+      .replace(/[–—]/g, '-')
+      .replace(/[‘’]/g, "'")
+      .replace(/[“”]/g, '"')
+      .replace(/•/g, '-')
+      .replace(/…/g, '...')
+      .replace(/[^\x20-\x7e]/g, '');
+  }
+
+  wrapText(text, maxChars) {
+    const rawLines = String(text).split('\n');
+    const lines = [];
+    rawLines.forEach(rawLine => {
+      const words = rawLine.split(' ');
+      let cur = '';
+      words.forEach(w => {
+        const next = cur ? cur + ' ' + w : w;
+        if (next.length > maxChars && cur) { lines.push(cur); cur = w; } else { cur = next; }
+      });
+      if (cur) lines.push(cur);
+      else if (rawLine === '' && rawLines.length > 1) lines.push('');
+    });
+    return lines;
+  }
+
+  groupByLiteralHeading(items, otherOrderPositions) {
+    const norm = (h) => (h || '').trim().toLowerCase().replace(/\s+/g, ' ').replace(/l/g, 'i');
+    const others = Array.isArray(otherOrderPositions) ? otherOrderPositions.filter(x => typeof x === 'number') : [];
+    const nothingBetween = (a, b) => typeof a === 'number' && typeof b === 'number' && !others.some(x => x > a && x < b);
+    const groups = [];
+    items.forEach(item => {
+      const h = norm(item.heading);
+      const last = groups[groups.length - 1];
+      if (last && norm(last.heading) === h) {
+        last.items.push(item);
+        last.lastPosition = item.position;
+      } else if (last && h === '' && nothingBetween(last.lastPosition, item.position)) {
+        last.items.push(item);
+        last.lastPosition = item.position;
+      } else {
+        groups.push({ heading: (item.heading || '').trim(), position: item.position, lastPosition: item.position, items: [item] });
+      }
+    });
+    return groups;
+  }
+
+  // Ported from candidate.html's buildResumeLines. That version takes separate "delivered" (R) and
+  // "editor" (L) params because a paying candidate's overrides can diverge the two; with
+  // ignore_overrides=true every item's own position is present regardless, so one fetch covers both roles.
+  buildComparisonLines(R) {
+    const L = R;
+    const lines = [];
+    const push = (text, bold) => lines.push({ text: this.sanitizeAts(text), bold: !!bold });
+    const H = R.header || {};
+    if (H.mode === 'printed' && H.printed_header) {
+      String(H.printed_header).split('\n').forEach(line => { if (line.trim()) push(line); });
+    } else {
+      if (R.candidate && R.candidate.name) push(R.candidate.name);
+      if (H.location) push(H.location);
+      const c = R.contact || {};
+      const contactLine = [c.phone && c.phone.value, c.email && c.email.value].filter(Boolean).join(' · ');
+      if (contactLine) push(contactLine);
+    }
+    const S = R.summary || {};
+    if (S.content) {
+      if (S.heading) push(S.heading, true);
+      this.wrapText(S.content, 90).forEach(w => push(w));
+    }
+    push('');
+
+    const other = (kind) => {
+      const out = [];
+      const add = (rows, k) => { if (k !== kind) (rows || []).forEach(r => { if (r && typeof r.position === 'number') out.push(r.position); }); };
+      add(L.work, 'work'); add(L.education, 'education'); add(L.certifications, 'certifications'); add(L.other_sections, 'freeform');
+      if (kind !== 'skills' && L.skills && typeof L.skills.section_position === 'number') out.push(L.skills.section_position);
+      return out;
+    };
+    const posOf = (x) => (typeof x.position === 'number' ? x.position : Infinity);
+    const grouped = [];
+    const groupKind = (rows, kind, mk, key) => {
+      const items = (rows || []).map(x => ({ position: posOf(x), heading: x.heading || '', label: mk(x), body: kind === 'experience' ? (x.description || '') : '' }));
+      items.sort((a, b) => a.position - b.position);
+      this.groupByLiteralHeading(items, other(key)).forEach(g => grouped.push({ kind, position: g.position, heading: g.heading, items: g.items }));
+    };
+    groupKind(R.work, 'experience', (w) => this.czWorkLabel(w), 'work');
+    groupKind(R.education, 'education', (e) => this.czEduLabel(e), 'education');
+    groupKind(R.certifications, 'certifications', (c) => this.czCertLabel(c), 'certifications');
+
+    const skillTexts = ((R.skills && R.skills.items) || []).map(x => (x.text || '').trim()).filter(Boolean);
+    if (skillTexts.length) {
+      grouped.push({ kind: 'skills', position: (R.skills && typeof R.skills.section_position === 'number') ? R.skills.section_position : Infinity, body: skillTexts.join('\n'), heading: (R.skills && R.skills.heading) || 'Skills' });
+    }
+    (R.other_sections || []).forEach(f => {
+      const content = (f.content || '').trim();
+      if (!content) return;
+      grouped.push({ kind: 'misc', position: posOf(f), heading: (f.heading || '').trim(), body: content });
+    });
+    grouped.sort((a, b) => a.position - b.position);
+
+    let lastHeading = null;
+    grouped.forEach(g => {
+      if (g.items) {
+        const heading = (g.heading || '').trim();
+        if (heading && heading !== lastHeading) push(heading, true);
+        lastHeading = heading || null;
+        g.items.forEach(b => {
+          this.wrapText(b.label, 90).forEach(w => push(w));
+          if (b.body) this.wrapText(b.body, 90).forEach(w => push(w));
+          push('');
+        });
+        return;
+      }
+      if (g.kind === 'skills') {
+        const skillsHeading = g.heading || 'Skills';
+        if (skillsHeading !== lastHeading) push(skillsHeading, true);
+        lastHeading = skillsHeading;
+        this.wrapText(g.body, 90).forEach(w => push(w));
+        push('');
+        return;
+      }
+      const heading = (g.heading || '').trim();
+      if (heading && heading !== lastHeading) push(heading, true);
+      lastHeading = heading || null;
+      this.wrapText(g.body, 90).forEach(w => push(w));
+      push('');
+    });
+    return lines;
+  }
+
+  // Verbatim port of candidate.html's buildAtsPdfBytes -- a plain, dependency-free PDF byte writer
+  // (Helvetica/Helvetica-Bold text only, no images, no annotations of any kind).
+  buildComparisonPdfBytes(lines) {
+    const pageWidth = 612, pageHeight = 792, margin = 54, fontSize = 10, leading = 14;
+    const usableHeight = pageHeight - margin * 2;
+    const linesPerPage = Math.max(1, Math.floor(usableHeight / leading));
+    const pages = [];
+    for (let i = 0; i < lines.length; i += linesPerPage) pages.push(lines.slice(i, i + linesPerPage));
+    if (!pages.length) pages.push([]);
+    const esc = (s) => String(s).replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+    const objects = [];
+    const addObj = (body) => { objects.push(body); return objects.length; };
+    const fontRegNum = addObj('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+    const fontBoldNum = addObj('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>');
+    const pageObjNums = [];
+    const contentObjNums = [];
+    pages.forEach((pageLines) => {
+      let y = pageHeight - margin;
+      let content = 'BT\n';
+      let curFont = null;
+      pageLines.forEach((ln) => {
+        const font = ln.bold ? '/F2' : '/F1';
+        if (font !== curFont) { content += font + ' ' + fontSize + ' Tf\n'; curFont = font; }
+        content += '1 0 0 1 ' + margin + ' ' + y.toFixed(2) + ' Tm\n';
+        content += '(' + esc(ln.text) + ') Tj\n';
+        y -= leading;
+      });
+      content += 'ET';
+      const contentNum = addObj('<< /Length ' + content.length + ' >>\nstream\n' + content + '\nendstream');
+      contentObjNums.push(contentNum);
+    });
+    const pagesObjIndexPlaceholder = objects.length + 1;
+    pages.forEach((pageLines, i) => {
+      const pageNum = addObj('<< /Type /Page /Parent ' + pagesObjIndexPlaceholder + ' 0 R /MediaBox [0 0 ' + pageWidth + ' ' + pageHeight + '] /Resources << /Font << /F1 ' + fontRegNum + ' 0 R /F2 ' + fontBoldNum + ' 0 R >> >> /Contents ' + contentObjNums[i] + ' 0 R >>');
+      pageObjNums.push(pageNum);
+    });
+    const pagesNum = addObj('<< /Type /Pages /Kids [' + pageObjNums.map(n => n + ' 0 R').join(' ') + '] /Count ' + pageObjNums.length + ' >>');
+    const catalogNum = addObj('<< /Type /Catalog /Pages ' + pagesNum + ' 0 R >>');
+    let pdf = '%PDF-1.4\n';
+    const offsets = [0];
+    objects.forEach((body, i) => {
+      offsets.push(pdf.length);
+      pdf += (i + 1) + ' 0 obj\n' + body + '\nendobj\n';
+    });
+    const xrefStart = pdf.length;
+    pdf += 'xref\n0 ' + (objects.length + 1) + '\n0000000000 65535 f \n';
+    for (let i = 1; i <= objects.length; i++) pdf += String(offsets[i]).padStart(10, '0') + ' 00000 n \n';
+    pdf += 'trailer\n<< /Size ' + (objects.length + 1) + ' /Root ' + catalogNum + ' 0 R >>\nstartxref\n' + xrefStart + '\n%%EOF';
+    return pdf;
+  }
+
+  // The employer's own document, captured at comparison-request time (2026-09-22): auto-loaded from the
+  // signed link the server already returned alongside the comparison, so the "upload a copy" prompt only
+  // shows when there genuinely isn't a stored one any more (purged after 21 days, or a request made before
+  // this existed).
+  renderProvidedDocument() {
+    const container = document.getElementById('employer-copy-container');
+    if (!container) return;
+    const cmp = this.state.compare || {};
+    const doc = cmp.document;
+    container.innerHTML = '';
+    if (!doc || !doc.url) return;
+    if (String(doc.content_type || '').indexOf('pdf') !== -1) {
+      const em = document.createElement('embed');
+      em.type = 'application/pdf'; em.src = doc.url; em.style.cssText = 'width:100%;height:100%;border:0';
+      container.appendChild(em);
+    } else {
+      const im = document.createElement('img');
+      im.src = doc.url; im.alt = 'Their document'; im.style.cssText = 'width:100%;display:block';
+      container.appendChild(im);
+    }
+  }
+
+  // The system-generated document (2026-09-22): built fresh in this browser from the live data the server
+  // just returned, never cached. Deliberately carries no verification indicator, badge, or annotation of
+  // any kind -- all verification detail stays in the report section above; see assemble_plain_document.
+  renderGeneratedDocument() {
+    const container = document.getElementById('generated-doc-container');
+    if (!container) return;
+    const cmp = this.state.compare || {};
+    const resume = cmp.generatedDocument;
+    container.innerHTML = '';
+    const fail = () => {
+      const d = document.createElement('div');
+      d.style.cssText = 'color:#5b5b66;font-size:12px;padding:24px;text-align:center;line-height:1.6';
+      d.textContent = "This candidate's current record could not be rendered as a document just now.";
+      container.appendChild(d);
+    };
+    if (!resume || !resume.available) { fail(); return; }
+    try {
+      const lines = this.buildComparisonLines(resume);
+      const pdfText = this.buildComparisonPdfBytes(lines);
+      const bytes = new Uint8Array(pdfText.length);
+      for (let i = 0; i < pdfText.length; i++) bytes[i] = pdfText.charCodeAt(i) & 0xff;
+      const blob = new Blob([bytes], { type: 'application/pdf' });
+      if (this._genDocUrl) { try { URL.revokeObjectURL(this._genDocUrl); } catch (x) { /* ignore */ } }
+      this._genDocUrl = URL.createObjectURL(blob);
+      const em = document.createElement('embed');
+      em.type = 'application/pdf'; em.src = this._genDocUrl; em.style.cssText = 'width:100%;height:100%;border:0';
+      container.appendChild(em);
+    } catch (e) {
+      console.error('renderGeneratedDocument failed', String(e));
+      fail();
+    }
+  }
+
+  renderComparisonDocuments() {
+    // containers are inside the sc-if compare view; give the DOM a tick to attach after setState
+    requestAnimationFrame(() => { this.renderProvidedDocument(); this.renderGeneratedDocument(); });
   }
 
   orgFormOk() {
@@ -4411,6 +4693,10 @@ class Component extends DCLogic {
         : (cmp.metered && cmp.quota ? 'This used 1 lookup (' + cmp.quota.remaining + ' of ' + cmp.quota.included + ' left this period).' : 'No lookup used by this view (it was counted when first opened).'),
       compareBackLabel: cmp.guest ? 'Close this one-time view' : (s.compareFrom === 'request' ? 'Back to your requests' : 'Back to your account'),
       compareEmpty: !(content.work || []).length && !(content.education || []).length && !(content.certifications || []).length,
+      // 2026-09-22: the document captured when the request was submitted, if there still is one (21-day
+      // retention). When present it is auto-loaded below; the manual-upload prompt is the fallback, not the default.
+      hasStoredDoc: !!(cmp.document && cmp.document.url),
+      noStoredDoc: !(cmp.document && cmp.document.url),
       // Redesigned 2026-09-22: every submitted item shows, always, with exactly one of five statuses — no more
       // exclusion into a bare count, no more separate bounded "checked, not verified" list. A Discrepancy always
       // carries both the claimed and the found value, never just the word "Discrepancy" alone.
@@ -4443,7 +4729,7 @@ class Component extends DCLogic {
         return out;
       })(),
       onPickCopy: (e) => this.onPickCopy(e),
-      closeCompare: (e) => { if (e && e.preventDefault) e.preventDefault(); if (cmp.guest) { this.closeGuestView(); return; } if (this._copyUrl) { try { URL.revokeObjectURL(this._copyUrl); } catch (x) { /* ignore */ } this._copyUrl = null; } this.setState({ screen: s.compareFrom === 'request' ? 'request' : 'acct', compare: null }); this.loadReal(); },
+      closeCompare: (e) => { if (e && e.preventDefault) e.preventDefault(); if (cmp.guest) { this.closeGuestView(); return; } if (this._copyUrl) { try { URL.revokeObjectURL(this._copyUrl); } catch (x) { /* ignore */ } this._copyUrl = null; } if (this._genDocUrl) { try { URL.revokeObjectURL(this._genDocUrl); } catch (x) { /* ignore */ } this._genDocUrl = null; } this.setState({ screen: s.compareFrom === 'request' ? 'request' : 'acct', compare: null }); this.loadReal(); },
 
       backToLookup: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'lookup', lookupResult: null, lookup: null, request: null, pendingEmail: '' }); },
       isLanding: s.screen === 'landing',
