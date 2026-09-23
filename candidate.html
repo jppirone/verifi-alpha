@@ -4758,6 +4758,16 @@ a:hover{color:var(--color-accent)}
     <sc-if value="{{ tabIsViews }}" hint-placeholder-val="{{ false }}">
       <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6;margin-bottom:var(--space-4)">A single ATS-safe PDF, built fresh from what is saved on your account: your confirmed resume content with the choices you made on Customization and Content Manager. It carries no verification marks, and it is never the originally uploaded document. To change what appears, use Customization or Content Manager; changes are saved there as you make them.</div>
 
+      <!-- 2026-09-23: an informational notice only, never the content itself, shown to every tier
+           (including free) so a candidate is never blindsided by content silently missing from their
+           PDF. Left off by default (needs_review) is a real, deliberate paywall on the CONTENT; whether
+           that exclusion is happening at all was previously invisible outside Content Manager. -->
+      <sc-if value="{{ czHasExcludedFlaggedContent }}" hint-placeholder-val="{{ false }}">
+        <div class="card elev-sm" style="font-size:12px;color:var(--color-neutral-400);line-height:1.6;margin-bottom:var(--space-3);padding:10px 14px">
+          {{ czExcludedFlaggedContentNote }} See Content Manager to review it.
+        </div>
+      </sc-if>
+
       <div style="display:flex;flex-direction:column;gap:var(--space-3)">
         <div id="pdf-preview-container" style="width:100%;min-height:70vh;max-height:80vh;overflow:auto;background:var(--color-neutral-900);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:16px;display:flex;flex-direction:column;align-items:center;gap:16px"></div>
         <button type="button" class="btn btn-secondary" style="align-self:flex-start" sc-camel-on-click="{{ downloadPdf }}">Download PDF</button>
@@ -6204,7 +6214,19 @@ class Component extends DCLogic {
     if ((R.certifications || []).length) cats.push({ key: 'certifications', label: 'Certifications', items: R.certifications.map(c => ({ id: c.id, kind: 'certification', label: this.czCertLabel(c), included: c.included })) });
     const flagged = (R.other_sections || []).filter(f => f.section_type === 'needs_review');
     if (flagged.length) cats.push({ key: 'needsReview', label: 'Flagged for review', note: 'Left off by default. Tick a section to include it exactly as extracted.', items: flagged.map(f => ({ id: f.id, kind: 'freeform', label: (f.heading || '').trim() || 'Untitled section', included: f.included })) });
-    const misc = (R.other_sections || []).filter(f => f.section_type !== 'needs_review');
+    // additional_info (2026-09-23): real, common resume sections (Projects, Career Highlights,
+    // Professional Affiliations, and similar) that are delivered by default, the same as
+    // hobbies_other — kept in their own bucket rather than lumped under "Hobbies & other
+    // activities" (a real, confirmed mislabeling; see skills_secondary just below for the other
+    // section_type this same "misc" bucket used to wrongly absorb).
+    const additionalInfo = (R.other_sections || []).filter(f => f.section_type === 'additional_info');
+    if (additionalInfo.length) cats.push({ key: 'additionalInfo', label: 'Additional resume sections', items: additionalInfo.map(f => ({ id: f.id, kind: 'freeform', label: (f.heading || '').trim() || 'Untitled section', included: f.included })) });
+    // skills_secondary (a second, differently-headed skills-shaped section) also used to land in
+    // "Hobbies & other activities" — real, common resume content, not a hobby. Own bucket, using
+    // each section's own real heading in its items' labels the same way every other bucket does.
+    const secondarySkills = (R.other_sections || []).filter(f => f.section_type === 'skills_secondary');
+    if (secondarySkills.length) cats.push({ key: 'secondarySkills', label: 'Additional skills', items: secondarySkills.map(f => ({ id: f.id, kind: 'freeform', label: (f.heading || '').trim() || 'Untitled section', included: f.included })) });
+    const misc = (R.other_sections || []).filter(f => f.section_type !== 'needs_review' && f.section_type !== 'additional_info' && f.section_type !== 'skills_secondary');
     if (misc.length) cats.push({ key: 'misc', label: 'Hobbies & other activities', items: misc.map(f => ({ id: f.id, kind: 'freeform', label: (f.heading || '').trim() || 'Untitled section', included: f.included })) });
     return cats;
   }
@@ -11851,6 +11873,18 @@ class Component extends DCLogic {
           onToggle: (e) => this.czToggleItem({ id: f.id, kind: 'freeform', included: !!f.included }, e),
         })),
       hasFlaggedContent: !!(czReady && (s.czData.other_sections || []).some(f => f.section_type === 'needs_review')),
+      // Views-tab notice (2026-09-23): count of flagged sections NOT currently included in the
+      // delivered PDF — for free tier this is every flagged section (none can be included); for
+      // paid tier only the ones the candidate hasn't opted in yet. Informational only, visible to
+      // every tier, never reveals the content itself — see the note right above hasFlaggedContent.
+      czHasExcludedFlaggedContent: !!(czReady && (s.czData.other_sections || []).some(f => f.section_type === 'needs_review' && !f.included)),
+      czExcludedFlaggedContentNote: (() => {
+        const n = ((czReady && s.czData.other_sections) || []).filter(f => f.section_type === 'needs_review' && !f.included).length;
+        if (!n) return '';
+        return n === 1
+          ? 'One section from your resume didn’t clearly fit a standard category and isn’t included in this PDF.'
+          : n + ' sections from your resume didn’t clearly fit a standard category and aren’t included in this PDF.';
+      })(),
       freeSummaryPreview: (s.czData && s.czData.summary && s.czData.summary.content) || '',
       freeSkillsPreview: ((czReady && s.czData.skills && s.czData.skills.items) || []).filter(x => x.included).map(x => x.text),
       skillsHeadingLabel: this.skillsHeading(),

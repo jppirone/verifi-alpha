@@ -67,12 +67,31 @@ the same concept counts, however it's actually worded):
 - summary: "Summary", "Professional Summary", "Objective", "About Me", or similar — an intro blurb
   near the top of the resume.
 - hobbies_other: "Interests", "Hobbies", "Volunteer Work", "Community Involvement", or similar.
-If a section's header doesn't semantically match ANY of the above — a real header exists, but names
-something else entirely (e.g. "Career Highlights," "Workplace Strengths," "Achievements") — its
-category is "unknown". This is not a failure state: "unknown" content is real, gets captured in full,
-and is unconditionally flagged for a human to review (never silently dropped, never forced into a
-category it doesn't belong in just to avoid "unknown") — this is the anti-gaming design: a candidate
-cannot route real content around verification by mislabeling its own section header.`;
+- additional_info: real, commonly-seen resume content that doesn't correspond to any of the six
+  categories above and isn't independently verifiable — the same non-verified status hobbies_other
+  already has, just a different common shape. Covers headers like "Projects," "Portfolio," "AI
+  Projects & Portfolio," "Career Highlights," "Selected Career Highlights," "Workplace Strengths,"
+  "Achievements," "Professional Affiliations," "Awards," "Publications," "Languages," or similar —
+  a real, distinct header naming one of these recognizable patterns, however worded. This is NOT a
+  failure state and is NOT the same as "unknown" below: additional_info content is delivered on the
+  resume by default (the same as hobbies_other), never silently paywalled, because it is a
+  recognized, common section type, not a genuinely unclassifiable one.
+2026-09-23 addition (real, confirmed gap): content this common was previously being sent to
+"unknown"/needs_review purely because it didn't match one of the ORIGINAL six categories above — that
+silently excluded real, substantial resume content (a candidate's own listed projects, differentiator
+highlights, professional affiliations) from their generated resume by default, with no way for a
+free-tier candidate to ever recover it. additional_info exists specifically to stop that: match a
+header against this list BEFORE falling through to "unknown".
+If a section's header STILL doesn't semantically match ANY of the seven categories above — a real
+header exists, but names something else entirely and doesn't fit any recognizable common pattern
+either — its category is "unknown". This is not a failure state either: "unknown" content is real,
+gets captured in full, and is unconditionally flagged for a human to review (never silently dropped,
+never forced into a category it doesn't belong in just to avoid "unknown") — this is the anti-gaming
+design: a candidate cannot route real content around verification by mislabeling its own section
+header as if it were work_history, education, certifications, or skills. additional_info does not
+weaken this: it only ever applies to a header that clearly matches one of the common, professionally-
+mundane patterns listed above, never to a header that could plausibly be an attempt to relabel
+employment, a degree, a credential, or a skill list.`;
 
 // Inline label + enumerated list as an undressed section boundary (2026-09-22 — a real, confirmed
 // failure mode: a resume's Summary paragraph ended with "Experience Areas: o software development
@@ -102,7 +121,35 @@ within a job's existing bulleted duties list is not. When you cannot confidently
 this is, do not guess — leave the content inside its current section exactly as you would have without
 this rule.`;
 
-type BoundaryCategory = "work_history" | "education" | "certifications" | "skills" | "summary" | "hobbies_other" | "unknown";
+// Sub-entries inside a Projects/Portfolio-shaped section (2026-09-23 — a real, confirmed failure mode:
+// an "AI PROJECTS & PORTFOLIO" section listing 4 distinct projects, each with its own bold project-name
+// line, a tool-stack + date line under it, and its own bullet(s), came back shattered into several
+// disconnected sections instead of staying one — several of the fragments lost their heading entirely
+// ("Untitled section" in the UI) because only the FIRST project's name was treated as the section's real
+// heading; each subsequent project's own bold name line was wrongly treated as a brand-new top-level
+// section boundary of its own). This is the same visual shape work_history entries have (a bold/short
+// title-like line, then a secondary line, then bullets) — which is exactly why it gets over-split the
+// same way a resume's own company entries never do: those stay correctly grouped under ONE
+// "Professional Experience" boundary because this pipeline already knows work_history sections contain
+// multiple dated entries. A Projects/Portfolio-shaped section (or any additional_info-shaped section)
+// needs the identical treatment.
+const MULTI_ENTRY_SECTION_BOUNDARY_RULE = `MULTIPLE NAMED SUB-ENTRIES UNDER ONE SECTION (a narrow, structural exception, most relevant to
+"Projects"/"Portfolio"-shaped sections but applicable to any section): once a real top-level heading has
+opened a section, that section can legitimately contain SEVERAL parallel, individually-named sub-entries
+under it — e.g. a "Projects" or "AI Projects & Portfolio" section listing 4 separate projects, each with
+its own bold project-name line, its own secondary line (tools used, a date range), and its own bullet(s)
+describing it. This is structurally the same pattern work_history sections already have (one heading,
+several dated company/title entries under it) — treat it the same way: the section's own top-level
+heading (e.g. "AI Projects & Portfolio") stays the ONE section boundary and category decision for the
+WHOLE block; a subsequent project's own bold name line is part of that SAME section's content, never a
+new section boundary of its own, even though it visually resembles a heading. Judge this structurally:
+a short bold line immediately followed by a secondary line (tools/dates) and then bullet(s), appearing
+after an already-open section with no unrelated topic shift, is a sub-entry of that open section, not a
+new section — this holds no matter how many sub-entries follow one after another. Only a line that is
+clearly a DIFFERENT, unrelated section's own heading (a genuinely new topic, e.g. "PROFESSIONAL
+EXPERIENCE" appearing after a Projects section) ends the current section and starts a new one.`;
+
+type BoundaryCategory = "work_history" | "education" | "certifications" | "skills" | "summary" | "hobbies_other" | "additional_info" | "unknown";
 
 type BoundarySection = { heading: string; category: BoundaryCategory };
 
@@ -136,7 +183,7 @@ function resolveSkillsHeading(boundaries: BoundaryResult | null | undefined, ext
 
 const BOUNDARY_SCHEMA_SHAPE = `{
   "sections": [
-    { "heading": string, "category": "work_history" | "education" | "certifications" | "skills" | "summary" | "hobbies_other" | "unknown" }
+    { "heading": string, "category": "work_history" | "education" | "certifications" | "skills" | "summary" | "hobbies_other" | "additional_info" | "unknown" }
   ],
   "noMergeCompanies": [ string ],
   "mergeCompanies": [ string ]
@@ -165,6 +212,8 @@ new section.
 ${KNOWN_CATEGORIES_GUIDE}
 
 ${INLINE_LABEL_LIST_BOUNDARY_RULE}
+
+${MULTI_ENTRY_SECTION_BOUNDARY_RULE}
 
 A SEPARATE TASK, after boundaries — SAME-COMPANY, MULTIPLE ROLES: decide, for every employer name that
 appears more than once within whatever section(s) you judged as work_history above, whether it must
@@ -239,7 +288,10 @@ against the known internal categories — "Experience"/"Work History"/"Professio
 education; "Certifications"/"Licenses"/"Credentials" and similar = certifications (licenses and
 certifications are the SAME internal category, never split into two); "Skills"/"Core Competencies"/
 "Technical Skills"/"Areas of Expertise" and similar = skills; "Summary"/"Objective"/"About Me" and
-similar = summary; "Interests"/"Hobbies"/"Volunteer Work" and similar = hobbies_other. For genuinely
+similar = summary; "Interests"/"Hobbies"/"Volunteer Work" and similar = hobbies_other; "Projects"/
+"Portfolio"/"Career Highlights"/"Workplace Strengths"/"Professional Affiliations"/"Awards"/
+"Publications"/"Languages" and similar = additional_info (delivered by default, same as
+hobbies_other — see the KNOWN INTERNAL CATEGORIES guide above for the full list). For genuinely
 headerless content, fall back further to judging by its own shape — the same fallback described in
 "THE ONE EXCEPTION" above, just applied to the whole document rather than one flagged section, since
 no per-section decision exists this time. A header that matches none of the above goes to
@@ -391,7 +443,7 @@ Return ONLY a single JSON object, no prose before or after it, matching exactly 
   "skills": [ string ],
   "skills_position": number | null,
   "freeform": [
-    { "section_type": "summary" | "hobbies_other" | "needs_review" | "skills_secondary", "heading": string, "content": string, "position": number }
+    { "section_type": "summary" | "hobbies_other" | "additional_info" | "needs_review" | "skills_secondary", "heading": string, "content": string, "position": number }
   ]
 }
 
@@ -399,10 +451,10 @@ ZERO-LOSS RULE (hard requirement — read this before classifying anything): eve
 paragraph, table, or list on the page must be accounted for somewhere in your output. Never omit
 visible content for any reason. Classify it into a real category (work_history, education,
 certifications, skills) when it genuinely belongs there; otherwise it goes into "freeform" as
-"summary" or "hobbies_other" only when it actually matches one of those two definitions below, and
-as "needs_review" for everything else that doesn't fit anywhere — needs_review is the universal
-fallback, always available, always correct when nothing else fits. Never force content into a
-category it doesn't genuinely belong in just to give it a home.
+"summary", "hobbies_other", or "additional_info" only when it actually matches one of those three
+definitions below, and as "needs_review" for everything else that doesn't fit anywhere —
+needs_review is the universal fallback, always available, always correct when nothing else fits.
+Never force content into a category it doesn't genuinely belong in just to give it a home.
 
 CLASSIFICATION IS SECTION-DRIVEN, DECIDED BEFORE THIS STEP — READ THIS FIRST (Decision 38, 2026-09-18):
 the category every item below belongs to is NOT something this step decides by judging an individual
@@ -838,20 +890,59 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   standalone named item or just a description of one, treat it as needs_review — inventing an entry
   is never the safe choice, omitting nothing is.
 
+- THE SAME RULE APPLIES ACROSS A SECTION'S OWN CATEGORY BOUNDARY, NOT JUST INSIDE NEEDS_REVIEW (a real,
+  confirmed failure mode, 2026-09-23): a narrative sentence describing informal, self-directed, or
+  continuing-education-style activity can sit inside a section whose OWN boundary-assigned category is
+  "education" or "certifications" (a real "EDUCATION" or "CERTIFICATIONS" heading governs it) rather
+  than needs_review — that placement never makes it a genuine certifications entry. Real example: an
+  EDUCATION section's own line reading "Continuing Education: 55+ hours of AI & emerging technology
+  certification coursework — Coursiv, 2024–2025" is a narrative caption sentence, not a discrete named
+  credential — even though it names an hours figure, a provider ("Coursiv"), and dates, the same shape
+  the NEVER-FABRICATE rule above already warns about. It must stay as part of the education section's
+  own content (or needs_review if it has no education content of its own to attach to) — never split
+  out into its own certifications entry, regardless of which section physically contains it.
+  A second real example, subtler because it's ONE BULLET inside an otherwise-genuine bulleted
+  certifications list (being part of a real list does not by itself make an item real — see below): a
+  CERTIFICATIONS section reading "• Google Project Management Certificate | Google / Coursera" then
+  "• Generative AI and Automation (Coursework, 2024–2026): applied GenAI for..." then "• Self-directed
+  exploration of project management platforms (including Jira) via trial access, evaluating workflow,
+  ticketing, and reporting capabilities." — the first two bullets each independently NAME a specific
+  credential (a certificate, a coursework program) and are genuine certifications entries; the third
+  bullet names no credential at all, no course, no certificate, no provider — it only describes an
+  informal, unstructured activity ("self-directed exploration... via trial access"). Sharing a bulleted
+  list with two real credentials does not make the third bullet real: judge EACH bulleted item in a
+  list independently against whether it itself names a specific, identifiable credential — a list
+  being mostly real is never a reason to extract every item in it as a certifications entry. That third
+  bullet goes to needs_review (heading = the section's own real heading, e.g. "CERTIFICATIONS"), not
+  certifications, and never becomes a certifications row under a DIFFERENT section's heading either.
+
 - "summary" (freeform) = any professional summary / objective / about-me blurb at the top of the
   resume. "hobbies_other" (freeform) = interests, hobbies, and volunteer/community activities ONLY
   — this is NOT a general catch-all. Content that isn't actually a hobby, interest, or volunteer
   activity, and doesn't genuinely fit work_history, education, certifications, or skills, belongs in
-  "needs_review" instead, never here. Summary and hobbies/other content must NEVER be placed into
-  work_history, education, certifications, or skills, even if it superficially resembles one of
-  them.
+  "additional_info" or "needs_review" instead (see below), never here. Summary and hobbies/other
+  content must NEVER be placed into work_history, education, certifications, or skills, even if it
+  superficially resembles one of them.
+
+- "additional_info" (freeform, 2026-09-23) = a real, distinctly-headed section matching one of the
+  common, recognizable-but-not-independently-verified patterns: "Projects" / "Portfolio" (a list of
+  named personal or professional projects, each with its own sub-heading, tool stack, or date range),
+  "Career Highlights" / "Selected Career Highlights" / "Achievements," "Workplace Strengths," "Professional
+  Affiliations," "Awards," "Publications," "Languages," or similar. This is delivered on the candidate's
+  resume by default, the same as hobbies_other — it is NOT a paywalled or flagged-for-review category,
+  because it is a recognized, common section type. Capture the section's FULL content verbatim in
+  "content" (see the PROJECTS/MULTI-ENTRY SECTIONS rule below for sections containing several named
+  sub-entries) — do not shorten, summarize, or drop any of it. A section only gets "additional_info"
+  when its own real header clearly matches one of these recognizable patterns; a header that is vague,
+  ambiguous, or doesn't fit even loosely still goes to "needs_review" instead — this category is for
+  clearly-recognizable common section types only, never a second general catch-all.
 
 - "needs_review" (freeform) = the universal catch-all for anything real and visible on the page that
-  doesn't genuinely belong in work_history, education, certifications, skills, summary, or
-  hobbies_other. This includes — but is not limited to — a role that reads as unpaid employment (see
-  the work_history rule above), a clearly-titled section whose content doesn't match any other
-  category's definition (e.g. "Career Highlights," "Workplace Strengths," "Achievements," and
-  similar), and any content you can't confidently attribute to another category. When genuinely
+  doesn't genuinely belong in work_history, education, certifications, skills, summary, hobbies_other,
+  or additional_info. This includes — but is not limited to — a role that reads as unpaid employment
+  (see the work_history rule above), a clearly-titled section whose header names something too vague
+  or unrecognizable to match ANY category above (including additional_info's own list of common
+  patterns), and any content you can't confidently attribute to another category. When genuinely
   unsure which category fits, use needs_review rather than guessing or omitting the content —
   content flagged here is reviewed by a human, not lost.
 
