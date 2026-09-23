@@ -1067,6 +1067,7 @@ export default {
           skills: parsed.skills.length,
           freeform: parsed.freeform.length,
         },
+        debug_boundaries: sectionBoundaries,
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: "unhandled", detail: String(e) }), {
