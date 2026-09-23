@@ -162,12 +162,18 @@ type BoundaryCategory = "work_history" | "education" | "certifications" | "skill
 
 type BoundarySection = { heading: string; category: BoundaryCategory };
 
-type BoundaryResult = { sections: BoundarySection[] };
+// noMergeCompanies (2026-09-23): a SAME COMPANY, MULTIPLE ROLES merge decision the main extraction
+// step kept getting wrong even after three prose-only attempts (the model kept merging two
+// independently, fully-headed same-company entries whenever one carried a promotion/transition
+// caption, no matter how explicitly the prose said not to). Decided HERE instead, deterministically —
+// same philosophy as the rest of this block.
+type BoundaryResult = { sections: BoundarySection[]; noMergeCompanies?: string[] };
 
 const BOUNDARY_SCHEMA_SHAPE = `{
   "sections": [
     { "heading": string, "category": "work_history" | "education" | "certifications" | "skills" | "summary" | "hobbies_other" | "unknown" }
-  ]
+  ],
+  "noMergeCompanies": [ string ]
 }`;
 
 function buildBoundaryDetectionPrompt(): string {
@@ -191,6 +197,19 @@ new section.
 
 ${KNOWN_CATEGORIES_GUIDE}
 
+A SEPARATE TASK, after boundaries — SAME-COMPANY ENTRIES THAT MUST NOT BE MERGED: within whatever
+section(s) you judged as work_history above, an employer name sometimes appears more than once, each
+time as its own COMPLETE header line — a line that, by itself, states a title, that company, and a
+date range (the same header shape the document uses for every other employer entry), not as a
+parenthetical or a subordinate aside underneath a single shared header. When you find a company name
+with two or more of these independent, complete header lines — regardless of whether the roles read
+like an internal promotion, a title change, or carry a caption such as "Role transition" or "Promoted
+from..." — list that company's exact printed name in "noMergeCompanies". Do NOT list a company that
+has only ONE complete header line even if a different, earlier or later role is mentioned as a short
+aside underneath that one header (that is a normal internal-promotion case, not this one). Do NOT list
+a company whose two mentions read as genuinely separate, disconnected stints with an unrelated gap.
+When no company has this pattern, return an empty array.
+
 Return ONLY a single JSON object, no prose before or after it, matching exactly this shape:
 
 ${BOUNDARY_SCHEMA_SHAPE}`;
@@ -199,6 +218,7 @@ ${BOUNDARY_SCHEMA_SHAPE}`;
 function isValidBoundaryResult(x: unknown): x is BoundaryResult {
   if (!x || typeof x !== "object") return false;
   const o = x as Record<string, unknown>;
+  if (o.noMergeCompanies !== undefined && !(Array.isArray(o.noMergeCompanies) && o.noMergeCompanies.every((c) => typeof c === "string"))) return false;
   return Array.isArray(o.sections) && o.sections.every((s) =>
     s && typeof s === "object" && typeof (s as Record<string, unknown>).heading === "string" &&
     typeof (s as Record<string, unknown>).category === "string"
@@ -238,7 +258,8 @@ headerless content, fall back further to judging by its own shape — the same f
 no per-section decision exists this time. A header that matches none of the above goes to
 needs_review, same as always.`;
   }
-  if (boundaries.sections.length === 0) return "";
+  const noMergeCompanies = (boundaries.noMergeCompanies || []).filter((c) => typeof c === "string" && c.trim());
+  if (boundaries.sections.length === 0 && noMergeCompanies.length === 0) return "";
   const known = boundaries.sections.filter((s) => s.category !== "unknown");
   const unknown = boundaries.sections.filter((s) => s.category === "unknown");
   // Multiple distinct "skills" sections (2026-09-23): decided HERE, deterministically, same philosophy
@@ -266,6 +287,24 @@ needs_review, same as always.`;
   const unknownList = unknown.length
     ? unknown.map((s) => `  - "${s.heading || "(no heading at all)"}"`).join("\n")
     : "  (none)";
+  // SAME COMPANY, MULTIPLE ROLES (2026-09-23): decided HERE too, same reasoning as the skills_secondary
+  // case above — three prose-only attempts inside the main extraction prompt could not reliably stop
+  // the model from merging two independently, fully-headed same-company entries whenever a promotion
+  // or transition caption was present. Rendered as a fixed, per-company "already decided" instruction
+  // instead of asking the model to run a gating test itself mid-extraction.
+  const noMergeBlock = noMergeCompanies.length
+    ? `
+
+SAME COMPANY, MULTIPLE ROLES — ALREADY DECIDED FOR THESE COMPANIES (do not run your own gating test
+against them, do not merge them, no matter what caption or transition language is nearby): the
+following employer names have two or more independent, complete header lines in this document — each
+with its own title and its own date range — so each of THEIR header lines must be its own separate
+work_history entry, keeping its own real title and its own real start_date/end_date exactly as printed
+on that line:
+${noMergeCompanies.map((c) => `  - "${c}"`).join("\n")}
+Any OTHER company name not listed here that still repeats follows the ordinary SAME COMPANY, MULTIPLE
+ROLES rules below as normal (run the gating test yourself for those).`
+    : "";
 
   return `
 
@@ -285,7 +324,7 @@ literal text verbatim, content holding everything under it. One narrow exception
 VS. SKILL DISAMBIGUATION rule below: an "unknown" section that itself shows a genuine mix of items
 with/without a discernible trailing certification/license number may still split some of its items into
 certifications vs. skills using that signal. This is the ONLY place that item-level heuristic is allowed
-to fire — never inside a section already assigned a real category above.`;
+to fire — never inside a section already assigned a real category above.${noMergeBlock}`;
 }
 
 function buildVisionExtractionPrompt(sectionBoundaries?: BoundaryResult | null): string {

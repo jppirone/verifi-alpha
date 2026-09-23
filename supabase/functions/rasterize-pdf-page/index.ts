@@ -706,7 +706,13 @@ type BoundarySection = {
   is_continuation_of_previous_page: boolean;
 };
 
-type BoundaryResult = { sections: BoundarySection[] };
+// noMergeCompanies (2026-09-23): a SAME COMPANY, MULTIPLE ROLES merge decision the main extraction
+// step kept getting wrong even after three prose-only attempts (the model kept merging two
+// independently, fully-headed same-company entries whenever one carried a promotion/transition
+// caption, no matter how explicitly the prose said not to). Decided HERE instead, deterministically,
+// scoped to companies with 2+ independent complete header lines visible on THIS SAME page (a role
+// split across a page boundary stays the separate continuation-merge step's job, not this one).
+type BoundaryResult = { sections: BoundarySection[]; noMergeCompanies?: string[] };
 
 // The Skills block's own literal heading (2026-09-21). NO extraction prompt carries it (adding a field to those prompts measurably changed how one job
 // bullet was transcribed, so they stay byte-for-byte as they were): it comes from the section-boundary step, the call that already reads every section's
@@ -723,7 +729,8 @@ function resolveSkillsHeading(boundaries: BoundaryResult | null | undefined, ext
 const BOUNDARY_SCHEMA_SHAPE = `{
   "sections": [
     { "heading": string, "category": "work_history" | "education" | "certifications" | "skills" | "summary" | "hobbies_other" | "unknown", "is_continuation_of_previous_page": boolean }
-  ]
+  ],
+  "noMergeCompanies": [ string ]
 }`;
 
 function buildBoundaryDetectionInstructions(previousPageContext?: TrailingItemContext | null): string {
@@ -764,6 +771,20 @@ ${KNOWN_CATEGORIES_GUIDE}
 
 ${INLINE_LABEL_LIST_BOUNDARY_RULE}${continuationNote}
 
+A SEPARATE TASK, after boundaries — SAME-COMPANY ENTRIES THAT MUST NOT BE MERGED: within whatever
+section(s) you judged as work_history above, an employer name sometimes appears more than once ON
+THIS SAME PAGE, each time as its own COMPLETE header line — a line that, by itself, states a title,
+that company, and a date range (the same header shape the page uses for every other employer entry),
+not as a parenthetical or a subordinate aside underneath a single shared header. When you find a
+company name with two or more of these independent, complete header lines on this page — regardless
+of whether the roles read like an internal promotion, a title change, or carry a caption such as "Role
+transition" or "Promoted from..." — list that company's exact printed name in "noMergeCompanies". Do
+NOT list a company that has only ONE complete header line on this page even if a different, earlier or
+later role is mentioned as a short aside underneath that one header (that is a normal internal-
+promotion case, not this one). Do NOT list a company whose two mentions read as genuinely separate,
+disconnected stints with an unrelated gap. When no company on this page has this pattern, return an
+empty array.
+
 Return ONLY a single JSON object, no prose before or after it, matching exactly this shape:
 
 ${BOUNDARY_SCHEMA_SHAPE}`;
@@ -791,6 +812,7 @@ ${buildBoundaryDetectionInstructions(previousPageContext)}`;
 function isValidBoundaryResult(x: unknown): x is BoundaryResult {
   if (!x || typeof x !== "object") return false;
   const o = x as Record<string, unknown>;
+  if (o.noMergeCompanies !== undefined && !(Array.isArray(o.noMergeCompanies) && o.noMergeCompanies.every((c) => typeof c === "string"))) return false;
   return Array.isArray(o.sections) && o.sections.every((s) =>
     s && typeof s === "object" && typeof (s as Record<string, unknown>).heading === "string" &&
     typeof (s as Record<string, unknown>).category === "string"
@@ -841,7 +863,7 @@ function resolveContinuationCategory(boundaries: BoundaryResult, previousPageCon
 
   const sections = boundaries.sections.slice();
   sections[0] = { ...first, category: resolvedCategory };
-  return { sections };
+  return { ...boundaries, sections };
 }
 
 // STEP 2 OF 2 support: renders step 1's already-decided boundaries into the block step 2's prompt
@@ -875,7 +897,8 @@ described in "THE ONE EXCEPTION" above, just applied to the whole page rather th
 section, since no per-section decision exists this time. A header that matches none of the above goes
 to needs_review, same as always.`;
   }
-  if (boundaries.sections.length === 0) return "";
+  const noMergeCompanies = (boundaries.noMergeCompanies || []).filter((c) => typeof c === "string" && c.trim());
+  if (boundaries.sections.length === 0 && noMergeCompanies.length === 0) return "";
   const known = boundaries.sections.filter((s) => s.category !== "unknown");
   const unknown = boundaries.sections.filter((s) => s.category === "unknown");
   // Multiple distinct "skills" sections on THIS page (2026-09-23): decided HERE, deterministically,
@@ -903,6 +926,21 @@ to needs_review, same as always.`;
   const unknownList = unknown.length
     ? unknown.map((s) => `  - "${s.heading || "(no heading at all)"}"`).join("\n")
     : "  (none)";
+  // SAME COMPANY, MULTIPLE ROLES (2026-09-23): decided HERE too, same reasoning as the skills_secondary
+  // case above — scoped to this page only, matching the SAME COMPANY, MULTIPLE ROLES rule's own scope.
+  const noMergeBlock = noMergeCompanies.length
+    ? `
+
+SAME COMPANY, MULTIPLE ROLES — ALREADY DECIDED FOR THESE COMPANIES (do not run your own gating test
+against them, do not merge them, no matter what caption or transition language is nearby): the
+following employer names have two or more independent, complete header lines on THIS PAGE — each with
+its own title and its own date range — so each of THEIR header lines must be its own separate
+work_history entry, keeping its own real title and its own real start_date/end_date exactly as printed
+on that line:
+${noMergeCompanies.map((c) => `  - "${c}"`).join("\n")}
+Any OTHER company name not listed here that still repeats follows the ordinary SAME COMPANY, MULTIPLE
+ROLES rules below as normal (run the gating test yourself for those).`
+    : "";
 
   return `
 
@@ -921,7 +959,7 @@ literal text verbatim, content holding everything under it. One narrow exception
 VS. SKILL DISAMBIGUATION rule below: an "unknown" section that itself shows a genuine mix of items
 with/without a discernible trailing certification/license number may still split some of its items into
 certifications vs. skills using that signal. This is the ONLY place that item-level heuristic is allowed
-to fire — never inside a section already assigned a real category above.`;
+to fire — never inside a section already assigned a real category above.${noMergeBlock}`;
 }
 
 // Page-boundary continuation context — real bug, confirmed against a real document (john.pirone's
