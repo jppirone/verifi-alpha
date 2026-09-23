@@ -566,18 +566,6 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   a genuine standalone named item or just a description of one, treat it as needs_review —
   inventing an entry is never the safe choice, omitting nothing is.
 
-- THE SAME RULE APPLIES ACROSS A SECTION'S OWN CATEGORY BOUNDARY, NOT JUST INSIDE NEEDS_REVIEW (a real,
-  confirmed failure mode, 2026-09-23): a narrative sentence describing informal, self-directed, or
-  continuing-education-style activity can sit inside a section whose OWN boundary-assigned category is
-  "education" or "certifications" (a real "EDUCATION" or "CERTIFICATIONS" heading governs it) rather
-  than needs_review — that placement never makes it a genuine certifications entry. Real example: an
-  EDUCATION section's own line reading "Continuing Education: 55+ hours of AI & emerging technology
-  certification coursework — Coursiv, 2024–2025" is a narrative caption sentence, not a discrete named
-  credential — even though it names an hours figure, a provider ("Coursiv"), and dates, the same shape
-  the NEVER-FABRICATE rule above already warns about. It must stay as part of the education section's
-  own content (or needs_review if it has no education content of its own to attach to) — never split
-  out into its own certifications entry, regardless of which section physically contains it.
-
 - "summary" (freeform) = any professional summary / objective / about-me blurb at the top of the
   resume. "hobbies_other" (freeform) = interests, hobbies, and volunteer/community activities ONLY
   — this is NOT a general catch-all. Content that isn't actually a hobby, interest, or volunteer
