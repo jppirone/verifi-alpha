@@ -162,18 +162,21 @@ type BoundaryCategory = "work_history" | "education" | "certifications" | "skill
 
 type BoundarySection = { heading: string; category: BoundaryCategory };
 
-// noMergeCompanies (2026-09-23): a SAME COMPANY, MULTIPLE ROLES merge decision the main extraction
-// step kept getting wrong even after three prose-only attempts (the model kept merging two
-// independently, fully-headed same-company entries whenever one carried a promotion/transition
-// caption, no matter how explicitly the prose said not to). Decided HERE instead, deterministically —
-// same philosophy as the rest of this block.
-type BoundaryResult = { sections: BoundarySection[]; noMergeCompanies?: string[] };
+// noMergeCompanies / mergeCompanies (2026-09-23): a SAME COMPANY, MULTIPLE ROLES merge decision the
+// main extraction step kept getting wrong even after three prose-only attempts at the "don't merge"
+// direction. Adding noMergeCompanies alone then exposed the SAME unreliability from the other side: a
+// genuine Shape-A case (one real header, one subordinate promotion note) stopped reliably reaching the
+// merge step once left to the model's own prose gating test — the prose was never actually reliable,
+// earlier tests just hadn't exposed it yet. Both directions decided HERE instead, deterministically —
+// same philosophy as the rest of this block. A company appears in at most one of the two lists.
+type BoundaryResult = { sections: BoundarySection[]; noMergeCompanies?: string[]; mergeCompanies?: string[] };
 
 const BOUNDARY_SCHEMA_SHAPE = `{
   "sections": [
     { "heading": string, "category": "work_history" | "education" | "certifications" | "skills" | "summary" | "hobbies_other" | "unknown" }
   ],
-  "noMergeCompanies": [ string ]
+  "noMergeCompanies": [ string ],
+  "mergeCompanies": [ string ]
 }`;
 
 function buildBoundaryDetectionPrompt(): string {
@@ -197,32 +200,43 @@ new section.
 
 ${KNOWN_CATEGORIES_GUIDE}
 
-A SEPARATE TASK, after boundaries — SAME-COMPANY ENTRIES THAT MUST NOT BE MERGED: within whatever
-section(s) you judged as work_history above, an employer name sometimes appears more than once, each
-time as its own COMPLETE header line — a line that, by itself, states a title, that company, and a
-date range (the same header shape the document uses for every other employer entry), not as a
-parenthetical or a subordinate aside underneath a single shared header. When you find a company name
-with two or more of these independent, complete header lines — regardless of whether the roles read
-like an internal promotion, a title change, or carry a caption such as "Role transition" or "Promoted
-from..." — list that company's exact printed name in "noMergeCompanies". Do NOT list a company that
-has only ONE complete header line even if a different, earlier or later role is mentioned as a short
-aside underneath that one header (that is a normal internal-promotion case, not this one). Do NOT list
-a company whose two mentions read as genuinely separate, disconnected stints with an unrelated gap.
-When no company has this pattern, return an empty array.
+A SEPARATE TASK, after boundaries — SAME-COMPANY, MULTIPLE ROLES: decide, for every employer name that
+appears more than once within whatever section(s) you judged as work_history above, whether it must
+merge into one work_history entry or stay as separate entries. Do NOT leave this decision to a later
+step — decide it definitively here, for every repeated company, so nothing is left ambiguous.
+
+The test: count the COMPLETE header lines naming this company. A complete header line is one that, by
+itself, states a title, this company, AND a date range (the same header shape the document uses for
+every other employer entry) — not a parenthetical or a subordinate aside underneath a single shared
+header.
+  - Exactly ONE complete header line names this company, with any other role for it mentioned ONLY as
+    a subordinate aside UNDER that one header (a parenthetical, an italicized note, a short line like
+    "Promoted mid-year from Desktop Publishing Manager (1996-1997)" that has no company/location/date-
+    range fields of its own) → list the company's exact printed name in "mergeCompanies". This is a
+    genuine internal promotion/title-change within one tenure.
+  - TWO OR MORE complete header lines independently name this company, each with its own title AND its
+    own date range → list the company's exact printed name in "noMergeCompanies", regardless of
+    whether the roles read like an internal promotion or carry a caption such as "Role transition" or
+    "Promoted from...". A caption on one header never erases the fact that the other role has its own
+    separate, complete header elsewhere.
+  - The company's two mentions read as genuinely separate, disconnected stints with an unrelated gap
+    (not a continuous tenure at all) → list it in neither array; leave it out entirely.
+A company appears in at most one of the two arrays, never both. When no company repeats at all, return
+two empty arrays.
 
 Two confirmed real examples to calibrate against precisely (get this test wrong in either direction
 and downstream data is wrong): "Business Education Teacher | School District of Indian River County |
 Sebastian, FL | 2018 - 2025" and "Associate Dean of Discipline | School District of Indian River
 County | Sebastian, FL | 2025 - 2026" are TWO complete header lines (each independently states its own
-title, company, location, AND date range) — LIST "School District of Indian River County". By
-contrast, "Manager of Business Analysis and Publishing Systems | Thomson Reuters | Montvale, NJ | 1996
-- 1998" followed on its own line by "Promoted mid-year from Desktop Publishing Manager (1996-1997)" is
-only ONE complete header line — the second line names an earlier title but has no company, no
-location, and no independent date range of its own printed on it (the "(1996-1997)" is a parenthetical
-aside inside that one sentence, not a standalone date-range field like the header line has) — DO NOT
-LIST "Thomson Reuters". The test is whether the SECOND mention independently repeats the company name
-AND prints its own location AND its own date range as separate fields the way the first one does, not
-whether it names an earlier title at all.
+title, company, location, AND date range) — list "School District of Indian River County" in
+"noMergeCompanies". By contrast, "Manager of Business Analysis and Publishing Systems | Thomson
+Reuters | Montvale, NJ | 1996 - 1998" followed on its own line by "Promoted mid-year from Desktop
+Publishing Manager (1996-1997)" is only ONE complete header line — the second line names an earlier
+title but has no company, no location, and no independent date range of its own printed on it (the
+"(1996-1997)" is a parenthetical aside inside that one sentence, not a standalone date-range field
+like the header line has) — list "Thomson Reuters" in "mergeCompanies". The test is whether the SECOND
+mention independently repeats the company name AND prints its own location AND its own date range as
+separate fields the way the first one does, not whether it names an earlier title at all.
 
 Return ONLY a single JSON object, no prose before or after it, matching exactly this shape:
 
@@ -233,6 +247,7 @@ function isValidBoundaryResult(x: unknown): x is BoundaryResult {
   if (!x || typeof x !== "object") return false;
   const o = x as Record<string, unknown>;
   if (o.noMergeCompanies !== undefined && !(Array.isArray(o.noMergeCompanies) && o.noMergeCompanies.every((c) => typeof c === "string"))) return false;
+  if (o.mergeCompanies !== undefined && !(Array.isArray(o.mergeCompanies) && o.mergeCompanies.every((c) => typeof c === "string"))) return false;
   return Array.isArray(o.sections) && o.sections.every((s) =>
     s && typeof s === "object" && typeof (s as Record<string, unknown>).heading === "string" &&
     typeof (s as Record<string, unknown>).category === "string"
@@ -273,7 +288,8 @@ no per-section decision exists this time. A header that matches none of the abov
 needs_review, same as always.`;
   }
   const noMergeCompanies = (boundaries.noMergeCompanies || []).filter((c) => typeof c === "string" && c.trim());
-  if (boundaries.sections.length === 0 && noMergeCompanies.length === 0) return "";
+  const mergeCompanies = (boundaries.mergeCompanies || []).filter((c) => typeof c === "string" && c.trim());
+  if (boundaries.sections.length === 0 && noMergeCompanies.length === 0 && mergeCompanies.length === 0) return "";
   const known = boundaries.sections.filter((s) => s.category !== "unknown");
   const unknown = boundaries.sections.filter((s) => s.category === "unknown");
   // Multiple distinct "skills" sections (2026-09-23): decided HERE, deterministically, same philosophy
@@ -301,23 +317,37 @@ needs_review, same as always.`;
   const unknownList = unknown.length
     ? unknown.map((s) => `  - "${s.heading || "(no heading at all)"}"`).join("\n")
     : "  (none)";
-  // SAME COMPANY, MULTIPLE ROLES (2026-09-23): decided HERE too, same reasoning as the skills_secondary
-  // case above — three prose-only attempts inside the main extraction prompt could not reliably stop
-  // the model from merging two independently, fully-headed same-company entries whenever a promotion
-  // or transition caption was present. Rendered as a fixed, per-company "already decided" instruction
-  // instead of asking the model to run a gating test itself mid-extraction.
+  // SAME COMPANY, MULTIPLE ROLES (2026-09-23): decided HERE too, both directions, same reasoning as
+  // the skills_secondary case above. The merge-eligible direction turned out to need this just as much
+  // as the don't-merge direction — see this file's own noMergeCompanies/mergeCompanies type comment
+  // for the full story of why both are needed, not just one.
   const noMergeBlock = noMergeCompanies.length
     ? `
 
-SAME COMPANY, MULTIPLE ROLES — ALREADY DECIDED FOR THESE COMPANIES (do not run your own gating test
-against them, do not merge them, no matter what caption or transition language is nearby): the
-following employer names have two or more independent, complete header lines in this document — each
-with its own title and its own date range — so each of THEIR header lines must be its own separate
-work_history entry, keeping its own real title and its own real start_date/end_date exactly as printed
-on that line:
-${noMergeCompanies.map((c) => `  - "${c}"`).join("\n")}
-Any OTHER company name not listed here that still repeats follows the ordinary SAME COMPANY, MULTIPLE
-ROLES rules below as normal (run the gating test yourself for those).`
+SAME COMPANY, MULTIPLE ROLES — ALREADY DECIDED, DO NOT MERGE THESE COMPANIES (do not run your own
+gating test against them, do not merge them, no matter what caption or transition language is nearby):
+the following employer names have two or more independent, complete header lines in this document —
+each with its own title and its own date range — so each of THEIR header lines must be its own
+separate work_history entry, keeping its own real title and its own real start_date/end_date exactly
+as printed on that line:
+${noMergeCompanies.map((c) => `  - "${c}"`).join("\n")}`
+    : "";
+  const mergeBlock = mergeCompanies.length
+    ? `
+
+SAME COMPANY, MULTIPLE ROLES — ALREADY DECIDED, MERGE THESE COMPANIES (do not run your own gating test
+against them, go straight to the "HOW TO MERGE" mechanics below for each one — this IS a genuine
+internal promotion/title-change within one tenure, already confirmed): the following employer names
+have exactly one complete header line, with any other role for that same tenure mentioned only as a
+subordinate aside underneath it — combine each into ONE work_history entry per the HOW TO MERGE steps
+below (joined title, earliest start_date, latest end_date, full job_responsibilities including the
+aside's own content):
+${mergeCompanies.map((c) => `  - "${c}"`).join("\n")}`
+    : "";
+  const sameCompanyFooter = (noMergeBlock || mergeBlock)
+    ? `
+Any OTHER company name not listed in either block above that still repeats follows the ordinary SAME
+COMPANY, MULTIPLE ROLES rules below as normal (run the gating test yourself for those only).`
     : "";
 
   return `
@@ -338,7 +368,7 @@ literal text verbatim, content holding everything under it. One narrow exception
 VS. SKILL DISAMBIGUATION rule below: an "unknown" section that itself shows a genuine mix of items
 with/without a discernible trailing certification/license number may still split some of its items into
 certifications vs. skills using that signal. This is the ONLY place that item-level heuristic is allowed
-to fire — never inside a section already assigned a real category above.${noMergeBlock}`;
+to fire — never inside a section already assigned a real category above.${noMergeBlock}${mergeBlock}${sameCompanyFooter}`;
 }
 
 function buildVisionExtractionPrompt(sectionBoundaries?: BoundaryResult | null): string {
