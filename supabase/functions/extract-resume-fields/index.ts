@@ -192,8 +192,27 @@ needs_review, same as always.`;
   if (boundaries.sections.length === 0) return "";
   const known = boundaries.sections.filter((s) => s.category !== "unknown");
   const unknown = boundaries.sections.filter((s) => s.category === "unknown");
+  // Multiple distinct "skills" sections (2026-09-23): decided HERE, deterministically, same philosophy
+  // as the rest of this block — not left as a prose rule the model has to notice and apply on its own
+  // while it's busy extracting everything else. Only the first skills-category section stays "skills";
+  // every later one is flagged explicitly, per section, as its own freeform "skills_secondary" entry.
+  let sawSkills = false;
   const knownList = known.length
-    ? known.map((s) => `  - "${s.heading || "(no heading)"}" -> ${s.category}`).join("\n")
+    ? known.map((s) => {
+        if (s.category === "skills") {
+          if (sawSkills) {
+            return `  - "${s.heading || "(no heading)"}" -> skills, BUT this is a SECOND (or later) skills-shaped
+    section on this document — a section already assigned "skills" above came first. Do NOT add this
+    section's terms to the "skills" array; the "skills" array holds only the FIRST skills section's
+    terms. Instead extract this section as ONE "freeform" entry: section_type "skills_secondary",
+    "heading" set to "${s.heading || ""}" verbatim, "content" holding its terms exactly as the source
+    presents them (comma-separated, one per line, however the source actually lists them — copied
+    verbatim, not reformatted into a different list style).`;
+          }
+          sawSkills = true;
+        }
+        return `  - "${s.heading || "(no heading)"}" -> ${s.category}`;
+      }).join("\n")
     : "  (none)";
   const unknownList = unknown.length
     ? unknown.map((s) => `  - "${s.heading || "(no heading at all)"}"`).join("\n")
