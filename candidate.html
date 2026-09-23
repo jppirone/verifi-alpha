@@ -3945,9 +3945,10 @@ a:hover{color:var(--color-accent)}
                 </div>
               </div>
             </sc-if>
-            <!-- Item A: was "Pre-filled once from your parsed resume, if a number was found there" —
-                 real resume-contact-extraction was never built (see seedContactFromAccount's own
-                 header); this now genuinely pre-fills from your account, so the copy says that. -->
+            <!-- Item A reverted (2026-09-23): no longer pre-filled from your account -- see
+                 seedContactFromAccount's own header. Starts empty until you type something, or real
+                 resume-contact-extraction exists (not built yet). This copy makes no claim about a
+                 source, so it stays accurate either way. -->
             <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Editable at any time, with no re-verification required.</div>
             </sc-if>
 
@@ -8051,41 +8052,35 @@ class Component extends DCLogic {
     return map[s.deactReason] || 'Thanks for the detail. It\u2019s logged with your account.';
   }
 
-  // Item A (2026-09-08 regression session): the real seeding this app needed all along, replacing
-  // SEEDED_PARSED_CONTACT (a hardcoded '(555) 012-3456' / 'you@email.com' dev literal) and the
-  // DEV-ONLY test-scenario switcher (contactScenarioPatch/applyTestScenario) that drove it — both
-  // removed entirely, not left dormant. Decision made (not a unilateral call): collapse the
-  // printed/verified distinction for now rather than build real "extract contact info printed on
-  // the resume" — printedPhone/printedEmail seed from the candidate's own real account phone/email
-  // instead. Guarded exactly the way applySession already guards profileFirst/savedFirst (see that
-  // function's own header) — only fills a field that's genuinely still blank, so a candidate who's
-  // already edited their Printed Number/Email is never overwritten by a later call (e.g. a page
-  // reload re-resolving the same session). Email is genuinely verified (magic-link confirms
-  // ownership before an account exists at all); phone is whatever's on file, not SMS-verified until
-  // the candidate completes the separate "Send confirmation code" flow below — seeding it here is a
-  // convenience pre-fill, not a claim of verification, same as parsedResumePhone/printedPhone always
-  // meant "not yet verified" pre-collapse too.
+  // Item A reverted (2026-09-23 troubleshooting session): the 2026-09-08 version of this function
+  // seeded printedPhone/printedEmail from the candidate's own ACCOUNT phone/email (i.e. whatever was
+  // typed into the registration form at signup) as a deliberate, documented stopgap — "collapse the
+  // printed/verified distinction for now rather than build real 'extract contact info printed on the
+  // resume'". Confirmed real and live (a real candidate's Printed Number/Email showed her registration
+  // input, not her resume's actual header contact info and not blank): this directly violates the
+  // Profile Info design — Printed fields pre-fill from resume-parsed contact info if present,
+  // otherwise start empty, and are NEVER silently filled from any other source, registration input
+  // included. That design supersedes the 2026-09-08 stopgap. Removed entirely: printedPhone/
+  // printedEmail/parsedResumePhone/parsedResumeEmail are no longer seeded from account data at all —
+  // they now start (and stay) empty until either the candidate types something themselves, or real
+  // resume-contact-extraction is built as its own separate feature (not done as of this fix; there is
+  // currently no structured "phone/email as printed on the resume" field anywhere in the pipeline, so
+  // "if present" is never true today — Printed fields simply start empty, which is the documented
+  // fallback behavior, not a broken intermediate state).
   //
-  // Real dead end this closes, worth flagging plainly (per instruction) even though it's not fixed
-  // today: this collapse means printed and verified start out IDENTICAL for every candidate, so
-  // Item 16's free-tier existence-check matching (designed to treat Printed and Verified email/phone
-  // as two genuinely distinct signals) now effectively only has ONE real signal until real
-  // printed-contact-extraction becomes its own separate feature later.
+  // verifiedPhoneEntry (the SEPARATE "Verified Number" field below, on this same screen) keeps being
+  // seeded from the account phone — that field's own stated purpose is "what we have on file for you"
+  // (see its own copy: "Pre-filled from your account, if a number is on file"), which account data is
+  // the correct, intended source for; this fix is scoped to the Printed fields only.
   seedContactFromAccount(email, phone) {
     const s = this.state;
     const patch = {};
-    // On a paid plan the printed values live on the server (customization state) and Profile Info shows what is saved there, so the account value is
-    // never re-seeded over a printed field the candidate left empty (empty means private, and is what the delivered resume uses).
-    const serverOwnsPrinted = !!(s.czData && s.czLoadedFor && s.czData.customization && s.czData.customization.active);
-    if (email && !s.printedEmail) {
-      if (!serverOwnsPrinted) { patch.printedEmail = email; patch.savedPrintedEmail = email; }
-      patch.parsedResumeEmail = email;
-    }
-    if (phone && !s.printedPhone) {
-      if (!serverOwnsPrinted) { patch.printedPhone = phone; patch.savedPrintedPhone = phone; }
-      patch.parsedResumePhone = phone;
-      patch.verifiedPhoneEntry = phone; patch.savedVerifiedPhoneEntry = phone; patch.cvPhoneEntry = phone;
-    }
+    // Guarded on its own field's blankness now (2026-09-23), not printedPhone's -- the two were only
+    // coupled together before because both used to come from the same removed seeding step. A candidate
+    // who has already typed/edited their own Verified Number is never overwritten by a later session
+    // resolve (e.g. a page reload), same "only fill a field that's genuinely still blank" principle the
+    // original guard intended, just correctly scoped to the field it actually fills.
+    if (phone && !s.verifiedPhoneEntry) { patch.verifiedPhoneEntry = phone; patch.savedVerifiedPhoneEntry = phone; patch.cvPhoneEntry = phone; }
     return patch;
   }
 

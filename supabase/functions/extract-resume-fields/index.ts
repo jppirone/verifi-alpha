@@ -275,7 +275,7 @@ Return ONLY a single JSON object, no prose before or after it, matching exactly 
   "skills": [ string ],
   "skills_position": number | null,
   "freeform": [
-    { "section_type": "summary" | "hobbies_other" | "needs_review", "heading": string, "content": string, "position": number }
+    { "section_type": "summary" | "hobbies_other" | "needs_review" | "skills_secondary", "heading": string, "content": string, "position": number }
   ]
 }
 
@@ -390,14 +390,54 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   whatever form it appears; use an empty string "" when no location is given for that role — never
   infer or guess one from the employer's real-world location.
 
-- work_history's "heading" field = the literal heading/label text of the section this entry sits
-  under, exactly as printed (e.g. "PROFESSIONAL EXPERIENCE", "Employment History"), copied verbatim —
-  not reworded, not invented, not guessed. When two or more consecutive entries share the same visible
-  heading, every one of them gets that same literal heading string, not just the first. Use an empty
-  string "" only when the resume genuinely has no visible heading above this entry (e.g. a minimally-
-  formatted document with no section labels at all, per THE ONE EXCEPTION rule above).
+- work_history's "heading" field = the literal heading/label text of the OUTER SECTION this entry sits
+  under, exactly as printed (e.g. "PROFESSIONAL EXPERIENCE", "Employment History") — the ONE section
+  title that governs the entire block of company entries, copied verbatim, not reworded, not invented,
+  not guessed. It is NEVER an individual company's own header line (e.g. "CDW, Remote November 2015 -
+  September 2020"), even though that line is often bold, sits on its own line, and sits directly above
+  the role/title and bullets — exactly the way a real section heading looks. That company-level line
+  belongs in the separate "company", "location", "start_date", and "end_date" fields instead; it must
+  never be copied into "heading". A real, confirmed failure mode: on a resume with one outer
+  "PROFESSIONAL EXPERIENCE" heading governing five different companies, four of the five companies each
+  got their OWN "COMPANY, Remote [date] [date]" line as "heading" instead of "PROFESSIONAL EXPERIENCE"
+  (only the fifth got it right) — and while copying that wrong text, the hyphen between the two dates
+  was also dropped, so the same underlying mistake corrupted two different things at once. Every entry
+  under one true outer section heading gets that SAME literal string — when two or more consecutive
+  entries share the same visible section heading, all of them get it, not just the first, and never a
+  company's own line instead. Use an empty string "" only when the resume genuinely has no visible
+  section heading above this entry at all (e.g. a minimally-formatted document with no section labels
+  anywhere, per THE ONE EXCEPTION rule above).
   This is additive only, like freeform's own "heading" field below — it does not change how content
   gets classified, only what section title the output can reproduce.
+
+- SAME COMPANY, MULTIPLE ROLES (an internal promotion or title change) — a real, confirmed structure:
+  when ONE employer shows a company-level header (its own overall date range, sometimes its own
+  company-level description or a note like an acquisition) followed by two or more distinct role
+  sub-entries under it — each with its own title and its own date range, typically an earlier, more
+  junior title followed by a later, more senior one after a promotion — this is ONE company tenure with
+  multiple roles, not several unrelated jobs that happen to share an employer name. Combine it into ONE
+  work_history entry, never one entry per role:
+    - "company" = the employer's name, copied verbatim once.
+    - "title" = every role's own title, in chronological order, joined as "First Title to Second Title"
+      (extend the same way for three or more roles) — e.g. "Recruiter to Senior Recruiter" — never just
+      the most senior/most recent title alone, which would misrepresent the whole tenure as having
+      started at that level.
+    - "start_date" = the EARLIEST role's own start date. "end_date" = the LATEST role's own end date
+      (or the current-role rule below if that latest role is still ongoing).
+    - "job_responsibilities" = rebuild the full internal structure as one piece of text, nothing
+      dropped: first, any company-level description or context that applies to the whole tenure and
+      isn't specific to either individual role (what the company does, an acquisition note, and
+      similar) — copied verbatim, on its own line(s); then, for each role in chronological order, a
+      line naming that role and its own exact date range (e.g. "Recruiter, September 2023 - June
+      2024:"), followed by that role's own bullets exactly as printed, using "\n" between lines per the
+      LINE-BREAK PRESERVATION rule above. Never shorten, summarize, or drop any real content from either
+      role or from the company-level context while combining them — the combining is structural only.
+  Do NOT apply this when two entries merely share an employer NAME but read as genuinely separate,
+  disconnected stints — a real gap where the candidate left and later came back, or two different
+  contract engagements at the same staffing client years apart with no promotion language connecting
+  them. The signal is ONE continuous tenure with an internal role change, not just a repeated company
+  name. When genuinely unsure whether two same-company entries are one continuous tenure or two
+  separate stints, extract them as separate entries rather than guessing at a merge.
 
 - education = DEGREE-GRANTING PROGRAMS ONLY (e.g. B.A., B.S., M.S., MBA, Ph.D., Associate's).
 
@@ -411,6 +451,22 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   section this program sits under (e.g. "EDUCATION", "Academic Background") — literal text, verbatim,
   the same shared string across every entry under one visible heading, empty string "" only when the
   resume genuinely has none.
+
+- education's "degree" and "field_of_study" fields must preserve the resume's own qualifying or
+  partial-completion language VERBATIM — never simplify, clean up, or drop words like "coursework
+  toward," "in progress," "incomplete," "partial completion," "expected [year]," or a credit/hour count
+  in parentheses (e.g. "(60 credits completed)") when the resume's own phrasing includes them. A real,
+  confirmed failure mode: a resume reading "coursework toward Bachelor of Science (60 credits
+  completed)" under a Travel and Tourism major came back as bare "Bachelor of Science" / "Travel and
+  Tourism" — silently dropping "coursework toward" and "(60 credits completed)" entirely, which turns a
+  stated INCOMPLETE credential into what reads as a completed one. That is never acceptable regardless
+  of how much cleaner the shortened form looks: if the resume's own words for a degree qualify,
+  partially complete, or hedge it in any way, those exact words are part of "degree" (or
+  "field_of_study", whichever the qualifying language sits closest to in the source line) and must
+  appear in the output exactly as printed — never trimmed down to just the degree title and major name.
+  This holds for every entry, not only ones that look unusual; do not "normalize" a degree line to its
+  cleanest-looking form just because most other entries on the page happen to already be complete,
+  unqualified degrees.
 
 - certifications = standalone credentials: certifications, licenses, bootcamps, and similar
   short-form credentials that are NOT part of a degree program. A coding bootcamp goes in
@@ -548,6 +604,25 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   skills-shaped section elsewhere (e.g. "Core Competencies") — a second bulleted list later in the
   document is NOT automatically more of the same skills block just because its individual phrases
   look similar; check each item for its own explanatory clause before adding anything to skills.
+
+- MULTIPLE DISTINCT SKILLS-SHAPED SECTIONS (a real, confirmed structure, different from the case just
+  above — this one is about two sections that are BOTH genuinely skills-shaped, not one that only looks
+  like it is): a resume can have more than one section that is a genuine flat list of terms, each with
+  its own distinct heading — e.g. "CORE COMPETENCIES" (a list of competency phrases) immediately
+  followed by "RECENT TECHNICAL SKILLS" (a list of named tools/software), two real, differently-headed
+  lists back to back. The top-level "skills" array is ONE flat, unattributed list for the whole resume,
+  so only the FIRST such section's terms go into "skills" (carrying that section's own heading the usual
+  way, via the section-boundary step). Every ADDITIONAL skills-shaped section — one with its own
+  genuinely different heading text, appearing after the first — goes into "freeform" instead of being
+  merged into "skills": section_type "skills_secondary", "heading" set to that section's own literal
+  heading text, "content" holding its terms exactly as the source presents them (comma-separated, one
+  per line, however the source actually lists them — copied verbatim, not reformatted into a different
+  list style). Never merge a second skills-shaped section's terms into the "skills" array just because
+  both sections are skills-shaped — doing so silently discards the second section's own heading and
+  visually merges two genuinely distinct sections into one. This does not apply to a single skills
+  section that merely wraps across multiple lines or columns (still one section, one heading) — only to
+  two or more sections with genuinely distinct heading text, per the general "never merge sections just
+  because they're topically similar" rule.
 
 - Deduplication: if the same role, credential, or skill term appears more than once anywhere in the
   document (e.g. listed once under "Experience" and again under a separate "Leadership" or
