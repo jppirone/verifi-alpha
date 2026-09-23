@@ -830,8 +830,27 @@ to needs_review, same as always.`;
   if (boundaries.sections.length === 0) return "";
   const known = boundaries.sections.filter((s) => s.category !== "unknown");
   const unknown = boundaries.sections.filter((s) => s.category === "unknown");
+  // Multiple distinct "skills" sections on THIS page (2026-09-23): decided HERE, deterministically,
+  // same philosophy as the rest of this block — scoped to this page only, since previousPageContext
+  // has no "skills" kind to reliably know whether an earlier page already had one.
+  let sawSkills = false;
   const knownList = known.length
-    ? known.map((s) => `  - "${s.heading || "(no heading — continuation)"}" -> ${s.category}${s.is_continuation_of_previous_page ? " (continuation of the previous page's open item — see continuation context above)" : ""}`).join("\n")
+    ? known.map((s) => {
+        const cont = s.is_continuation_of_previous_page ? " (continuation of the previous page's open item — see continuation context above)" : "";
+        if (s.category === "skills") {
+          if (sawSkills) {
+            return `  - "${s.heading || "(no heading — continuation)"}" -> skills${cont}, BUT this is a SECOND (or
+    later) skills-shaped section on THIS PAGE — a section already assigned "skills" above came first.
+    Do NOT add this section's terms to the "skills" array; the "skills" array holds only the FIRST
+    skills section's terms. Instead extract this section as ONE "freeform" entry: section_type
+    "skills_secondary", "heading" set to "${s.heading || ""}" verbatim, "content" holding its terms
+    exactly as the source presents them (comma-separated, one per line, however the source actually
+    lists them — copied verbatim, not reformatted into a different list style).`;
+          }
+          sawSkills = true;
+        }
+        return `  - "${s.heading || "(no heading — continuation)"}" -> ${s.category}${cont}`;
+      }).join("\n")
     : "  (none)";
   const unknownList = unknown.length
     ? unknown.map((s) => `  - "${s.heading || "(no heading at all)"}"`).join("\n")
