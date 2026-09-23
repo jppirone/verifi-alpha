@@ -610,7 +610,10 @@ export default {
         // The employer's document for each request: only what the candidate needs to decide whether to open it. The file itself is reached
         // only through action "document_link".
         const docs = reqs.length ? await rows(`comparison_request_documents?request_id=in.(${reqs.map((r) => r.id).join(",")})&select=request_id,file_name,content_type,byte_size,purge_after`) : [];
-        const docByRequest = new Map(docs.filter((d) => new Date(d.purge_after).getTime() > Date.now()).map((d) => [d.request_id, d]));
+        // Row existence IS availability (2026-09-23 correction) -- the row is deleted exactly when it should stop
+        // being available (expire_comparison_requests, tied to the request's real terminal status, not a fixed
+        // clock), so no time filter belongs here; purge_after is carried through below only as a display estimate.
+        const docByRequest = new Map(docs.map((d) => [d.request_id, d]));
         const now = Date.now();
         const shaped = reqs.map((r) => {
           // a pending request past its window is closed even if the sweep has not run yet
@@ -620,7 +623,7 @@ export default {
             delivered: !!r.first_delivered_at, first_delivered_at: r.first_delivered_at, snapshot_available: hasSnap.has(r.id), snapshot_expires_at: r.snapshot_expires_at,
             requester: { name: r.requester_name, company: r.requester_company, email: r.requester_email, domain: String(r.requester_email).split("@")[1] || "", domain_type: r.requester_domain_type },
             attestation: r.attestation,
-            // 'available' now; 'deleted' = the 21 days ended (or the account was deactivated); 'none' = a request from before documents were required
+            // 'available' now; 'deleted' = the request reached a terminal state and its document was purged (or the account was deactivated); 'none' = a request from before documents were required
             document_state: docByRequest.has(r.id) ? "available" : (r.document_required ? "deleted" : "none"),
             document: docByRequest.has(r.id) ? { file_name: docByRequest.get(r.id).file_name, content_type: docByRequest.get(r.id).content_type, byte_size: docByRequest.get(r.id).byte_size, available_until: docByRequest.get(r.id).purge_after } : null,
           };
@@ -635,13 +638,14 @@ export default {
       }
 
       // A 60-second signed link to the employer's document for one of THIS candidate's requests. The file is served unmodified by Storage from a
-      // private bucket; nothing else can reach it. Someone else's request is indistinguishable from one that does not exist.
+      // private bucket; nothing else can reach it. Someone else's request is indistinguishable from one that does not exist. Row existence IS
+      // availability (2026-09-23 correction, see employer-api.ts's open_comparison for the full reasoning) -- no purge_after time check here.
       if (action === "document_link") {
         if (typeof body.request_id !== "string" || !UUID.test(body.request_id)) return json({ ok: false, error: "request_id_invalid" }, 400);
         const own = (await rows(`comparison_requests?id=eq.${body.request_id}&candidate_id=eq.${candidateId}&select=id`))[0];
         if (!own) return json({ ok: false, error: "not_found" }, 404);
-        const d = (await rows(`comparison_request_documents?request_id=eq.${own.id}&select=storage_path,file_name,content_type,purge_after`))[0];
-        if (!d || new Date(d.purge_after).getTime() <= Date.now() || !/^[0-9a-f-]{36}\.(pdf|png|jpg)$/.test(d.storage_path)) return json({ ok: false, error: "document_unavailable" }, 404);
+        const d = (await rows(`comparison_request_documents?request_id=eq.${own.id}&select=storage_path,file_name,content_type`))[0];
+        if (!d || !/^[0-9a-f-]{36}\.(pdf|png|jpg)$/.test(d.storage_path)) return json({ ok: false, error: "document_unavailable" }, 404);
         const sres = await fetch(`${SUPABASE_URL}/storage/v1/object/sign/employer-documents/${d.storage_path}`, { method: "POST", headers: JSON_H, body: JSON.stringify({ expiresIn: 60 }) });
         const sj = sres.ok ? await sres.json().catch(() => null) : null;
         if (!sj || typeof sj.signedURL !== "string") return json({ ok: false, error: "link_failed" }, 502);

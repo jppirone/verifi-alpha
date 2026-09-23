@@ -103,11 +103,12 @@ async function liveContent(candidateId: string): Promise<{ content: any; assembl
 
 // The document this guest already provided at request time, and the system-generated plain document
 // (2026-09-23) — see employer-api.ts's open_comparison for the identical org-path version and the full
-// reasoning. Both best-effort: a failure here never blocks delivery of the live verification content.
+// reasoning, including why availability is row existence, not a purge_after time comparison. Both
+// best-effort: a failure here never blocks delivery of the live verification content.
 async function documentAndGenerated(requestId: string, candidateId: string): Promise<{ document: { url: string; file_name: string; content_type: string; expires_in: number } | null; generated_document: unknown }> {
   let document: { url: string; file_name: string; content_type: string; expires_in: number } | null = null;
-  const doc = (await rows(`comparison_request_documents?request_id=eq.${requestId}&select=storage_path,file_name,content_type,purge_after`))[0];
-  if (doc && new Date(doc.purge_after).getTime() > Date.now() && /^[0-9a-f-]{36}\.(pdf|png|jpg)$/.test(doc.storage_path)) {
+  const doc = (await rows(`comparison_request_documents?request_id=eq.${requestId}&select=storage_path,file_name,content_type`))[0];
+  if (doc && /^[0-9a-f-]{36}\.(pdf|png|jpg)$/.test(doc.storage_path)) {
     const sres = await fetch(`${SUPABASE_URL}/storage/v1/object/sign/employer-documents/${doc.storage_path}`, { method: "POST", headers: JSON_H, body: JSON.stringify({ expiresIn: 60 }) });
     const sj = sres.ok ? await sres.json().catch(() => null) : null;
     if (sj && typeof sj.signedURL === "string") document = { url: `${SUPABASE_URL}/storage/v1${sj.signedURL}`, file_name: doc.file_name, content_type: doc.content_type, expires_in: 60 };

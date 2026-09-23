@@ -597,13 +597,19 @@ const ACTIONS: Record<string, Action> = {
       const snap = { content: liveJson.content, assembled_at: liveJson.assembled_at };
 
       // The document THIS employer already provided at request time (2026-09-23): a signed 60-second link to
-      // their own upload, if it hasn't been purged (21 days from request) — so the comparison screen can show
-      // it automatically instead of asking them to pick a fresh local copy every time they open this. Best-
-      // effort: a missing or expired document just means the client falls back to its own manual-upload prompt,
-      // never a hard failure of the whole open.
+      // their own upload, so the comparison screen can show it automatically instead of asking them to pick a
+      // fresh local copy every time they open this. Row existence IS availability (2026-09-23 correction): the
+      // row is deleted exactly when it should stop being available (expire_comparison_requests, tied to the
+      // owning request's real terminal status, not a fixed clock — see that function's own header for why a
+      // fixed ceiling alone was wrong for a guest request, whose real access window can be extended by a late
+      // Stripe hold authorization). purge_after is kept only as a generous display estimate elsewhere (candidate.html's
+      // "kept until" text, the staff abuse-investigation view's own deliberately-stricter cutoff) — it must never
+      // gate whether an existing row gets served, or a genuinely-still-open request's document could be wrongly
+      // refused here once that estimate elapses. Best-effort: a missing document just means the client falls back
+      // to its own manual-upload prompt, never a hard failure of the whole open.
       let document: { url: string; file_name: string; content_type: string; expires_in: number } | null = null;
-      const doc = (await rows(`comparison_request_documents?request_id=eq.${r.id}&select=storage_path,file_name,content_type,purge_after`))?.[0];
-      if (doc && new Date(doc.purge_after).getTime() > Date.now() && /^[0-9a-f-]{36}\.(pdf|png|jpg)$/.test(doc.storage_path)) {
+      const doc = (await rows(`comparison_request_documents?request_id=eq.${r.id}&select=storage_path,file_name,content_type`))?.[0];
+      if (doc && /^[0-9a-f-]{36}\.(pdf|png|jpg)$/.test(doc.storage_path)) {
         const sres = await fetch(`${SUPABASE_URL}/storage/v1/object/sign/employer-documents/${doc.storage_path}`, { method: "POST", headers: JSON_H, body: JSON.stringify({ expiresIn: 60 }) });
         const sj = sres.ok ? await sres.json().catch(() => null) : null;
         if (sj && typeof sj.signedURL === "string") document = { url: `${SUPABASE_URL}/storage/v1${sj.signedURL}`, file_name: doc.file_name, content_type: doc.content_type, expires_in: 60 };
