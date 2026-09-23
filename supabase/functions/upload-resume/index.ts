@@ -569,10 +569,20 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   internal promotion or title change within that single tenure): combine it into ONE work_history
   entry, never one entry per role:
     - "company" = the employer's name, copied verbatim once.
-    - "title" = every role's own title, in chronological order, joined as "First Title to Second Title"
-      (extend the same way for three or more roles) — e.g. "Recruiter to Senior Recruiter" — never just
-      the most senior/most recent title alone, which would misrepresent the whole tenure as having
-      started at that level.
+    - "title" = every role's own title, in chronological order (earlier role FIRST, later/current role
+      LAST), joined as "First Title to Second Title" (extend the same way for three or more roles) —
+      e.g. "Recruiter to Senior Recruiter" — never just the most senior/most recent title alone, which
+      would misrepresent the whole tenure as having started at that level, and never the reverse order
+      either. Determine which title is earlier from the subordinate aside's own wording, not from which
+      title sounds more senior: a note reading "Promoted FROM [Title]," "Started as [Title]," or similar
+      names the EARLIER title explicitly — that named title goes FIRST, and the header line's OWN title
+      (the one with the company/location/date-range) goes SECOND, since the header always describes the
+      tenure's current/most recent state. A real, confirmed failure mode: "Manager of Business Analysis
+      and Publishing Systems | Thomson Reuters | ... | 1996-1998" with a subordinate note "Promoted
+      mid-year from Desktop Publishing Manager (1996-1997)" came back as "Manager of Business Analysis
+      and Publishing Systems to Desktop Publishing Manager" — backwards; "from" explicitly names Desktop
+      Publishing Manager as the earlier role, so the correct title is "Desktop Publishing Manager to
+      Manager of Business Analysis and Publishing Systems".
     - "start_date" = the EARLIEST role's own start date. "end_date" = the LATEST role's own end date
       (or the current-role rule below if that latest role is still ongoing).
     - "job_responsibilities" = rebuild the full internal structure as one piece of text, nothing
