@@ -3211,18 +3211,16 @@ const __ds_scope = {};
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
         <div class="card-kicker">Their document</div>
         <sc-if value="{{ hasStoredDoc }}" hint-placeholder-val="{{ false }}">
-          <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">The document they provided when this request was submitted.</div>
+          <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">The document they provided when this request was submitted. This is fixed -- there is no way to view or attach a different one here.</div>
         </sc-if>
         <sc-if value="{{ noStoredDoc }}" hint-placeholder-val="{{ false }}">
-          <div class="field">
-            <label for="cp-file">This request has no stored copy any more (or was made before this was captured). Choose the copy you received</label>
-            <input class="input" id="cp-file" type="file" accept=".pdf,image/*" sc-camel-on-change="{{ onPickCopy }}">
-          </div>
+          <!-- No control of any kind here, deliberately (2026-09-23): a request can never be created without a bound
+               document, and nothing on this screen can attach or replace one after the fact. This branch is legacy-only
+               -- a request made before that requirement existed, or (today) a document past its 21-day retention while
+               the comparison itself is still open. -->
+          <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">No document is available for this request.</div>
         </sc-if>
         <div id="employer-copy-container" style="width:100%;aspect-ratio:8.5 / 11;background:#ffffff;border-radius:2px;box-shadow:var(--shadow-lg);overflow:auto"></div>
-        <sc-if value="{{ noStoredDoc }}" hint-placeholder-val="{{ false }}">
-          <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">A file chosen here is shown only in this browser. It is not uploaded, stored, or visible to the candidate. PDF and image files can be previewed; other types cannot.</div>
-        </sc-if>
       </div>
 
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
@@ -3347,7 +3345,7 @@ class Component extends DCLogic {
   }
 
   componentWillUnmount() {
-    if (this._copyUrl) { try { URL.revokeObjectURL(this._copyUrl); } catch (e) { /* ignore */ } }
+    if (this._genDocUrl) { try { URL.revokeObjectURL(this._genDocUrl); } catch (e) { /* ignore */ } }
   }
 
   // The landing choice (2026-09-19): the first screen used to be the Tier 1 lookup form alone, with the real sign-in only a
@@ -3974,7 +3972,6 @@ class Component extends DCLogic {
   endGuestView() {
     this._guestEnded = true; // a late answer to an earlier visit must not bring a closed view back
     if (this._guestTimer) { clearInterval(this._guestTimer); this._guestTimer = null; }
-    if (this._copyUrl) { try { URL.revokeObjectURL(this._copyUrl); } catch (x) { /* ignore */ } this._copyUrl = null; }
     if (this._genDocUrl) { try { URL.revokeObjectURL(this._genDocUrl); } catch (x) { /* ignore */ } this._genDocUrl = null; }
     // keep the kind (the guest has just seen it) so the closed screen names what was closed
     const seen = (this.state.compare && this.state.compare.content && this.state.compare.content.kind) || (this.state.guest && this.state.guest.kind) || null;
@@ -4041,30 +4038,6 @@ class Component extends DCLogic {
         : "We couldn't open that " + noun + ". Please try again.",
     });
     await this.loadComparisons();
-  }
-
-  // The employer's own copy is shown ONLY in this browser (an object URL); it is never sent anywhere.
-  onPickCopy(e) {
-    const f = e.target.files && e.target.files[0];
-    if (this._copyUrl) { try { URL.revokeObjectURL(this._copyUrl); } catch (x) { /* ignore */ } this._copyUrl = null; }
-    const box = document.getElementById('employer-copy-container');
-    if (!box) return;
-    box.innerHTML = '';
-    if (!f) return;
-    const note = (t) => { const d = document.createElement('div'); d.style.cssText = 'color:#5b5b66;font-size:12px;padding:24px;text-align:center;line-height:1.6'; d.textContent = t; box.appendChild(d); };
-    if (f.type === 'application/pdf') {
-      this._copyUrl = URL.createObjectURL(f);
-      const em = document.createElement('embed');
-      em.type = 'application/pdf'; em.src = this._copyUrl; em.style.cssText = 'width:100%;height:100%;border:0';
-      box.appendChild(em);
-    } else if (/^image\//.test(f.type)) {
-      this._copyUrl = URL.createObjectURL(f);
-      const im = document.createElement('img');
-      im.src = this._copyUrl; im.alt = 'Your copy'; im.style.cssText = 'width:100%;display:block';
-      box.appendChild(im);
-    } else {
-      note('This file type cannot be previewed here (only PDF and image files can). The file stays on your computer.');
-    }
   }
 
   // ---- System-generated document (2026-09-22) ----
@@ -4733,8 +4706,7 @@ class Component extends DCLogic {
         (content.certifications || []).forEach(x => out.push(row('Certification', x.name || '', [x.issuer, x.license_number ? 'Lic #' + x.license_number : '', x.license_state, x.issued].filter(Boolean).join(' · '), x)));
         return out;
       })(),
-      onPickCopy: (e) => this.onPickCopy(e),
-      closeCompare: (e) => { if (e && e.preventDefault) e.preventDefault(); if (cmp.guest) { this.closeGuestView(); return; } if (this._copyUrl) { try { URL.revokeObjectURL(this._copyUrl); } catch (x) { /* ignore */ } this._copyUrl = null; } if (this._genDocUrl) { try { URL.revokeObjectURL(this._genDocUrl); } catch (x) { /* ignore */ } this._genDocUrl = null; } this.setState({ screen: s.compareFrom === 'request' ? 'request' : 'acct', compare: null }); this.loadReal(); },
+      closeCompare: (e) => { if (e && e.preventDefault) e.preventDefault(); if (cmp.guest) { this.closeGuestView(); return; } if (this._genDocUrl) { try { URL.revokeObjectURL(this._genDocUrl); } catch (x) { /* ignore */ } this._genDocUrl = null; } this.setState({ screen: s.compareFrom === 'request' ? 'request' : 'acct', compare: null }); this.loadReal(); },
 
       backToLookup: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'lookup', lookupResult: null, lookup: null, request: null, pendingEmail: '' }); },
       isLanding: s.screen === 'landing',
