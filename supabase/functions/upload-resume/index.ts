@@ -210,6 +210,20 @@ aside underneath that one header (that is a normal internal-promotion case, not 
 a company whose two mentions read as genuinely separate, disconnected stints with an unrelated gap.
 When no company has this pattern, return an empty array.
 
+Two confirmed real examples to calibrate against precisely (get this test wrong in either direction
+and downstream data is wrong): "Business Education Teacher | School District of Indian River County |
+Sebastian, FL | 2018 - 2025" and "Associate Dean of Discipline | School District of Indian River
+County | Sebastian, FL | 2025 - 2026" are TWO complete header lines (each independently states its own
+title, company, location, AND date range) — LIST "School District of Indian River County". By
+contrast, "Manager of Business Analysis and Publishing Systems | Thomson Reuters | Montvale, NJ | 1996
+- 1998" followed on its own line by "Promoted mid-year from Desktop Publishing Manager (1996-1997)" is
+only ONE complete header line — the second line names an earlier title but has no company, no
+location, and no independent date range of its own printed on it (the "(1996-1997)" is a parenthetical
+aside inside that one sentence, not a standalone date-range field like the header line has) — DO NOT
+LIST "Thomson Reuters". The test is whether the SECOND mention independently repeats the company name
+AND prints its own location AND its own date range as separate fields the way the first one does, not
+whether it names an earlier title at all.
+
 Return ONLY a single JSON object, no prose before or after it, matching exactly this shape:
 
 ${BOUNDARY_SCHEMA_SHAPE}`;
