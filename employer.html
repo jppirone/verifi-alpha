@@ -4072,7 +4072,10 @@ class Component extends DCLogic {
   // dependency-free raw-PDF-byte approach, no external library. Fed by candidate-comparison-requests'
   // assemble_plain_document action, which calls assemble_customized_resume(ignore_overrides=true,
   // delivered_only=true) -- the complete, unexcludable "default resume" every non-paying candidate
-  // already sees, so there is no verification field anywhere in the source data to accidentally print.
+  // already sees. NOTE: that RPC's raw JSON DOES carry a per-item `verification` object (status/method/
+  // verified_on) -- it's shared with the Customization editor, which needs it -- so this is NOT "a
+  // verification-free data source". The guarantee is narrower and lives here: buildComparisonLines below
+  // never reads `.verification` on any item, by construction. Keep it that way.
   czPartialLabel(p) {
     const m = String(p || '').match(/^(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?$/);
     if (!m) return '';
