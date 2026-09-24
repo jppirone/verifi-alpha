@@ -493,9 +493,15 @@ export default {
       // immediately -- staff never have to separately open the draft row to find it. candidate_note
       // is the same column the pre-existing Education-resubmit note flow already writes; this is a
       // second, independent writer of it (a fresh row, never a competing write to an existing one).
+      // flagged_by_candidate is ALWAYS included, explicitly, even when false -- see the identical,
+      // already-hard-won lesson on `status` immediately below this comment (PostgREST batches one JS
+      // array into a single INSERT from the UNION of keys across every object; a row that omits a key
+      // present on a SIBLING row in the same batch gets an explicit NULL, not the column default, the
+      // moment any other row in the batch supplies it). candidate_note/candidate_note_at stay omitted
+      // when unflagged (nullable columns, no NOT NULL default to violate).
       const flagCarry = (x: FlagEdit) => {
         const f = flagFields(x);
-        return f.flagged_by_candidate ? { flagged_by_candidate: true, candidate_note: f.candidate_flag_note, candidate_note_at: nowIso } : {};
+        return f.flagged_by_candidate ? { flagged_by_candidate: true, candidate_note: f.candidate_flag_note, candidate_note_at: nowIso } : { flagged_by_candidate: false };
       };
 
       if (opt_in.work_history) {
