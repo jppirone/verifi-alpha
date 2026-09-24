@@ -27,13 +27,17 @@ const FIELD_MAP = {
   correctionField: "correction_field",
   correctionValue: "correction_value",
   correctionAppliedAt: "correction_applied_at",
+  // Item-flagging (2026-09-23): staff/worker resolving a candidate's flag clears it here -- the only
+  // write this function makes to flagged_by_candidate; a candidate can only ever SET it true, via
+  // submit-candidate-correction-response, never clear it themselves.
+  flaggedByCandidate: "flagged_by_candidate",
 };
 const DATE_COLUMNS = new Set(["received", "desired", "follow_up"]);
 // The statuses staff.html offers (STATUS_OPTIONS). Nothing else is ever a valid status, for any role (this used to accept any string).
 const STATUS_VALUES = new Set(["New", "In Progress", "Awaiting Response", "Needs Reconciliation", "Confirmed", "Discrepancy", "Verification Not Possible", "Unable to Verify"]);
 // What a worker may change on an item assigned to them: exactly what staff.html lets a worker do. assignedTo, type, received, desired
 // and the candidate-side correction fields (correctionNote/correctionField, written by submit-candidate-correction-response) are not in it.
-const WORKER_PATCH_FIELDS = new Set(["status", "note", "internalNote", "followUp", "automatedCheck", "claim", "foundValue", "correctionValue", "correctionRequested", "correctionAppliedAt"]);
+const WORKER_PATCH_FIELDS = new Set(["status", "note", "internalNote", "followUp", "automatedCheck", "claim", "foundValue", "correctionValue", "correctionRequested", "correctionAppliedAt", "flaggedByCandidate"]);
 
 // ---------------------------------------------------------------------------------------------------
 // ---------------------------------------------------------------------------------------------------

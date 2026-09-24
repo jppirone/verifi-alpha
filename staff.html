@@ -2307,6 +2307,10 @@ th.sortable{cursor:pointer;user-select:none}
         <div style="display:flex;gap:var(--space-2)">
           <button type="button" class="btn {{ filterAllClass }}" style="font-size:12px" onClick="{{ showAllItems }}">All items</button>
           <button type="button" class="btn {{ filterCorrectionClass }}" style="font-size:12px" onClick="{{ showCorrectionOnly }}">Correction requested ({{ correctionCount }})</button>
+          <!-- Item-flagging (2026-09-23): flagged_by_candidate is independent of status/correction_requested
+               — see this filter's own view-model (flaggedScoped) for why it composes with, rather than
+               replaces, the other two toggles. -->
+          <button type="button" class="btn {{ filterFlaggedClass }}" style="font-size:12px" onClick="{{ showFlaggedOnly }}">Flagged by candidate ({{ flaggedCount }})</button>
         </div>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:flex-end;margin-bottom:var(--space-4)">
@@ -2390,6 +2394,9 @@ th.sortable{cursor:pointer;user-select:none}
               </sc-raw-td>
               <sc-raw-td>
                 <span class="{{ row.statusTagClass }}">{{ row.status }}</span>
+                <sc-if value="{{ row.flaggedByCandidate }}" hint-placeholder-val="{{ false }}">
+                  <div style="margin-top:4px"><span class="tag tag-outline" style="color:#b26a00;border-color:#b26a00;white-space:nowrap">🚩 Flagged</span></div>
+                </sc-if>
                 <sc-if value="{{ row.syncError }}" hint-placeholder-val="{{ false }}">
                   <div style="margin-top:4px">
                     <span class="tag tag-outline" style="color:#b00020;border-color:#b00020;white-space:nowrap;cursor:pointer" onClick="{{ row.onRetrySync }}">Not saved · Retry</span>
@@ -2713,9 +2720,21 @@ th.sortable{cursor:pointer;user-select:none}
 
       <sc-if value="{{ detailHasCandidateNote }}" hint-placeholder-val="{{ false }}">
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-4)">
-        <div class="card-kicker">Candidate's note</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3)">
+          <div class="card-kicker">Candidate's note</div>
+          <sc-if value="{{ detailFlaggedByCandidate }}" hint-placeholder-val="{{ false }}">
+            <span class="tag tag-outline" style="color:#b26a00;border-color:#b26a00">🚩 Flagged</span>
+          </sc-if>
+        </div>
         <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.5;white-space:pre-wrap">{{ detailCandidateNote }}</div>
         <div style="font-size:11px;color:var(--color-neutral-500)">Left {{ detailCandidateNoteAt }}. Every note and edit the candidate made is in the timeline below.</div>
+        <!-- Item-flagging (2026-09-23): flagged_by_candidate is a separate boolean from status (see
+             this build's own migration header) — resolving it never changes status, assigned_to, or
+             anything else. A candidate can only ever SET this flag (submit-candidate-correction-
+             response); only staff can clear it. -->
+        <sc-if value="{{ detailFlaggedByCandidate }}" hint-placeholder-val="{{ false }}">
+          <button type="button" class="btn btn-ghost" style="align-self:flex-start;font-size:12px" onClick="{{ resolveCandidateFlag }}">Mark flag resolved</button>
+        </sc-if>
       </div>
       </sc-if>
 
@@ -3028,6 +3047,9 @@ class Component extends DCLogic {
     internalNoteSaveState: 'idle', internalNoteFading: false,
     statusConfirmOpen: false, pendingStatus: null, resolutionEvidenceDraft: '',
     correctionFilter: false, correctionMode: null, correctionDraft: '', declineDraft: '',
+    // Item-flagging (2026-09-23): a second, independent boolean-flag toggle, same pattern as
+    // correctionFilter above — composes with it and the text/dropdown filters rather than replacing them.
+    flaggedFilter: false,
     // Real search/filter, added after confirming none existed: candidate name (reuses the
     // candidateName field list-verification-items already resolves — first_name+last_name with a
     // full_name fallback for pre-existing candidates, untouched here), item ID (the real VQ-####
@@ -3814,13 +3836,16 @@ class Component extends DCLogic {
     const isWorker = s.loginRole === 'worker';
     const scopedAll = isAdmin ? s.items : s.items.filter(it => it.assignedTo === s.currentUser);
     const correctionScoped = s.correctionFilter ? scopedAll.filter(it => it.correctionRequested) : scopedAll;
+    // Item-flagging (2026-09-23): a second, independent toggle — composes with correctionFilter
+    // (AND), not a replacement for it, since a row can be both correction-requested and flagged.
+    const flaggedScoped = s.flaggedFilter ? correctionScoped.filter(it => it.flaggedByCandidate) : correctionScoped;
 
     // Real search/filter (see state's own comment for why each of these three exists and what it
     // reads). All three narrow together (AND, not OR) — a name query, an ID query, and a category
     // pick are each independently optional; whichever ones are non-empty all have to match.
     const nameQuery = s.nameFilter.trim().toLowerCase();
     const idQuery = s.itemIdFilter.trim().toLowerCase();
-    const scoped = correctionScoped.filter((it) => {
+    const scoped = flaggedScoped.filter((it) => {
       if (nameQuery && !(it.candidateName || '').toLowerCase().includes(nameQuery)) return false;
       if (idQuery && !(it.id || '').toLowerCase().includes(idQuery)) return false;
       if (s.typeFilter && it.type !== s.typeFilter) return false;
@@ -3855,6 +3880,7 @@ class Component extends DCLogic {
       candidateIdentifier: it.candidateEmail || it.candidateId || '',
       receivedDisp: this.fmt(it.received), desiredDisp: this.fmt(it.desired), followUpDisp: this.fmt(it.followUp),
       automatedCheck: it.automatedCheck, status: it.status, statusTagClass: this.statusTagClass(it.status),
+      flaggedByCandidate: !!it.flaggedByCandidate,
       registryFlag: this.isNotActiveMatch(it),
       registryFlagText: this.isLapsedAfterVerified(it) ? 'Was verified · now not active' : 'License found · not active',
       hasCandidateNote: !!it.candidateNote,
@@ -4059,14 +4085,32 @@ class Component extends DCLogic {
       arrowCorrection: arrow('correctionRequested'), sortByCorrection: setSort('correctionRequested'),
 
       correctionCount: scopedAll.filter(it => it.correctionRequested).length,
-      filterAllClass: s.correctionFilter ? 'btn-ghost' : 'btn-secondary',
+      filterAllClass: (s.correctionFilter || s.flaggedFilter) ? 'btn-ghost' : 'btn-secondary',
       filterCorrectionClass: s.correctionFilter ? 'btn-secondary' : 'btn-ghost',
-      showAllItems: () => this.setState({ correctionFilter: false }),
-      showCorrectionOnly: () => this.setState({ correctionFilter: true }),
+      showAllItems: () => this.setState({ correctionFilter: false, flaggedFilter: false }),
+      showCorrectionOnly: () => this.setState({ correctionFilter: true, flaggedFilter: false }),
+      // Item-flagging (2026-09-23): same toggle-button pattern as Correction requested above, just a
+      // second, independent boolean — see flaggedScoped's own comment on why it composes rather than replaces.
+      flaggedCount: scopedAll.filter(it => it.flaggedByCandidate).length,
+      filterFlaggedClass: s.flaggedFilter ? 'btn-secondary' : 'btn-ghost',
+      showFlaggedOnly: () => this.setState({ flaggedFilter: true, correctionFilter: false }),
 
       detailHasCandidateNote: !!(selected && selected.candidateNote),
       detailCandidateNote: selected ? (selected.candidateNote || '') : '',
       detailCandidateNoteAt: selected && selected.candidateNoteAt ? new Date(selected.candidateNoteAt).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '',
+      detailFlaggedByCandidate: !!(selected && selected.flaggedByCandidate),
+      // Item-flagging (2026-09-23): the only write this makes is flagged_by_candidate: false — never
+      // touches status/note/anything else, same "resolve is its own separate action" shape as
+      // submitDecline above. A candidate can only ever SET this flag; only staff clear it.
+      resolveCandidateFlag: () => {
+        if (!selected) return;
+        this.updateItem(selected.id, { flaggedByCandidate: false });
+        this.addTimelineEntry(selected.id, {
+          date: new Date().toISOString(), actor: s.currentUser,
+          action: 'Candidate flag marked resolved.',
+          note: 'Resolved by ' + s.currentUser + '.',
+        });
+      },
       detailCorrectionRequested: !!(selected && selected.correctionRequested),
       detailCorrectionNote: selected ? (selected.correctionNote || '') : '',
       detailCorrectionField: selected ? (selected.correctionField || 'Claim detail') : '',
@@ -4095,7 +4139,12 @@ class Component extends DCLogic {
         const next = (s.correctionDraft || '').trim();
         if (!next) return;
         const now = new Date().toISOString();
-        this.updateItem(selected.id, { correctionValue: next, correctionRequested: false, correctionAppliedAt: now, status: 'Confirmed' });
+        // flaggedByCandidate: false (item-flagging, 2026-09-23) -- applying the correction IS
+        // resolving whatever the candidate flagged here (the same candidate_note this correction's
+        // own note came from, when one was given -- see submit-candidate-correction-response's
+        // default action), so this closes the flag too rather than leaving a stray "still flagged"
+        // badge after the correction it was about is already settled.
+        this.updateItem(selected.id, { correctionValue: next, correctionRequested: false, correctionAppliedAt: now, status: 'Confirmed', flaggedByCandidate: false });
         this.addTimelineEntry(selected.id, {
           date: now, actor: s.currentUser,
           action: 'Correction applied to ' + (selected.correctionField || 'claim detail') + '.',
@@ -4107,7 +4156,8 @@ class Component extends DCLogic {
         if (!selected) return;
         const reason = (s.declineDraft || '').trim();
         if (!reason) return;
-        this.updateItem(selected.id, { correctionRequested: false });
+        // flaggedByCandidate: false -- same reasoning as submitCorrection above.
+        this.updateItem(selected.id, { correctionRequested: false, flaggedByCandidate: false });
         this.addTimelineEntry(selected.id, {
           date: new Date().toISOString(), actor: s.currentUser,
           action: 'Correction request declined.',

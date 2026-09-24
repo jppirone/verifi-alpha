@@ -31,8 +31,15 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 // *_precision: how precisely the SOURCE printed each date (year | month | day, or present for an end date), echoed
 // back by the client from get-resume-extraction; see migration 20260919090000_date_precision.sql.
-type WorkHistoryEdit = { id: string; company?: string; title?: string; location?: string; start_date?: string; end_date?: string; start_date_precision?: string | null; end_date_precision?: string | null; job_responsibilities?: string; heading?: string | null };
-type EducationEdit = { id: string; institution?: string; degree?: string; field_of_study?: string; location?: string; start_date?: string; end_date?: string; start_date_precision?: string | null; end_date_precision?: string | null; heading?: string | null };
+// flagged/flag_note (candidate item-flagging, 2026-09-23): a candidate can flag any individual item
+// on the review screen as wrong (or wrongly judged) before ever hitting confirm -- see this
+// migration's own header (20260923050000_candidate_item_flag.sql). Present on every editable-item
+// type below. Written onto the draft row unconditionally (a flag with no note is not persisted --
+// see flagFields()) and, for the three categories that create a verification_items row in the same
+// request, carried onto that new row too so staff see it immediately, not just on the draft item.
+type FlagEdit = { flagged?: boolean; flag_note?: string };
+type WorkHistoryEdit = { id: string; company?: string; title?: string; location?: string; start_date?: string; end_date?: string; start_date_precision?: string | null; end_date_precision?: string | null; job_responsibilities?: string; heading?: string | null } & FlagEdit;
+type EducationEdit = { id: string; institution?: string; degree?: string; field_of_study?: string; location?: string; start_date?: string; end_date?: string; start_date_precision?: string | null; end_date_precision?: string | null; heading?: string | null } & FlagEdit;
 // source_match is echoed back by the client (candidate.html already has it, straight from
 // get-resume-extraction) for the same reason section_type/heading are on FreeformEdit below — this
 // function only needs it to decide which certifications get the unconditional staff flag, not to
@@ -46,7 +53,7 @@ type EducationEdit = { id: string; institution?: string; degree?: string; field_
 // accepted here regardless of which the item turns out to be, same as every other field on this row. Same
 // validation as the later employer-contact-details screen already applies to the same column: http(s) only,
 // capped at 500 chars, blank clears it.
-type CertificationEdit = { id: string; name?: string; issuing_body?: string; license_number?: string; verification_link?: string | null; issue_date?: string; expiration_date?: string; issue_date_precision?: string | null; expiration_date_precision?: string | null; source_match?: string; trade_soc_code?: string | null; heading?: string | null };
+type CertificationEdit = { id: string; name?: string; issuing_body?: string; license_number?: string; verification_link?: string | null; issue_date?: string; expiration_date?: string; issue_date_precision?: string | null; expiration_date_precision?: string | null; source_match?: string; trade_soc_code?: string | null; heading?: string | null } & FlagEdit;
 // License edits (automatic license verification): a license is a certification row (edited through
 // CertificationEdit above — name, number, dates) plus a 1:1 license_items extension holding only the
 // issuing state. state is only ever a 2-letter US state/DC code (validated below) and is never
@@ -63,8 +70,16 @@ function stateOrNull(v: unknown): string | null {
 // section_type/heading are echoed back by the client (candidate.html already has them, straight
 // from get-resume-extraction) rather than re-fetched here — this function only needs them to decide
 // which freeform rows are needs_review for the staff-queue flag below, not to validate anything.
-type FreeformEdit = { id: string; content?: string; section_type?: string; heading?: string };
-type SkillEdit = { id: string; skill_text?: string };
+type FreeformEdit = { id: string; content?: string; section_type?: string; heading?: string } & FlagEdit;
+type SkillEdit = { id: string; skill_text?: string } & FlagEdit;
+
+// A flag with no (or whitespace-only) note is not persisted as a flag -- an empty flag would give
+// staff nothing to act on. max 1000 chars, same cap as the Education-resubmit note.
+function flagFields(x: FlagEdit): { flagged_by_candidate: boolean; candidate_flag_note: string | null; note: string } {
+  const note = typeof x.flag_note === "string" ? x.flag_note.replace(/\s+/g, " ").trim().slice(0, 1000) : "";
+  const flagged = !!x.flagged && !!note;
+  return { flagged_by_candidate: flagged, candidate_flag_note: flagged ? note : null, note };
+}
 
 function dateOrNull(v: unknown): string | null {
   return typeof v === "string" && v.trim() !== "" ? v : null;
@@ -294,6 +309,10 @@ export default {
         }
       }
 
+      // Shared timestamp for every flagged_by_candidate/candidate_flag_note_at write below (item-flagging, 2026-09-23) --
+      // one instant for the whole request, not a fresh Date() per row.
+      const nowIso = new Date().toISOString();
+
       // Write candidate's (possibly corrected) fields and mark each row confirmed. Sequential, not
       // parallel — keeps error reporting attributable to a specific row if one update fails.
       //
@@ -320,7 +339,8 @@ export default {
           // contiguous resumeConfirm group — see candidate.html's updateResumeSectionHeading), so
           // this is the first write this field has ever gotten past initial extraction.
           heading: w.heading ?? null,
-          candidate_confirmed: true, updated_at: new Date().toISOString(),
+          ...(() => { const f = flagFields(w); return { flagged_by_candidate: f.flagged_by_candidate, candidate_flag_note: f.candidate_flag_note, candidate_flag_note_at: f.flagged_by_candidate ? nowIso : null }; })(),
+          candidate_confirmed: true, updated_at: nowIso,
         }).eq("id", w.id).eq("candidate_id", candidate_id).select("id");
         if (error || !data || data.length === 0) {
           return await failReleasing(JSON.stringify({ ok: false, error: "work_history_update_failed", detail: error ? error.message : "no matching row for this candidate", item_id: w.id }), {
@@ -338,7 +358,8 @@ export default {
             end_date_precision: cleanPrecision(e.end_date_precision, dateOrNull(e.end_date), true),
           } : {}),
           heading: e.heading ?? null,
-          candidate_confirmed: true, updated_at: new Date().toISOString(),
+          ...(() => { const f = flagFields(e); return { flagged_by_candidate: f.flagged_by_candidate, candidate_flag_note: f.candidate_flag_note, candidate_flag_note_at: f.flagged_by_candidate ? nowIso : null }; })(),
+          candidate_confirmed: true, updated_at: nowIso,
         }).eq("id", e.id).eq("candidate_id", candidate_id).select("id");
         if (error || !data || data.length === 0) {
           return await failReleasing(JSON.stringify({ ok: false, error: "education_update_failed", detail: error ? error.message : "no matching row for this candidate", item_id: e.id }), {
@@ -357,7 +378,8 @@ export default {
           } : {}),
           trade_soc_code: c.trade_soc_code ?? null,
           heading: c.heading ?? null,
-          candidate_confirmed: true, updated_at: new Date().toISOString(),
+          ...(() => { const f = flagFields(c); return { flagged_by_candidate: f.flagged_by_candidate, candidate_flag_note: f.candidate_flag_note, candidate_flag_note_at: f.flagged_by_candidate ? nowIso : null }; })(),
+          candidate_confirmed: true, updated_at: nowIso,
         }).eq("id", c.id).eq("candidate_id", candidate_id).select("id");
         if (error || !data || data.length === 0) {
           return await failReleasing(JSON.stringify({ ok: false, error: "certification_update_failed", detail: error ? error.message : "no matching row for this candidate", item_id: c.id }), {
@@ -370,8 +392,11 @@ export default {
       // No opt-in flag for skills exists (it was never one of the three categories collected at
       // signup, and this build doesn't add a fourth) — deliberately out of scope, not an oversight.
       for (const sk of skills) {
+        const skFlag = flagFields(sk);
         const { data, error } = await supabase.from("skill_items").update({
-          skill_text: sk.skill_text ?? "", candidate_confirmed: true, updated_at: new Date().toISOString(),
+          skill_text: sk.skill_text ?? "",
+          flagged_by_candidate: skFlag.flagged_by_candidate, candidate_flag_note: skFlag.candidate_flag_note, candidate_flag_note_at: skFlag.flagged_by_candidate ? nowIso : null,
+          candidate_confirmed: true, updated_at: nowIso,
         }).eq("id", sk.id).eq("candidate_id", candidate_id).select("id");
         if (error || !data || data.length === 0) {
           return await failReleasing(JSON.stringify({ ok: false, error: "skill_update_failed", detail: error ? error.message : "no matching row for this candidate", item_id: sk.id }), {
@@ -386,7 +411,8 @@ export default {
           // rows too (summary/hobbies_other/needs_review) — previously echoed back read-only and
           // never actually written here.
           heading: f.heading ?? null,
-          candidate_confirmed: true, updated_at: new Date().toISOString(),
+          ...(() => { const fl = flagFields(f); return { flagged_by_candidate: fl.flagged_by_candidate, candidate_flag_note: fl.candidate_flag_note, candidate_flag_note_at: fl.flagged_by_candidate ? nowIso : null }; })(),
+          candidate_confirmed: true, updated_at: nowIso,
         }).eq("id", f.id).eq("candidate_id", candidate_id).select("id");
         if (error || !data || data.length === 0) {
           return await failReleasing(JSON.stringify({ ok: false, error: "freeform_update_failed", detail: error ? error.message : "no matching row for this candidate", item_id: f.id }), {
@@ -462,6 +488,16 @@ export default {
       const today = new Date().toISOString().slice(0, 10);
       const queueInserts: Record<string, unknown>[] = [];
 
+      // flagCarry (item-flagging, 2026-09-23): the same flagFields() used for the draft-row write
+      // above, reused here so a flagged item's new verification_items row shows the flag and note
+      // immediately -- staff never have to separately open the draft row to find it. candidate_note
+      // is the same column the pre-existing Education-resubmit note flow already writes; this is a
+      // second, independent writer of it (a fresh row, never a competing write to an existing one).
+      const flagCarry = (x: FlagEdit) => {
+        const f = flagFields(x);
+        return f.flagged_by_candidate ? { flagged_by_candidate: true, candidate_note: f.candidate_flag_note, candidate_note_at: nowIso } : {};
+      };
+
       if (opt_in.work_history) {
         for (const w of work_history) {
           const { data: idRow } = await supabase.rpc("nextval_verification_item_id");
@@ -471,7 +507,7 @@ export default {
             // from get-resume-extraction, same id this function's own update loop above just wrote
             // to), not a guess or a synthesized value.
             id: idRow, candidate_id, type: "Job Experience", claim: claimForWorkHistory(w), received: today, status: "New",
-            source_item_id: w.id, bundle_id: resume_document_id,
+            source_item_id: w.id, bundle_id: resume_document_id, ...flagCarry(w),
           });
         }
       }
@@ -480,7 +516,7 @@ export default {
           const { data: idRow } = await supabase.rpc("nextval_verification_item_id");
           queueInserts.push({
             id: idRow, candidate_id, type: "Education", claim: claimForEducation(e), received: today, status: "New",
-            source_item_id: e.id, bundle_id: resume_document_id,
+            source_item_id: e.id, bundle_id: resume_document_id, ...flagCarry(e),
           });
         }
       }
@@ -539,12 +575,12 @@ export default {
             id: idRow, candidate_id, type: "Certification", claim: claimForCertification(c), received: today,
             status: "Needs Reconciliation",
             internal_note: `Auto-flagged: ${reasons.join(" Also: ")}`,
-            source_item_id: c.id, bundle_id: resume_document_id,
+            source_item_id: c.id, bundle_id: resume_document_id, ...flagCarry(c),
           });
         } else {
           queueInserts.push({
             id: idRow, candidate_id, type: "Certification", claim: claimForCertification(c), received: today, status: "New",
-            source_item_id: c.id, bundle_id: resume_document_id,
+            source_item_id: c.id, bundle_id: resume_document_id, ...flagCarry(c),
           });
         }
       }
@@ -576,7 +612,7 @@ export default {
           received: today,
           status: "Needs Reconciliation",
           internal_note: `Auto-flagged: unstructured content from the candidate's resume that didn't map to a defined category (heading: ${JSON.stringify(f.heading || "(none)")}). Not independently validated against the uploaded document the way the structured fields above it are — review for anything that reads like an inserted job-description-style claim rather than content genuinely present on the original resume. Full content:\n\n${f.content || ""}`,
-          bundle_id: resume_document_id,
+          bundle_id: resume_document_id, ...flagCarry(f),
         });
       }
 

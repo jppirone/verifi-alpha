@@ -10,10 +10,12 @@ const corsHeaders = {
 // Candidate-facing write to verification_items — the first one that exists. Everything else that
 // touches this table (update-verification-item, add-verification-timeline-entry) is staff-only,
 // with no ownership check and no restriction on which columns get written, because nothing calling
-// them today is anything but staff.html. This function is deliberately narrow in a way those are
-// not: it writes exactly three columns (correction_requested, correction_note, correction_value),
-// never touches status/assigned_to/note/internal_note/automated_check/anything else, and only ever
-// after confirming the row's own candidate_id matches the caller's.
+// them today is anything but staff.html. This function stays narrow in a way those are not: every
+// action here writes a small, fixed set of columns (see each action's own header below — the default
+// action's correction_requested/correction_note/correction_value trio, education_resubmit's item
+// fields + candidate_note, flag_item's flagged_by_candidate + candidate_note), never status/
+// assigned_to/internal_note/automated_check/anything else, and only ever after confirming the row's
+// own candidate_id matches the caller's.
 //
 // Direction note (see this task's investigation): correction_requested/correction_note/
 // correction_value were originally built for a candidate-originates -> staff-resolves flow
@@ -106,6 +108,48 @@ const EDU_CANDIDATE_EVENT_CAP = 20; // candidate-authored timeline entries per i
 const restH = { "Content-Type": "application/json", "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": "Bearer " + SUPABASE_SERVICE_ROLE_KEY };
 const jsonOut = (o: unknown, status = 200) => new Response(JSON.stringify(o), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
+// ---------------------------------------------------------------------------------------------------
+// GENERAL ITEM FLAG (candidate item-flagging, 2026-09-23; see migration
+// 20260923050000_candidate_item_flag.sql for the schema). The two flows above this comment
+// (education_resubmit's note, the Discrepancy-response note below) are each gated to one specific
+// type+status combination. This is the generalization: candidate.html's single "Flag this item"
+// entry point on the Verification Status tab calls this for every item that ISN'T currently showing
+// the education-edit or discrepancy-respond form (i.e. every status/type not covered by those two),
+// so a candidate always has somewhere to leave a note, not just on the narrow subset those two cover.
+// Deliberately NOT restricted by status or type, and NOT one-shot like the discrepancy-response flow
+// (that restriction exists to protect staff's in-progress review of one specific proposed value --
+// this has no proposed value, so a candidate may update their flag note any time, e.g. to add more
+// detail staff asked for outside the product). Shares the same flood guard as education_resubmit.
+// ---------------------------------------------------------------------------------------------------
+const FLAG_NOTE_MAX = 1000;
+async function flagItem(candidate_id: string, item_id: string, body: any): Promise<Response> {
+  const note = typeof body?.note === "string" ? body.note.replace(/\s+/g, " ").trim().slice(0, FLAG_NOTE_MAX) : "";
+  if (!note) return jsonOut({ ok: false, error: "note_required" }, 400);
+
+  const itemRes = await fetch(SUPABASE_URL + "/rest/v1/verification_items?select=id,candidate_id&id=eq." + encodeURIComponent(item_id), { headers: restH });
+  if (!itemRes.ok) return jsonOut({ ok: false, error: "lookup_failed" }, 500);
+  const item = (await itemRes.json())[0];
+  if (!item || item.candidate_id !== candidate_id) return jsonOut({ ok: false, error: "not_found" }, 404);
+
+  const cntRes = await fetch(SUPABASE_URL + "/rest/v1/verification_item_timeline?select=item_id&actor=eq.Candidate&item_id=eq." + encodeURIComponent(item_id), { headers: restH });
+  if (cntRes.ok && (await cntRes.json()).length >= EDU_CANDIDATE_EVENT_CAP) return jsonOut({ ok: false, error: "too_many_updates" }, 429);
+
+  const now = new Date().toISOString();
+  const q = await fetch(SUPABASE_URL + "/rest/v1/verification_items?id=eq." + encodeURIComponent(item_id) + "&candidate_id=eq." + encodeURIComponent(candidate_id), {
+    method: "PATCH", headers: { ...restH, "Prefer": "return=representation" },
+    body: JSON.stringify({ flagged_by_candidate: true, candidate_note: note, candidate_note_at: now }),
+  });
+  const qRows = q.ok ? await q.json() : [];
+  if (!Array.isArray(qRows) || qRows.length !== 1) return jsonOut({ ok: false, error: "update_failed" }, 502);
+
+  await fetch(SUPABASE_URL + "/rest/v1/verification_item_timeline", {
+    method: "POST", headers: { ...restH, "Prefer": "return=minimal" },
+    body: JSON.stringify({ item_id, event_date: now, actor: "Candidate", action: "Candidate flagged this item.", note }),
+  }).catch(() => {}); // best-effort: the flag itself already persisted above
+
+  return jsonOut({ ok: true, item: { id: item_id, flaggedByCandidate: true, candidateNote: note } });
+}
+
 async function educationResubmit(candidate_id: string, item_id: string, body: any): Promise<Response> {
   const cleanField = (v: unknown): string | null | "bad" => {
     if (v === undefined || v === null) return null; // not sent: leave as is
@@ -161,7 +205,11 @@ async function educationResubmit(candidate_id: string, item_id: string, body: an
   }
   const patch: Record<string, unknown> = {};
   if (changed) { patch.claim = afterClaim; patch.status = statusAfter; }
-  if (rawNote) { patch.candidate_note = rawNote; patch.candidate_note_at = now; }
+  // flagged_by_candidate (item-flagging, 2026-09-23): a note left here is the same real "staff,
+  // look at this" signal as the general flag_item action below, just via this narrower, older path
+  // -- set consistently so candidate.html's unified flag badge/note display and staff.html's
+  // "Flagged by candidate" filter catch it the same way regardless of which path wrote it.
+  if (rawNote) { patch.candidate_note = rawNote; patch.candidate_note_at = now; patch.flagged_by_candidate = true; }
   const q = await fetch(SUPABASE_URL + "/rest/v1/verification_items?id=eq." + encodeURIComponent(item_id) + "&candidate_id=eq." + encodeURIComponent(candidate_id), {
     method: "PATCH", headers: { ...restH, "Prefer": "return=representation" }, body: JSON.stringify(patch),
   });
@@ -202,6 +250,7 @@ export default {
         });
       }
       if (reqBody.action === "education_resubmit") return await educationResubmit(candidate_id, item_id, reqBody);
+      if (reqBody.action === "flag_item") return await flagItem(candidate_id, item_id, reqBody);
       const trimmedValue = typeof corrected_value === "string" ? corrected_value.trim() : "";
       const trimmedNote = typeof note === "string" ? note.trim() : "";
       if (!trimmedValue && !trimmedNote) {
@@ -253,6 +302,13 @@ export default {
           correction_requested: true,
           correction_note: trimmedNote || null,
           correction_value: trimmedValue || null,
+          // flagged_by_candidate (item-flagging, 2026-09-23): mirrored onto candidate_note too (not
+          // just correction_note) so this response shows up the same way in candidate.html's unified
+          // flag/note display and staff.html's "Flagged by candidate" filter, regardless of which of
+          // the three candidate-note paths wrote it. correction_requested already carries its own,
+          // more specific "Correction requested" signal in staff.html -- this is additive, not a
+          // replacement for that.
+          ...(trimmedNote ? { candidate_note: trimmedNote, candidate_note_at: new Date().toISOString(), flagged_by_candidate: true } : {}),
         }),
       });
       if (!patchRes.ok) {

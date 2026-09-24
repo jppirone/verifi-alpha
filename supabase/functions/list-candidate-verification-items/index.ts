@@ -153,7 +153,7 @@ export default {
       // reference confirm-resume-data has written since Item C. Not staff-only or sensitive — it's
       // the id of the candidate's own row, same trust boundary as everything else already returned
       // here.
-      const url = SUPABASE_URL + "/rest/v1/verification_items?select=id,type,claim,status,created_at,note,correction_requested,correction_note,correction_value,source_item_id,candidate_note&candidate_id=eq."
+      const url = SUPABASE_URL + "/rest/v1/verification_items?select=id,type,claim,status,created_at,note,correction_requested,correction_note,correction_value,source_item_id,candidate_note,candidate_note_at,flagged_by_candidate&candidate_id=eq."
         + encodeURIComponent(candidate_id) + "&order=created_at.asc,id.asc";
       const res = await fetch(url, {
         headers: {
@@ -191,6 +191,8 @@ export default {
           correctionNote: isDiscrepancy ? (r.correction_note || null) : null,
           correctionValue: isDiscrepancy ? (r.correction_value || null) : null,
           candidateNote: r.candidate_note || null,
+          candidateNoteAt: r.candidate_note_at || null,
+          flaggedByCandidate: !!r.flagged_by_candidate,
           education: r.type === "Education" && r.source_item_id && eduById.get(r.source_item_id)
             ? { degree: eduById.get(r.source_item_id).degree || "", fieldOfStudy: eduById.get(r.source_item_id).field_of_study || "", institution: eduById.get(r.source_item_id).institution || "", location: eduById.get(r.source_item_id).location || "" }
             : null,

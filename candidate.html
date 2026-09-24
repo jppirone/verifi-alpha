@@ -3016,6 +3016,10 @@ a:hover{color:var(--color-accent)}
       </sc-if>
       <sc-if value="{{ resumeHasSummary }}" hint-placeholder-val="{{ false }}">
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
+        <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px">
+          <sc-if value="{{ resumeSummaryFlagged }}" hint-placeholder-val="{{ false }}"><span class="tag tag-outline" style="font-size:11px">🚩 Flagged</span></sc-if>
+          <button type="button" class="btn btn-ghost" style="font-size:12px" sc-camel-on-click="{{ resumeSummaryOnFlag }}">{{ resumeSummaryFlagButtonLabel }}</button>
+        </div>
         <!-- Bug 1 / Item #3 point 7 (2026-09-17): no generic "Summary" label stacked above the real
              one — the literal source heading (or nothing, if the document genuinely has none) is the
              only heading this section ever shows. -->
@@ -3079,6 +3083,10 @@ a:hover{color:var(--color-accent)}
           </div>
           <sc-for list="{{ section.items }}" as="item" hint-placeholder-count="1">
           <div style="display:flex;flex-direction:column;gap:var(--space-2);padding-top:var(--space-2);border-top:1px solid var(--color-divider)">
+            <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px">
+              <sc-if value="{{ item.flagged }}" hint-placeholder-val="{{ false }}"><span class="tag tag-outline" style="font-size:11px">🚩 Flagged</span></sc-if>
+              <button type="button" class="btn btn-ghost" style="font-size:12px" sc-camel-on-click="{{ item.onFlag }}">{{ item.flagButtonLabel }}</button>
+            </div>
             <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
               <div class="field" style="flex:1;min-width:160px"><label>Title</label><input class="input" value="{{ item.title }}" sc-camel-on-change="{{ item.onTitle }}"></div>
               <div class="field" style="flex:1;min-width:160px"><label>Company</label><input class="input" value="{{ item.company }}" sc-camel-on-change="{{ item.onCompany }}"></div>
@@ -3107,6 +3115,10 @@ a:hover{color:var(--color-accent)}
           </div>
           <sc-for list="{{ section.items }}" as="item" hint-placeholder-count="1">
           <div style="display:flex;flex-direction:column;gap:var(--space-2);padding-top:var(--space-2);border-top:1px solid var(--color-divider)">
+            <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px">
+              <sc-if value="{{ item.flagged }}" hint-placeholder-val="{{ false }}"><span class="tag tag-outline" style="font-size:11px">🚩 Flagged</span></sc-if>
+              <button type="button" class="btn btn-ghost" style="font-size:12px" sc-camel-on-click="{{ item.onFlag }}">{{ item.flagButtonLabel }}</button>
+            </div>
             <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
               <div class="field" style="flex:1;min-width:160px"><label>Degree</label><input class="input" value="{{ item.degree }}" sc-camel-on-change="{{ item.onDegree }}"></div>
               <div class="field" style="flex:1;min-width:160px"><label>Field of study</label><input class="input" value="{{ item.fieldOfStudy }}" sc-camel-on-change="{{ item.onFieldOfStudy }}"></div>
@@ -3135,6 +3147,10 @@ a:hover{color:var(--color-accent)}
           </div>
           <sc-for list="{{ section.items }}" as="item" hint-placeholder-count="1">
           <div style="display:flex;flex-direction:column;gap:var(--space-2);padding-top:var(--space-2);border-top:1px solid var(--color-divider)">
+            <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px">
+              <sc-if value="{{ item.flagged }}" hint-placeholder-val="{{ false }}"><span class="tag tag-outline" style="font-size:11px">🚩 Flagged</span></sc-if>
+              <button type="button" class="btn btn-ghost" style="font-size:12px" sc-camel-on-click="{{ item.onFlag }}">{{ item.flagButtonLabel }}</button>
+            </div>
             <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
               <div class="field" style="flex:1;min-width:160px"><label>Name</label><input class="input" value="{{ item.name }}" sc-camel-on-change="{{ item.onName }}"></div>
               <div class="field" style="flex:1;min-width:160px"><label>Issuing body</label><input class="input" value="{{ item.issuingBody }}" sc-camel-on-change="{{ item.onIssuingBody }}"></div>
@@ -3212,9 +3228,12 @@ a:hover{color:var(--color-accent)}
         <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
           <div class="card-kicker">{{ section.skillsHeading }}</div>
           <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Read straight from your resume, one field per skill — not capped at any count, and each is delivered exactly as written.</div>
-          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,200px),1fr));gap:var(--space-2)">
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,220px),1fr));gap:var(--space-2)">
             <sc-for list="{{ section.skillRows }}" as="skillRow" hint-placeholder-count="6">
-              <input class="input" value="{{ skillRow.skillText }}" sc-camel-on-change="{{ skillRow.onChange }}">
+              <div style="display:flex;gap:4px;align-items:center">
+                <input class="input" style="flex:1" value="{{ skillRow.skillText }}" sc-camel-on-change="{{ skillRow.onChange }}">
+                <button type="button" class="btn btn-ghost" style="font-size:14px;padding:4px 8px;flex-shrink:0" title="{{ skillRow.flagButtonLabel }}" sc-camel-on-click="{{ skillRow.onFlag }}">{{ skillRow.flagIcon }}</button>
+              </div>
             </sc-for>
           </div>
         </div>
@@ -3224,8 +3243,12 @@ a:hover{color:var(--color-accent)}
         <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2);border:2px solid var(--color-accent);background:color-mix(in srgb, var(--color-accent) 6%, transparent)">
           <!-- Item #3 point 5 (2026-09-17): "unmissable," not just accent-bordered — a real
                attention-getting badge, not only a colored border easy to skim past. -->
-          <div style="display:flex;align-items:center;gap:6px">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap">
             <span class="tag" style="background:var(--color-accent);color:var(--color-neutral-950);font-weight:600">⚠ Needs your review</span>
+            <div style="display:flex;align-items:center;gap:8px">
+              <sc-if value="{{ section.flagged }}" hint-placeholder-val="{{ false }}"><span class="tag tag-outline" style="font-size:11px">🚩 Flagged</span></sc-if>
+              <button type="button" class="btn btn-ghost" style="font-size:12px" sc-camel-on-click="{{ section.onFlag }}">{{ section.flagButtonLabel }}</button>
+            </div>
           </div>
           <div class="field">
             <label>Section heading, as printed on your resume</label>
@@ -3250,6 +3273,10 @@ a:hover{color:var(--color-accent)}
 
       <sc-if value="{{ resumeHasHobbies }}" hint-placeholder-val="{{ false }}">
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
+        <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px">
+          <sc-if value="{{ resumeHobbiesFlagged }}" hint-placeholder-val="{{ false }}"><span class="tag tag-outline" style="font-size:11px">🚩 Flagged</span></sc-if>
+          <button type="button" class="btn btn-ghost" style="font-size:12px" sc-camel-on-click="{{ resumeHobbiesOnFlag }}">{{ resumeHobbiesFlagButtonLabel }}</button>
+        </div>
         <div class="field">
           <label>Section heading, as printed on your resume</label>
           <input class="input" placeholder="(no heading on your resume)" value="{{ resumeHobbiesHeading }}" sc-camel-on-change="{{ onResumeHobbiesHeadingChange }}">
@@ -3285,6 +3312,32 @@ a:hover{color:var(--color-accent)}
         <div class="dialog-actions">
           <button type="button" class="btn btn-secondary" disabled="{{ rejectResumePending }}" sc-camel-on-click="{{ closeRejectResumeModal }}">Cancel</button>
           <button type="button" class="btn btn-primary" disabled="{{ rejectResumePending }}" sc-camel-on-click="{{ confirmRejectResume }}">{{ rejectResumeConfirmLabel }}</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- Candidate item-flagging (2026-09-23): one shared modal for every item card above (work
+       history/education/certifications/skills/freeform, incl. Summary/Hobbies) — see
+       flagItemProps/openFlagModal. Purely local until Confirm; see submitResumeConfirmation for
+       where the note actually gets submitted. -->
+  <sc-if value="{{ flagModalOpen }}" hint-placeholder-val="{{ false }}">
+    <div class="dialog-backdrop">
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="flag-item-modal-title">
+        <div class="dialog-title" id="flag-item-modal-title">Flag this item</div>
+        <div class="dialog-body">
+          <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6;margin-bottom:var(--space-3)">Something wrong here, or something that reads wrong but is actually correct? Tell us what — our team sees this note once you confirm.</div>
+          <div class="field">
+            <label>Note</label>
+            <textarea class="input" rows="4" maxlength="1000" value="{{ flagModalNoteValue }}" sc-camel-on-change="{{ setFlagModalNote }}" placeholder="e.g. &quot;This job title is wrong, it should be...&quot; or &quot;This IS a real certification, you misread it.&quot;"></textarea>
+          </div>
+        </div>
+        <div class="dialog-actions">
+          <sc-if value="{{ flagModalIsFlagged }}" hint-placeholder-val="{{ false }}">
+            <button type="button" class="btn btn-ghost" style="margin-right:auto" sc-camel-on-click="{{ clearFlagModal }}">Remove flag</button>
+          </sc-if>
+          <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ closeFlagModal }}">Cancel</button>
+          <button type="button" class="btn btn-primary" sc-camel-on-click="{{ saveFlagModal }}">Save flag</button>
         </div>
       </div>
     </div>
@@ -4246,30 +4299,6 @@ a:hover{color:var(--color-accent)}
                 <sc-if value="{{ row.hasResponded }}" hint-placeholder-val="{{ false }}">
                   <div style="font-size:12px;color:var(--color-neutral-500)">Response submitted, awaiting staff review.</div>
                 </sc-if>
-
-                <sc-if value="{{ row.showRespondButton }}" hint-placeholder-val="{{ false }}">
-                  <button type="button" class="btn btn-ghost" style="align-self:flex-start;font-size:12px" sc-camel-on-click="{{ row.openRespond }}">Respond</button>
-                </sc-if>
-
-                <sc-if value="{{ row.responseFormOpen }}" hint-placeholder-val="{{ false }}">
-                  <div style="display:flex;flex-direction:column;gap:var(--space-2);border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
-                    <div class="field" style="max-width:320px">
-                      <label>Corrected value (optional)</label>
-                      <input class="input" value="{{ correctionValueDraft }}" sc-camel-on-change="{{ setCorrectionValueDraft }}" placeholder="Leave blank if you're standing by the original">
-                    </div>
-                    <div class="field" style="max-width:360px">
-                      <label>Your explanation</label>
-                      <textarea class="input" rows="2" value="{{ correctionNoteDraft }}" sc-camel-on-change="{{ setCorrectionNoteDraft }}" placeholder="Explain the correction, or explain why the original is correct"></textarea>
-                    </div>
-                    <sc-if value="{{ correctionSubmitError }}" hint-placeholder-val="{{ false }}">
-                      <div style="font-size:11px;color:#b00020">Couldn't submit your response. Try again.</div>
-                    </sc-if>
-                    <div style="display:flex;gap:8px">
-                      <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ row.submitRespond }}">{{ correctionSubmitLabel }}</button>
-                      <button type="button" class="btn btn-ghost" sc-camel-on-click="{{ row.cancelRespond }}">Cancel</button>
-                    </div>
-                  </div>
-                </sc-if>
               </sc-if>
 
               <sc-if value="{{ row.isNeedsReview }}" hint-placeholder-val="{{ false }}">
@@ -4320,41 +4349,97 @@ a:hover{color:var(--color-accent)}
               <sc-if value="{{ row.hasPlaceholderHint }}" hint-placeholder-val="{{ false }}">
                 <div style="font-size:12px;color:var(--color-warning,#c77d1e);border-top:1px solid var(--color-divider);padding-top:8px;line-height:1.6">This entry still contains template text in square brackets. Edit it to what is true and resubmit, or add a note explaining it to our team.</div>
               </sc-if>
-              <sc-if value="{{ row.hasCandidateNote }}" hint-placeholder-val="{{ false }}">
-                <div style="font-size:12px;color:var(--color-neutral-400);border-top:1px solid var(--color-divider);padding-top:8px;line-height:1.6"><b>Your note to our team:</b> {{ row.candidateNoteText }}</div>
+
+              <!-- Candidate item-flagging, post-confirm half (2026-09-23): one "Flag this item" button
+                   on every row, regardless of type or status — see openPostFlagModal. Replaces what
+                   used to be two separate, narrower triggers here (a Discrepancy-only "Respond" button
+                   and an Education-only "Edit and resubmit, or add a note" button); their own field-
+                   edit / corrected-value logic is unchanged, just reached through the shared modal
+                   below (postFlagModalOpen) instead of two different inline forms. -->
+              <sc-if value="{{ row.flaggedByCandidate }}" hint-placeholder-val="{{ false }}">
+                <div style="border-top:1px solid var(--color-divider);padding-top:8px;display:flex;flex-direction:column;gap:4px">
+                  <span class="tag tag-outline" style="align-self:flex-start;font-size:11px">🚩 Flagged by you</span>
+                  <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.6"><b>Your note:</b> {{ row.candidateNoteText }}</div>
+                </div>
               </sc-if>
-              <sc-if value="{{ row.canEditEducation }}" hint-placeholder-val="{{ false }}">
-                <button type="button" class="btn btn-ghost" style="align-self:flex-start;font-size:12px" sc-camel-on-click="{{ row.openEducationEdit }}">Edit and resubmit, or add a note</button>
-              </sc-if>
-              <sc-if value="{{ row.educationFormOpen }}" hint-placeholder-val="{{ false }}">
-                <div style="display:flex;flex-direction:column;gap:var(--space-2);border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
-                  <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6;max-width:520px">Correct what is printed here, add a note for our team, or both. An edited entry goes back to the start of review. Nothing else about your resume changes.</div>
-                  <div class="field" style="max-width:360px"><label>Degree</label><input class="input" value="{{ eduDraftDegree }}" sc-camel-on-change="{{ setEduDraftDegree }}"></div>
-                  <div class="field" style="max-width:360px"><label>Field of study</label><input class="input" value="{{ eduDraftField }}" sc-camel-on-change="{{ setEduDraftField }}"></div>
-                  <div class="field" style="max-width:360px"><label>Institution</label><input class="input" value="{{ eduDraftInstitution }}" sc-camel-on-change="{{ setEduDraftInstitution }}"></div>
-                  <div class="field" style="max-width:360px"><label>Location</label><input class="input" value="{{ eduDraftLocation }}" sc-camel-on-change="{{ setEduDraftLocation }}"></div>
-                  <div class="field" style="max-width:420px">
+              <div style="display:flex;gap:8px;flex-wrap:wrap;border-top:1px solid var(--color-divider);padding-top:8px">
+                <sc-if value="{{ row.postFlagButtonLabel }}" hint-placeholder-val="{{ false }}">
+                  <button type="button" class="btn btn-ghost" style="font-size:12px" sc-camel-on-click="{{ row.openPostFlag }}">{{ row.postFlagButtonLabel }}</button>
+                </sc-if>
+                <!-- Item 7 (2026-09-12 live-testing session, follow-up build): durable, always-
+                     reachable access to the same optional employer/certification contact-details this
+                     item may have skipped or only partly filled in at confirmation time. -->
+                <sc-if value="{{ row.canEditContactDetails }}" hint-placeholder-val="{{ false }}">
+                  <button type="button" class="btn btn-ghost" style="font-size:12px" sc-camel-on-click="{{ row.openContactDetails }}">Add or edit contact details</button>
+                </sc-if>
+              </div>
+            </div>
+          </sc-for>
+        </sc-if>
+
+        <!-- Candidate item-flagging, post-confirm modal (2026-09-23): one shared dialog-backdrop for
+             every row's "Flag this item" button (see openPostFlagModal). Exactly one of the three
+             bodies below ever shows: the existing Discrepancy-respond form, the existing Education
+             edit+note form (both unchanged from before this build, just moved into this shared
+             modal instead of an inline card form), or the new plain note-only flag. -->
+        <sc-if value="{{ postFlagModalOpen }}" hint-placeholder-val="{{ false }}">
+          <div class="dialog-backdrop">
+            <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="post-flag-modal-title">
+              <div class="dialog-title" id="post-flag-modal-title">{{ postFlagModalRow.claim }}</div>
+              <div class="dialog-body">
+                <sc-if value="{{ postFlagModalIsDiscrepancy }}" hint-placeholder-val="{{ false }}">
+                  <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6;margin-bottom:var(--space-3)">Respond to the discrepancy staff found, propose a corrected value, or just leave a note — either is fine.</div>
+                  <div class="field" style="margin-bottom:var(--space-3)">
+                    <label>Corrected value (optional)</label>
+                    <input class="input" value="{{ correctionValueDraft }}" sc-camel-on-change="{{ setCorrectionValueDraft }}" placeholder="Leave blank if you're standing by the original">
+                  </div>
+                  <div class="field">
+                    <label>Your explanation</label>
+                    <textarea class="input" rows="3" value="{{ correctionNoteDraft }}" sc-camel-on-change="{{ setCorrectionNoteDraft }}" placeholder="Explain the correction, or explain why the original is correct"></textarea>
+                  </div>
+                  <sc-if value="{{ correctionSubmitError }}" hint-placeholder-val="{{ false }}">
+                    <div style="font-size:11px;color:#b00020;margin-top:var(--space-2)">Couldn't submit your response. Try again.</div>
+                  </sc-if>
+                </sc-if>
+                <sc-if value="{{ postFlagModalIsEducation }}" hint-placeholder-val="{{ false }}">
+                  <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6;margin-bottom:var(--space-3)">Correct what is printed here, add a note for our team, or both. An edited entry goes back to the start of review. Nothing else about your resume changes.</div>
+                  <div class="field" style="margin-bottom:var(--space-2)"><label>Degree</label><input class="input" value="{{ eduDraftDegree }}" sc-camel-on-change="{{ setEduDraftDegree }}"></div>
+                  <div class="field" style="margin-bottom:var(--space-2)"><label>Field of study</label><input class="input" value="{{ eduDraftField }}" sc-camel-on-change="{{ setEduDraftField }}"></div>
+                  <div class="field" style="margin-bottom:var(--space-2)"><label>Institution</label><input class="input" value="{{ eduDraftInstitution }}" sc-camel-on-change="{{ setEduDraftInstitution }}"></div>
+                  <div class="field" style="margin-bottom:var(--space-3)"><label>Location</label><input class="input" value="{{ eduDraftLocation }}" sc-camel-on-change="{{ setEduDraftLocation }}"></div>
+                  <div class="field">
                     <label>Note for our team (optional)</label>
                     <textarea class="input" rows="3" maxlength="1000" value="{{ eduNoteValue }}" sc-camel-on-change="{{ setEduNote }}" placeholder="For example: this part of my resume was a blank template and I have no degree to list"></textarea>
                   </div>
                   <sc-if value="{{ hasEduEditError }}" hint-placeholder-val="{{ false }}">
-                    <div style="font-size:11px;color:#b00020;line-height:1.5;max-width:520px">{{ eduEditError }}</div>
+                    <div style="font-size:11px;color:#b00020;margin-top:var(--space-2)">{{ eduEditError }}</div>
                   </sc-if>
-                  <div style="display:flex;gap:8px;flex-wrap:wrap">
-                    <button type="button" class="btn btn-secondary" disabled="{{ eduEditPending }}" sc-camel-on-click="{{ row.submitEducationEdit }}">{{ eduEditSaveLabel }}</button>
-                    <button type="button" class="btn btn-ghost" disabled="{{ eduEditPending }}" sc-camel-on-click="{{ row.cancelEducationEdit }}">Cancel</button>
+                </sc-if>
+                <sc-if value="{{ postFlagModalIsPlain }}" hint-placeholder-val="{{ false }}">
+                  <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6;margin-bottom:var(--space-3)">Something wrong here, or something that reads wrong but is actually correct? Tell us what.</div>
+                  <div class="field">
+                    <label>Note</label>
+                    <textarea class="input" rows="4" maxlength="1000" value="{{ plainFlagNoteValue }}" sc-camel-on-change="{{ setPlainFlagNote }}" placeholder="e.g. &quot;This claim is wrong, it should be...&quot; or &quot;This IS correct, you misread it.&quot;"></textarea>
                   </div>
-                </div>
-              </sc-if>
-
-              <!-- Item 7 (2026-09-12 live-testing session, follow-up build): durable, always-
-                   reachable access to the same optional employer/certification contact-details this
-                   item may have skipped or only partly filled in at confirmation time. -->
-              <sc-if value="{{ row.canEditContactDetails }}" hint-placeholder-val="{{ false }}">
-                <button type="button" class="btn btn-ghost" style="align-self:flex-start;font-size:12px;border-top:1px solid var(--color-divider);padding-top:8px;border-radius:0" sc-camel-on-click="{{ row.openContactDetails }}">Add or edit contact details</button>
-              </sc-if>
+                  <sc-if value="{{ hasPlainFlagError }}" hint-placeholder-val="{{ false }}">
+                    <div style="font-size:11px;color:#b00020;margin-top:var(--space-2)">{{ plainFlagError }}</div>
+                  </sc-if>
+                </sc-if>
+              </div>
+              <div class="dialog-actions">
+                <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ closePostFlagModal }}">Cancel</button>
+                <sc-if value="{{ postFlagModalIsDiscrepancy }}" hint-placeholder-val="{{ false }}">
+                  <button type="button" class="btn btn-primary" disabled="{{ correctionSubmitPending }}" sc-camel-on-click="{{ postFlagModalRow.submitRespond }}">{{ correctionSubmitLabel }}</button>
+                </sc-if>
+                <sc-if value="{{ postFlagModalIsEducation }}" hint-placeholder-val="{{ false }}">
+                  <button type="button" class="btn btn-primary" disabled="{{ eduEditPending }}" sc-camel-on-click="{{ postFlagModalRow.submitEducationEdit }}">{{ eduEditSaveLabel }}</button>
+                </sc-if>
+                <sc-if value="{{ postFlagModalIsPlain }}" hint-placeholder-val="{{ false }}">
+                  <button type="button" class="btn btn-primary" disabled="{{ plainFlagPending }}" sc-camel-on-click="{{ submitPlainFlag }}">{{ plainFlagSubmitLabel }}</button>
+                </sc-if>
+              </div>
             </div>
-          </sc-for>
+          </div>
         </sc-if>
 
         <div style="font-size:11px;color:var(--color-neutral-600);line-height:1.6">
@@ -6832,11 +6917,13 @@ class Component extends DCLogic {
         isUnverifiedLicense: !l.correction,
         unverifiedLicenseNote: 'Sent as you stated it, not independently verified. ' + reason,
         isDiscrepancy: false, isNeedsReview: false, needsReviewNote: '', discrepancyNote: '',
-        hasResponded: false, canRespond: false, showRespondButton: false, responseFormOpen: false,
-        openRespond: () => {}, cancelRespond: () => {}, submitRespond: () => {},
+        hasResponded: false, canRespond: false,
+        submitRespond: () => {},
         canEditContactDetails: false, openContactDetails: () => {},
-        canEditEducation: false, educationFormOpen: false, hasPlaceholderHint: false, hasCandidateNote: false, candidateNoteText: '',
-        openEducationEdit: () => {}, cancelEducationEdit: () => {}, submitEducationEdit: () => {},
+        canEditEducation: false, hasPlaceholderHint: false, flaggedByCandidate: false, hasCandidateNote: false, candidateNoteText: '',
+        submitEducationEdit: () => {},
+        // Not a real verification_items row (synthetic id, see above) — nothing to flag against.
+        postFlagButtonLabel: '', openPostFlag: () => {},
         // this row already says why in unverifiedLicenseNote above, so the check's own finding is not repeated
         ...this.licenseRowEditProps({ ...l, finding: null }),
       };
@@ -6862,7 +6949,6 @@ class Component extends DCLogic {
         // case but wrong for a needs_review row the candidate never actually submitted for anything.
         // Distinguished by type, not status, since status alone can't tell the two apart.
         const isNeedsReview = it.type === 'Needs Review';
-        const formOpen = s.correctionResponseOpenId === it.id;
         return {
           id: it.id,
           categoryLabel: this.VERIFICATION_CATEGORY_LABELS[it.type] || it.type,
@@ -6875,11 +6961,8 @@ class Component extends DCLogic {
           discrepancyNote: it.note || "Staff hasn't added an explanation yet.",
           hasResponded: isDiscrepancy && !!it.correctionRequested,
           canRespond: isDiscrepancy && !it.correctionRequested,
-          showRespondButton: isDiscrepancy && !it.correctionRequested && !formOpen,
-          responseFormOpen: isDiscrepancy && !it.correctionRequested && formOpen,
-          openRespond: () => this.openCorrectionResponse(it.id),
-          cancelRespond: () => this.cancelCorrectionResponse(),
           submitRespond: () => this.submitCorrectionResponse(it.id),
+          submitEducationEdit: () => this.submitEducationEdit(it.id),
           // Item 7 (2026-09-12 live-testing session, follow-up build): durable, always-reachable
           // entry point back into the same optional employer/certification contact-details fields
           // the one-time post-confirmation screen collects — see openContactDetailsModal's own
@@ -6888,15 +6971,25 @@ class Component extends DCLogic {
           canEditContactDetails: (it.type === 'Job Experience' || it.type === 'Certification') && !!it.sourceItemId,
           openContactDetails: () => this.openContactDetailsModal(it.type, it.sourceItemId, it.claim),
           // Education entry still in review: edit it and resubmit, and/or leave a note for staff (2026-09-20). Same open-status set the server
-          // enforces; a Discrepancy has its own respond form above.
-          canEditEducation: it.type === 'Education' && !!it.education && this.EDU_OPEN_STATUSES.includes(it.status) && s.eduEditId !== it.id,
-          educationFormOpen: it.type === 'Education' && !!it.education && this.EDU_OPEN_STATUSES.includes(it.status) && s.eduEditId === it.id,
+          // enforces; a Discrepancy has its own respond flow instead (see openPostFlag below).
+          canEditEducation: it.type === 'Education' && !!it.education && this.EDU_OPEN_STATUSES.includes(it.status),
           hasPlaceholderHint: it.type === 'Education' && this.EDU_OPEN_STATUSES.includes(it.status) && /\[[^\]]{1,60}\]/.test(it.claim || ''),
-          hasCandidateNote: it.type === 'Education' && !!it.candidateNote,
+          // candidate item-flagging (2026-09-23): candidateNote/candidateNoteAt are now general —
+          // written either by education_resubmit, the discrepancy-response flow, or the new flag_item
+          // action — so this is no longer gated to type === 'Education'. flaggedByCandidate is the
+          // real signal a note exists AND is an active flag (vs. e.g. an applied/resolved correction).
+          flaggedByCandidate: !!it.flaggedByCandidate,
+          hasCandidateNote: !!it.flaggedByCandidate && !!it.candidateNote,
           candidateNoteText: it.candidateNote || '',
-          openEducationEdit: () => this.openEducationEdit(it),
-          cancelEducationEdit: () => this.setState({ eduEditId: null, eduEditError: '' }),
-          submitEducationEdit: () => this.submitEducationEdit(it.id),
+          education: it.education, // carried through for openPostFlagModal's own type check
+          // Candidate item-flagging, post-confirm half (2026-09-23): one button, every row, any
+          // status — see openPostFlagModal. Label stays honest about what happens per row's own
+          // state rather than always saying the same generic thing.
+          postFlagButtonLabel: isDiscrepancy && it.correctionRequested ? 'Flag this item'
+            : isDiscrepancy ? 'Respond / flag this item'
+            : (it.type === 'Education' && this.EDU_OPEN_STATUSES.includes(it.status)) ? 'Edit, respond, or flag this item'
+            : it.flaggedByCandidate ? 'Flagged — edit note' : 'Flag this item',
+          openPostFlag: () => this.openPostFlagModal(it),
           ...(it.type === 'License' && it.sourceItemId && (s.verificationLicenses || []).find(l => l.id === it.sourceItemId)
             ? this.licenseRowEditProps((s.verificationLicenses || []).find(l => l.id === it.sourceItemId)) : {}),
         };
@@ -6996,6 +7089,59 @@ class Component extends DCLogic {
     // Real refresh from the server rather than an optimistic local patch, so the candidate sees
     // exactly what staff will see (correction_requested now true) — matches this codebase's
     // existing convention of re-fetching after a real write rather than guessing the new state.
+    this.loadVerificationItems(s.resumeCandidateId);
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // CANDIDATE ITEM-FLAGGING, post-confirm half (2026-09-23). One "Flag this item" button per row
+  // (see getVerificationItemRows' postFlagButtonLabel/openPostFlag), available regardless of type
+  // or status — the real gap this closes: before this, only an open Education row or a Discrepancy
+  // row could leave staff anything at all. This does NOT replace the two existing, working flows'
+  // own logic (openCorrectionResponse/submitCorrectionResponse for Discrepancy,
+  // openEducationEdit/submitEducationEdit for Education) — it routes to them for the two cases they
+  // already cover, so a candidate can still propose a corrected value or edit+resubmit an education
+  // entry exactly as before, and only opens the new plain note-only flow (flagItem below) for
+  // everything else. All three now render inside ONE shared modal (postFlagModalOpen) instead of
+  // two different inline card forms plus nothing at all for every other row.
+  // ---------------------------------------------------------------------------------------------
+  openPostFlagModal(it) {
+    const isDiscrepancy = it.status === 'Discrepancy';
+    if (isDiscrepancy && !it.correctionRequested) { this.openCorrectionResponse(it.id); return; }
+    if (it.type === 'Education' && !!it.education && this.EDU_OPEN_STATUSES.includes(it.status)) { this.openEducationEdit(it); return; }
+    this.setState({ plainFlagOpenId: it.id, plainFlagNote: it.candidateNote || '', plainFlagError: null });
+  }
+  closePostFlagModal() {
+    this.setState({ correctionResponseOpenId: null, correctionSubmitError: null, eduEditId: null, eduEditError: '', plainFlagOpenId: null, plainFlagNote: '', plainFlagError: null });
+  }
+  setPlainFlagNote(e) {
+    this.setState({ plainFlagNote: e.target.value });
+  }
+  async submitPlainFlag() {
+    const s = this.state;
+    const itemId = s.plainFlagOpenId;
+    const note = (s.plainFlagNote || '').trim();
+    if (!itemId) return;
+    if (!note) { this.setState({ plainFlagError: 'A note is required so staff know what to look at.' }); return; }
+    this.setState({ plainFlagPending: true, plainFlagError: null });
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/submit-candidate-correction-response', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: s.resumeCandidateId, action: 'flag_item', item_id: itemId, note }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ plainFlagPending: false, plainFlagError: "Couldn't reach the server. Check your connection and try again." });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      const msg = data.error === 'too_many_updates' ? "You've sent a lot of updates on this entry. Please wait for our team to review them."
+        : "Couldn't save your flag. Please try again.";
+      this.setState({ plainFlagPending: false, plainFlagError: msg });
+      return;
+    }
+    this.setState({ plainFlagPending: false, plainFlagOpenId: null, plainFlagNote: '' });
     this.loadVerificationItems(s.resumeCandidateId);
   }
 
@@ -7532,6 +7678,8 @@ class Component extends DCLogic {
     licenseDetecting: false,
     // Item 1 (2026-09-11 status-check session, CRITICAL): see discardResumeDocument's own header.
     rejectResumeModalOpen: false, rejectResumePending: false, rejectResumeError: null,
+    // Candidate item-flagging, pre-confirm modal (2026-09-23): see flagItemProps/openFlagModal.
+    flagModalOpen: false, flagModalCategory: null, flagModalItemId: null, flagModalNote: '',
     // Item C (2026-09-08 regression session): the new employer/certification contact-details
     // screen. employerContactExpanded tracks per-row "Add details" expand state for the >5-jobs
     // collapsed-by-default layout (see employerContactDefaultExpand in renderVals).
@@ -7546,6 +7694,8 @@ class Component extends DCLogic {
     verificationItems: [], verificationLicenses: [], verificationItemsLoading: false, verificationItemsError: null, verificationItemsLoadedFor: null,
     correctionResponseOpenId: null, correctionValueDraft: '', correctionNoteDraft: '',
     correctionSubmitPending: false, correctionSubmitError: null,
+    // Candidate item-flagging, post-confirm plain-note modal (2026-09-23): see openPostFlagModal/submitPlainFlag.
+    plainFlagOpenId: null, plainFlagNote: '', plainFlagPending: false, plainFlagError: null,
     // Item 7 (2026-09-12 live-testing session, follow-up build): the durable contact-details modal
     // — see openContactDetailsModal's own header. contactDetailsDraft holds whichever field set is
     // relevant for the open item's type (work_history's 4 fields, or certification's 2).
@@ -10460,6 +10610,58 @@ class Component extends DCLogic {
     });
   }
 
+  // ---------------------------------------------------------------------------------------------
+  // CANDIDATE ITEM-FLAGGING, pre-confirm half (2026-09-23). One shared modal, opened from a small
+  // "Flag this item" button on every card on this screen (work_history/education/certifications/
+  // skills/freeform, incl. the fixed Summary/Hobbies slots) — see flagItemProps below for the
+  // per-item props this drives, and the confirm-resume-data POST body builder (submitResumeConfirmation)
+  // for where `_flagged`/`_flagNote` actually get submitted. Purely local state until the candidate
+  // hits Confirm, same as every other edit on this screen (a title edit doesn't reach the server
+  // early either) — so a flag set here and never confirmed is simply never persisted, exactly like
+  // any other abandoned edit, and flagging does NOT block or change Confirm in any way (the user's
+  // own framing: "the flag should NOT block confirmation").
+  // ---------------------------------------------------------------------------------------------
+  flagItemProps(category, item, prefix) {
+    const key = (k) => prefix ? (prefix + k) : (k.charAt(0).toLowerCase() + k.slice(1));
+    const flagged = !!(item && item._flagged);
+    return {
+      [key('Flagged')]: flagged,
+      [key('FlagButtonLabel')]: flagged ? 'Flagged — edit note' : 'Flag this item',
+      [key('FlagIcon')]: flagged ? '🚩' : '⚑',
+      [key('OnFlag')]: () => item && this.openFlagModal(category, item.id),
+    };
+  }
+  openFlagModal(category, id) {
+    this.setState(st => {
+      const ex = st.resumeExtraction;
+      const item = ex && ex[category] && ex[category].find(i => i.id === id);
+      return { flagModalOpen: true, flagModalCategory: category, flagModalItemId: id, flagModalNote: (item && item._flagNote) || '' };
+    });
+  }
+  closeFlagModal() {
+    this.setState({ flagModalOpen: false, flagModalCategory: null, flagModalItemId: null, flagModalNote: '' });
+  }
+  setFlagModalNote(e) {
+    this.setState({ flagModalNote: e.target.value });
+  }
+  saveFlagModal() {
+    this.setState(st => {
+      const ex = st.resumeExtraction;
+      if (!ex || !st.flagModalCategory || !st.flagModalItemId) return { flagModalOpen: false };
+      const note = (st.flagModalNote || '').trim().slice(0, 1000);
+      const list = ex[st.flagModalCategory].map(i => i.id === st.flagModalItemId ? { ...i, _flagged: !!note, _flagNote: note } : i);
+      return { resumeExtraction: { ...ex, [st.flagModalCategory]: list }, flagModalOpen: false, flagModalCategory: null, flagModalItemId: null, flagModalNote: '' };
+    });
+  }
+  clearFlagModal() {
+    this.setState(st => {
+      const ex = st.resumeExtraction;
+      if (!ex || !st.flagModalCategory || !st.flagModalItemId) return { flagModalOpen: false };
+      const list = ex[st.flagModalCategory].map(i => i.id === st.flagModalItemId ? { ...i, _flagged: false, _flagNote: '' } : i);
+      return { resumeExtraction: { ...ex, [st.flagModalCategory]: list }, flagModalOpen: false, flagModalCategory: null, flagModalItemId: null, flagModalNote: '' };
+    });
+  }
+
   // Shared by resumeSectionsOrdered (confirm screen) and buildResumeLines (generated PDF) so both
   // surfaces group identically: contiguous runs of same-kind items sharing the same literal source
   // heading (normalized for case/whitespace only), never by fixed category alone, and never merging
@@ -10538,17 +10740,21 @@ class Component extends DCLogic {
       // freeform always has, since resumeConfirm can now edit it (one shared value per contiguous
       // group — see groupByLiteralHeading/updateResumeSectionHeading) and confirm-resume-data needs
       // the edited value, not just what extraction originally captured.
-      work_history: ex.work_history.map(w => ({ id: w.id, company: w.company, title: w.title, location: w.location, start_date: w.start_date, end_date: w.end_date, start_date_precision: w.start_date_precision || null, end_date_precision: w.end_date_precision || null, job_responsibilities: w.job_responsibilities, heading: w.heading || null })),
-      education: ex.education.map(x => ({ id: x.id, institution: x.institution, degree: x.degree, field_of_study: x.field_of_study, location: x.location, start_date: x.start_date, end_date: x.end_date, start_date_precision: x.start_date_precision || null, end_date_precision: x.end_date_precision || null, heading: x.heading || null })),
+      // flagged/flag_note (candidate item-flagging, 2026-09-23): local-only until this submit — see
+      // saveFlagModal/openFlagModal — echoed on every category below so confirm-resume-data can
+      // persist the flag onto the draft row and, for the categories that create one, carry it onto
+      // the new verification_items row too.
+      work_history: ex.work_history.map(w => ({ id: w.id, company: w.company, title: w.title, location: w.location, start_date: w.start_date, end_date: w.end_date, start_date_precision: w.start_date_precision || null, end_date_precision: w.end_date_precision || null, job_responsibilities: w.job_responsibilities, heading: w.heading || null, flagged: !!w._flagged, flag_note: w._flagNote || '' })),
+      education: ex.education.map(x => ({ id: x.id, institution: x.institution, degree: x.degree, field_of_study: x.field_of_study, location: x.location, start_date: x.start_date, end_date: x.end_date, start_date_precision: x.start_date_precision || null, end_date_precision: x.end_date_precision || null, heading: x.heading || null, flagged: !!x._flagged, flag_note: x._flagNote || '' })),
       // source_match is echoed back (not edited here) so confirm-resume-data can flag a
       // structurally-unmatched certification for staff regardless of the opt-in checkbox below —
       // see that function's own header (bug-2 defense-in-depth).
-      certifications: ex.certifications.map(c => ({ id: c.id, name: c.name, issuing_body: c.issuing_body, license_number: c.license_number, verification_link: c.verification_link || null, issue_date: c.issue_date, expiration_date: c.expiration_date, issue_date_precision: c.issue_date_precision || null, expiration_date_precision: c.expiration_date_precision || null, source_match: c.source_match, trade_soc_code: c.trade_soc_code || null, heading: c.heading || null })),
-      skills: ex.skills.map(s => ({ id: s.id, skill_text: s.skill_text })),
+      certifications: ex.certifications.map(c => ({ id: c.id, name: c.name, issuing_body: c.issuing_body, license_number: c.license_number, verification_link: c.verification_link || null, issue_date: c.issue_date, expiration_date: c.expiration_date, issue_date_precision: c.issue_date_precision || null, expiration_date_precision: c.expiration_date_precision || null, source_match: c.source_match, trade_soc_code: c.trade_soc_code || null, heading: c.heading || null, flagged: !!c._flagged, flag_note: c._flagNote || '' })),
+      skills: ex.skills.map(s => ({ id: s.id, skill_text: s.skill_text, flagged: !!s._flagged, flag_note: s._flagNote || '' })),
       // section_type/heading are echoed back (not edited here) so confirm-resume-data can flag
       // needs_review rows for staff without a second round-trip to look up what kind of freeform
       // row each id is — see that function's own header.
-      freeform: ex.freeform.map(f => ({ id: f.id, content: f.content, section_type: f.section_type, heading: f.heading })),
+      freeform: ex.freeform.map(f => ({ id: f.id, content: f.content, section_type: f.section_type, heading: f.heading, flagged: !!f._flagged, flag_note: f._flagNote || '' })),
       // Detected licenses (automatic license verification): state is optional here — a license with
       // no state is simply saved unverified; confirm-resume-data only fires verification when both
       // a state and a license number are present.
@@ -12126,8 +12332,31 @@ class Component extends DCLogic {
       correctionNoteDraft: s.correctionNoteDraft,
       setCorrectionValueDraft: (e) => this.setState({ correctionValueDraft: e.target.value }),
       setCorrectionNoteDraft: (e) => this.setState({ correctionNoteDraft: e.target.value }),
+      correctionSubmitPending: s.correctionSubmitPending,
       correctionSubmitLabel: s.correctionSubmitPending ? 'Submitting…' : 'Submit response',
       correctionSubmitError: !!s.correctionSubmitError,
+      // Candidate item-flagging, post-confirm unified modal (2026-09-23): exactly one of these three
+      // is ever true at once (a row is Discrepancy-open, Education-open, or neither — see
+      // openPostFlagModal), so one shared dialog-backdrop renders whichever body applies. The row's
+      // own claim/label is resolved fresh from verificationItemRows rather than cached, since it's
+      // cheap and always current.
+      postFlagModalRow: (() => {
+        const openId = s.correctionResponseOpenId || s.eduEditId || s.plainFlagOpenId;
+        const found = openId ? this.getVerificationItemRows().find(r => r.id === openId) : null;
+        return found || { claim: '', submitRespond: () => {}, submitEducationEdit: () => {} };
+      })(),
+      postFlagModalOpen: !!(s.correctionResponseOpenId || s.eduEditId || s.plainFlagOpenId),
+      postFlagModalIsDiscrepancy: !!s.correctionResponseOpenId,
+      postFlagModalIsEducation: !!s.eduEditId,
+      postFlagModalIsPlain: !!s.plainFlagOpenId,
+      closePostFlagModal: () => this.closePostFlagModal(),
+      plainFlagNoteValue: s.plainFlagNote,
+      setPlainFlagNote: (e) => this.setPlainFlagNote(e),
+      plainFlagPending: s.plainFlagPending,
+      plainFlagSubmitLabel: s.plainFlagPending ? 'Saving…' : 'Save flag',
+      hasPlainFlagError: !!s.plainFlagError,
+      plainFlagError: s.plainFlagError,
+      submitPlainFlag: () => this.submitPlainFlag(),
       employerSummaryLines: this.getEmployerSummaryLines(),
       employerRows: this.getEmployerRows(),
       empPageLabel: 'Page ' + (s.empPage + 1) + ' of ' + this.empPageCount() + ', ' + this.employerSorted().length + ' entries.',
@@ -12455,6 +12684,7 @@ class Component extends DCLogic {
         const f = s.resumeExtraction && s.resumeExtraction.freeform.find(f => f.section_type === 'summary');
         if (f) this.updateResumeFreeform(f.id, e.target.value);
       },
+      ...this.flagItemProps('freeform', s.resumeExtraction && s.resumeExtraction.freeform.find(f => f.section_type === 'summary'), 'resumeSummary'),
       resumeHasHobbies: !!(s.resumeExtraction && s.resumeExtraction.freeform.some(f => f.section_type === 'hobbies_other')),
       // Same gap as Summary above (bonus finding, same root cause): hobbies_other's own literal
       // heading was dropped at render too — fixed the same way, same pass.
@@ -12478,6 +12708,7 @@ class Component extends DCLogic {
         const f = s.resumeExtraction && s.resumeExtraction.freeform.find(f => f.section_type === 'hobbies_other');
         if (f) this.updateResumeFreeform(f.id, e.target.value);
       },
+      ...this.flagItemProps('freeform', s.resumeExtraction && s.resumeExtraction.freeform.find(f => f.section_type === 'hobbies_other'), 'resumeHobbies'),
       resumeHasWorkHistory: !!(s.resumeExtraction) && s.resumeExtraction.work_history.length > 0,
       resumeHasEducation: !!(s.resumeExtraction) && s.resumeExtraction.education.length > 0,
       resumeHasCertifications: !!(s.resumeExtraction) && s.resumeExtraction.certifications.length > 0,
@@ -12517,6 +12748,7 @@ class Component extends DCLogic {
               onStartDate: (e) => this.updateResumeItem('work_history', w.id, 'start_date', e.target.value),
               onEndDate: (e) => this.updateResumeItem('work_history', w.id, 'end_date', e.target.value),
               onResponsibilities: (e) => this.updateResumeItem('work_history', w.id, 'job_responsibilities', e.target.value),
+              ...this.flagItemProps('work_history', w),
             })),
           });
         });
@@ -12538,6 +12770,7 @@ class Component extends DCLogic {
               onLocation: (e) => this.updateResumeItem('education', x.id, 'location', e.target.value),
               onStartDate: (e) => this.updateResumeItem('education', x.id, 'start_date', e.target.value),
               onEndDate: (e) => this.updateResumeItem('education', x.id, 'end_date', e.target.value),
+              ...this.flagItemProps('education', x),
             })),
           });
         });
@@ -12567,6 +12800,7 @@ class Component extends DCLogic {
               onIssueDate: (e) => this.updateResumeItem('certifications', c.id, 'issue_date', e.target.value),
               onExpirationDate: (e) => this.updateResumeItem('certifications', c.id, 'expiration_date', e.target.value),
               onTradeSocCode: (e) => this.updateResumeItem('certifications', c.id, 'trade_soc_code', e.target.value),
+              ...this.flagItemProps('certifications', c),
             }; }),
           });
         });
@@ -12583,6 +12817,7 @@ class Component extends DCLogic {
             skillRows: s.resumeExtraction.skills.map(sk => ({
               skillText: sk.skill_text || '',
               onChange: (e) => this.updateResumeSkill(sk.id, e.target.value),
+              ...this.flagItemProps('skills', sk),
             })),
           });
         }
@@ -12603,6 +12838,7 @@ class Component extends DCLogic {
             ? (f.content || '').replace(/\.\s+(?=[A-Z])/g, '.\n')
             : (f.content || ''),
           onChange: (e) => this.updateResumeFreeform(f.id, e.target.value),
+          ...this.flagItemProps('freeform', f),
         }));
         blocks.sort((a, b) => a.position - b.position);
         return blocks.map(b => ({
@@ -12652,6 +12888,14 @@ class Component extends DCLogic {
       openRejectResumeModal: () => this.setState({ rejectResumeModalOpen: true, rejectResumeError: null }),
       closeRejectResumeModal: () => this.setState({ rejectResumeModalOpen: false, rejectResumeError: null }),
       confirmRejectResume: () => this.discardResumeDocument(),
+      // Candidate item-flagging, pre-confirm modal (2026-09-23): see flagItemProps/openFlagModal.
+      flagModalOpen: s.flagModalOpen,
+      flagModalNoteValue: s.flagModalNote,
+      flagModalIsFlagged: !!(s.flagModalCategory && s.flagModalItemId && s.resumeExtraction && s.resumeExtraction[s.flagModalCategory] && (s.resumeExtraction[s.flagModalCategory].find(i => i.id === s.flagModalItemId) || {})._flagged),
+      setFlagModalNote: (e) => this.setFlagModalNote(e),
+      closeFlagModal: () => this.closeFlagModal(),
+      saveFlagModal: () => this.saveFlagModal(),
+      clearFlagModal: () => this.clearFlagModal(),
       isVerifying: s.screen === 'verifying',
       verifyPending: s.verifyStatus === 'pending',
       verifyFailed: s.verifyStatus === 'error',
