@@ -158,7 +158,7 @@ export default {
       // intentional skip back into resumeConfirm forever.
       // employer_contact_resolved_at added for Item C (2026-09-08): same class of signal, one step
       // later in the flow — see checkEmployerContactIncomplete's own header in candidate.html.
-      const RESUME_DOC_SELECT = "id, original_storage_path, original_filename, mime_type, extraction_status, uploaded_at, continued_without_data_at, employer_contact_resolved_at, candidate_location, printed_header, license_detection_status, extraction_page_count, extraction_lease_until, extraction_progress_at, extraction_stalls, kind, supersedes_document_id";
+      const RESUME_DOC_SELECT = "id, original_storage_path, original_filename, mime_type, extraction_status, uploaded_at, continued_without_data_at, employer_contact_resolved_at, candidate_location, candidate_phone, candidate_email, printed_header, license_detection_status, extraction_page_count, extraction_lease_until, extraction_progress_at, extraction_stalls, kind, supersedes_document_id";
 
       // Item (2026-09-14 live-testing session, real bug found in production data): this used to
       // order by uploaded_at alone — the single most recent row, full stop, with no regard for

@@ -3946,9 +3946,10 @@ a:hover{color:var(--color-accent)}
               </div>
             </sc-if>
             <!-- Item A reverted (2026-09-23): no longer pre-filled from your account -- see
-                 seedContactFromAccount's own header. Starts empty until you type something, or real
-                 resume-contact-extraction exists (not built yet). This copy makes no claim about a
-                 source, so it stays accurate either way. -->
+                 seedContactFromAccount's own header. Pre-fills from your resume's own printed
+                 contact info if present (seedContactFromResume, built the same day), otherwise
+                 starts empty until you type something. This copy makes no claim about a source,
+                 so it stays accurate either way. -->
             <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Editable at any time, with no re-verification required.</div>
             </sc-if>
 
@@ -8085,10 +8086,9 @@ class Component extends DCLogic {
   // included. That design supersedes the 2026-09-08 stopgap. Removed entirely: printedPhone/
   // printedEmail/parsedResumePhone/parsedResumeEmail are no longer seeded from account data at all —
   // they now start (and stay) empty until either the candidate types something themselves, or real
-  // resume-contact-extraction is built as its own separate feature (not done as of this fix; there is
-  // currently no structured "phone/email as printed on the resume" field anywhere in the pipeline, so
-  // "if present" is never true today — Printed fields simply start empty, which is the documented
-  // fallback behavior, not a broken intermediate state).
+  // resume-contact-extraction populates them — see seedContactFromResume just below, built the same
+  // day as this comment as its own separate feature, exactly as this comment originally said it would
+  // need to be.
   //
   // verifiedPhoneEntry (the SEPARATE "Verified Number" field below, on this same screen) keeps being
   // seeded from the account phone — that field's own stated purpose is "what we have on file for you"
@@ -8103,6 +8103,34 @@ class Component extends DCLogic {
     // resolve (e.g. a page reload), same "only fill a field that's genuinely still blank" principle the
     // original guard intended, just correctly scoped to the field it actually fills.
     if (phone && !s.verifiedPhoneEntry) { patch.verifiedPhoneEntry = phone; patch.savedVerifiedPhoneEntry = phone; patch.cvPhoneEntry = phone; }
+    return patch;
+  }
+
+  // Real resume-contact-extraction (2026-09-23) — the feature seedContactFromAccount's own header
+  // above says was deliberately left unbuilt. extract-resume-fields/rasterize-pdf-page/upload-resume
+  // now all capture candidate_phone/candidate_email as their own structured fields (a sibling to the
+  // existing candidate_location), stored on resume_documents and returned by get-resume-extraction as
+  // part of resume_document. Called from loadResumeExtraction's own success path, the same place
+  // renderOriginalPdfViewer/maybeDetectLicenses already fire once resumeExtraction data is available.
+  //
+  // Deliberately mirrors seedContactFromAccount's "only fill a field that's genuinely still blank"
+  // guard: printedPhone/printedEmail (the candidate's own editable choice of what gets DELIVERED to
+  // partners) are only pre-filled while still empty — never overwritten once the candidate has typed
+  // their own value, whether that happened before or after this seed runs, and never silently
+  // re-filled by a later reload after the candidate has deliberately cleared the field (an empty
+  // printedPhone is a real, meaningful state — "print nothing" — not a blank waiting to be filled).
+  // parsedResumePhone/parsedResumeEmail are different: they are a read-only "what your resume actually
+  // says" reference fact (used by printedPhoneDivergesFromResume's own comparison, and the "Revert to
+  // original" action), not a candidate choice — those stay in sync with the resume's own extracted
+  // value on every load, including across a resubmission with different contact info, even if
+  // printedPhone/printedEmail themselves stay as the candidate's own prior edit.
+  seedContactFromResume(resumeDoc) {
+    const phone = (resumeDoc && resumeDoc.candidate_phone) || '';
+    const email = (resumeDoc && resumeDoc.candidate_email) || '';
+    const s = this.state;
+    const patch = { parsedResumePhone: phone, parsedResumeEmail: email };
+    if (phone && !s.printedPhone) patch.printedPhone = phone;
+    if (email && !s.printedEmail) patch.printedEmail = email;
     return patch;
   }
 
@@ -10213,7 +10241,10 @@ class Component extends DCLogic {
     // (see each function's own header). Fired after the state update lands (this.state won't reflect
     // resumeExtraction yet at the moment setState is called — see the callback, not a synchronous
     // read), not before.
-    this.setState({ resumeExtractionLoading: false, resumeExtraction: data }, () => {
+    this.setState({ resumeExtractionLoading: false, resumeExtraction: data,
+      // Real resume-contact-extraction (2026-09-23) — see seedContactFromResume's own header.
+      ...this.seedContactFromResume(data.resume_document),
+    }, () => {
       // Item 14: this is the one real choke point both resumeConfirm entry paths (a fresh signup
       // via applySignupConfirmation, and a returning candidate via checkResumeFlowIncomplete) funnel
       // through — renderOriginalPdfViewer no-ops on its own if the extracted document isn't a PDF or

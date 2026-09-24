@@ -176,18 +176,32 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   candidate's own location wasn't printed. Use an empty string "" when no personal location is
   printed anywhere on THIS page — never infer or guess one.
 
+- "candidate_phone" and "candidate_email" (top-level, not inside any category, 2026-09-23) = the
+  candidate's OWN phone number and email address, exactly as printed on their name/contact line —
+  the same header line candidate_location and printed_header both read from, if THIS page is the
+  one that shows it. Copy each verbatim, in whatever format the resume actually prints it (e.g.
+  "732-804-4973", "(219) 204-2607", "+1 201-446-6784" for phone; "jpirone@yahoo.com" for email) —
+  never reformat, normalize, add or remove punctuation, or guess a missing country code. A SIBLING
+  pair to candidate_location, structured out of the same header line for the same reason. Use an
+  empty string "" for either one when THIS page doesn't show that header block at all, or when the
+  resume genuinely doesn't print one of them — never infer, guess, or reconstruct one, and never
+  copy a DIFFERENT phone/email printed elsewhere (e.g. inside a work_history entry, or a
+  reference's contact info) into these fields — only the candidate's OWN header-line phone/email.
+
 - "printed_header" (top-level, not inside any category) = the ENTIRE personal-info header block
   exactly as printed at the top of the resume — the candidate's own name (including any middle
   initial, suffix like "Jr." or "Sr.", or professional qualifier like "Esq." or "PE", exactly as
   printed, in whatever order and case it appears), plus every contact/location line printed
   alongside it (phone, email, mailing address, city/state, LinkedIn URL, etc.), if THIS page is the
   one that shows it. Captured as ONE literal block of text — never parsed into separate name/phone/
-  email/location parts, unlike candidate_location above, which stays a separate, structured field
-  for exactly the location piece. Preserve the resume's own line breaks using "\n" between them;
-  copy every character verbatim, including capitalization and punctuation — never reformat,
-  reorder, translate, or normalize anything, and never add or drop words. Use an empty string ""
-  when THIS page doesn't show that header block at all (true for every page but the one with it) —
-  never invent or reconstruct one.
+  email/location parts by YOU editing or shortening it, unlike candidate_location/candidate_phone/
+  candidate_email above, which each stay their own separate, structured field for exactly that one
+  piece — extracting those structured fields is an ADDITIONAL, SEPARATE operation from capturing
+  this one, not an alternative to it; do both. Preserve the resume's own line breaks using "\n"
+  between them; copy every character verbatim, including capitalization and punctuation — never
+  reformat, reorder, translate, or normalize anything, and never add or drop words. Use an empty
+  string "" when THIS page doesn't show that header block at all (true for every page but the one
+  with it) — never invent or reconstruct one.
 
 - LINE-BREAK PRESERVATION (real, confirmed failure mode — a real source document with bulleted
   content came back as one dense, run-on paragraph with every bullet's line break silently
@@ -626,6 +640,8 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
 
 const SCHEMA_SHAPE = `{
   "candidate_location": string,
+  "candidate_phone": string,
+  "candidate_email": string,
   "printed_header": string,
   "work_history": [
     { "company": string, "title": string, "location": string, "start_date": string, "end_date": string,
@@ -1222,6 +1238,8 @@ type TrailingItemContext = {
 
 type ExtractionResult = {
   candidate_location?: string;
+  candidate_phone?: string;
+  candidate_email?: string;
   printed_header?: string;
   work_history: Array<{ company: string; title: string; location?: string; start_date: string; end_date: string; job_responsibilities: string; extraction_confidence: string; position?: number; heading?: string }>;
   education: Array<{ institution: string; degree: string; field_of_study: string; location?: string; start_date: string; end_date: string; extraction_confidence: string; position?: number; heading?: string }>;

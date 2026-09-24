@@ -427,6 +427,8 @@ Return ONLY a single JSON object, no prose before or after it, matching exactly 
 
 {
   "candidate_location": string,
+  "candidate_phone": string,
+  "candidate_email": string,
   "printed_header": string,
   "work_history": [
     { "company": string, "title": string, "location": string, "start_date": string, "end_date": string,
@@ -492,14 +494,31 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   candidate's own location wasn't printed. Use an empty string "" when no personal location is
   printed anywhere on the page — never infer or guess one.
 
+- "candidate_phone" and "candidate_email" (top-level, not inside any category, 2026-09-23) = the
+  candidate's OWN phone number and email address, exactly as printed on their name/contact line —
+  the same header line candidate_location and printed_header both read from. Copy each verbatim, in
+  whatever format the resume actually prints it (e.g. "732-804-4973", "(219) 204-2607",
+  "+1 201-446-6784" for phone; "jpirone@yahoo.com" for email) — never reformat, normalize, add or
+  remove punctuation, or guess a missing country code. These are a SIBLING pair to
+  candidate_location, structured out of the same header line for the same reason: printed_header
+  captures the whole block verbatim for display, but a phone number and email address are each
+  their own genuinely useful structured fact on their own, the same way candidate_location already
+  is. Use an empty string "" for either one when the resume genuinely doesn't print it anywhere —
+  never infer, guess, or reconstruct one, and never copy a DIFFERENT phone/email printed elsewhere
+  on the resume (e.g. inside a work_history entry, or a reference's contact info) into these
+  fields — only the candidate's OWN header-line phone/email count.
+
 - "printed_header" (top-level, not inside any category) = the ENTIRE personal-info header block
   exactly as printed at the top of the resume — the candidate's own name (including any middle
   initial, suffix like "Jr." or "Sr.", or professional qualifier like "Esq." or "PE", exactly as
   printed, in whatever order and case it appears), plus every contact/location line printed
   alongside it (phone, email, mailing address, city/state, LinkedIn URL, etc.). Captured as ONE
-  literal block of text — never parsed into separate name/phone/email/location parts, unlike
-  candidate_location above, which stays a separate, structured field for exactly the location
-  piece. Preserve the resume's own line breaks using "\n" between them; copy every character
+  literal block of text — never parsed into separate name/phone/email/location parts by YOU editing
+  or shortening it, unlike candidate_location/candidate_phone/candidate_email above, which each stay
+  their own separate, structured field for exactly that one piece — extracting those structured
+  fields is an ADDITIONAL, SEPARATE operation from capturing this one, not an alternative to it; do
+  both, the same way certifications' "heading" and "issuing_body" both get extracted from one shared
+  heading line. Preserve the resume's own line breaks using "\n" between them; copy every character
   verbatim, including capitalization and punctuation — never reformat, reorder, translate, or
   normalize anything, and never add or drop words. Use an empty string "" only if the resume
   genuinely has no such header block at all (e.g. a bare list of qualifications with no name or
@@ -963,6 +982,8 @@ ${ocrText}
 
 type ExtractionResult = {
   candidate_location?: string;
+  candidate_phone?: string;
+  candidate_email?: string;
   printed_header?: string;
   work_history: Array<{ company: string; title: string; location?: string; start_date: string; end_date: string; job_responsibilities: string; extraction_confidence: string; position?: number; heading?: string }>;
   education: Array<{ institution: string; degree: string; field_of_study: string; location?: string; start_date: string; end_date: string; extraction_confidence: string; position?: number; heading?: string }>;
@@ -1164,6 +1185,8 @@ export default {
         p_ocr_text: doc.ocr_raw_text,
         p_candidate_location: parsed.candidate_location || null,
         p_printed_header: parsed.printed_header || null,
+        p_candidate_phone: parsed.candidate_phone || null,
+        p_candidate_email: parsed.candidate_email || null,
       });
       if (rpcErr) {
         await supabase.from("resume_documents").update({ extraction_status: "failed" }).eq("id", resume_document_id);

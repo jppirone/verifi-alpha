@@ -424,6 +424,8 @@ Return ONLY a single JSON object, no prose before or after it, matching exactly 
 
 {
   "candidate_location": string,
+  "candidate_phone": string,
+  "candidate_email": string,
   "printed_header": string,
   "work_history": [
     { "company": string, "title": string, "location": string, "start_date": string, "end_date": string,
@@ -489,14 +491,28 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   candidate's own location wasn't printed. Use an empty string "" when no personal location is
   printed anywhere on the page — never infer or guess one.
 
+- "candidate_phone" and "candidate_email" (top-level, not inside any category, 2026-09-23) = the
+  candidate's OWN phone number and email address, exactly as printed on their name/contact line —
+  the same header line candidate_location and printed_header both read from. Copy each verbatim, in
+  whatever format the resume actually prints it (e.g. "732-804-4973", "(219) 204-2607",
+  "+1 201-446-6784" for phone; "jpirone@yahoo.com" for email) — never reformat, normalize, add or
+  remove punctuation, or guess a missing country code. A SIBLING pair to candidate_location,
+  structured out of the same header line for the same reason. Use an empty string "" for either one
+  when the resume genuinely doesn't print it anywhere — never infer, guess, or reconstruct one, and
+  never copy a DIFFERENT phone/email printed elsewhere on the resume (e.g. inside a work_history
+  entry, or a reference's contact info) into these fields — only the candidate's OWN header-line
+  phone/email count.
+
 - "printed_header" (top-level, not inside any category) = the ENTIRE personal-info header block
   exactly as printed at the top of the resume — the candidate's own name (including any middle
   initial, suffix like "Jr." or "Sr.", or professional qualifier like "Esq." or "PE", exactly as
   printed, in whatever order and case it appears), plus every contact/location line printed
   alongside it (phone, email, mailing address, city/state, LinkedIn URL, etc.). Captured as ONE
-  literal block of text — never parsed into separate name/phone/email/location parts, unlike
-  candidate_location above, which stays a separate, structured field for exactly the location
-  piece. Preserve the resume's own line breaks using "\n" between them; copy every character
+  literal block of text — never parsed into separate name/phone/email/location parts by YOU editing
+  or shortening it, unlike candidate_location/candidate_phone/candidate_email above, which each stay
+  their own separate, structured field for exactly that one piece — extracting those structured
+  fields is an ADDITIONAL, SEPARATE operation from capturing this one, not an alternative to it; do
+  both. Preserve the resume's own line breaks using "\n" between them; copy every character
   verbatim, including capitalization and punctuation — never reformat, reorder, translate, or
   normalize anything, and never add or drop words. Use an empty string "" only if the resume
   genuinely has no such header block at all (e.g. a bare list of qualifications with no name or
@@ -961,6 +977,8 @@ If a category has no entries, return an empty array for it — do not omit the k
 
 type ExtractionResult = {
   candidate_location?: string;
+  candidate_phone?: string;
+  candidate_email?: string;
   printed_header?: string;
   work_history: Array<{ company: string; title: string; location?: string; start_date: string; end_date: string; job_responsibilities: string; extraction_confidence: string; position?: number; heading?: string }>;
   education: Array<{ institution: string; degree: string; field_of_study: string; location?: string; start_date: string; end_date: string; extraction_confidence: string; position?: number; heading?: string }>;
@@ -1641,6 +1659,18 @@ function mergeExtractions(pages: Array<{ pageNumber: number; extraction: Extract
       const withLocation = pages.find(({ extraction }) => !!extraction.candidate_location);
       return withLocation ? withLocation.extraction.candidate_location : "";
     })(),
+    // Real resume-contact-extraction (2026-09-23): same "first page that actually reported one"
+    // pattern as candidate_location just above — the candidate's own phone/email, printed once on
+    // the same header line as candidate_location, only ever realistically appears on page 1, but
+    // this doesn't hard-code that assumption either.
+    candidate_phone: (() => {
+      const withPhone = pages.find(({ extraction }) => !!extraction.candidate_phone);
+      return withPhone ? withPhone.extraction.candidate_phone : "";
+    })(),
+    candidate_email: (() => {
+      const withEmail = pages.find(({ extraction }) => !!extraction.candidate_email);
+      return withEmail ? withEmail.extraction.candidate_email : "";
+    })(),
     // Item 6 (2026-09-12 live-testing session, follow-up build): same "first page that actually
     // reported one" pattern as candidate_location just above — the printed header block only ever
     // realistically appears on page 1, but this doesn't hard-code that assumption either.
@@ -1880,6 +1910,8 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
     p_ocr_text: combinedOcrText,
     p_candidate_location: merged.candidate_location || null,
     p_printed_header: merged.printed_header || null,
+    p_candidate_phone: merged.candidate_phone || null,
+    p_candidate_email: merged.candidate_email || null,
   });
   if (pdfRpcErr) return await fail(500, { error: "insert_failed", detail: pdfRpcErr.message });
 
@@ -2204,6 +2236,8 @@ export default {
           p_ocr_text: null,
           p_candidate_location: extraction.candidate_location || null,
           p_printed_header: extraction.printed_header || null,
+          p_candidate_phone: extraction.candidate_phone || null,
+          p_candidate_email: extraction.candidate_email || null,
         });
         if (rpcErr) {
           await supabase.from("resume_documents").update({ extraction_status: "failed" }).eq("id", docId);
