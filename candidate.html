@@ -6186,9 +6186,18 @@ class Component extends DCLogic {
     return label ? ' (' + label + ')' : '';
   }
 
-  czWorkLabel(w) { return [w.title, w.employer].filter(Boolean).join(' at ') + this.czRange(w.start, w.end, w.current); }
+  // Gap #4 fix (2026-09-24): w.location and c.license_state were already present in the server's
+  // assembled JSON (assemble_customized_resume -- see that migration's j_work/j_cert build, which
+  // has always included 'location'/'license_state') -- confirmed live before writing this fix, not
+  // assumed. czEduLabel already rendered e.location correctly; czWorkLabel and czCertLabel simply
+  // never read the field that was already there, so both a job's city/state and a license's issuing
+  // state were silently dropped from every generated PDF and Content Manager label, despite being
+  // correctly parsed, stored, and (per the license case) even driving other live UI. Pure render-side
+  // gap -- no extraction, assembly, or storage change needed. license_state prints ahead of "Lic #",
+  // matching how it naturally reads on the source document ("FL Lic #CFC1425829").
+  czWorkLabel(w) { return [w.title, w.employer].filter(Boolean).join(' at ') + (w.location ? ', ' + w.location : '') + this.czRange(w.start, w.end, w.current); }
   czEduLabel(e) { return [e.degree, e.field_of_study, [e.institution, e.location].filter(Boolean).join(', ')].filter(Boolean).join(', ') + this.czRange(e.start, e.end, false); }
-  czCertLabel(c) { return [c.name, c.issuer, c.license_number ? 'Lic #' + c.license_number : ''].filter(Boolean).join(', ') + (c.issued ? ' (' + this.czPartialLabel(c.issued) + ')' : ''); }
+  czCertLabel(c) { const lic = c.license_number ? [c.license_state, 'Lic #' + c.license_number].filter(Boolean).join(' ') : (c.license_state || ''); return [c.name, c.issuer, lic].filter(Boolean).join(', ') + (c.issued ? ' (' + this.czPartialLabel(c.issued) + ')' : ''); }
 
   czReady() {
     const s = this.state;

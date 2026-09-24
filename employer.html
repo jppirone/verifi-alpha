@@ -4061,9 +4061,13 @@ class Component extends DCLogic {
     const label = [this.czPartialLabel(start), current ? 'Present' : this.czPartialLabel(end)].filter(Boolean).join('-');
     return label ? ' (' + label + ')' : '';
   }
-  czWorkLabel(w) { return [w.title, w.employer].filter(Boolean).join(' at ') + this.czRange(w.start, w.end, w.current); }
+  // Gap #4 fix (2026-09-24): ported from candidate.html's identical fix -- these three functions are
+  // themselves a ported copy (see this section's own header), so they carried the same gap: w.location
+  // and c.license_state are already in assemble_customized_resume's JSON, just never read here. See
+  // candidate.html's czWorkLabel/czCertLabel for the full explanation.
+  czWorkLabel(w) { return [w.title, w.employer].filter(Boolean).join(' at ') + (w.location ? ', ' + w.location : '') + this.czRange(w.start, w.end, w.current); }
   czEduLabel(e) { return [e.degree, e.field_of_study, [e.institution, e.location].filter(Boolean).join(', ')].filter(Boolean).join(', ') + this.czRange(e.start, e.end, false); }
-  czCertLabel(c) { return [c.name, c.issuer, c.license_number ? 'Lic #' + c.license_number : ''].filter(Boolean).join(', ') + (c.issued ? ' (' + this.czPartialLabel(c.issued) + ')' : ''); }
+  czCertLabel(c) { const lic = c.license_number ? [c.license_state, 'Lic #' + c.license_number].filter(Boolean).join(' ') : (c.license_state || ''); return [c.name, c.issuer, lic].filter(Boolean).join(', ') + (c.issued ? ' (' + this.czPartialLabel(c.issued) + ')' : ''); }
 
   sanitizeAts(text) {
     return String(text)
