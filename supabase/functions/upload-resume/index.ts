@@ -240,6 +240,13 @@ still be two separate sections if they have two separate, distinct heading strin
 into one just because they're topically similar; a genuinely different heading string always starts a
 new section.
 
+A heading's visual weight is not a requirement for it to count. A short standalone line naming a
+distinct topic, sitting on its own above a list or paragraph, is a real section boundary even when it
+is styled more lightly than the document's other headings — smaller, not bold, or Title Case where
+every other heading is ALL CAPS. Do not let a lightly-styled heading get read as trailing content of
+the section before it just because the list under it happens to share the same shape (e.g. both are
+short bare phrases) as the list above it — judge it as its own heading like any other.
+
 ${KNOWN_CATEGORIES_GUIDE}
 
 A SEPARATE TASK, after boundaries — SAME-COMPANY, MULTIPLE ROLES: decide, for every employer name that
