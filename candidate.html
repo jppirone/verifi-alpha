@@ -8283,13 +8283,44 @@ class Component extends DCLogic {
   // original" action), not a candidate choice — those stay in sync with the resume's own extracted
   // value on every load, including across a resubmission with different contact info, even if
   // printedPhone/printedEmail themselves stay as the candidate's own prior edit.
+  //
+  // Gap #3 reopened, two fixes (2026-09-24, live-reproduced and root-caused before fixing, not
+  // patched on symptom):
+  //
+  // Problem A - Verified Phone never pre-filled. This function only ever wrote printedPhone/
+  // printedEmail; nothing here touched verifiedPhoneEntry/confirmedPhoneNumber, so a fresh account
+  // with no account-level phone on file (seedContactFromAccount's own source) landed on Profile Info
+  // with Verified Phone genuinely blank, confirmed by direct state inspection, not assumed. The
+  // finalized design pre-fills Verified Phone from the SAME resume-parsed number, shown as pending/
+  // not-yet-verified until the candidate clicks through to confirm it - seeding verifiedPhoneEntry
+  // (and leaving confirmedPhoneNumber/phoneConfirmed untouched) is sufficient for that: the existing
+  // phonePendingVerification check (verifiedPhoneEntry set, but !== confirmedPhoneNumber) already
+  // renders exactly that pending state with no further change needed. Guarded the same "only if
+  // genuinely still blank" way as the sibling fields, so a real account-level phone (seeded first by
+  // seedContactFromAccount) or a candidate's own prior entry is never overwritten.
+  //
+  // Problem B - a phantom "unsaved changes" prompt that, on Revert, wiped the just-seeded Printed
+  // values back to blank (confirmed live: isDirty() true immediately on landing on Profile Info with
+  // nothing touched, and clicking Revert set both printedPhone AND printedEmail to '' - reproduced via
+  // direct state inspection, not the report taken on faith). Root cause: this function set
+  // printedPhone/printedEmail without ever updating their savedPrintedPhone/savedPrintedEmail
+  // counterparts, so isDirty()'s printedPhone !== savedPrintedPhone comparison read the freshly-seeded
+  // value as an unsaved edit from the moment it landed - and Revert's own logic (by design) resets a
+  // field to its saved counterpart, which was still the pre-seed blank. Every OTHER seed path in this
+  // file already avoids this: seedContactFromAccount pairs verifiedPhoneEntry with
+  // savedVerifiedPhoneEntry, and applyCzContactToProfile pairs printedPhone with savedPrintedPhone -
+  // this function was the one place that didn't. Fixed the same way: a seed is the starting state, not
+  // a pending edit, so printed/saved move together here exactly as they do everywhere else a value is
+  // pre-filled rather than typed by the candidate. Printed fields are document-locked and irrecoverable
+  // once blanked short of a re-upload, so this is treated as a real data-loss bug, not cosmetic.
   seedContactFromResume(resumeDoc) {
     const phone = (resumeDoc && resumeDoc.candidate_phone) || '';
     const email = (resumeDoc && resumeDoc.candidate_email) || '';
     const s = this.state;
     const patch = { parsedResumePhone: phone, parsedResumeEmail: email };
-    if (phone && !s.printedPhone) patch.printedPhone = phone;
-    if (email && !s.printedEmail) patch.printedEmail = email;
+    if (phone && !s.printedPhone) { patch.printedPhone = phone; patch.savedPrintedPhone = phone; }
+    if (email && !s.printedEmail) { patch.printedEmail = email; patch.savedPrintedEmail = email; }
+    if (phone && !s.verifiedPhoneEntry) { patch.verifiedPhoneEntry = phone; patch.savedVerifiedPhoneEntry = phone; }
     return patch;
   }
 
