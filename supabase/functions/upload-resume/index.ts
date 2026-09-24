@@ -554,6 +554,29 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   a single linear list regardless, so when in doubt, prefer keeping each cell's own sentence fully
   intact and separate over guessing at a merged reading order.
 
+- ISOLATED SHORT-FRAGMENT OCR LINE MID-SENTENCE (a real, confirmed failure mode, distinct from the
+  multi-column case above — this one is a single flowing paragraph or bullet, not a grid): OCR text
+  sometimes reports a short fragment — often just one or two words, commonly ending in a comma — as
+  its OWN separate line, sitting between two other lines that plainly form one continuous sentence
+  together once that fragment is removed from between them. A real, confirmed example: OCR text read
+  "...adoption playbooks for SMB and enterprise clients" / "Automate," / "across ChatGPT, Claude,
+  Gemini, Jasper, and Microsoft Power accelerating time-to-value for each" / "engagement." — the
+  isolated fragment "Automate," had visually broken away from its real position (immediately after
+  "Microsoft Power," completing the product name "Microsoft Power Automate,") and was reported one
+  line too early, corrupting a real product name ("Microsoft Power" instead of "Microsoft Power
+  Automate") and starting the next clause with an orphaned word ("Automate across..." instead of
+  "across..."). When a short (1-3 word) OCR line is grammatically incomplete on its own, does not read
+  as a genuine new bullet or sentence of its own, and the lines immediately before and after it read as
+  one continuous sentence that is ITSELF grammatically incomplete or broken without that fragment
+  restored to it — reconstruct the sentence in its natural reading order (the fragment belongs wherever
+  it completes a term or clause correctly, almost always immediately before the specific word it
+  visually separated from) rather than transcribing the OCR's own arbitrary line placement verbatim.
+  This is never a license to rewrite or improve wording that already reads correctly as printed — it
+  only undoes a clear, mechanical OCR misordering where a short fragment visibly landed on the wrong
+  line. When genuinely unsure whether a short line is a real, intentional fragment (an actual short
+  bullet or clause of its own) or a misplaced piece of the surrounding sentence, leave it exactly as
+  OCR reported it rather than guessing.
+
 - work_history = PAID EMPLOYMENT ONLY. If a role reads as unpaid — volunteer work, an unpaid
   internship explicitly described as unpaid, community service — do NOT put it in work_history.
   Instead add ONE entry to "freeform" with section_type "needs_review" whose content plainly

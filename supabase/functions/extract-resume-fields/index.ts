@@ -209,6 +209,13 @@ still be two separate sections if they have two separate, distinct heading strin
 into one just because they're topically similar; a genuinely different heading string always starts a
 new section.
 
+A heading's visual weight is not a requirement for it to count. A short standalone line naming a
+distinct topic, sitting on its own above a list or paragraph, is a real section boundary even when it
+is styled more lightly than the document's other headings — smaller, not bold, or Title Case where
+every other heading is ALL CAPS. Do not let a lightly-styled heading get read as trailing content of
+the section before it just because the list under it happens to share the same shape (e.g. both are
+short bare phrases) as the list above it — judge it as its own heading like any other.
+
 ${KNOWN_CATEGORIES_GUIDE}
 
 ${INLINE_LABEL_LIST_BOUNDARY_RULE}
@@ -559,6 +566,29 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   the original column layout in your output — the generated result only ever shows this content as
   a single linear list regardless, so when in doubt, prefer keeping each cell's own sentence fully
   intact and separate over guessing at a merged reading order.
+
+- ISOLATED SHORT-FRAGMENT OCR LINE MID-SENTENCE (a real, confirmed failure mode, distinct from the
+  multi-column case above — this one is a single flowing paragraph or bullet, not a grid): OCR text
+  sometimes reports a short fragment — often just one or two words, commonly ending in a comma — as
+  its OWN separate line, sitting between two other lines that plainly form one continuous sentence
+  together once that fragment is removed from between them. A real, confirmed example: OCR text read
+  "...adoption playbooks for SMB and enterprise clients" / "Automate," / "across ChatGPT, Claude,
+  Gemini, Jasper, and Microsoft Power accelerating time-to-value for each" / "engagement." — the
+  isolated fragment "Automate," had visually broken away from its real position (immediately after
+  "Microsoft Power," completing the product name "Microsoft Power Automate,") and was reported one
+  line too early, corrupting a real product name ("Microsoft Power" instead of "Microsoft Power
+  Automate") and starting the next clause with an orphaned word ("Automate across..." instead of
+  "across..."). When a short (1-3 word) OCR line is grammatically incomplete on its own, does not read
+  as a genuine new bullet or sentence of its own, and the lines immediately before and after it read as
+  one continuous sentence that is ITSELF grammatically incomplete or broken without that fragment
+  restored to it — reconstruct the sentence in its natural reading order (the fragment belongs wherever
+  it completes a term or clause correctly, almost always immediately before the specific word it
+  visually separated from) rather than transcribing the OCR's own arbitrary line placement verbatim.
+  This is never a license to rewrite or improve wording that already reads correctly as printed — it
+  only undoes a clear, mechanical OCR misordering where a short fragment visibly landed on the wrong
+  line. When genuinely unsure whether a short line is a real, intentional fragment (an actual short
+  bullet or clause of its own) or a misplaced piece of the surrounding sentence, leave it exactly as
+  OCR reported it rather than guessing.
 
 - work_history = PAID EMPLOYMENT ONLY. If a role reads as unpaid — volunteer work, an unpaid
   internship explicitly described as unpaid, community service — do NOT put it in work_history.
