@@ -1811,7 +1811,51 @@ function mergeBoundaryContinuations(extraction: ExtractionResult): ExtractionRes
     if (!(item.issuing_body || "").trim()) item.issuing_body = prevCert.issuing_body;
   }
 
-  return { ...extraction, freeform: mergedFreeform, work_history: mergedWorkHistory, certifications };
+  // Gap #16h follow-up fix (2026-09-25, found in the SAME live re-verification pass that caught the
+  // work_history self-referential-heading regression above — re-running the exact same document a
+  // second time after redeploying that fix): the correction just above only fires when the model put
+  // the continuation item IN "certifications" with a self-referential heading. A DIFFERENT, deeper
+  // manifestation of the identical underlying non-determinism is possible: the boundary-detection step
+  // itself can fail to recognize the item as a headerless continuation at all, and instead treat it as
+  // its own genuinely-new, standalone SECTION — landing in "freeform" as needs_review, with "heading"
+  // AND "content" both set to just the item's own name (nothing else). This is the exact original
+  // gap #16c failure signature ("item 9... landed as its own isolated needs_review section instead of
+  // the list's 9th entry") re-confirmed live in this fresh run — the certifications_list continuation
+  // hint IS built and sent correctly (unchanged, already verified above); the receiving page's own
+  // boundary call just doesn't always apply it, the same class of "hint built correctly, not always
+  // obeyed" gap already confirmed for the self-referential-heading sub-case. Rescue this specific,
+  // narrow signature deterministically: a freeform needs_review entry whose "heading" and "content"
+  // are identical once trimmed (a real section has a heading DIFFERENT from its own body — this one
+  // doesn't, meaning the model only ever saw one bare list-item-shaped line, not an actual new
+  // section) AND is page-adjacent to a genuine multi-item certifications list's last page (the same
+  // hasSiblingUnderSameHeading signal used above) gets moved out of freeform and into certifications,
+  // adopting that list's heading and issuing_body, positioned right after that list's own items.
+  const rescuedFreeform: typeof mergedFreeform = [];
+  for (const f of mergedFreeform) {
+    if (f.section_type !== "needs_review") { rescuedFreeform.push(f); continue; }
+    const heading = (f.heading || "").trim();
+    const content = (f.content || "").trim();
+    if (!heading || !content || norm(heading) !== norm(content)) { rescuedFreeform.push(f); continue; }
+    const itemPage = pageOf(f.position);
+    if (itemPage === null) { rescuedFreeform.push(f); continue; }
+    let prevCert: (typeof certifications)[number] | undefined;
+    for (let j = certifications.length - 1; j >= 0; j--) {
+      if (certPageOf(certifications[j]) !== null) { prevCert = certifications[j]; break; }
+    }
+    const prevPage = prevCert ? certPageOf(prevCert) : null;
+    const prevHeading = prevCert ? (prevCert.heading || "").trim() : "";
+    const prevHasSibling = !!prevCert && certifications.some((c) => c !== prevCert && certPageOf(c) === prevPage && norm(c.heading || "") === norm(prevHeading));
+    if (!prevCert || prevPage === null || itemPage !== prevPage + 1 || !prevHeading || !prevHasSibling) {
+      rescuedFreeform.push(f);
+      continue;
+    }
+    certifications.push({
+      name: content, issuing_body: prevCert.issuing_body || "", license_number: "", issue_date: "", expiration_date: "",
+      extraction_confidence: "medium", position: f.position, heading: prevHeading,
+    });
+  }
+
+  return { ...extraction, freeform: rescuedFreeform, work_history: mergedWorkHistory, certifications };
 }
 
 // Item B (2026-09-13 PDF-regression follow-up session): server-side, deterministic replacement for
