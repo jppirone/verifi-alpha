@@ -1501,12 +1501,29 @@ function describeTrailingItem(extraction: ExtractionResult): TrailingItemContext
   }
   for (const c of extraction.certifications) {
     if (typeof c.position !== "number") continue;
+    // Gap #16c fix (2026-09-24, real regression found live testing John's beast resume): this
+    // function's own comment used to claim "the multi-item-list-continuation case is handled
+    // separately" — checked directly and it is NOT; this was the only place a certifications_list
+    // TrailingItemContext is ever built, and the blanket `open: false` added by 13025b4 (fixing a
+    // real false-positive on a genuinely CLOSED single cert fact) excluded every certification
+    // candidate unconditionally, silently disabling the certifications_list continuation mechanism
+    // entirely — including the genuine multi-item-list case it was never meant to cover. Reproduced
+    // live: a 9-item AI-certifications list split across a page boundary (items 1-8 on page 1, item 9
+    // alone at the top of page 2) lost its continuation hint, and item 9 ("AI Video Generation &
+    // Cinematic Workflows (Veo)") landed as its own isolated needs_review section instead of the
+    // list's 9th entry. Fix: a certification is "open" (plausibly still continuing) when it shares
+    // its heading with at least one OTHER certification extracted on the SAME page — a real,
+    // deterministic multi-item-list signal, never true for a genuinely standalone single cert (13025b4's
+    // own original case, e.g. one "Google Project Management Certificate" alone under its own heading),
+    // which stays correctly excluded exactly as that fix intended.
+    const hasSiblingUnderSameHeading = (() => {
+      const heading = (c.heading || "").trim();
+      if (!heading) return false;
+      return extraction.certifications.some((other) => other !== c && (other.heading || "").trim() === heading);
+    })();
     candidates.push({
       position: c.position,
-      // Never open: a cert/license entry (name, issuer, date) is complete the moment it's extracted.
-      // The multi-item-list-continuation case (a certifications LIST whose remaining items spill onto
-      // the next page) is handled separately and doesn't depend on this flag.
-      open: false,
+      open: hasSiblingUnderSameHeading,
       build: () => ({ kind: "certifications_list", name: c.name || "", issuingBody: c.issuing_body || "", heading: c.heading || "", snippet: c.name || "" }),
     });
   }
@@ -1679,7 +1696,55 @@ function dedupePositions(extraction: ExtractionResult): ExtractionResult {
   return extraction;
 }
 
+// Gap #16a (2026-09-24, real regression found live testing John's beast resume): the same-page
+// "MULTIPLE DISTINCT SKILLS-SHAPED SECTIONS" carve-out (skills_secondary) only protects against a
+// second skills-shaped section on the SAME page — the skills array itself is merged across pages by
+// pure flat concatenation just below (`pages.flatMap(...)`), with a single globally-resolved
+// skills_heading (the first page that reported one), and NO adjacency or heading-match check at all,
+// unlike work_history/freeform which both use page-adjacency + matching-heading merge logic. A later
+// page's own skills-shaped content — even one that correctly resolved its OWN different heading —
+// gets silently absorbed into the flat array and mislabeled with page 1's heading. Reproduced live:
+// "WORKPLACE STRENGTHS" (page 3 of the beast resume, item-shaped exactly like the NOT-skills-shaped
+// rule's own worked example) landed as 3 more "CORE COMPETENCIES" skill terms (page 1's heading) with
+// no trace of its own real heading anywhere. This generalizes the identical same-page protection
+// across a page boundary: a later page's skill terms merge into the primary flat array only when that
+// page reported NO heading of its own (a genuine headerless continuation) or the SAME heading as the
+// page that established the block; a later page with its OWN, DIFFERENT heading is rerouted to
+// freeform instead — same section_type/shape as skills_secondary already uses for the same-page case
+// — never silently relabeled under the wrong heading.
+function splitCrossPageSkills(pages: Array<{ pageNumber: number; extraction: ExtractionResult }>): {
+  primary: string[];
+  heading: string;
+  secondaryFreeform: Array<{ section_type: string; heading: string; content: string; position?: number }>;
+} {
+  let establishedHeading: string | null = null;
+  const primary: string[] = [];
+  const secondaryFreeform: Array<{ section_type: string; heading: string; content: string; position?: number }> = [];
+  for (const { pageNumber, extraction } of pages) {
+    if (!extraction.skills.length) continue;
+    const pageHeading = cleanHeading(extraction.skills_heading);
+    if (establishedHeading === null) {
+      establishedHeading = pageHeading; // may itself be "" (no heading at all) — still establishes the block
+      primary.push(...extraction.skills);
+    } else if (!pageHeading || pageHeading === establishedHeading) {
+      primary.push(...extraction.skills); // headerless continuation, or the same heading repeated: genuine continuation
+    } else {
+      secondaryFreeform.push({
+        section_type: "needs_review",
+        heading: pageHeading,
+        content: extraction.skills.join("\n"),
+        position: typeof extraction.skills_position === "number" ? globalizePosition(pageNumber, extraction.skills_position) ?? undefined : undefined,
+      });
+    }
+  }
+  // Same value primary's own establishing page used, so the two can never disagree — kept in step
+  // with the pre-existing "first page that reported one" intent, just sourced from the single pass
+  // above instead of a second, separately-resolved search that could pick a DIFFERENT (rerouted) page.
+  return { primary, heading: establishedHeading || "", secondaryFreeform };
+}
+
 function mergeExtractions(pages: Array<{ pageNumber: number; extraction: ExtractionResult }>): ExtractionResult {
+  const { primary: primarySkills, heading: primarySkillsHeading, secondaryFreeform: crossPageSkillsSecondary } = splitCrossPageSkills(pages);
   const merged = {
     // Item 19 (2026-09-12 live-testing session): same "first page that actually reported one"
     // pattern as skills_position just below — a candidate's own personal location, printed once
@@ -1714,12 +1779,14 @@ function mergeExtractions(pages: Array<{ pageNumber: number; extraction: Extract
       extraction.education.map((e) => ({ ...e, position: globalizePosition(pageNumber, e.position) ?? undefined }))),
     certifications: pages.flatMap(({ pageNumber, extraction }) =>
       extraction.certifications.map((c) => ({ ...c, position: globalizePosition(pageNumber, c.position) ?? undefined }))),
-    skills: pages.flatMap(({ extraction }) => extraction.skills),
-    // the first page that reported the skills block's heading (a skills list that runs onto a later page has no heading there)
-    skills_heading: (() => {
-      const withHeading = pages.find(({ extraction }) => !!cleanHeading(extraction.skills_heading));
-      return withHeading ? cleanHeading(withHeading.extraction.skills_heading) : "";
-    })(),
+    // Gap #16a fix: no longer a raw flatMap — see splitCrossPageSkills above. A later page's skill
+    // terms only merge here when they're a genuine continuation (no heading of their own, or the
+    // same heading already established); a later page with its OWN different heading is in
+    // crossPageSkillsSecondary below instead, never silently relabeled into this array.
+    skills: primarySkills,
+    // The heading of the page that established the primary block above (see splitCrossPageSkills) —
+    // sourced from the same pass that built `skills`, so the two can never disagree.
+    skills_heading: primarySkillsHeading,
     // Only one page can sensibly claim "the" skills block position — the first page that actually
     // reported one. A resume with skills split oddly across pages is a real edge case this doesn't
     // try to solve; it just doesn't crash or silently pick an arbitrary later page instead.
@@ -1727,8 +1794,11 @@ function mergeExtractions(pages: Array<{ pageNumber: number; extraction: Extract
       const withSkills = pages.find(({ extraction }) => typeof extraction.skills_position === "number");
       return withSkills ? globalizePosition(withSkills.pageNumber, withSkills.extraction.skills_position) : null;
     })(),
-    freeform: pages.flatMap(({ pageNumber, extraction }) =>
-      extraction.freeform.map((f) => ({ ...f, position: globalizePosition(pageNumber, f.position) ?? undefined }))),
+    freeform: [
+      ...pages.flatMap(({ pageNumber, extraction }) =>
+        extraction.freeform.map((f) => ({ ...f, position: globalizePosition(pageNumber, f.position) ?? undefined }))),
+      ...crossPageSkillsSecondary, // gap #16a fix — see splitCrossPageSkills; positions already globalized there
+    ],
   };
   return mergeBoundaryContinuations(merged);
 }

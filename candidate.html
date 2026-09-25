@@ -9489,6 +9489,29 @@ class Component extends DCLogic {
     const last = (profile && profile.last_name) || this.state.lastName;
     const resolvedEmail = (profile && profile.email) || this.state.email;
     const resolvedPhone = (profile && profile.phone) || this.state.phone;
+    // Gap #16e fix (2026-09-24, real regression found live testing John's beast resume, confirmed
+    // via live setState instrumentation, not inference): computed once, here, instead of inline at
+    // its own key further down. Two DIFFERENT mechanisms try to fill verifiedPhoneEntry inside this
+    // SAME setState call — this function's own seedContactFromAccount() spread (pre-fills from the
+    // account's registration phone, unverified/pending) and a second, later assignment to the exact
+    // same key (pre-fills from a server-CONFIRMED verified_phone_number, when one exists from a past
+    // session) — and in a single JS object literal, a later key silently overwrites an earlier one.
+    // The later assignment's own fallback read `this.state.verifiedPhoneEntry` — the state from
+    // BEFORE this entire call, not contactSeed's just-computed result — so on every candidate who
+    // has no server-confirmed number yet (the ordinary case before they ever click through phone
+    // verification), it silently discarded contactSeed's correct seed and reset the field back to
+    // blank, every single time applySession ran. Confirmed live: Verified Phone genuinely never
+    // seeded at all for a fresh account with an account-level phone on file but no confirmed one.
+    // Fixed by composing the two sources in the right priority (server-confirmed number, then
+    // contactSeed's own account-phone fallback, then whatever's already in state) instead of letting
+    // two same-key assignments silently race.
+    const contactSeed = this.seedContactFromAccount(resolvedEmail, resolvedPhone);
+    const resolvedVerifiedPhoneEntry = (profile && profile.verified_phone_number && !this.state.verifiedPhoneEntry)
+      ? profile.verified_phone_number
+      : (contactSeed.verifiedPhoneEntry !== undefined ? contactSeed.verifiedPhoneEntry : this.state.verifiedPhoneEntry);
+    const resolvedSavedVerifiedPhoneEntry = (profile && profile.verified_phone_number && !this.state.savedVerifiedPhoneEntry)
+      ? profile.verified_phone_number
+      : (contactSeed.savedVerifiedPhoneEntry !== undefined ? contactSeed.savedVerifiedPhoneEntry : this.state.savedVerifiedPhoneEntry);
     this.setState({
       sessionToken,
       email: resolvedEmail,
@@ -9503,7 +9526,9 @@ class Component extends DCLogic {
       // Item A: real seed for printedEmail/printedPhone — see seedContactFromAccount's own header.
       // Same guard as profileFirst/savedFirst above — covers a returning session exactly like a
       // fresh signup, since this is the only other place email/phone are ever really learned.
-      ...this.seedContactFromAccount(resolvedEmail, resolvedPhone),
+      // (computed above as `contactSeed`, alongside the resolved verifiedPhoneEntry values — see
+      // the gap #16e comment there for why it's no longer inlined here directly)
+      ...contactSeed,
       // Item B (2026-09-08 regression session): accountTier now reflects the real
       // candidates.tier backend value (see set-candidate-tier/test-stripe-webhook's own headers)
       // every time a session is resolved — not just once at some earlier local flip that could
@@ -9576,8 +9601,10 @@ class Component extends DCLogic {
       // verified" on every fresh page load, because the comparison had an empty string on one side
       // — confirmedPhoneNumber was right, but nothing was there to match it against. Seeded only
       // when the entry is still at its blank default (never clobbers an in-progress edit).
-      verifiedPhoneEntry: (profile && profile.verified_phone_number && !this.state.verifiedPhoneEntry) ? profile.verified_phone_number : this.state.verifiedPhoneEntry,
-      savedVerifiedPhoneEntry: (profile && profile.verified_phone_number && !this.state.savedVerifiedPhoneEntry) ? profile.verified_phone_number : this.state.savedVerifiedPhoneEntry,
+      // (computed above as resolvedVerifiedPhoneEntry/resolvedSavedVerifiedPhoneEntry, composed
+      // together with contactSeed's own result — see the gap #16e comment there)
+      verifiedPhoneEntry: resolvedVerifiedPhoneEntry,
+      savedVerifiedPhoneEntry: resolvedSavedVerifiedPhoneEntry,
       crossValidationCompletedAt: (profile && profile.cross_validation_completed_at) || this.state.crossValidationCompletedAt,
       crossValidationDone: !!((profile && profile.cross_validation_completed_at) || this.state.crossValidationCompletedAt),
       licenseSubscriptionStartedAt: (profile && profile.license_subscription_started_at) || this.state.licenseSubscriptionStartedAt,
