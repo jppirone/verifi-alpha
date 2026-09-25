@@ -2338,6 +2338,14 @@ th.sortable{cursor:pointer;user-select:none}
             </sc-for>
           </sc-raw-select>
         </div>
+        <div class="field" style="flex:1;min-width:160px;margin:0">
+          <label for="filter-status" style="font-size:11px">Status</label>
+          <sc-raw-select class="input" id="filter-status" value="{{ statusFilter }}" onChange="{{ setStatusFilter }}">
+            <sc-for list="{{ statusFilterOptions }}" as="opt" hint-placeholder-count="3">
+              <option value="{{ opt.value }}">{{ opt.label }}</option>
+            </sc-for>
+          </sc-raw-select>
+        </div>
         <sc-if value="{{ hasAnyFilterActive }}" hint-placeholder-val="{{ false }}">
           <button type="button" class="btn btn-ghost" style="font-size:12px" onClick="{{ clearFilters }}">Clear filters</button>
         </sc-if>
@@ -3057,7 +3065,10 @@ class Component extends DCLogic {
     // confirmed live: "Job Experience", "Education", "Certification", "Needs Review" — plus
     // "Personal Info", included per instruction even though no code path inserts that type today;
     // see typeFilterOptions below for why it's expected to return nothing).
-    nameFilter: '', itemIdFilter: '', typeFilter: '', findingFilter: '',
+    // statusFilter (open-vs-resolved) added alongside these: same "narrow together, AND not OR" shape,
+    // default '' (All statuses), so the existing default view (everything mixed together) is unchanged
+    // unless staff actively picks a stage.
+    nameFilter: '', itemIdFilter: '', typeFilter: '', findingFilter: '', statusFilter: '',
     syncFailures: {},
     automatedCheckType: 'credly',
     automatedCheckInputs: { badgeUrl: '', dbprFirstName: '', dbprLastName: '', dbprLicenseNumber: '', sunbizEntityName: '', codoraFirstName: '', codoraLastName: '', codoraLicenseNumber: '', cososEntityName: '' },
@@ -3850,6 +3861,8 @@ class Component extends DCLogic {
       if (idQuery && !(it.id || '').toLowerCase().includes(idQuery)) return false;
       if (s.typeFilter && it.type !== s.typeFilter) return false;
       if (s.findingFilter === 'not_active' && !this.isNotActiveMatch(it)) return false;
+      if (s.statusFilter === 'open' && this.RESOLUTION_STATUSES.includes(it.status)) return false;
+      if (s.statusFilter === 'resolved' && !this.RESOLUTION_STATUSES.includes(it.status)) return false;
       return true;
     });
 
@@ -4074,8 +4087,19 @@ class Component extends DCLogic {
         { value: '', label: 'All' },
         { value: 'not_active', label: 'License found, name matches, not active (incl. lapsed after verification)' },
       ],
-      hasAnyFilterActive: !!(s.nameFilter.trim() || s.itemIdFilter.trim() || s.typeFilter || s.findingFilter),
-      clearFilters: () => this.setState({ nameFilter: '', itemIdFilter: '', typeFilter: '', findingFilter: '' }),
+      // Status/stage filter: lets staff see what's actually active without wading through already-resolved
+      // items, the goal that motivated adding this. 'open'/'resolved' are derived from the SAME
+      // RESOLUTION_STATUSES list the "Next unresolved" navigation and the resolution-status dropdown
+      // already use — one definition of what counts as resolved, not a second copy of that list.
+      statusFilter: s.statusFilter,
+      setStatusFilter: (e) => this.setState({ statusFilter: e.target.value }),
+      statusFilterOptions: [
+        { value: '', label: 'All statuses' },
+        { value: 'open', label: 'Open (not yet resolved)' },
+        { value: 'resolved', label: 'Resolved' },
+      ],
+      hasAnyFilterActive: !!(s.nameFilter.trim() || s.itemIdFilter.trim() || s.typeFilter || s.findingFilter || s.statusFilter),
+      clearFilters: () => this.setState({ nameFilter: '', itemIdFilter: '', typeFilter: '', findingFilter: '', statusFilter: '' }),
       filteredEmpty: scoped.length === 0 && scopedAll.length > 0,
 
       arrowId: arrow('id'), arrowCandidate: arrow('candidateName'), arrowType: arrow('type'), arrowReceived: arrow('received'), arrowDesired: arrow('desired'),
@@ -4324,7 +4348,13 @@ class Component extends DCLogic {
       acResultFailed: !!(s.automatedCheckLastResult && s.automatedCheckLastResult.failed),
 
       detailAssignedTo: selected ? selected.assignedTo : '',
-      detailNote: selected ? selected.note : '',
+      // Item bleed via "Next unresolved" (root-caused live): unlike detailInternalNote just below, this had no
+      // `|| ''` fallback. A freshly-selected item whose note column is still null/undefined evaluated to
+      // undefined here, and the template binding leaves an existing <textarea>'s displayed text alone rather
+      // than clearing it when the bound value is undefined (it does clear it for an explicit ''), so the
+      // PREVIOUS item's note stayed visibly on screen until something else forced a real value through.
+      // Matching detailInternalNote's own `|| ''` is the fix -- same field shape, same navigation path.
+      detailNote: selected ? (selected.note || '') : '',
       statusOptions: this.STATUS_OPTIONS,
       currentStatusLabel: selected ? selected.status : '',
       statusConfirmOpen: s.statusConfirmOpen,
