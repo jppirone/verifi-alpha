@@ -1838,9 +1838,19 @@ function mergeBoundaryContinuations(extraction: ExtractionResult): ExtractionRes
     if (!heading || !content || norm(heading) !== norm(content)) { rescuedFreeform.push(f); continue; }
     const itemPage = pageOf(f.position);
     if (itemPage === null) { rescuedFreeform.push(f); continue; }
+    // Bug fixed here (2026-09-25, found in the SAME live re-verification round that found the need
+    // for this rescue at all — a live run showed the rescue simply never firing): this used to just
+    // grab the LAST certification in the whole document by array position, not the one immediately
+    // BEFORE this freeform item — on a document whose certifications continue past the rescued item
+    // (e.g. a later "Professional Certifications" list on a following page), that's a certification
+    // positioned AFTER f, not before it, so the page-adjacency check below could never pass and the
+    // rescue silently never fired. Correct version: the certification with the highest position that
+    // is still strictly less than this freeform item's own position — the one it's actually
+    // page-adjacent to, if any.
     let prevCert: (typeof certifications)[number] | undefined;
-    for (let j = certifications.length - 1; j >= 0; j--) {
-      if (certPageOf(certifications[j]) !== null) { prevCert = certifications[j]; break; }
+    for (const c of certifications) {
+      if (typeof c.position !== "number" || typeof f.position !== "number" || c.position >= f.position) continue;
+      if (!prevCert || (c.position as number) > (prevCert.position as number)) prevCert = c;
     }
     const prevPage = prevCert ? certPageOf(prevCert) : null;
     const prevHeading = prevCert ? (prevCert.heading || "").trim() : "";
@@ -1919,24 +1929,59 @@ function splitCrossPageSkills(pages: Array<{ pageNumber: number; extraction: Ext
   secondaryFreeform: Array<{ section_type: string; heading: string; content: string; position?: number }>;
 } {
   let establishedHeading: string | null = null;
+  let lastPrimaryPage: number | null = null;
+  let lastSecondaryHeading: string | null = null;
+  let lastSecondaryPage: number | null = null;
   const primary: string[] = [];
   const secondaryFreeform: Array<{ section_type: string; heading: string; content: string; position?: number }> = [];
   for (const { pageNumber, extraction } of pages) {
     if (!extraction.skills.length) continue;
     const pageHeading = cleanHeading(extraction.skills_heading);
+    const push = (heading: string) => secondaryFreeform.push({
+      section_type: "needs_review",
+      heading,
+      content: extraction.skills.join("\n"),
+      position: typeof extraction.skills_position === "number" ? globalizePosition(pageNumber, extraction.skills_position) ?? undefined : undefined,
+    });
     if (establishedHeading === null) {
       establishedHeading = pageHeading; // may itself be "" (no heading at all) — still establishes the block
       primary.push(...extraction.skills);
-    } else if (!pageHeading || pageHeading === establishedHeading) {
-      primary.push(...extraction.skills); // headerless continuation, or the same heading repeated: genuine continuation
-    } else {
-      secondaryFreeform.push({
-        section_type: "needs_review",
-        heading: pageHeading,
-        content: extraction.skills.join("\n"),
-        position: typeof extraction.skills_position === "number" ? globalizePosition(pageNumber, extraction.skills_position) ?? undefined : undefined,
-      });
+      lastPrimaryPage = pageNumber;
+      continue;
     }
+    const looksLikePrimary = !pageHeading || pageHeading === establishedHeading;
+    if (looksLikePrimary) {
+      // Gap #16h fix, round 2 (2026-09-25, found live re-verifying the round-1 fixes against the
+      // ACTUAL generated PDF a second time): a page's trailing skills block can wrongly report the
+      // document's PRIMARY heading (e.g. "CORE COMPETENCIES") even when it's really continuing a
+      // DIFFERENT, already-established SECONDARY skills-shaped section (e.g. "WORKPLACE STRENGTHS")
+      // from the immediately preceding page — the same "hint built correctly, not always obeyed"
+      // failure already confirmed for certifications and work_history, just showing up here as a
+      // heading matching an EARLIER real heading instead of a self-referential one, so the earlier
+      // fixes' "does it match its own name" tell doesn't apply. Reproduced live: 2 trailing
+      // "WORKPLACE STRENGTHS" items on the document's last page came back with skills_heading ===
+      // the document's primary "CORE COMPETENCIES" heading, silently absorbed into Core Competencies
+      // instead of joining Workplace Strengths. Page adjacency is the deterministic tell: a page
+      // reporting the primary heading is genuinely continuing primary only when it's page-adjacent to
+      // primary's own last contributing page; when it's instead page-adjacent to a PENDING secondary
+      // section's last page (and not also adjacent to primary's), it's that secondary section's real
+      // continuation, mislabeled. Only reroutes on this specific adjacency mismatch — an ordinary
+      // multi-page primary block (adjacent to itself, no secondary in progress, or ambiguous) is
+      // completely unaffected.
+      const adjacentToSecondary = lastSecondaryPage !== null && pageNumber === lastSecondaryPage + 1;
+      const adjacentToPrimary = lastPrimaryPage !== null && pageNumber === lastPrimaryPage + 1;
+      if (adjacentToSecondary && !adjacentToPrimary && lastSecondaryHeading) {
+        push(lastSecondaryHeading);
+        lastSecondaryPage = pageNumber;
+        continue;
+      }
+      primary.push(...extraction.skills); // headerless continuation, or the same heading repeated: genuine continuation
+      lastPrimaryPage = pageNumber;
+      continue;
+    }
+    push(pageHeading);
+    lastSecondaryHeading = pageHeading;
+    lastSecondaryPage = pageNumber;
   }
   // Same value primary's own establishing page used, so the two can never disagree — kept in step
   // with the pre-existing "first page that reported one" intent, just sourced from the single pass
