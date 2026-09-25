@@ -148,6 +148,96 @@ function cleanName(v: unknown, min: number, max: number): string | null {
   return t.length >= min && t.length <= max ? t : null;
 }
 
+// ---- candidate name/contact matching, DUPLICATED from check-existence/index.ts for request_comparison_direct
+// below (see that action's own header for why this is a duplicate, not a shared import). Kept byte-for-byte
+// identical to check-existence's own copy except for the _local suffix on the two entry points, so the two
+// stay easy to diff against each other if one is ever changed. ----
+const NAME_SUFFIXES = new Set(["JR", "SR", "II", "III", "IV", "MD", "PHD", "ESQ"]);
+const NAME_TITLES = new Set(["MR", "MRS", "MS", "MISS", "DR", "PROF"]);
+const NICKNAME_GROUPS: string[][] = [
+  ["WILLIAM", "BILL", "WILL", "BILLY", "WILLY"], ["ROBERT", "BOB", "ROB", "BOBBY", "ROBBIE"],
+  ["RICHARD", "RICK", "RICH", "DICK", "RICKY"], ["JAMES", "JIM", "JIMMY", "JAMIE"],
+  ["JOHN", "JON", "JACK", "JOHNNY"], ["MICHAEL", "MIKE", "MICKEY"],
+  ["ELIZABETH", "LIZ", "BETH", "BETSY", "LIZZIE", "ELIZA", "BETTY"],
+  ["KATHERINE", "KATHRYN", "CATHERINE", "KATE", "KATIE", "KATHY", "CATHY", "KAT"],
+  ["MARGARET", "MAGGIE", "PEGGY", "MEG", "MARGE"], ["THOMAS", "TOM", "TOMMY"],
+  ["CHARLES", "CHUCK", "CHARLIE", "CHAS"], ["JOSEPH", "JOE", "JOEY"], ["DANIEL", "DAN", "DANNY"],
+  ["MATTHEW", "MATT"], ["ANTHONY", "TONY"], ["CHRISTOPHER", "CHRIS", "KIT"], ["JENNIFER", "JEN", "JENNY"],
+  ["PATRICIA", "PAT", "PATTY", "TRISH"], ["DEBORAH", "DEBRA", "DEB", "DEBBIE"], ["STEPHEN", "STEVEN", "STEVE"],
+  ["ANDREW", "ANDY", "DREW"], ["EDWARD", "ED", "EDDIE", "TED", "NED"], ["NICHOLAS", "NICK", "NICKY"],
+  ["SAMUEL", "SAM", "SAMMY"], ["BENJAMIN", "BEN", "BENNY"], ["ALEXANDER", "ALEX", "SANDY"],
+  ["JONATHAN", "JON", "JONNY"], ["TIMOTHY", "TIM", "TIMMY"], ["DAVID", "DAVE", "DAVEY"],
+  ["SUSAN", "SUE", "SUSIE"], ["REBECCA", "BECKY", "BECCA"], ["VICTORIA", "VICKY", "VIC"],
+  ["JESSICA", "JESS", "JESSIE"], ["THEODORE", "TED", "THEO"], ["LAWRENCE", "LARRY"],
+  ["RONALD", "RON", "RONNIE"], ["DONALD", "DON", "DONNIE"], ["KENNETH", "KEN", "KENNY"],
+  ["GREGORY", "GREG"], ["PHILIP", "PHILLIP", "PHIL"], ["FREDERICK", "FRED", "FREDDIE"],
+  ["ABIGAIL", "ABBY"], ["MARJORIE", "MARJORY", "MARGE", "MARGIE"], ["AMANDA", "MANDY"], ["SAMANTHA", "SAM"],
+];
+const NICKNAME_INDEX = new Map<string, number[]>();
+NICKNAME_GROUPS.forEach((g, i) => g.forEach((n) => NICKNAME_INDEX.set(n, [...(NICKNAME_INDEX.get(n) || []), i])));
+
+function nameTokensLocal(s: string): string[] {
+  return String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase()
+    .replace(/[-.'’,]/g, " ").replace(/[^A-Z0-9 ]/g, "")
+    .split(/\s+/).filter((t) => t && !NAME_SUFFIXES.has(t) && !NAME_TITLES.has(t));
+}
+function editDistanceLocal(a: string, b: string): number {
+  const dp: number[] = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = dp[0]; dp[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const tmp = dp[j];
+      dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = tmp;
+    }
+  }
+  return dp[b.length];
+}
+function lastNamesMatchLocal(a: string, b: string): boolean {
+  if (a === b) return true;
+  const m = Math.min(a.length, b.length);
+  const allowed = m >= 8 ? 2 : m >= 5 ? 1 : 0;
+  return allowed > 0 && editDistanceLocal(a, b) <= allowed;
+}
+function firstNamesMatchLocal(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (a.length === 1 || b.length === 1) return a[0] === b[0];
+  const ga = NICKNAME_INDEX.get(a), gb = NICKNAME_INDEX.get(b);
+  if (ga && gb && ga.some((g) => gb.includes(g))) return true;
+  const m = Math.min(a.length, b.length);
+  if (m >= 3 && (a.startsWith(b) || b.startsWith(a))) return true;
+  return m >= 4 && editDistanceLocal(a, b) <= (m >= 7 ? 2 : 1);
+}
+function namesMatchLocal(typed: string, first: string | null, last: string | null, full: string | null): boolean {
+  const commaParts = String(typed || "").split(",");
+  const t = nameTokensLocal(commaParts.length === 2 ? `${commaParts[1]} ${commaParts[0]}` : typed);
+  if (t.length < 2) return false;
+  let F = nameTokensLocal(first || ""), L = nameTokensLocal(last || "");
+  if (!F.length || !L.length) {
+    const f = nameTokensLocal(full || "");
+    if (f.length >= 2) { F = [f[0]]; L = f.slice(1); }
+  }
+  if (!F.length || !L.length) return false;
+  const lastKey = L.join("");
+  const candFirst = [F.join(""), F[0]];
+  for (let k = 1; k <= Math.min(3, t.length - 1); k++) {
+    if (!lastNamesMatchLocal(t.slice(t.length - k).join(""), lastKey)) continue;
+    const typedFirstTokens = t.slice(0, t.length - k);
+    const typedFirst = [typedFirstTokens.join(""), typedFirstTokens[0]];
+    for (const a of typedFirst) for (const b of candFirst) if (firstNamesMatchLocal(a, b)) return true;
+  }
+  return false;
+}
+function digitsOfLocal(s: string | null | undefined): string {
+  return String(s || "").replace(/\D/g, "");
+}
+function phonesMatchLocal(typedDigits: string, stored: string | null): boolean {
+  const y = digitsOfLocal(stored);
+  if (typedDigits.length < 10 || y.length < 10) return false;
+  return typedDigits.slice(-10) === y.slice(-10);
+}
+
 const OPEN_ANSWER_STATUS_NOTE = "not_authorized";
 // What an employer is told about a request. A candidate's decline, a timeout and a deactivation are one and the same outcome.
 function employerStatus(r: any, hasSnapshot: boolean): string {
@@ -562,6 +652,9 @@ const ACTIONS: Record<string, Action> = {
         if (res.reason === "subscription_required") return fail(402, (await hasPaymentProblem(user.org_id!)) ? "payment_problem" : "subscription_required");
         if (res.reason === "rate_limited") return fail(429, "rate_limited");
         if (res.reason === "already_open") return fail(409, "already_requested", { request_id: res.request_id });
+        // Gap #22: existence is already known on this lookup-first path, so this is told apart from the
+        // generic "unavailable" below -- see create_comparison_request's own header.
+        if (res.reason === "comparison_not_allowed") return fail(409, "not_accepting");
         return fail(409, "unavailable");
       }
       // Tell the candidate. Never fails the request: the candidate function's sweep retries an unsent notice.
@@ -714,6 +807,9 @@ const ACTIONS: Record<string, Action> = {
         if (res.reason === "document_invalid") return fail(400, "document_invalid");
         if (res.reason === "rate_limited") return fail(429, "rate_limited");
         if (res.reason === "already_open") return fail(409, "already_requested", { request_id: res.request_id });
+        // Gap #22: existence is already known on this lookup-first path, so this is told apart from the
+        // generic "unavailable" below -- see create_comparison_request's own header.
+        if (res.reason === "comparison_not_allowed") return fail(409, "not_accepting");
         return fail(409, "unavailable");
       }
       let notified = false;
@@ -846,6 +942,136 @@ const ACTIONS: Record<string, Action> = {
       if (genJson && genJson.ok) generatedDocument = genJson.resume;
 
       return ok({ content: liveJson.content, assembled_at: liveJson.assembled_at, window_ends_at: res.window_ends_at, first_open: !!res.first_open, document, generated_document: generatedDocument });
+    },
+  },
+
+  // Gap #22 (2026-09-26): "Allow comparison requests" split off from "Allow lookup" (discoverable). Before this,
+  // create_comparison_request hard-required a prior successful check-existence lookup ROW, which meant a
+  // candidate with Lookup off could never be reached for a comparison request either, even if they had
+  // separately turned Comparison ON -- the two were really one setting wearing two names. This action removes
+  // that dependency: it takes the candidate's identity directly (name + email/phone, exactly what check-
+  // existence's own form collects) and does its own matching, in this same call, WITHOUT requiring
+  // discoverable = true -- the whole point being that Lookup=off must not block Comparison=on.
+  //
+  // NO ORACLE, extended to a THIRD outcome. check-existence has two: exists / does-not-exist, byte-identical
+  // either way except for the flag. This has three, and the hardening is in which ones are told apart:
+  //   * no match at all                                      -> 'not_found'
+  //   * match, but allow_comparison_requests = false:
+  //       - discoverable = true  (already knowable via lookup)   -> 'not_accepting' (an honest, DIFFERENT answer)
+  //       - discoverable = false (would be a NEW leak)            -> 'not_found' (byte-identical to no-match)
+  //   * match, allow_comparison_requests = true                -> the request is created; 'sent' either way,
+  //     regardless of discoverable, so a signed-in employer's own submission acknowledgment never itself
+  //     reveals existence -- only the candidate's own later approve/decline can do that (Lookup=off, Comparison=on
+  //     is the candidate's own opt-in to exactly that).
+  //
+  // The matching logic (fuzzy name/nickname/typo matching, contact matching) is intentionally a DUPLICATE of
+  // check-existence's own copy, not a shared import -- matching this project's standing convention that every
+  // edge function's helpers are self-contained (see captureGuestHoldLocal above, or verify-co-*'s socrata.ts).
+  // check-existence itself is NOT modified by this change and keeps requiring discoverable = true, unchanged.
+  request_comparison_direct: {
+    access: "any",
+    run: async ({ user, org, p }) => {
+      const candidateName = cleanName(p.candidate_name, 2, 160) || "";
+      const candidateEmail = typeof p.candidate_email === "string" ? p.candidate_email.trim().slice(0, 254) : "";
+      const candidatePhoneRaw = typeof p.candidate_phone === "string" ? p.candidate_phone.trim().slice(0, 40) : "";
+      const requesterCompany = typeof p.requester_company === "string" ? p.requester_company.trim().slice(0, 160) : "";
+      const attestation = typeof p.attestation === "string" ? p.attestation : "";
+      const documentId = typeof p.document_id === "string" && UUID.test(p.document_id) ? p.document_id : null;
+
+      if (candidateName.split(/\s+/).filter(Boolean).length < 2) return fail(400, "candidate_name_required");
+      const phoneDigits = candidatePhoneRaw.replace(/\D/g, "");
+      if (!candidateEmail && phoneDigits.length < 10) return fail(400, "candidate_contact_required");
+      if (candidateEmail && !EMAIL.test(candidateEmail)) return fail(400, "candidate_email_invalid");
+
+      // Rate limit + attempt log, same table and same shape check-existence's own session path uses (5/hour
+      // per requester address) -- this reuses that table deliberately, as the generic "an employer attempted
+      // to find a candidate by these identity fields" record it already is, not a new tracking table.
+      const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const recent = await rows(`employer_lookup_requests?requester_email=eq.${encodeURIComponent(user.email)}&created_at=gte.${encodeURIComponent(since)}&select=id`);
+      if (!recent) return fail(500, "request_failed");
+      if (recent.length >= 5) return fail(429, "rate_limited");
+
+      const insRes = await rest("employer_lookup_requests", {
+        method: "POST", headers: { "Prefer": "return=representation" },
+        body: JSON.stringify({
+          token: crypto.randomUUID(), requester_email: user.email, requester_name: user.name || user.email,
+          requester_company: requesterCompany || null, candidate_name: candidateName, candidate_email: candidateEmail || null,
+          candidate_phone: candidatePhoneRaw || null, expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+        }),
+      });
+      if (!insRes.ok) return fail(500, "request_failed");
+      const staged = (await insRes.json())?.[0];
+      if (!staged) return fail(500, "request_failed");
+
+      // ---- matching (duplicated from check-existence, discoverable NOT required here -- see header above) ----
+      const emailTyped = candidateEmail.toLowerCase();
+      const phoneTyped = phoneDigits;
+      const hasEmail = emailTyped.length > 0;
+      const hasPhone = phoneTyped.length >= 10;
+      let candidates: any[] = [];
+      if (hasEmail || hasPhone) {
+        const cols = "id,email,phone,first_name,last_name,full_name,discoverable,allow_comparison_requests,deletion_scheduled_at,account_type";
+        const filter = hasEmail
+          ? `email=ilike.${encodeURIComponent(emailTyped.replace(/[*%]/g, ""))}&limit=10`
+          : `phone=ilike.${encodeURIComponent("*" + phoneTyped.slice(-4) + "*")}&limit=50`;
+        const cRes = await rest(`candidates?select=${cols}&${filter}`);
+        if (!cRes.ok) return fail(500, "request_failed");
+        candidates = await cRes.json();
+      }
+      const matched = candidates.find((c) =>
+        (!hasEmail || String(c.email || "").trim().toLowerCase() === emailTyped) &&
+        (!hasPhone || phonesMatchLocal(phoneTyped, c.phone)) &&
+        !c.deletion_scheduled_at &&
+        namesMatchLocal(candidateName, c.first_name, c.last_name, c.full_name)
+      ) || null;
+
+      // ---- burn the staged row (same conditional-update shape as check-existence's own burn step) ----
+      await rest(`employer_lookup_requests?id=eq.${staged.id}&used_at=is.null`, {
+        method: "PATCH", headers: { "Prefer": "return=minimal" },
+        body: JSON.stringify({
+          used_at: new Date().toISOString(), result_exists: !!matched, matched_candidate_id: matched ? matched.id : null,
+          candidate_label: matched ? candidateName.slice(0, 120) : null,
+          candidate_name: null, candidate_email: null, candidate_phone: null,
+        }),
+      }).catch(() => {});
+
+      if (!matched || matched.allow_comparison_requests !== true) {
+        if (matched && matched.discoverable === true) return ok({ outcome: "not_accepting" });
+        return ok({ outcome: "not_found" });
+      }
+
+      // ---- eligible: create the request exactly like request_comparison / request_comparison_paid do today ----
+      const useOrg = !!org && await (async () => !!(await rows(`employer_org_subscriptions?org_id=eq.${org.id}&status=in.(active,trialing)&select=id&limit=1`))?.length)();
+      const method = useOrg ? "org" : "guest";
+      const r = await rest("rpc/create_comparison_request_direct", {
+        method: "POST",
+        body: JSON.stringify({
+          p_candidate_id: matched.id, p_method: method, p_employer_user: user.id, p_attestation: attestation,
+          p_document_id: documentId, p_lookup_id: staged.id, p_requester_company: requesterCompany || null,
+        }),
+      });
+      if (!r.ok) return fail(500, "request_failed");
+      const res = (await r.json())?.[0];
+      if (!res) return fail(500, "request_failed");
+      if (!res.ok) {
+        if (res.reason === "attestation_invalid") return fail(400, "attestation_invalid");
+        if (res.reason === "document_required") return fail(400, "document_required");
+        if (res.reason === "document_invalid") return fail(400, "document_invalid");
+        if (res.reason === "rate_limited") return fail(429, "rate_limited");
+        if (res.reason === "subscription_required") return fail(402, "subscription_required");
+        if (res.reason === "already_open") return fail(409, "already_requested", { request_id: res.request_id });
+        return fail(409, "unavailable");
+      }
+      let notified = false;
+      try {
+        const n = await fetch(`${SUPABASE_URL}/functions/v1/candidate-comparison-requests`, {
+          method: "POST", headers: { "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "notify_candidate", request_id: res.request_id }),
+        });
+        notified = n.ok && (await n.json().catch(() => ({})))?.sent === true;
+      } catch (_e) { /* the sweep retries */ }
+      // Neutral, regardless of discoverable -- see header above.
+      return ok({ outcome: "sent", request_id: res.request_id, status: "awaiting_candidate", candidate_notified: notified, method });
     },
   },
 };

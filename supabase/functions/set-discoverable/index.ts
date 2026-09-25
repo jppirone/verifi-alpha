@@ -76,12 +76,20 @@ export default {
       const authBody = await req.clone().json().catch(() => ({}));
       const authDenied = await authGateCandidate(req, authBody);
       if (authDenied) return authDenied;
-      const { candidate_id, discoverable } = await req.json();
+      const { candidate_id, discoverable, allow_comparison_requests } = await req.json();
       if (!candidate_id || typeof candidate_id !== "string" || typeof discoverable !== "boolean") {
         return new Response(JSON.stringify({ ok: false, error: "candidate_id and discoverable (boolean) are required" }), {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
+      // Gap #22 (2026-09-26): "Allow lookup" (discoverable, unchanged) and "Allow comparison requests"
+      // (allow_comparison_requests, new) are two independent settings, but ONE save call for both, so the
+      // three screens that show them (candidate.html's tiers screen, Personal Info, Activity) all write
+      // through the exact same path -- no second endpoint to drift out of sync with this one. A caller may
+      // patch either field alone (only discoverable is required, matching every existing call site that has
+      // never known about the second field) or both together.
+      const patch: Record<string, boolean> = { discoverable };
+      if (typeof allow_comparison_requests === "boolean") patch.allow_comparison_requests = allow_comparison_requests;
 
       const res = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${encodeURIComponent(candidate_id)}`, {
         method: "PATCH",
@@ -91,7 +99,7 @@ export default {
           "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
           "Prefer": "return=representation",
         },
-        body: JSON.stringify({ discoverable }),
+        body: JSON.stringify(patch),
       });
       if (!res.ok) {
         const detail = await res.text();
@@ -106,7 +114,7 @@ export default {
         });
       }
 
-      return new Response(JSON.stringify({ ok: true, discoverable: rows[0].discoverable }), {
+      return new Response(JSON.stringify({ ok: true, discoverable: rows[0].discoverable, allow_comparison_requests: rows[0].allow_comparison_requests !== false }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     } catch (e) {

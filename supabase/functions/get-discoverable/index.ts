@@ -77,14 +77,19 @@ export default {
       if (!candidateId || typeof candidateId !== "string" || !/^[0-9a-f-]{36}$/i.test(candidateId)) {
         return json({ ok: false, error: "candidate_id_required" }, 400);
       }
+      // Gap #22 (2026-09-26): allow_comparison_requests returned alongside discoverable in the same call, on
+      // purpose -- one load, one save (set-discoverable), for BOTH settings, read/written identically from
+      // all three screens that show them (candidate.html's tiers screen, Personal Info, Activity). A second
+      // pair of endpoints for the second setting would just recreate the exact drift risk these two are
+      // deliberately built to avoid (see set-discoverable's own header for the two settings' meanings).
       const res = await fetch(
-        `${SUPABASE_URL}/rest/v1/candidates?id=eq.${encodeURIComponent(candidateId)}&select=discoverable`,
+        `${SUPABASE_URL}/rest/v1/candidates?id=eq.${encodeURIComponent(candidateId)}&select=discoverable,allow_comparison_requests`,
         { headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } },
       );
       if (!res.ok) return json({ ok: false, error: "lookup_failed" }, 500);
       const rows = await res.json();
       if (!Array.isArray(rows) || rows.length === 0) return json({ ok: false, error: "candidate_not_found" }, 404);
-      return json({ ok: true, discoverable: rows[0].discoverable === true });
+      return json({ ok: true, discoverable: rows[0].discoverable === true, allow_comparison_requests: rows[0].allow_comparison_requests !== false });
     } catch (_e) {
       return json({ ok: false, error: "lookup_failed" }, 500);
     }

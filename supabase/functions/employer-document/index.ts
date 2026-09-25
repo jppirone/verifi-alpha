@@ -270,6 +270,18 @@ export default {
         const user = (await rows(`employer_users?id=eq.${sess.employer_user_id}&select=id,org_id`))[0];
         if (!user || !user.org_id) return json({ ok: false, error: "forbidden" }, 403);
         uploaderRef = user.id;
+      } else if (mode === "employer") {
+        // Gap #22 (2026-09-26): the direct-request path (request_comparison_direct, employer-api.ts) has no
+        // employer_lookup_requests row to prove ownership by (that is the whole point -- it is not reached
+        // via any prior lookup). Same session-based identity as 'org' above, minus the org_id requirement,
+        // since a pay-per-use (no-org) employer must be able to use this path too.
+        const raw = String(fd.get("session_token") || "");
+        if (!raw || raw.length > 200) return json({ ok: false, error: "invalid_session" }, 401);
+        const sess = (await rows(`employer_sessions?token_hash=eq.${await sha256Hex(raw)}&select=employer_user_id,expires_at,revoked_at`))[0];
+        if (!sess || sess.revoked_at || new Date(sess.expires_at) < new Date()) return json({ ok: false, error: "invalid_session" }, 401);
+        const user = (await rows(`employer_users?id=eq.${sess.employer_user_id}&select=id`))[0];
+        if (!user) return json({ ok: false, error: "forbidden" }, 403);
+        uploaderRef = user.id;
       } else if (mode === "guest") {
         const lookupId = String(fd.get("lookup_id") || "");
         const claim = String(fd.get("claim_token") || "");

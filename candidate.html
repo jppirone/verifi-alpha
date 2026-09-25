@@ -3508,6 +3508,14 @@ a:hover{color:var(--color-accent)}
     <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Employers can run a free existence-only check. Leaving this unchecked means any such check returns "no record," identical to what's shown for someone not in our system at all.</div>
     <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6;border-top:1px solid var(--color-divider);padding-top:var(--space-3)">When enabled, an employer who already has your name and either the email address or the phone number you signed up with can confirm that you have an account here, and nothing else about you. The name has to match too. Deactivating your account also turns this off.</div>
   </div>
+  <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+    <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;color:var(--color-neutral-300);cursor:pointer">
+      <input type="checkbox" checked="{{ allowComparisonRequests }}" disabled="{{ discoverableLoading }}" sc-camel-on-change="{{ toggleAllowComparisonRequests }}" style="margin-top:2px">
+      <span>Let an employer who already has my resume ask to compare it</span>
+    </label>
+    <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">This is a separate setting from the one above. An employer who already has your resume or application (from applying, a recruiter, and so on) can send a comparison request even if the box above is off. Leaving this on means that if you approve or decline their request, that action itself tells them you have an account here -- the free existence check above stays off, but this is its own, later way for the same thing to become knowable, and only because you chose to allow the request in the first place.</div>
+    <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6;border-top:1px solid var(--color-divider);padding-top:var(--space-3)">Turning this off means any such request is refused before it ever reaches you, with no record of an account either way -- the employer sees the same thing as someone not in our system at all.</div>
+  </div>
   <sc-if value="{{ noTierChosen }}" hint-placeholder-val="{{ true }}">
     <button type="button" class="btn btn-primary btn-block" disabled="disabled">Continue</button>
   </sc-if>
@@ -4131,17 +4139,25 @@ a:hover{color:var(--color-accent)}
           </div>
         </div>
 
-        <sc-if value="{{ isLicenseOnlyAccount }}" hint-placeholder-val="{{ false }}">
+        <!-- Gap #22 (2026-09-26): widened from license_only-only to every account type -- a full_resume
+             candidate previously had NO way to see or change either setting except at signup (the tiers
+             screen), which they might never revisit. Both toggles now render and save identically here
+             regardless of account type, and identically again on the Activity tab below. -->
         <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
-          <div class="card-kicker">Employer lookups</div>
+          <div class="card-kicker">Employer access</div>
           <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;color:var(--color-neutral-300);cursor:pointer">
             <input type="checkbox" checked="{{ discoverable }}" disabled="{{ discoverableProfileDisabled }}" sc-camel-on-change="{{ toggleDiscoverableProfile }}" style="margin-top:2px">
             <span>Let employers confirm I have an account here</span>
           </label>
           <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Employers can run a free existence-only check. Leaving this unchecked means any such check returns "no record," identical to what's shown for someone not in our system at all.</div>
-          <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6;border-top:1px solid var(--color-divider);padding-top:var(--space-3)">When enabled, an employer who already has your name and either the email address or the phone number you signed up with can confirm that you have an account here, and nothing else about you. The name has to match too. Deactivating your account also turns this off. Each time an employer confirms a lookup that matches you, it is listed on your Activity tab.</div>
+          <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">When enabled, an employer who already has your name and either the email address or the phone number you signed up with can confirm that you have an account here, and nothing else about you. The name has to match too. Deactivating your account also turns this off. Each time an employer confirms a lookup that matches you, it is listed on your Activity tab.</div>
+          <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;color:var(--color-neutral-300);cursor:pointer;border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
+            <input type="checkbox" checked="{{ allowComparisonRequests }}" disabled="{{ discoverableProfileDisabled }}" sc-camel-on-change="{{ toggleAllowComparisonRequestsProfile }}" style="margin-top:2px">
+            <span>Let an employer who already has my resume ask to compare it</span>
+          </label>
+          <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">A separate setting from the one above. An employer who already has your resume or application can send a comparison request even with the box above off. If you leave this on and later approve or decline their request, that action itself tells them you have an account here -- a later, separate way for that to become knowable, and only because you chose to allow the request. Turning it off refuses any such request before it reaches you, with no record either way.</div>
           <sc-if value="{{ discoverableProfileLoadFailed }}" hint-placeholder-val="{{ false }}">
-            <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">We couldn't load your saved choice, so this is locked rather than showing a guess. Refresh the page to try again.</div>
+            <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">We couldn't load your saved choices, so both are locked rather than showing a guess. Refresh the page to try again.</div>
           </sc-if>
           <sc-if value="{{ discoverableProfileError }}" hint-placeholder-val="{{ false }}">
             <div style="font-size:12px;color:#e2735c">{{ discoverableProfileError }}</div>
@@ -4150,7 +4166,6 @@ a:hover{color:var(--color-accent)}
             <div style="font-size:12px;color:var(--color-accent-300)">Saved.</div>
           </sc-if>
         </div>
-        </sc-if>
 
         <!-- Item 6 (2026-09-12 live-testing session, follow-up build): the one real, explicit
              all-or-nothing choice for what header (name/contact/location) renders on generated
@@ -5194,6 +5209,31 @@ a:hover{color:var(--color-accent)}
       </sc-if>
     </sc-if>
     <sc-if value="{{ tabIsActivity }}" hint-placeholder-val="{{ false }}">
+      <!-- Gap #22 (2026-09-26): the third of the two toggles' three identical render sites (tiers, Profile/
+           Personal Info above, here). Same state, same handlers, same save path -- see toggleDiscoverableProfile/
+           toggleAllowComparisonRequestsProfile's own comments. -->
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3);margin-bottom:var(--space-5)">
+        <div class="card-kicker">Employer access</div>
+        <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;color:var(--color-neutral-300);cursor:pointer">
+          <input type="checkbox" checked="{{ discoverable }}" disabled="{{ discoverableProfileDisabled }}" sc-camel-on-change="{{ toggleDiscoverableProfile }}" style="margin-top:2px">
+          <span>Let employers confirm I have an account here</span>
+        </label>
+        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Employers can run a free existence-only check. Leaving this unchecked means any such check returns "no record," identical to what's shown for someone not in our system at all.</div>
+        <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;color:var(--color-neutral-300);cursor:pointer;border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
+          <input type="checkbox" checked="{{ allowComparisonRequests }}" disabled="{{ discoverableProfileDisabled }}" sc-camel-on-change="{{ toggleAllowComparisonRequestsProfile }}" style="margin-top:2px">
+          <span>Let an employer who already has my resume ask to compare it</span>
+        </label>
+        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">A separate setting. An employer who already has your resume can send a comparison request even with the box above off; if you leave this on and later approve or decline their request, that action itself tells them you have an account here.</div>
+        <sc-if value="{{ discoverableProfileLoadFailed }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">We couldn't load your saved choices, so both are locked rather than showing a guess. Refresh the page to try again.</div>
+        </sc-if>
+        <sc-if value="{{ discoverableProfileError }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:#e2735c">{{ discoverableProfileError }}</div>
+        </sc-if>
+        <sc-if value="{{ discoverableProfileSaved }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:var(--color-accent-300)">Saved.</div>
+        </sc-if>
+      </div>
       <sc-if value="{{ isLicenseOnlyAccount }}" hint-placeholder-val="{{ false }}">
       <div style="display:flex;flex-direction:column;gap:var(--space-4)">
         <div id="license-requests" style="display:flex;flex-direction:column;gap:var(--space-4);border-bottom:1px solid var(--color-divider);padding-bottom:var(--space-5)">
@@ -7694,7 +7734,13 @@ class Component extends DCLogic {
     // for; discoverableTouchedFor is the candidate id whose toggle the user actually changed on this page
     // load. Nothing writes the flag back to the server unless it was loaded or touched.
     discoverableLoadedFor: null, discoverableFailedFor: null, discoverableLoading: false, discoverableTouchedFor: null,
-    // Personal Info (license_only) toggle: saves the moment it changes.
+    // Gap #22 (2026-09-26): "Allow comparison requests" -- independent from discoverable ("Allow lookup")
+    // above, but loaded/saved together (ensureDiscoverableLoaded / set-discoverable both carry both fields
+    // in one call) and sharing the same loaded/failed/touched tracking, since both toggles sit on the same
+    // three screens and race the same way. Default true (matches the column default): a comparison request
+    // has never had an opt-out before this, so an unloaded value must not look like a new block.
+    allowComparisonRequests: true,
+    // Personal Info toggle: saves the moment it changes.
     discoverableProfileSaving: false, discoverableProfileSaved: false, discoverableProfileError: null,
     // license_only Activity tab: real server data (list-candidate-activity), reloaded each time the tab opens.
     licenseActivity: [], licenseActivityLoading: false, licenseActivityError: false, licenseActivityLoadedFor: null,
@@ -8253,7 +8299,10 @@ class Component extends DCLogic {
       this.recheckStaleTierSelection();
     }
     this._lastAccountTab = tabNow;
-    if (this.state.screen === 'tiers' || this.isLicenseProfileTabOpen()) this.ensureDiscoverableLoaded();
+    // Gap #22: widened from license_only's Personal Info tab alone to every screen that shows either privacy
+    // toggle -- the tiers/signup interstitial (both account types), Profile/Personal Info (both account
+    // types, no longer license_only-only), and the new Activity-tab card.
+    if (this.state.screen === 'tiers' || (this.state.screen === 'account' && (this.state.accountTab === 'profile' || this.state.accountTab === 'activity'))) this.ensureDiscoverableLoaded();
     if (this.state.screen === 'account') this.ensureFeedPauseLoaded();
     if (this.state.screen === 'account' && this.state.accountType === 'full_resume' && this.state.resumeCandidateId && this.state.czLoadedFor !== this.state.resumeCandidateId && !this.state.czLoading && this._czAutoTried !== this.state.resumeCandidateId) {
       this._czAutoTried = this.state.resumeCandidateId;
@@ -9191,30 +9240,37 @@ class Component extends DCLogic {
     return s.screen === 'account' && s.accountType === 'license_only' && s.accountTab === 'profile';
   }
 
-  // Personal Info toggle (license_only): saves the moment it changes, and puts the box back if the save
-  // fails so it never shows a value the server doesn't hold.
-  async toggleDiscoverableProfile(checked) {
+  // Instant-save toggle for EITHER privacy setting, shared by every instant-save render site (Personal/Profile
+  // Info, Activity) so there is one save path, not one per screen -- Gap #22's whole point. Sends BOTH
+  // current values every time (set-discoverable's own convention): touching one setting never risks
+  // silently reverting the other to a stale client-side copy. Puts the box back if the save fails, so it
+  // never shows a value the server doesn't hold.
+  async savePrivacySetting(field, checked) {
     const s = this.state;
     const id = s.resumeCandidateId;
     if (!id || s.discoverableProfileSaving || s.discoverableLoadedFor !== id) return;
-    const previous = s.discoverable;
-    this.setState({ discoverable: checked, discoverableProfileSaving: true, discoverableProfileError: null, discoverableProfileSaved: false });
+    const previous = s[field];
+    const nextDiscoverable = field === 'discoverable' ? checked : s.discoverable;
+    const nextAllow = field === 'allowComparisonRequests' ? checked : s.allowComparisonRequests;
+    this.setState({ [field]: checked, discoverableProfileSaving: true, discoverableProfileError: null, discoverableProfileSaved: false });
     let saved = false;
     try {
       const res = await fetch(this.SUPABASE_FN_URL + '/set-discoverable', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: id, discoverable: checked }),
+        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: id, discoverable: nextDiscoverable, allow_comparison_requests: nextAllow }),
       });
       const data = await res.json().catch(() => ({}));
-      saved = res.ok && !!data.ok && data.discoverable === checked;
+      saved = res.ok && !!data.ok;
     } catch (e) { saved = false; }
     if (!saved) {
-      this.setState({ discoverable: previous, discoverableProfileSaving: false, discoverableProfileError: "We couldn't save that change, so it's back to what it was. Please try again." });
+      this.setState({ [field]: previous, discoverableProfileSaving: false, discoverableProfileError: "We couldn't save that change, so it's back to what it was. Please try again." });
       return;
     }
     this.setState({ discoverableProfileSaving: false, discoverableProfileSaved: true, discoverableProfileError: null });
   }
+  toggleDiscoverableProfile(checked) { return this.savePrivacySetting('discoverable', checked); }
+  toggleAllowComparisonRequestsProfile(checked) { return this.savePrivacySetting('allowComparisonRequests', checked); }
 
   ensureLicenseActivityLoaded(force) {
     const s = this.state;
@@ -9280,7 +9336,7 @@ class Component extends DCLogic {
     const id = s.resumeCandidateId;
     if (!id || s.discoverableLoading || s.discoverableLoadedFor === id || s.discoverableFailedFor === id) return;
     this.setState({ discoverableLoading: true });
-    let value = null;
+    let value = null, value2 = null;
     try {
       const res = await fetch(this.SUPABASE_FN_URL + '/get-discoverable', {
         method: 'POST',
@@ -9288,12 +9344,15 @@ class Component extends DCLogic {
         body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: id }),
       });
       const data = await res.json().catch(() => ({}));
+      // Gap #22: allow_comparison_requests comes back in the same call (see get-discoverable's own header).
       if (res.ok && data.ok && typeof data.discoverable === 'boolean') value = data.discoverable;
+      if (res.ok && data.ok && typeof data.allow_comparison_requests === 'boolean') value2 = data.allow_comparison_requests;
     } catch (e) { value = null; }
     if (value === null) { this.setState({ discoverableLoading: false, discoverableFailedFor: id }); return; }
     this.setState(st => ({
       discoverableLoading: false, discoverableLoadedFor: id,
       discoverable: st.discoverableTouchedFor === id ? st.discoverable : value,
+      allowComparisonRequests: st.discoverableTouchedFor === id ? st.allowComparisonRequests : (value2 === null ? true : value2),
     }));
   }
 
@@ -9338,6 +9397,8 @@ class Component extends DCLogic {
     if (this.state.discoverableSavePending) return;
     // Nothing loaded and nothing touched (the load failed): the box on screen is just the local default, not
     // the candidate's choice, so writing it would be exactly the silent overwrite this guards against.
+    // Gap #22: the same touched flag now covers BOTH toggles on this screen (see its own state comment) --
+    // either one being touched saves the CURRENT value of both, since sending both together is always safe.
     const id = this.state.resumeCandidateId;
     if (this.state.discoverableTouchedFor !== id) { this.setState({ discoverableSaveError: null }); this.advanceFromTiers(); return; }
     this.setState({ discoverableSavePending: true, discoverableSaveError: null });
@@ -9346,7 +9407,7 @@ class Component extends DCLogic {
       const res = await fetch(this.SUPABASE_FN_URL + '/set-discoverable', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: this.state.resumeCandidateId, discoverable: this.state.discoverable }),
+        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: this.state.resumeCandidateId, discoverable: this.state.discoverable, allow_comparison_requests: this.state.allowComparisonRequests }),
       });
       const data = await res.json().catch(() => ({}));
       saved = res.ok && !!data.ok;
@@ -9355,7 +9416,7 @@ class Component extends DCLogic {
     }
     this.setState({ discoverableSavePending: false });
     if (!saved) {
-      this.setState({ discoverableSaveError: "We couldn't save your discoverability preference." });
+      this.setState({ discoverableSaveError: "We couldn't save your privacy settings." });
       return;
     }
     this.setState({ discoverableSaveError: null });
@@ -12327,6 +12388,9 @@ class Component extends DCLogic {
       toggleDiscoverable: (e) => this.setState(st => ({ discoverable: !!e.target.checked, discoverableTouchedFor: st.resumeCandidateId })),
       discoverableLoading: s.discoverableLoading,
       discoverableLoadFailed: !!s.resumeCandidateId && s.discoverableFailedFor === s.resumeCandidateId,
+      // Gap #22: the tiers screen's deferred-save twin of allowComparisonRequests below.
+      allowComparisonRequests: s.allowComparisonRequests,
+      toggleAllowComparisonRequests: (e) => this.setState(st => ({ allowComparisonRequests: !!e.target.checked, discoverableTouchedFor: st.resumeCandidateId })),
       optInWorkHistory: s.optInWorkHistory,
       optInEducation: s.optInEducation,
       optInCertifications: s.optInCertifications,
@@ -12372,12 +12436,14 @@ class Component extends DCLogic {
       kycUnverifiedLicenseOnly: s.accountType === 'license_only' && !s.kycVerified,
       kycUnverifiedFullResume: s.accountType !== 'license_only' && !s.kycVerified,
       verifiedPhoneEditedFullResume: s.accountType !== 'license_only' && s.verifiedPhoneEntry !== s.savedVerifiedPhoneEntry,
-      // Personal Info discoverable toggle (license_only)
+      // Gap #22: the two privacy toggles' shared instant-save state, read/written identically wherever
+      // either one renders (Profile/Personal Info below, and the Activity-tab card).
       discoverableProfileDisabled: s.discoverableLoadedFor !== s.resumeCandidateId || s.discoverableProfileSaving,
       discoverableProfileLoadFailed: !!s.resumeCandidateId && s.discoverableFailedFor === s.resumeCandidateId,
       discoverableProfileError: s.discoverableProfileError,
       discoverableProfileSaved: s.discoverableProfileSaved,
       toggleDiscoverableProfile: (e) => this.toggleDiscoverableProfile(!!e.target.checked),
+      toggleAllowComparisonRequestsProfile: (e) => this.toggleAllowComparisonRequestsProfile(!!e.target.checked),
       // license_only Activity tab
       licActStart: s.licActStart,
       licActEnd: s.licActEnd,

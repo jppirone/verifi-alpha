@@ -251,6 +251,9 @@ export default {
           if (res.reason === "document_invalid") return json({ ok: false, error: "document_invalid" }, 400);
           if (res.reason === "rate_limited") return json({ ok: false, error: "rate_limited" }, 429);
           if (res.reason === "already_open") return json({ ok: false, error: "already_requested" }, 409);
+          // Gap #22: existence is already known on this lookup-first path (create_comparison_request's own
+          // header), so this is told apart from the generic "unavailable" below.
+          if (res.reason === "comparison_not_allowed") return json({ ok: false, error: "not_accepting" }, 409);
           return json({ ok: false, error: "unavailable" }, 409);
         }
         // The claim token has done its one job.

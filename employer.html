@@ -2711,14 +2711,52 @@ const __ds_scope = {};
         <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Required. We send a confirmation link to this address, and the lookup only runs after you click it. Once a record is found you can request it here, and you see the exact terms before anything is sent.</div>
       </sc-if>
       <sc-if value="{{ realSignedIn }}" hint-placeholder-val="{{ true }}">
-        <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Signed in as {{ realEmailLabel }}. No confirmation email is needed; the lookup runs right away. Once a record is found you can request it here, and you see the exact terms before anything is sent.</div>
+        <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Signed in as {{ realEmailLabel }}.</div>
       </sc-if>
     </div>
 
-    <sc-if value="{{ lookupFormError }}" hint-placeholder-val="{{ false }}">
-      <div style="font-size:12px;color:#e2735c;line-height:1.6">{{ lookupFormError }}</div>
+    <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-4)">
+      <div class="card-kicker">Your document</div>
+      <sc-if value="{{ directUsesOrg }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">We'll tell you right away whether this can go through. If the candidate has no account, or isn't accepting requests, nothing is used from your plan and nothing is created. If it does go through, the candidate is asked to approve; opening an approved result uses one lookup from your organization's plan, and a decline or timeout uses none.</div>
+      </sc-if>
+      <sc-if value="{{ directUsesGuest }}" hint-placeholder-val="{{ true }}">
+        <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">We'll tell you right away whether this can go through. If the candidate has no account, or isn't accepting requests, nothing is charged and nothing is created. If it does go through, you'll save your card next (no hold yet); if the candidate approves, we automatically place a hold at that moment, and the real charge only happens when you open the result, any time in the 7 days after their approval.</div>
+      </sc-if>
+      <div class="field">
+        <label for="el-att">How did you obtain this candidate's information?</label>
+        <textarea class="input" id="el-att" rows="3" style="resize:vertical;font-family:var(--font-body);line-height:1.6" value="{{ attestationDraft }}" sc-camel-on-change="{{ setAttestationDraft }}" placeholder="e.g. Applied through LinkedIn on Sep 3; recruiter Jane Smith sent me this resume"></textarea>
+        <div style="font-size:11px;color:var(--color-neutral-500);margin-top:6px;line-height:1.6">Required (10 to 500 characters). Shown to the candidate with your name, company and confirmed email -- only if they have an account and are accepting requests.</div>
+      </div>
+      <div class="field">
+        <label for="el-doc">Your document</label>
+        <input class="input" id="el-doc" type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" sc-camel-on-change="{{ onPickRequestDoc }}">
+        <div style="font-size:11px;color:var(--color-neutral-500);margin-top:6px;line-height:1.6">Required. A PDF, PNG or JPEG of up to 10 MB. We check it for scripts and other active content before it is stored; a file that fails is refused and nothing is kept.</div>
+        <sc-if value="{{ reqDocHasName }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:var(--color-neutral-300);margin-top:6px">Selected: {{ reqDocName }}</div>
+        </sc-if>
+        <sc-if value="{{ reqDocErr }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:#e2735c;margin-top:6px;line-height:1.6">{{ reqDocErr }}</div>
+        </sc-if>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:var(--space-2);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:var(--space-3)">
+        <div style="font-size:13px;color:var(--color-neutral-200);line-height:1.6"><b>Before you upload</b></div>
+        <ul style="margin:0;padding-left:18px;font-size:12px;color:var(--color-neutral-300);line-height:1.7">
+          <li>The candidate will be able to see this exact file, if this goes through.</li>
+          <li>It is stored for 21 days from your request, then deleted.</li>
+          <li>It should be your own copy of the candidate's resume or application, containing nothing about other people.</li>
+        </ul>
+        <label style="display:flex;gap:var(--space-2);align-items:flex-start;font-size:12px;color:var(--color-neutral-300);line-height:1.6">
+          <input type="checkbox" checked="{{ reqConsent }}" sc-camel-on-change="{{ toggleReqConsent }}" style="accent-color:var(--color-accent);margin-top:3px">
+          <span>I understand and agree to the three points above.</span>
+        </label>
+      </div>
+    </div>
+
+    <sc-if value="{{ reqError }}" hint-placeholder-val="{{ false }}">
+      <div style="font-size:12px;color:#e2735c;line-height:1.6">{{ reqError }}</div>
     </sc-if>
-    <button type="button" id="request-lookup-submit" class="btn btn-primary btn-block" disabled="{{ lookupIncomplete }}" sc-camel-on-click="{{ submitLookup }}">{{ submitLookupLabel }}</button>
+    <button type="button" id="request-lookup-submit" class="btn btn-primary btn-block" disabled="{{ directIncomplete }}" sc-camel-on-click="{{ sendDirectRequest }}">{{ sendDirectLabel }}</button>
 
     <sc-if value="{{ acctHasOrg }}" hint-placeholder-val="{{ false }}">
       <div id="request-lists" class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
@@ -2901,6 +2939,16 @@ const __ds_scope = {};
       <div style="color:var(--color-neutral-500);margin-top:6px">A candidate may also choose not to show proof of an account.</div>
     </div>
     <button type="button" class="btn btn-primary" style="align-self:flex-start" sc-camel-on-click="{{ startOver }}">Start another lookup</button>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isRequestNotAccepted }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:460px;margin:0 auto;padding-top:72px;display:flex;flex-direction:column;gap:var(--space-4)">
+    <div class="card elev-md" style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">
+      <div>This candidate has an account, but isn't accepting comparison requests right now.</div>
+      <div style="color:var(--color-neutral-500);margin-top:6px">Nothing was charged and nothing was sent to them.</div>
+    </div>
+    <button type="button" class="btn btn-primary" style="align-self:flex-start" sc-camel-on-click="{{ startOver }}">Start another request</button>
   </div>
   </sc-if>
 
@@ -4055,13 +4103,15 @@ class Component extends DCLogic {
     if (this._reqDocUp && this._reqDocUp.file === f && Date.now() - this._reqDocUp.at < 50 * 60 * 1000) return { id: this._reqDocUp.id }; // already stored (a retry)
     const fd = new FormData();
     fd.append('mode', mode); fd.append('consent', 'true'); fd.append('file', f, f.name);
-    if (mode === 'org') fd.append('session_token', s.realToken || ''); else { fd.append('lookup_id', s.reqLookupId); fd.append('claim_token', s.reqClaimToken); }
+    // Gap #22: 'employer' is the new direct-request path (request_comparison_direct) -- same session-based
+    // identity as 'org', no lookup_id at all (see employer-document's own header for why).
+    if (mode === 'org' || mode === 'employer') fd.append('session_token', s.realToken || ''); else { fd.append('lookup_id', s.reqLookupId); fd.append('claim_token', s.reqClaimToken); }
     let res, data;
     try {
       res = await fetch(this.SUPABASE_FN_URL + '/employer-document', { method: 'POST', headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY }, body: fd });
       data = await res.json().catch(() => ({}));
     } catch (e) { return { error: "We couldn't upload the document. Check your connection and try again." }; }
-    if (res.status === 401 && mode === 'org') { this.dropRealSession(true); return { error: 'Your session ended. Please sign in again.' }; }
+    if (res.status === 401 && (mode === 'org' || mode === 'employer')) { this.dropRealSession(true); return { error: 'Your session ended. Please sign in again.' }; }
     if (data && data.ok) { this._reqDocUp = { file: f, id: data.document_id, at: Date.now() }; return { id: data.document_id }; }
     const code = data && data.error;
     return { error: code === 'scan_failed' ? (data.message || 'That file was rejected.')
@@ -4095,11 +4145,14 @@ class Component extends DCLogic {
         return;
       }
       const code = r.data && r.data.error;
+      // Gap #22: this candidate WAS just found by the lookup that got us here, so an honest, distinguishable
+      // answer is safe here specifically -- see create_comparison_request's own header.
       this.setState({
         reqBusy: false,
         reqErr: this.reqDocErrorFor(code) || (code === 'attestation_invalid' ? 'Please say how you obtained the candidate\u2019s information (10 to 500 characters).'
           : code === 'rate_limited' ? 'You have sent several requests today. Please try again tomorrow.'
           : code === 'already_requested' ? 'You already have a request open for this candidate. Check your email for the link if it was approved.'
+          : code === 'not_accepting' ? "This candidate has an account, but isn't accepting comparison requests right now. Nothing was charged and nothing was sent to them."
           : "This request can't be made right now."),
       });
       return;
@@ -4119,8 +4172,67 @@ class Component extends DCLogic {
       reqErr: this.reqDocErrorFor(code) || (code === 'attestation_invalid' ? 'Please say how you obtained the candidate\u2019s information (10 to 500 characters).'
         : code === 'rate_limited' ? 'You have sent several requests today. Please try again tomorrow.'
         : code === 'already_requested' ? 'You already have a request open for this candidate. Check your email for the link if it was approved.'
+        : code === 'not_accepting' ? "This candidate has an account, but isn't accepting comparison requests right now. Nothing was charged and nothing was sent to them."
         : "This request can't be made right now."),
     });
+  }
+
+  // Gap #22 (2026-09-26): the "Request a comparison" screen's own submit -- one step, no prior existence
+  // check. Candidate identity, attestation, document and consent are all collected on that same screen and
+  // sent together to request_comparison_direct, which does its own matching (independent of "Allow lookup")
+  // and tells the three outcomes apart: not_found (no account, or Lookup off AND Comparison off -- no
+  // distinguishable signal between those two), not_accepting (has an account, Lookup on, but Comparison off --
+  // an honest different answer since existence is already knowable), or sent (identical acknowledgment either
+  // way, so a successful submission itself never reveals Lookup state -- only the candidate's own later
+  // approve/decline can, and only because they opted into exactly that by leaving Comparison on).
+  async sendDirectRequest() {
+    const s = this.state;
+    if (s.reqBusy) return;
+    const name = (s.candNameInput || '').trim();
+    if (name.split(/\s+/).filter(Boolean).length < 2) { this.setState({ reqErr: 'Please enter the candidate’s first and last name.' }); return; }
+    const email = (s.candEmailInput || '').trim();
+    const phoneDigits = (s.candPhoneInput || '').replace(/\D/g, '');
+    if (!email && phoneDigits.length < 10) { this.setState({ reqErr: 'Give the candidate’s email address or a 10-digit phone number.' }); return; }
+    if ((s.reqAttestation || '').trim().length < 10 || !s.reqDocName || !s.reqConsent) return;
+    this.setState({ reqBusy: true, reqErr: null });
+    const up = await this.uploadRequestDocument('employer');
+    if (up.error) { this.setState({ reqBusy: false, reqErr: up.error }); return; }
+    const r = await this.empCall('request_comparison_direct', {
+      candidate_name: name, candidate_email: email, candidate_phone: s.candPhoneInput || '',
+      requester_company: s.reqCompanyInput || '', attestation: s.reqAttestation, document_id: up.id,
+    });
+    if (r.status === 401) { this.setState({ reqBusy: false }); return; }
+    if (!r.data || !r.data.ok) {
+      const code = r.data && r.data.error;
+      this.setState({
+        reqBusy: false,
+        reqErr: this.reqDocErrorFor(code) || (code === 'candidate_name_required' ? 'Please enter the candidate’s first and last name.'
+          : code === 'candidate_contact_required' ? 'Give the candidate’s email address or a 10-digit phone number.'
+          : code === 'candidate_email_invalid' ? 'That email address doesn’t look right.'
+          : code === 'attestation_invalid' ? 'Please say a bit more about how you obtained this candidate’s information (10 to 500 characters).'
+          : code === 'rate_limited' ? 'You have sent several requests recently. Please try again in an hour.'
+          : code === 'subscription_required' ? 'Your organization has no active subscription right now.'
+          : code === 'already_requested' ? 'You already have a request open for this candidate.'
+          : "That didn't work. Please try again."),
+      });
+      return;
+    }
+    this._reqDoc = null; this._reqDocUp = null;
+    const clearForm = { candNameInput: '', candEmailInput: '', candPhoneInput: '', reqAttestation: '', reqDocName: '', reqConsent: false };
+    const outcome = r.data.outcome;
+    if (outcome === 'not_found') { this.setState(Object.assign({ reqBusy: false, screen: 'noMatch', lookupResult: 'none' }, clearForm)); return; }
+    if (outcome === 'not_accepting') { this.setState(Object.assign({ reqBusy: false, screen: 'requestNotAccepted' }, clearForm)); return; }
+    // outcome === 'sent'
+    if (r.data.method === 'org') {
+      this.setState(Object.assign({
+        reqBusy: false, screen: 'requestSent', requestSentKind: 'org',
+        requestSentLine: r.data.candidate_notified ? 'They have been emailed and can answer from their account.' : "We couldn't email them just now; we will keep trying, and they will also see it in their account.",
+      }, clearForm));
+      await this.loadComparisons();
+      return;
+    }
+    this.setState(clearForm);
+    await this.startCardSetupNow(r.data.request_id, !!r.data.candidate_notified);
   }
 
   // Gap #21, finding 7: immediately after a successful pay-per-use request, kick off the Stripe SetupIntent
@@ -4270,6 +4382,7 @@ class Component extends DCLogic {
         : code === 'rate_limited' ? 'You have sent several requests today. Please try again tomorrow.'
         : code === 'already_requested' ? 'You already have a request open for this candidate. It is listed in your account.'
         : code === 'forbidden' ? 'Requests need an organization account.'
+        : code === 'not_accepting' ? "This candidate has an account, but isn't accepting comparison requests right now. Nothing was used from your plan and nothing was sent to them."
         : "This request can't be made right now."),
     });
   }
@@ -4861,6 +4974,17 @@ class Component extends DCLogic {
         && ((s.candEmailInput || '').trim() || (s.candPhoneInput || '').trim())
         && (!!s.real || ((s.reqNameInput || '').trim() && (s.reqEmailInput || '').trim()))),
       pendingRequesterEmail: s.pendingEmail || '',
+      // Gap #22: the "Request a comparison" screen's own one-step submit (request_comparison_direct) --
+      // candidate identity + attestation + document + consent, no prior existence check.
+      directUsesOrg: this.orgFormOk(),
+      directUsesGuest: !this.orgFormOk(),
+      directIncomplete: s.reqBusy
+        || (s.candNameInput || '').trim().split(/\s+/).filter(Boolean).length < 2
+        || !((s.candEmailInput || '').trim() || (s.candPhoneInput || '').trim())
+        || (s.reqAttestation || '').trim().length < 10 || !s.reqDocName || !s.reqConsent,
+      sendDirectLabel: s.reqBusy ? 'Sending…' : 'Send request',
+      sendDirectRequest: () => this.sendDirectRequest(),
+      isRequestNotAccepted: s.screen === 'requestNotAccepted',
       noop: (e) => { if (e && e.preventDefault) e.preventDefault(); },
       startOver: (e) => {
         if (e && e.preventDefault) e.preventDefault();
