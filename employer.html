@@ -3172,7 +3172,7 @@ const __ds_scope = {};
       <sc-for list="{{ coverageLines }}" as="line" hint-placeholder-count="3">
         <div style="font-size:15px;line-height:1.6">{{ line }}</div>
       </sc-for>
-      <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">Every job, education entry and certification the candidate has submitted is shown below, with its current status. Job descriptions are not part of what is verified, so they are not shown.</div>
+      <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">Every job, education entry and certification the candidate has submitted is shown below, with its current status. Job descriptions are not part of what is verified, so they are not shown. This report covers only these three categories — skills, summaries, and other resume content shown in the document below are the candidate's own stated content, not independently verified.</div>
       <div style="display:grid;grid-template-columns:auto 1fr;gap:var(--space-2) var(--space-4);font-size:12px;align-items:baseline;border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
         <div style="color:var(--color-neutral-500)">Record as of</div><div>{{ compareAsOf }}</div>
         <div style="color:var(--color-neutral-500)">Approved</div><div>{{ compareApproved }}</div>
@@ -4133,11 +4133,12 @@ class Component extends DCLogic {
       const contactLine = [c.phone && c.phone.value, c.email && c.email.value].filter(Boolean).join(' · ');
       if (contactLine) push(contactLine);
     }
-    const S = R.summary || {};
-    if (S.content) {
-      if (S.heading) push(S.heading, true);
-      this.wrapText(S.content, 90).forEach(w => push(w));
-    }
+    // Gap #18 (2026-09-25, John's explicit requirement — see that requirement doc's own header):
+    // "Everything else should match what the candidate view and the print output show, not a
+    // separately-drifting render path" — with exactly ONE approved exception, the Professional
+    // Summary, deliberately suppressed on the employer side only. Every other section (work,
+    // education, certifications, skills, other_sections) is untouched below, still a verbatim port of
+    // candidate.html's buildResumeLines — this is the one intentional divergence between the two.
     push('');
 
     const other = (kind) => {

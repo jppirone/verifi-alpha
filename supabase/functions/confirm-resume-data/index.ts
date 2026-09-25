@@ -139,6 +139,24 @@ function claimForNeedsReview(f: FreeformEdit): string {
   const preview = content.length > 140 ? content.slice(0, 140) + "…" : content;
   return heading ? `${heading}: ${preview}` : preview || "(no heading, no content)";
 }
+// Gap #18 (2026-09-25): same truncated-preview shape as claimForNeedsReview, reused for the other
+// freeform types (additional_info/hobbies_other/summary) now that they get their own queue row too —
+// see the queueInserts loop below for why.
+function claimForFreeformOther(f: FreeformEdit): string {
+  return claimForNeedsReview(f);
+}
+function claimForSkill(sk: SkillEdit): string {
+  return (sk.skill_text || "").trim() || "(no text)";
+}
+// Gap #18: the candidate-facing category label for each new freeform type's queue row — see
+// candidate.html's own VERIFICATION_CATEGORY_LABELS (kept in sync by hand, same convention already
+// used for every other type literal shared between this function and that file).
+function verificationTypeForFreeform(sectionType: string): string {
+  if (sectionType === "additional_info") return "Additional Info";
+  if (sectionType === "hobbies_other") return "Hobbies & Other";
+  if (sectionType === "summary") return "Summary";
+  return "Additional Info"; // defensive fallback; every caller below already filters to these three
+}
 
 // ---------------------------------------------------------------------------------------------------
 // CALLER AUTHENTICATION (candidate-session pass, 2026-09-19).
@@ -619,6 +637,50 @@ export default {
           status: "Needs Reconciliation",
           internal_note: `Auto-flagged: unstructured content from the candidate's resume that didn't map to a defined category (heading: ${JSON.stringify(f.heading || "(none)")}). Not independently validated against the uploaded document the way the structured fields above it are — review for anything that reads like an inserted job-description-style claim rather than content genuinely present on the original resume. Full content:\n\n${f.content || ""}`,
           bundle_id: resume_document_id, ...flagCarry(f),
+        });
+      }
+
+      // Gap #18 (2026-09-25, John's explicit product requirement — see that requirement doc's own
+      // header for the full reasoning): validation is free for every candidate, every tier, always;
+      // the ONLY thing ever paid-gated is excluding an item from delivery, never whether/what gets
+      // shown or flaggable. Skills and the other freeform types (additional_info/hobbies_other/
+      // summary — needs_review is already handled above, unconditionally, since before this) were
+      // completely invisible on the candidate's own Verification Status tab: no verification_items
+      // row of any kind was ever created for them (skills explicitly, "never enters the
+      // verification_items staff queue below, matching freeform's own lifecycle" — see the skill_items
+      // update loop above, now no longer the whole story). These can never be independently verified
+      // the way a Job Experience or Certification can (there's no employer or registry to check a
+      // Skill or a Professional Summary sentence against) — status is set directly to "Verification
+      // Not Possible" (never "New"/"Needs Reconciliation": there was never a check to attempt, so
+      // there's nothing "in progress" or "needing staff attention" about these, unlike needs_review's
+      // genuine extraction-confidence concern). That status is already treated as terminal by
+      // candidate.html's own verificationIsTerminal() — it won't show as an open/active item — and its
+      // own default candidate-facing label ("No way to verify this was found") is overridden client-
+      // side to "Not checked" specifically for these new types, the same word already used in this
+      // JSON's own 'verification.status' field (assemble_customized_resume, 'not_checked') and in the
+      // client's VERIFICATION_STATUS_LABELS convention (see candidate.html's own comment on that map).
+      // Unconditional, exactly like needs_review just above — never gated by opt_in (skills/freeform
+      // were never one of the three opt-in categories, and gap #18 is explicit that visibility here is
+      // never a paid feature). The existing flag+note mechanism (submit-candidate-correction-response's
+      // flag_item action) needs no changes at all: it already operates generically on any
+      // verification_items row the candidate owns, regardless of type.
+      for (const sk of skills) {
+        const { data: idRow } = await supabase.rpc("nextval_verification_item_id");
+        queueInserts.push({
+          id: idRow, candidate_id, type: "Skill", claim: claimForSkill(sk), received: today,
+          status: "Verification Not Possible",
+          internal_note: `Candidate-stated skill/competency term, not independently verifiable against any outside source. Shown on the candidate's own Verification Status tab as "Not checked."`,
+          source_item_id: sk.id, bundle_id: resume_document_id, ...flagCarry(sk),
+        });
+      }
+      for (const f of freeform) {
+        if (f.section_type !== "additional_info" && f.section_type !== "hobbies_other" && f.section_type !== "summary") continue;
+        const { data: idRow } = await supabase.rpc("nextval_verification_item_id");
+        queueInserts.push({
+          id: idRow, candidate_id, type: verificationTypeForFreeform(f.section_type), claim: claimForFreeformOther(f), received: today,
+          status: "Verification Not Possible",
+          internal_note: `Candidate-stated resume content (${f.section_type}, heading: ${JSON.stringify(f.heading || "(none)")}), not independently verifiable against any outside source. Shown on the candidate's own Verification Status tab as "Not checked."`,
+          source_item_id: f.id, bundle_id: resume_document_id, ...flagCarry(f),
         });
       }
 

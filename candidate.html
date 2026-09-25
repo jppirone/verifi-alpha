@@ -3261,6 +3261,31 @@ a:hover{color:var(--color-accent)}
           <div style="font-size:11px;color:var(--color-neutral-500)">Unresolved content from your resume. You can edit it above. Nothing here is submitted for verification.</div>
         </div>
         </sc-if>
+
+        <!-- Gap #18 (2026-09-25): additional_info sections (Career Highlights, Projects, Professional
+             Affiliations, Awards, and similar) — real, recognized content, not flagged or unresolved,
+             so no accent border or "Needs your review" badge; still fully editable and commentable,
+             same as every other bucket on this screen. -->
+        <sc-if value="{{ section.isAdditionalInfo }}" hint-placeholder-val="{{ false }}">
+        <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap">
+            <span class="card-kicker">{{ section.heading }}</span>
+            <div style="display:flex;align-items:center;gap:8px">
+              <sc-if value="{{ section.flagged }}" hint-placeholder-val="{{ false }}"><span class="tag tag-outline" style="font-size:11px">🚩 Flagged</span></sc-if>
+              <button type="button" class="btn btn-ghost" style="font-size:12px" sc-camel-on-click="{{ section.onFlag }}">{{ section.flagButtonLabel }}</button>
+            </div>
+          </div>
+          <div class="field">
+            <label>Section heading, as printed on your resume</label>
+            <input class="input" placeholder="(no heading on your resume)" value="{{ section.heading }}" sc-camel-on-change="{{ section.onHeadingChange }}">
+            <sc-if value="{{ section.headingEdited }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:11px;color:var(--color-warning,#c77d1e);margin-top:var(--space-1)">Edited from what your resume shows.</div>
+            </sc-if>
+          </div>
+          <textarea class="input" rows="3" value="{{ section.content }}" sc-camel-on-change="{{ section.onChange }}"></textarea>
+          <div style="font-size:11px;color:var(--color-neutral-500)">A recognized resume section, included on your profile and export by default. You can edit it above, or flag it with a note for our team.</div>
+        </div>
+        </sc-if>
       </sc-for>
 
       <!-- Automatic license verification: a detected license is NOT a second card - it is the same
@@ -4305,6 +4330,11 @@ a:hover{color:var(--color-accent)}
                 <div style="font-size:12px;color:var(--color-neutral-400);border-top:1px solid var(--color-divider);padding-top:8px">{{ row.needsReviewNote }}</div>
               </sc-if>
 
+              <!-- Gap #18 (2026-09-25): Skill/Additional Info/Hobbies & Other/Summary rows -->
+              <sc-if value="{{ row.isUncheckable }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:12px;color:var(--color-neutral-400);border-top:1px solid var(--color-divider);padding-top:8px">{{ row.uncheckableNote }}</div>
+              </sc-if>
+
               <sc-if value="{{ row.isUnverifiedLicense }}" hint-placeholder-val="{{ false }}">
                 <div style="font-size:12px;color:var(--color-neutral-400);border-top:1px solid var(--color-divider);padding-top:8px">{{ row.unverifiedLicenseNote }}</div>
               </sc-if>
@@ -4560,7 +4590,7 @@ a:hover{color:var(--color-accent)}
         </div>
 
         <div style="font-size:11px;color:var(--color-neutral-600);line-height:1.6">
-          Your name always appears and can't be turned off. Your phone and email appear only if you've chosen to print them on Profile Info. Content flagged for review is left off by default: tick a section below to include it. Write and name summary versions on the Content Manager tab.
+          Your name always appears and can't be turned off. Your phone and email appear only if you've chosen to print them on Profile Info. Flagged content is included by default, tagged as not independently verified: untick a section below to leave it out. Write and name summary versions on the Content Manager tab.
         </div>
 
         <div class="card elev-sm" style="display:flex;flex-direction:column;gap:2px;opacity:0.7">
@@ -4823,15 +4853,15 @@ a:hover{color:var(--color-accent)}
 
         <sc-if value="{{ hasFlaggedContent }}" hint-placeholder-val="{{ false }}">
           <div style="display:flex;flex-direction:column;gap:var(--space-3)">
-            <div class="card-kicker">Flagged for review</div>
-            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Content from your resume that didn't clearly fit a standard category. It is left off your resume by default. Tick a section to include it exactly as extracted; its text can't be edited here.</div>
+            <div class="card-kicker">Flagged content</div>
+            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Content from your resume that didn't clearly fit a standard category. It's included in your profile and export by default, tagged as not independently verified (see Verification Status); its text can't be edited here. Untick a section to leave it out.</div>
             <sc-for list="{{ flaggedContentItems }}" as="fc" hint-placeholder-count="2">
               <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
                 <label style="display:flex;gap:10px;align-items:center;font-size:13px;color:var(--color-neutral-300);cursor:pointer">
                   <input type="checkbox" checked="{{ fc.checked }}" disabled="{{ fc.disabled }}" sc-camel-on-change="{{ fc.onToggle }}"> {{ fc.heading }}</label>
                 <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6;white-space:pre-wrap;max-height:140px;overflow-y:auto">{{ fc.content }}</div>
                 <sc-if value="{{ fc.lockedNote }}" hint-placeholder-val="{{ false }}">
-                  <div style="font-size:11px;color:var(--color-neutral-600)">Including flagged content is part of customization on a paid plan.</div>
+                  <div style="font-size:11px;color:var(--color-neutral-600)">Excluding this section requires a paid plan.</div>
                 </sc-if>
               </div>
             </sc-for>
@@ -6307,8 +6337,14 @@ class Component extends DCLogic {
     if ((R.education || []).length) cats.push({ key: 'education', label: 'Education', items: R.education.map(e => ({ id: e.id, kind: 'education', label: this.czEduLabel(e), included: e.included })) });
     if (((R.skills && R.skills.items) || []).length) cats.push({ key: 'skills', label: this.skillsHeading(), items: R.skills.items.map(x => ({ id: x.id, kind: x.kind, label: x.text, included: x.included })) });
     if ((R.certifications || []).length) cats.push({ key: 'certifications', label: 'Certifications', items: R.certifications.map(c => ({ id: c.id, kind: 'certification', label: this.czCertLabel(c), included: c.included })) });
+    // Gap #18 (2026-09-25): included by default now (see assemble_customized_resume's own header) —
+    // label/note updated from "tick to include" to "tick to remove," matching the new reality: this
+    // is no longer a paywalled-until-toggled-on category, it's shown and delivered like every other
+    // bucket, tagged "Not checked" (see Verification Status). The checkbox's checked state itself
+    // needs no code change here — it already derives straight from each item's own `included` flag,
+    // which the SQL default flip already makes true unless a paid candidate explicitly excluded it.
     const flagged = (R.other_sections || []).filter(f => f.section_type === 'needs_review');
-    if (flagged.length) cats.push({ key: 'needsReview', label: 'Flagged for review', note: 'Left off by default. Tick a section to include it exactly as extracted.', items: flagged.map(f => ({ id: f.id, kind: 'freeform', label: (f.heading || '').trim() || 'Untitled section', included: f.included })) });
+    if (flagged.length) cats.push({ key: 'needsReview', label: 'Flagged content', note: 'Included by default, tagged "Not checked" — this content didn\'t clearly fit a standard category, so it isn\'t independently verified. Untick a section to leave it out.', items: flagged.map(f => ({ id: f.id, kind: 'freeform', label: (f.heading || '').trim() || 'Untitled section', included: f.included })) });
     // additional_info (2026-09-23): real, common resume sections (Projects, Career Highlights,
     // Professional Affiliations, and similar) that are delivered by default, the same as
     // hobbies_other — kept in their own bucket rather than lumped under "Hobbies & other
@@ -6783,7 +6819,12 @@ class Component extends DCLogic {
   // Deliberately NOT added to VERIFICATION_CATEGORY_ORDER below: the category-summary cards are
   // "parts of your record" (job history, education, certifications), and a flagged freeform blurb
   // isn't one of those — it gets its own distinct rendering in getVerificationItemRows instead.
-  VERIFICATION_CATEGORY_LABELS = { 'Job Experience': 'Job Experience', 'Education': 'Education', 'Certification': 'Certifications', 'License': 'Licenses', 'Needs Review': 'Flagged content' };
+  // Gap #18 (2026-09-25): 'Skill' / 'Additional Info' / 'Hobbies & Other' / 'Summary' added the same
+  // way — candidate-stated content with no external fact to check, same treatment as 'Needs Review'
+  // (own rendering, not a category-summary card). Kept in sync by hand with confirm-resume-data's own
+  // verificationTypeForFreeform()/type literals — same convention already used for every other type
+  // string shared between that function and this file.
+  VERIFICATION_CATEGORY_LABELS = { 'Job Experience': 'Job Experience', 'Education': 'Education', 'Certification': 'Certifications', 'License': 'Licenses', 'Needs Review': 'Flagged content', 'Skill': 'Skills', 'Additional Info': 'Additional Info', 'Hobbies & Other': 'Hobbies & Other', 'Summary': 'Summary' };
   VERIFICATION_CATEGORY_ORDER = ['Job Experience', 'Education', 'Certification', 'License'];
 
   // The P133 verification floor: a category only ever shows as having a confirmed status if at
@@ -6926,6 +6967,7 @@ class Component extends DCLogic {
         isUnverifiedLicense: !l.correction,
         unverifiedLicenseNote: 'Sent as you stated it, not independently verified. ' + reason,
         isDiscrepancy: false, isNeedsReview: false, needsReviewNote: '', discrepancyNote: '',
+        isUncheckable: false, uncheckableNote: '',
         hasResponded: false, canRespond: false,
         submitRespond: () => {},
         canEditContactDetails: false, openContactDetails: () => {},
@@ -6958,14 +7000,26 @@ class Component extends DCLogic {
         // case but wrong for a needs_review row the candidate never actually submitted for anything.
         // Distinguished by type, not status, since status alone can't tell the two apart.
         const isNeedsReview = it.type === 'Needs Review';
+        // Gap #18 (2026-09-25): Skill/Additional Info/Hobbies & Other/Summary rows — candidate-stated
+        // content with no external fact to check, so status is always the same terminal
+        // 'Verification Not Possible' (see confirm-resume-data's own comment on why that status,
+        // never 'New'/'Needs Reconciliation' — there was never a check to attempt). Candidate-facing
+        // label is overridden here to "Not checked" specifically for these types — the exact same word
+        // this candidate's own JSON export already uses for identical content
+        // (assemble_customized_resume's 'verification.status': 'not_checked') — rather than falling
+        // through to 'Verification Not Possible''s own normal label ("No way to verify this was
+        // found"), which is worded for a genuinely-attempted-and-failed case, not "never applicable."
+        const isUncheckable = it.type === 'Skill' || it.type === 'Additional Info' || it.type === 'Hobbies & Other' || it.type === 'Summary';
         return {
           id: it.id,
           categoryLabel: this.VERIFICATION_CATEGORY_LABELS[it.type] || it.type,
           claim: it.claim || '(no description on file)',
-          safeLabel: isNeedsReview ? 'Flagged, not submitted' : this.verificationSafeLabel(it.status),
-          tagClass: isNeedsReview ? 'tag-neutral' : this.verificationTagClass(it.status),
+          safeLabel: isNeedsReview ? 'Flagged, not submitted' : isUncheckable ? 'Not checked' : this.verificationSafeLabel(it.status),
+          tagClass: isNeedsReview || isUncheckable ? 'tag-neutral' : this.verificationTagClass(it.status),
           isDiscrepancy,
           isNeedsReview,
+          isUncheckable,
+          uncheckableNote: "This is content from your own resume that isn't independently verifiable against an outside source (there's no employer or registry to check it against) — it's included in your profile and export by default, tagged as not checked so anyone who sees it can judge it for themselves.",
           needsReviewNote: "We flagged this content from your resume because it didn't cleanly fit job history, education, or a certification. It's visible to staff for review — no action is needed from you unless someone reaches out.",
           discrepancyNote: it.note || "Staff hasn't added an explanation yet.",
           hasResponded: isDiscrepancy && !!it.correctionRequested,
@@ -12165,7 +12219,9 @@ class Component extends DCLogic {
         };
       }),
       cmUpgradePrompt: () => this.setState({ upgradeModalOpen: true, upgradeModalContext: 'contentManager' }),
-      // Flagged for review: shown read-only (its text is locked to the extraction); the candidate opts it in or out. Excluded unless opted in.
+      // Gap #18 (2026-09-25): included by default now for every tier — shown read-only (its text is
+      // locked to the extraction, same as before); a PAID candidate can untick to exclude it from
+      // delivery, free tier sees the same checked list but can't act on it (disabled, not hidden).
       flaggedContentItems: ((czReady && s.czData.other_sections) || [])
         .filter(f => f.section_type === 'needs_review')
         .map(f => ({
@@ -12177,17 +12233,19 @@ class Component extends DCLogic {
           onToggle: (e) => this.czToggleItem({ id: f.id, kind: 'freeform', included: !!f.included }, e),
         })),
       hasFlaggedContent: !!(czReady && (s.czData.other_sections || []).some(f => f.section_type === 'needs_review')),
-      // Views-tab notice (2026-09-23): count of flagged sections NOT currently included in the
-      // delivered PDF — for free tier this is every flagged section (none can be included); for
-      // paid tier only the ones the candidate hasn't opted in yet. Informational only, visible to
-      // every tier, never reveals the content itself — see the note right above hasFlaggedContent.
+      // Views-tab notice (2026-09-23, repurposed 2026-09-25 for gap #18): now that nothing is excluded
+      // by default at any tier, this only ever fires for a paid candidate who has actively, personally
+      // chosen to exclude one of these sections via the toggle above — free tier can never produce an
+      // override, so !f.included can no longer be true for them (needed no code change here, just this
+      // updated comment and the wording below, which used to imply an automatic system exclusion and
+      // now always describes the candidate's own deliberate choice).
       czHasExcludedFlaggedContent: !!(czReady && (s.czData.other_sections || []).some(f => f.section_type === 'needs_review' && !f.included)),
       czExcludedFlaggedContentNote: (() => {
         const n = ((czReady && s.czData.other_sections) || []).filter(f => f.section_type === 'needs_review' && !f.included).length;
         if (!n) return '';
         return n === 1
-          ? 'One section from your resume didn’t clearly fit a standard category and isn’t included in this PDF.'
-          : n + ' sections from your resume didn’t clearly fit a standard category and aren’t included in this PDF.';
+          ? 'You’ve excluded one section from this PDF.'
+          : `You’ve excluded ${n} sections from this PDF.`;
       })(),
       freeSummaryPreview: (s.czData && s.czData.summary && s.czData.summary.content) || '',
       freeSkillsPreview: ((czReady && s.czData.skills && s.czData.skills.items) || []).filter(x => x.included).map(x => x.text),
@@ -12907,6 +12965,24 @@ class Component extends DCLogic {
           onChange: (e) => this.updateResumeFreeform(f.id, e.target.value),
           ...this.flagItemProps('freeform', f),
         }));
+        // Gap #18 (2026-09-25): additional_info sections (Selected Career Highlights, Projects,
+        // Professional Affiliations, Awards, Publications, Languages, and similar recognized-but-not-
+        // independently-verified patterns — see rasterize-pdf-page's own KNOWN_CATEGORIES_GUIDE for
+        // the full list) were entirely absent from this screen before this fix: the blocks builder only
+        // ever looked at section_type === 'needs_review', so a candidate had no way to see, edit, or
+        // comment on this content until it was already confirmed. Same editable/commentable shape as a
+        // needs_review block (heading + content + flag), deliberately NOT the same "⚠ Needs your
+        // review" framing in the template below — this content isn't flagged or unresolved, it's
+        // real, recognized content that's simply not independently verifiable, delivered by default.
+        s.resumeExtraction.freeform.filter(f => f.section_type === 'additional_info').forEach(f => blocks.push({
+          kind: 'additional_info', position: typeof f.position === 'number' ? f.position : Infinity,
+          heading: f.heading || '', hasHeading: !!(f.heading || '').trim(),
+          headingEdited: editedGroups.has('freeform:' + f.id),
+          onHeadingChange: (e) => this.updateResumeFreeformHeading(f.id, e.target.value),
+          content: f.content || '',
+          onChange: (e) => this.updateResumeFreeform(f.id, e.target.value),
+          ...this.flagItemProps('freeform', f),
+        }));
         blocks.sort((a, b) => a.position - b.position);
         return blocks.map(b => ({
           ...b,
@@ -12915,6 +12991,7 @@ class Component extends DCLogic {
           isCertification: b.kind === 'certification',
           isSkills: b.kind === 'skills',
           isNeedsReview: b.kind === 'needs_review',
+          isAdditionalInfo: b.kind === 'additional_info',
         }));
       })(),
       // Detected licenses ride on the certification card (see the item.isLicense fields in
