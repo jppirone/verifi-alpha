@@ -3257,7 +3257,7 @@ a:hover{color:var(--color-accent)}
               <div style="font-size:11px;color:var(--color-warning,#c77d1e);margin-top:var(--space-1)">Edited from what your resume shows.</div>
             </sc-if>
           </div>
-          <textarea class="input" rows="3" value="{{ section.content }}" sc-camel-on-change="{{ section.onChange }}"></textarea>
+          <textarea class="input" rows="{{ section.rows }}" value="{{ section.content }}" sc-camel-on-change="{{ section.onChange }}"></textarea>
           <div style="font-size:11px;color:var(--color-neutral-500)">Unresolved content from your resume. You can edit it above. Nothing here is submitted for verification.</div>
         </div>
         </sc-if>
@@ -3282,7 +3282,7 @@ a:hover{color:var(--color-accent)}
               <div style="font-size:11px;color:var(--color-warning,#c77d1e);margin-top:var(--space-1)">Edited from what your resume shows.</div>
             </sc-if>
           </div>
-          <textarea class="input" rows="3" value="{{ section.content }}" sc-camel-on-change="{{ section.onChange }}"></textarea>
+          <textarea class="input" rows="{{ section.rows }}" value="{{ section.content }}" sc-camel-on-change="{{ section.onChange }}"></textarea>
           <div style="font-size:11px;color:var(--color-neutral-500)">A recognized resume section, included on your profile and export by default. You can edit it above, or flag it with a note for our team.</div>
         </div>
         </sc-if>
@@ -4295,10 +4295,19 @@ a:hover{color:var(--color-accent)}
           </div>
         </sc-if>
 
-        <div class="seg" style="align-self:flex-start">
-          <label class="seg-opt"><input type="radio" name="verif-filter" checked="{{ filterIsActive }}" sc-camel-on-change="{{ setFilterActive }}">Active</label>
-          <label class="seg-opt"><input type="radio" name="verif-filter" checked="{{ filterIsAll }}" sc-camel-on-change="{{ setFilterAll }}">All</label>
-          <label class="seg-opt"><input type="radio" name="verif-filter" checked="{{ filterIsCompleted }}" sc-camel-on-change="{{ setFilterCompleted }}">Completed</label>
+        <div style="display:flex;gap:var(--space-3);align-items:center;flex-wrap:wrap">
+          <div class="seg" style="align-self:flex-start">
+            <label class="seg-opt"><input type="radio" name="verif-filter" checked="{{ filterIsActive }}" sc-camel-on-change="{{ setFilterActive }}">Active</label>
+            <label class="seg-opt"><input type="radio" name="verif-filter" checked="{{ filterIsCompleted }}" sc-camel-on-change="{{ setFilterCompleted }}">Completed</label>
+            <label class="seg-opt"><input type="radio" name="verif-filter" checked="{{ filterIsAll }}" sc-camel-on-change="{{ setFilterAll }}">All</label>
+          </div>
+          <div class="field" style="margin:0;min-width:190px">
+            <sc-raw-select class="input" id="verif-type-filter" value="{{ verificationTypeFilter }}" sc-camel-on-change="{{ setVerificationTypeFilter }}">
+              <sc-for list="{{ verificationTypeFilterOptions }}" as="opt" hint-placeholder-count="4">
+                <option value="{{ opt.value }}">{{ opt.label }}</option>
+              </sc-for>
+            </sc-raw-select>
+          </div>
         </div>
 
         <sc-if value="{{ verificationItemsLoading }}" hint-placeholder-val="{{ false }}">
@@ -4595,7 +4604,7 @@ a:hover{color:var(--color-accent)}
       <div style="display:flex;flex-direction:column;gap:var(--space-6)">
 
         <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">
-          Choose what goes on your resume, in the PDF you download and in any licensed feed. Every change is saved to your account the moment you make it: you'll see "Saved" beside it, or an error if it didn't go through. This never changes who you share with (that stays on the Sharing tab), and it never changes a verification result.
+          See everything that would appear on your resume and in the PDF you download, all in one place, whatever your plan. On a paid plan you can untick anything you want left out — the change saves to your account the moment you make it: you'll see "Saved" beside it, or an error if it didn't go through. On a free plan everything here is shown for your own review, but the checkboxes are locked; nothing can be excluded yet. There's no separate licensed feed live today, so your PDF download is the only place any of this actually goes right now. This never changes who you share with (that stays on the Sharing tab), and it never changes a verification result.
         </div>
 
         <div style="display:flex;align-items:center;gap:var(--space-3);min-height:18px;font-size:12px">
@@ -4605,7 +4614,7 @@ a:hover{color:var(--color-accent)}
         </div>
 
         <div style="font-size:11px;color:var(--color-neutral-600);line-height:1.6">
-          Your name always appears and can't be turned off. Your phone and email appear only if you've chosen to print them on Profile Info. Flagged content is included by default, tagged as not independently verified: untick a section below to leave it out. Write and name summary versions on the Content Manager tab.
+          Your name always appears and can't be turned off. Your phone and email appear only if you've chosen to print one on Profile Info — including the option to print your system-verified number or email instead of typing a different one, available on every plan, free or paid. Flagged content is included by default, tagged as not independently verified: untick a section below to leave it out, on a paid plan. Write and name summary versions on the Content Manager tab.
         </div>
 
         <div class="card elev-sm" style="display:flex;flex-direction:column;gap:2px;opacity:0.7">
@@ -4656,9 +4665,12 @@ a:hover{color:var(--color-accent)}
                 <div style="font-size:11px;color:var(--color-neutral-600);line-height:1.6;padding:6px 0 6px 28px;border-bottom:1px solid var(--color-divider)">{{ cat.note }}</div>
               </sc-if>
               <sc-for list="{{ cat.items }}" as="it" hint-placeholder-count="0">
-                <div style="display:flex;align-items:center;gap:var(--space-3);padding:8px 0 8px 28px;border-bottom:1px solid var(--color-divider)">
+                <div style="display:flex;flex-direction:column;gap:2px;padding:8px 0 8px 28px;border-bottom:1px solid var(--color-divider)">
                   <label style="display:flex;gap:10px;align-items:center;font-size:13px;cursor:pointer">
                     <input type="checkbox" checked="{{ it.checked }}" disabled="{{ czSaving }}" sc-camel-on-change="{{ it.onToggle }}"> {{ it.label }}</label>
+                  <sc-if value="{{ it.hasPreview }}" hint-placeholder-val="{{ false }}">
+                    <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.5;padding-left:28px">{{ it.preview }}</div>
+                  </sc-if>
                 </div>
               </sc-for>
             </sc-for>
@@ -4690,9 +4702,12 @@ a:hover{color:var(--color-accent)}
                   <input type="checkbox" checked="{{ cat.checked }}" disabled="disabled"> {{ cat.label }}</label>
               </div>
               <sc-for list="{{ cat.items }}" as="it" hint-placeholder-count="0">
-                <div style="display:flex;align-items:center;gap:var(--space-3);padding:8px 0 8px 28px;border-bottom:1px solid var(--color-divider)">
+                <div style="display:flex;flex-direction:column;gap:2px;padding:8px 0 8px 28px;border-bottom:1px solid var(--color-divider)">
                   <label style="display:flex;gap:10px;align-items:center;font-size:13px;color:var(--color-neutral-500);cursor:not-allowed">
                     <input type="checkbox" checked="{{ it.checked }}" disabled="disabled"> {{ it.label }}</label>
+                  <sc-if value="{{ it.hasPreview }}" hint-placeholder-val="{{ false }}">
+                    <div style="font-size:11px;color:var(--color-neutral-600);line-height:1.5;padding-left:28px">{{ it.preview }}</div>
+                  </sc-if>
                 </div>
               </sc-for>
             </sc-for>
@@ -4864,6 +4879,36 @@ a:hover{color:var(--color-accent)}
             </sc-for>
           </div>
           </sc-if>
+        </sc-if>
+
+        <sc-if value="{{ hasCzEducation }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:var(--space-3)">
+            <div class="card-kicker">Education</div>
+            <sc-for list="{{ czEducationItems }}" as="ed" hint-placeholder-count="1">
+              <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
+                <label style="display:flex;gap:10px;align-items:center;font-size:13px;color:var(--color-neutral-300);cursor:pointer">
+                  <input type="checkbox" checked="{{ ed.checked }}" disabled="{{ ed.disabled }}" sc-camel-on-change="{{ ed.onToggle }}"> {{ ed.label }}</label>
+                <sc-if value="{{ ed.lockedNote }}" hint-placeholder-val="{{ false }}">
+                  <div style="font-size:11px;color:var(--color-neutral-600)">Excluding this entry requires a paid plan.</div>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ hasCzCertifications }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:var(--space-3)">
+            <div class="card-kicker">Certifications</div>
+            <sc-for list="{{ czCertificationItems }}" as="ce" hint-placeholder-count="1">
+              <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
+                <label style="display:flex;gap:10px;align-items:center;font-size:13px;color:var(--color-neutral-300);cursor:pointer">
+                  <input type="checkbox" checked="{{ ce.checked }}" disabled="{{ ce.disabled }}" sc-camel-on-change="{{ ce.onToggle }}"> {{ ce.label }}</label>
+                <sc-if value="{{ ce.lockedNote }}" hint-placeholder-val="{{ false }}">
+                  <div style="font-size:11px;color:var(--color-neutral-600)">Excluding this entry requires a paid plan.</div>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
         </sc-if>
 
         <sc-if value="{{ hasFlaggedContent }}" hint-placeholder-val="{{ false }}">
@@ -6384,22 +6429,36 @@ class Component extends DCLogic {
     // needs no code change here — it already derives straight from each item's own `included` flag,
     // which the SQL default flip already makes true unless a paid candidate explicitly excluded it.
     const flagged = (R.other_sections || []).filter(f => f.section_type === 'needs_review');
-    if (flagged.length) cats.push({ key: 'needsReview', label: 'Flagged content', note: 'Included by default, tagged "Not checked" — this content didn\'t clearly fit a standard category, so it isn\'t independently verified. Untick a section to leave it out.', items: flagged.map(f => ({ id: f.id, kind: 'freeform', label: (f.heading || '').trim() || 'Untitled section', included: f.included })) });
+    if (flagged.length) cats.push({ key: 'needsReview', label: 'Flagged content', note: 'Included by default, tagged "Not checked" — this content didn\'t clearly fit a standard category, so it isn\'t independently verified. Untick a section to leave it out.', items: flagged.map(f => ({ id: f.id, kind: 'freeform', label: (f.heading || '').trim() || 'Untitled section', preview: this.czFreeformPreview(f.content), included: f.included })) });
     // additional_info (2026-09-23): real, common resume sections (Projects, Career Highlights,
     // Professional Affiliations, and similar) that are delivered by default, the same as
     // hobbies_other — kept in their own bucket rather than lumped under "Hobbies & other
     // activities" (a real, confirmed mislabeling; see skills_secondary just below for the other
     // section_type this same "misc" bucket used to wrongly absorb).
     const additionalInfo = (R.other_sections || []).filter(f => f.section_type === 'additional_info');
-    if (additionalInfo.length) cats.push({ key: 'additionalInfo', label: 'Additional resume sections', items: additionalInfo.map(f => ({ id: f.id, kind: 'freeform', label: (f.heading || '').trim() || 'Untitled section', included: f.included })) });
+    if (additionalInfo.length) cats.push({ key: 'additionalInfo', label: 'Additional resume sections', items: additionalInfo.map(f => ({ id: f.id, kind: 'freeform', label: (f.heading || '').trim() || 'Untitled section', preview: this.czFreeformPreview(f.content), included: f.included })) });
     // skills_secondary (a second, differently-headed skills-shaped section) also used to land in
     // "Hobbies & other activities" — real, common resume content, not a hobby. Own bucket, using
     // each section's own real heading in its items' labels the same way every other bucket does.
     const secondarySkills = (R.other_sections || []).filter(f => f.section_type === 'skills_secondary');
-    if (secondarySkills.length) cats.push({ key: 'secondarySkills', label: 'Additional skills', items: secondarySkills.map(f => ({ id: f.id, kind: 'freeform', label: (f.heading || '').trim() || 'Untitled section', included: f.included })) });
+    if (secondarySkills.length) cats.push({ key: 'secondarySkills', label: 'Additional skills', items: secondarySkills.map(f => ({ id: f.id, kind: 'freeform', label: (f.heading || '').trim() || 'Untitled section', preview: this.czFreeformPreview(f.content), included: f.included })) });
     const misc = (R.other_sections || []).filter(f => f.section_type !== 'needs_review' && f.section_type !== 'additional_info' && f.section_type !== 'skills_secondary');
-    if (misc.length) cats.push({ key: 'misc', label: 'Hobbies & other activities', items: misc.map(f => ({ id: f.id, kind: 'freeform', label: (f.heading || '').trim() || 'Untitled section', included: f.included })) });
+    if (misc.length) cats.push({ key: 'misc', label: 'Hobbies & other activities', items: misc.map(f => ({ id: f.id, kind: 'freeform', label: (f.heading || '').trim() || 'Untitled section', preview: this.czFreeformPreview(f.content), included: f.included })) });
     return cats;
+  }
+
+  // Item 10b (2026-09-25 batch): every freeform-backed Customization category (Flagged content,
+  // Additional resume sections, Additional skills, Hobbies & other) showed ONLY each item's
+  // heading as the checkbox label — never the actual body content. For a section whose heading
+  // alone means nothing on its own (e.g. "RECENT TECHNICAL SKILLS" with no list of which skills),
+  // this reads to the candidate as an empty, non-functional bucket. Fixed generically for every
+  // freeform category, not special-cased to the one reported section, since they all shared the
+  // exact same gap. One line of flattened, truncated preview text; the full content stays
+  // reviewable/editable on the confirm-resume-data screen.
+  czFreeformPreview(content) {
+    const flat = (content || '').replace(/\s+/g, ' ').trim();
+    if (!flat) return '';
+    return flat.length > 160 ? flat.slice(0, 160).trim() + '…' : flat;
   }
 
   async czToggleItem(it, e) {
@@ -7021,14 +7080,33 @@ class Component extends DCLogic {
     });
   }
 
+  // Type-filter bucket for the Verification Status screen (Job / Education / Certification+License
+  // grouped / Other). Certification and License are one bucket on this screen because the candidate
+  // doesn't distinguish "an automatic state-registry check" from "a general certification" the way
+  // staff's own queue does -- both are credentials to them.
+  verificationTypeBucket(type) {
+    if (type === 'Job Experience') return 'job';
+    if (type === 'Education') return 'education';
+    if (type === 'Certification' || type === 'License') return 'cert';
+    return 'other';
+  }
+
   getVerificationItemRows() {
     const s = this.state;
     const filter = s.verificationFilter;
+    const typeFilter = s.verificationTypeFilter;
     return this.getVisibleVerificationItems()
       .filter(it => {
         const terminal = this.verificationIsTerminal(it.status);
-        if (filter === 'active') return !terminal;
-        if (filter === 'completed') return terminal;
+        // "Not checked" content (Skill/Additional Info/Hobbies & Other/Summary) never entered the
+        // verification pipeline at all, so it has no place in either Active or Completed -- only All
+        // shows it. (Active already excluded it as a side effect of it always being terminal-status;
+        // this makes that exclusion explicit and correct for Completed too, which is the real gap.)
+        const isUncheckableType = it.type === 'Skill' || it.type === 'Additional Info' || it.type === 'Hobbies & Other' || it.type === 'Summary';
+        if (filter !== 'all' && isUncheckableType) return false;
+        if (filter === 'active' && terminal) return false;
+        if (filter === 'completed' && !terminal) return false;
+        if (typeFilter && this.verificationTypeBucket(it.type) !== typeFilter) return false;
         return true;
       })
       .map(it => {
@@ -7097,7 +7175,7 @@ class Component extends DCLogic {
             ? this.licenseRowEditProps((s.verificationLicenses || []).find(l => l.id === it.sourceItemId)) : {}),
         };
       })
-      .concat(this.getUnverifiedLicenseRows());
+      .concat((!typeFilter || typeFilter === 'cert') ? this.getUnverifiedLicenseRows() : []);
   }
 
   EDU_OPEN_STATUSES = ['New', 'In Progress', 'Awaiting Response', 'Needs Reconciliation'];
@@ -7797,7 +7875,7 @@ class Component extends DCLogic {
     // confirmed live before this existed: "Skip this step" unconditionally called
     // resolveEmployerContact(true), silently discarding anything typed with zero confirmation.
     skipEmployerContactModalOpen: false,
-    verificationFilter: 'active', upgradeModalOpen: false, upgradeReturnTab: null, upgradeReturnTarget: null,
+    verificationFilter: 'active', verificationTypeFilter: '', upgradeModalOpen: false, upgradeReturnTab: null, upgradeReturnTarget: null,
     licenseEditId: null, licenseEditState: '', licenseEditNumber: '', licenseEditPending: false, licenseEditError: '', licenseEditNotice: '',
     eduEditId: null, eduDraft: { degree: '', fieldOfStudy: '', institution: '', location: '' }, eduNoteDraft: '', eduEditPending: false, eduEditError: '', eduEditNotice: '',
     verificationItems: [], verificationLicenses: [], verificationItemsLoading: false, verificationItemsError: null, verificationItemsLoadedFor: null,
@@ -12236,12 +12314,12 @@ class Component extends DCLogic {
         note: c.note || '',
         checked: c.items.every(i => i.included),
         onToggle: (e) => this.czToggleCategory(c, e),
-        items: c.items.map(it => ({ label: it.label, checked: it.included, onToggle: (e) => this.czToggleItem(it, e) })),
+        items: c.items.map(it => ({ label: it.label, preview: it.preview || '', hasPreview: !!it.preview, checked: it.included, onToggle: (e) => this.czToggleItem(it, e) })),
       })),
       czFreeRows: this.czCategories().map(c => ({
         label: c.label,
         checked: c.items.every(i => i.included),
-        items: c.items.map(it => ({ label: it.label, checked: it.included })),
+        items: c.items.map(it => ({ label: it.label, preview: it.preview || '', hasPreview: !!it.preview, checked: it.included })),
       })),
       czAllDeselected: czReady && !this.czCategories().some(c => c.items.some(i => i.included)),
       czResetConfirm: s.czResetConfirm,
@@ -12280,6 +12358,28 @@ class Component extends DCLogic {
         };
       }),
       cmUpgradePrompt: () => this.setState({ upgradeModalOpen: true, upgradeModalContext: 'contentManager' }),
+      // Content Manager completeness (audited live): Education and Certifications were entirely absent
+      // from this screen even though assemble_customized_resume already returns both (czData.education /
+      // czData.certifications, same `included` override flag work/skills/flagged content already use here)
+      // — every category the candidate actually has must be visible here regardless of tier, same
+      // checkbox-visible/tier-locked treatment the Flagged content section below already uses (czToggleItem
+      // is already generic across kind, so this is the same mechanism, not a new one).
+      czEducationItems: ((czReady && s.czData.education) || []).map(e => ({
+        label: this.czEduLabel(e),
+        checked: !!e.included,
+        disabled: s.accountTier !== 'paid' || s.czSaving,
+        lockedNote: s.accountTier !== 'paid',
+        onToggle: (ev) => this.czToggleItem({ id: e.id, kind: 'education', included: !!e.included }, ev),
+      })),
+      hasCzEducation: !!(czReady && (s.czData.education || []).length),
+      czCertificationItems: ((czReady && s.czData.certifications) || []).map(c => ({
+        label: this.czCertLabel(c),
+        checked: !!c.included,
+        disabled: s.accountTier !== 'paid' || s.czSaving,
+        lockedNote: s.accountTier !== 'paid',
+        onToggle: (ev) => this.czToggleItem({ id: c.id, kind: 'certification', included: !!c.included }, ev),
+      })),
+      hasCzCertifications: !!(czReady && (s.czData.certifications || []).length),
       // Gap #18 (2026-09-25): included by default now for every tier — shown read-only (its text is
       // locked to the extraction, same as before); a PAID candidate can untick to exclude it from
       // delivery, free tier sees the same checked list but can't act on it (disabled, not hidden).
@@ -12485,9 +12585,29 @@ class Component extends DCLogic {
       filterIsActive: s.verificationFilter === 'active',
       filterIsAll: s.verificationFilter === 'all',
       filterIsCompleted: s.verificationFilter === 'completed',
-      setFilterActive: () => this.setState({ verificationFilter: 'active' }),
-      setFilterAll: () => this.setState({ verificationFilter: 'all' }),
-      setFilterCompleted: () => this.setState({ verificationFilter: 'completed' }),
+      // verificationTypeFilter resets on every status-tab switch: a combination like "Completed + Other"
+      // can never be reached (Other/"Not checked" only ever has rows on All — see getVerificationItemRows),
+      // so carrying a stale selection across tabs would just leave the candidate looking at a silently
+      // empty list with no clue why.
+      setFilterActive: () => this.setState({ verificationFilter: 'active', verificationTypeFilter: '' }),
+      setFilterAll: () => this.setState({ verificationFilter: 'all', verificationTypeFilter: '' }),
+      setFilterCompleted: () => this.setState({ verificationFilter: 'completed', verificationTypeFilter: '' }),
+      verificationTypeFilter: s.verificationTypeFilter,
+      setVerificationTypeFilter: (e) => this.setState({ verificationTypeFilter: e.target.value }),
+      // "Other" ("Not checked" content) only ever appears on the All tab (see getVerificationItemRows'
+      // own comment) -- offered as an option here only then, so picking it elsewhere can't happen.
+      verificationTypeFilterOptions: (s.verificationFilter === 'all' ? [
+        { value: '', label: 'All types' },
+        { value: 'job', label: 'Job' },
+        { value: 'education', label: 'Education' },
+        { value: 'cert', label: 'Certification / License' },
+        { value: 'other', label: 'Other (not checked)' },
+      ] : [
+        { value: '', label: 'All types' },
+        { value: 'job', label: 'Job' },
+        { value: 'education', label: 'Education' },
+        { value: 'cert', label: 'Certification / License' },
+      ]),
       verificationItemsLoading: s.verificationItemsLoading,
       verificationItemsError: !!s.verificationItemsError,
       verificationItemRows: this.getVerificationItemRows(),
@@ -13012,11 +13132,14 @@ class Component extends DCLogic {
             })),
           });
         }
-        s.resumeExtraction.freeform.filter(f => f.section_type === 'needs_review').forEach(f => blocks.push({
-          kind: 'needs_review', position: typeof f.position === 'number' ? f.position : Infinity,
-          heading: f.heading || '', hasHeading: !!(f.heading || '').trim(),
-          headingEdited: editedGroups.has('freeform:' + f.id),
-          onHeadingChange: (e) => this.updateResumeFreeformHeading(f.id, e.target.value),
+        // Item 8 (2026-09-25 batch): confirm-screen display bug, NOT data loss — every
+        // needs_review/additional_info textarea below was hardcoded to rows="3" regardless of
+        // actual content length, so a real multi-project section (e.g. "AI Projects & Portfolio")
+        // visually reads as cut off, even though the full text is present in the value and the
+        // final PDF is complete. Size the textarea to the content instead of a fixed 3 rows, capped
+        // so one pathologically long section can't blow out the layout.
+        const rowsForFreeform = (txt) => Math.min(14, Math.max(3, ((txt || '').split('\n').length) + 1));
+        s.resumeExtraction.freeform.filter(f => f.section_type === 'needs_review').forEach(f => {
           // Display-only readability fix: "Selected Career Highlights" comes back from extraction as
           // one flat run-on string (the source is a multi-cell table; freeform content has no
           // concept of cells, so every cell's text gets concatenated) — a real reported readability
@@ -13025,12 +13148,19 @@ class Component extends DCLogic {
           // exactly). Scoped to this one heading rather than every needs_review block: other
           // freeform content is either already short or is genuine flowing prose that a blind
           // sentence-split would mangle, not run-on the same way.
-          content: /^selected career highlights$/i.test((f.heading || '').trim())
+          const content = /^selected career highlights$/i.test((f.heading || '').trim())
             ? (f.content || '').replace(/\.\s+(?=[A-Z])/g, '.\n')
-            : (f.content || ''),
-          onChange: (e) => this.updateResumeFreeform(f.id, e.target.value),
-          ...this.flagItemProps('freeform', f),
-        }));
+            : (f.content || '');
+          blocks.push({
+            kind: 'needs_review', position: typeof f.position === 'number' ? f.position : Infinity,
+            heading: f.heading || '', hasHeading: !!(f.heading || '').trim(),
+            headingEdited: editedGroups.has('freeform:' + f.id),
+            onHeadingChange: (e) => this.updateResumeFreeformHeading(f.id, e.target.value),
+            content, rows: rowsForFreeform(content),
+            onChange: (e) => this.updateResumeFreeform(f.id, e.target.value),
+            ...this.flagItemProps('freeform', f),
+          });
+        });
         // Gap #18 (2026-09-25): additional_info sections (Selected Career Highlights, Projects,
         // Professional Affiliations, Awards, Publications, Languages, and similar recognized-but-not-
         // independently-verified patterns — see rasterize-pdf-page's own KNOWN_CATEGORIES_GUIDE for
@@ -13040,12 +13170,19 @@ class Component extends DCLogic {
         // needs_review block (heading + content + flag), deliberately NOT the same "⚠ Needs your
         // review" framing in the template below — this content isn't flagged or unresolved, it's
         // real, recognized content that's simply not independently verifiable, delivered by default.
-        s.resumeExtraction.freeform.filter(f => f.section_type === 'additional_info').forEach(f => blocks.push({
+        // Item 10b (2026-09-25 batch): skills_secondary sections (a second, differently-headed
+        // skills-shaped section — e.g. "Recent Technical Skills" — see czCategories' own comment
+        // on this section_type) were entirely absent from this screen, same gap class as
+        // additional_info before the Gap #18 fix above: a candidate had no way to ever see, edit,
+        // or flag this real, recognized content pre-confirmation. Same treatment as additional_info
+        // (editable heading+content, flaggable, not "needs review") — reuses that exact block/markup
+        // rather than a separate near-duplicate template.
+        s.resumeExtraction.freeform.filter(f => f.section_type === 'additional_info' || f.section_type === 'skills_secondary').forEach(f => blocks.push({
           kind: 'additional_info', position: typeof f.position === 'number' ? f.position : Infinity,
           heading: f.heading || '', hasHeading: !!(f.heading || '').trim(),
           headingEdited: editedGroups.has('freeform:' + f.id),
           onHeadingChange: (e) => this.updateResumeFreeformHeading(f.id, e.target.value),
-          content: f.content || '',
+          content: f.content || '', rows: rowsForFreeform(f.content),
           onChange: (e) => this.updateResumeFreeform(f.id, e.target.value),
           ...this.flagItemProps('freeform', f),
         }));
