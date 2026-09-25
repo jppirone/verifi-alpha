@@ -2359,6 +2359,33 @@ const __ds_scope = {};
       <button type="button" class="btn btn-secondary" style="align-self:flex-start" disabled="{{ acctBusy }}" sc-camel-on-click="{{ saveAcctName }}">Save name</button>
     </div>
 
+    <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+      <div class="card-kicker">My comparisons</div>
+      <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Verified record requests you paid for yourself, outside any organization plan. Nothing is charged until a candidate approves <b>and</b> you open the result; once opened, it stays reopenable free for 21 days.</div>
+      <sc-if value="{{ myPaidErr }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:12px;color:#e2735c;line-height:1.6">{{ myPaidErr }}</div>
+      </sc-if>
+      <sc-if value="{{ noMyPaidComparisons }}" hint-placeholder-val="{{ true }}">
+        <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">None yet. Requesting one from a lookup result creates it here.</div>
+      </sc-if>
+      <sc-for list="{{ myPaidRows }}" as="row" hint-placeholder-count="2">
+        <div style="display:flex;flex-direction:column;gap:4px;padding-bottom:var(--space-2);border-bottom:1px solid var(--color-divider)">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap">
+            <span style="font-size:13px">{{ row.label }} <span style="color:var(--color-neutral-500)">&middot; requested {{ row.requestedLabel }}</span></span>
+            <div style="display:flex;gap:var(--space-2)">
+              <sc-if value="{{ row.showAddCard }}" hint-placeholder-val="{{ false }}">
+                <button type="button" class="btn btn-ghost" style="font-size:12px" disabled="{{ myPaidBusy }}" sc-camel-on-click="{{ row.onAddCard }}">Add a card</button>
+              </sc-if>
+              <sc-if value="{{ row.canOpen }}" hint-placeholder-val="{{ false }}">
+                <button type="button" class="btn btn-secondary" style="font-size:12px" disabled="{{ myPaidBusy }}" sc-camel-on-click="{{ row.onOpen }}">Open</button>
+              </sc-if>
+            </div>
+          </div>
+          <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">{{ row.statusLabel }}</div>
+        </div>
+      </sc-for>
+    </div>
+
     <sc-if value="{{ hasOrgInvites }}" hint-placeholder-val="{{ false }}">
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
         <div class="card-kicker">Invitations</div>
@@ -2573,7 +2600,7 @@ const __ds_scope = {};
   <sc-if value="{{ isRequest }}" hint-placeholder-val="{{ false }}">
   <div id="request-screen" style="max-width:520px;margin:0 auto;padding-top:40px;display:flex;flex-direction:column;gap:var(--space-4)">
     <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:26px;margin:0">Request a comparison</h1>
-    <p style="margin:0;color:var(--color-neutral-400);font-size:14px;line-height:1.5">Look up the candidate, then ask them to share their verified record. The candidate decides. You confirm your own email address before any result is shown.</p>
+    <p style="margin:0;color:var(--color-neutral-400);font-size:14px;line-height:1.5">Look up the candidate, then ask them to share their verified record. The candidate decides.</p>
 
     <sc-if value="{{ acctNotice }}" hint-placeholder-val="{{ false }}">
       <div class="card elev-sm" style="font-size:13px;color:var(--color-accent-300)">{{ acctNotice }}</div>
@@ -2666,19 +2693,26 @@ const __ds_scope = {};
 
     <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-4)">
       <div class="card-kicker">You</div>
-      <div class="field">
-        <label for="el-req-name">Your name</label>
-        <input class="input" id="el-req-name" value="{{ reqNameInput }}" sc-camel-on-change="{{ setReqNameInput }}">
-      </div>
+      <sc-if value="{{ realNotSignedIn }}" hint-placeholder-val="{{ false }}">
+        <div class="field">
+          <label for="el-req-name">Your name</label>
+          <input class="input" id="el-req-name" value="{{ reqNameInput }}" sc-camel-on-change="{{ setReqNameInput }}">
+        </div>
+      </sc-if>
       <div class="field">
         <label for="el-req-company">Your company</label>
         <input class="input" id="el-req-company" value="{{ reqCompanyInput }}" sc-camel-on-change="{{ setReqCompanyInput }}">
       </div>
-      <div class="field">
-        <label for="el-req-email">Your work email address</label>
-        <input class="input" id="el-req-email" value="{{ reqEmailInput }}" sc-camel-on-change="{{ setReqEmailInput }}">
-      </div>
-      <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Required. We send a confirmation link to this address, and the lookup only runs after you click it. Once a record is found you can request it here, and you see the exact terms before anything is sent.</div>
+      <sc-if value="{{ realNotSignedIn }}" hint-placeholder-val="{{ false }}">
+        <div class="field">
+          <label for="el-req-email">Your work email address</label>
+          <input class="input" id="el-req-email" value="{{ reqEmailInput }}" sc-camel-on-change="{{ setReqEmailInput }}">
+        </div>
+        <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Required. We send a confirmation link to this address, and the lookup only runs after you click it. Once a record is found you can request it here, and you see the exact terms before anything is sent.</div>
+      </sc-if>
+      <sc-if value="{{ realSignedIn }}" hint-placeholder-val="{{ true }}">
+        <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Signed in as {{ realEmailLabel }}. No confirmation email is needed; the lookup runs right away. Once a record is found you can request it here, and you see the exact terms before anything is sent.</div>
+      </sc-if>
     </div>
 
     <sc-if value="{{ lookupFormError }}" hint-placeholder-val="{{ false }}">
@@ -2757,6 +2791,9 @@ const __ds_scope = {};
         <button type="button" class="btn btn-secondary" style="font-size:12px" sc-camel-on-click="{{ retryPaymentHistoryLoad }}">Try again</button>
       </div>
     </sc-if>
+    <sc-if value="{{ myPaidErr }}" hint-placeholder-val="{{ false }}">
+      <div class="card elev-sm" style="font-size:13px;color:#e2735c">{{ myPaidErr }}</div>
+    </sc-if>
 
     <sc-if value="{{ noPaymentRows }}" hint-placeholder-val="{{ true }}">
       <div class="card elev-sm" style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">No payments yet. A one-time payment appears here once it's been charged.</div>
@@ -2771,6 +2808,9 @@ const __ds_scope = {};
         <div style="font-size:12px;color:var(--color-neutral-500)">{{ row.dateLabel }}<sc-if value="{{ row.hasCompany }}" hint-placeholder-val="{{ false }}"> &middot; {{ row.company }}</sc-if> &middot; {{ row.statusLabel }}</div>
         <sc-if value="{{ row.hasReceipt }}" hint-placeholder-val="{{ false }}">
           <a href="{{ row.receiptUrl }}" target="_blank" rel="noopener" style="font-size:12px;margin-top:2px">View Stripe receipt</a>
+        </sc-if>
+        <sc-if value="{{ row.canOpen }}" hint-placeholder-val="{{ false }}">
+          <button type="button" class="btn btn-secondary" style="font-size:12px;align-self:flex-start;margin-top:4px" disabled="{{ myPaidBusy }}" sc-camel-on-click="{{ row.onOpen }}">Open</button>
         </sc-if>
       </div>
     </sc-for>
@@ -2799,7 +2839,12 @@ const __ds_scope = {};
   <sc-if value="{{ isLookup }}" hint-placeholder-val="{{ true }}">
   <div style="max-width:460px;margin:0 auto;padding-top:56px;display:flex;flex-direction:column;gap:var(--space-4)">
     <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:26px;margin:0">Check a candidate's verified record</h1>
-    <p style="margin:0;color:var(--color-neutral-400);font-size:14px;line-height:1.5">Look up whether a candidate holds a verified record. You confirm your own email address before any result is shown.</p>
+    <sc-if value="{{ realNotSignedIn }}" hint-placeholder-val="{{ true }}">
+      <p style="margin:0;color:var(--color-neutral-400);font-size:14px;line-height:1.5">Look up whether a candidate holds a verified record. You confirm your own email address before any result is shown.</p>
+    </sc-if>
+    <sc-if value="{{ realSignedIn }}" hint-placeholder-val="{{ false }}">
+      <p style="margin:0;color:var(--color-neutral-400);font-size:14px;line-height:1.5">Look up whether a candidate holds a verified record.</p>
+    </sc-if>
 
     <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-4)">
       <div class="card-kicker">Candidate</div>
@@ -2820,19 +2865,26 @@ const __ds_scope = {};
 
     <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-4)">
       <div class="card-kicker">You</div>
-      <div class="field">
-        <label for="el-req-name">Your name</label>
-        <input class="input" id="el-req-name" value="{{ reqNameInput }}" sc-camel-on-change="{{ setReqNameInput }}">
-      </div>
+      <sc-if value="{{ realNotSignedIn }}" hint-placeholder-val="{{ true }}">
+        <div class="field">
+          <label for="el-req-name">Your name</label>
+          <input class="input" id="el-req-name" value="{{ reqNameInput }}" sc-camel-on-change="{{ setReqNameInput }}">
+        </div>
+      </sc-if>
       <div class="field">
         <label for="el-req-company">Your company</label>
         <input class="input" id="el-req-company" value="{{ reqCompanyInput }}" sc-camel-on-change="{{ setReqCompanyInput }}">
       </div>
-      <div class="field">
-        <label for="el-req-email">Your work email address</label>
-        <input class="input" id="el-req-email" value="{{ reqEmailInput }}" sc-camel-on-change="{{ setReqEmailInput }}">
-      </div>
-      <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Required. We send a confirmation link to this address, and the lookup only runs after you click it.</div>
+      <sc-if value="{{ realNotSignedIn }}" hint-placeholder-val="{{ true }}">
+        <div class="field">
+          <label for="el-req-email">Your work email address</label>
+          <input class="input" id="el-req-email" value="{{ reqEmailInput }}" sc-camel-on-change="{{ setReqEmailInput }}">
+        </div>
+        <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Required. We send a confirmation link to this address, and the lookup only runs after you click it.</div>
+      </sc-if>
+      <sc-if value="{{ realSignedIn }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Signed in as {{ realEmailLabel }}. No confirmation email is needed; the lookup runs right away.</div>
+      </sc-if>
     </div>
 
     <sc-if value="{{ lookupFormError }}" hint-placeholder-val="{{ false }}">
@@ -2958,7 +3010,7 @@ const __ds_scope = {};
       <div class="card-kicker">Request the verified record</div>
       <div style="font-size:17px;line-height:1.5">{{ accessCandidateLabel }}</div>
       <sc-if value="{{ accessGuestForm }}" hint-placeholder-val="{{ false }}">
-        <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">The candidate is asked to approve. Nothing is prepared or shown to you before they do, and a request that is declined or not answered costs nothing. If they approve, we email a link to {{ guestEmailLine }}. From that link you enter your card once: this places a hold for {{ guestPriceLabel }}, it does not charge you. The <b>real charge only happens the moment you are actually shown the result</b> &mdash; the same link opens it automatically once that happens, as a <b>one-time view</b> you can read for 30 minutes. If you never come back to that link, the hold simply expires on its own within about a week and you are never charged at all.</div>
+        <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">The candidate is asked to approve. Nothing is prepared or shown to you before they do, and a request that is declined or not answered costs nothing. If they approve, we email a link to {{ guestEmailLine }}. From that link you enter your card once: this places a hold for {{ guestPriceLabel }}, it does not charge you. The <b>real charge only happens the moment you are actually shown the result</b> &mdash; the same link opens it automatically once that happens, and stays open, reopenable for free, for <b>21 days</b>. If you never come back to that link, the hold simply expires on its own within about a week and you are never charged at all.</div>
         <div class="field">
           <label for="rq-att-g">How did you obtain this candidate's information?</label>
           <textarea class="input" id="rq-att-g" rows="3" style="resize:vertical;font-family:var(--font-body);line-height:1.6" value="{{ attestationDraft }}" sc-camel-on-change="{{ setAttestationDraft }}" placeholder="e.g. Applied through LinkedIn on Sep 3; recruiter Jane Smith sent me this resume"></textarea>
@@ -2992,6 +3044,41 @@ const __ds_scope = {};
         </sc-if>
         <button type="button" class="btn btn-primary" style="align-self:flex-start" disabled="{{ sendRequestDisabled }}" sc-camel-on-click="{{ sendRequest }}">{{ sendRequestLabel }}</button>
         <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Have an organization plan instead? <a href="#" sc-camel-on-click="{{ goSigninFromAccess }}">Sign in</a>. Its lookups cover these requests with no per-view charge.</div>
+      </sc-if>
+      <sc-if value="{{ accessPaidForm }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">The candidate is asked to approve, and a request that is declined or not answered costs nothing. Sending this request saves your card now, but places <b>no hold yet</b>. If the candidate approves, we automatically place a {{ guestPriceLabel }} hold on that saved card the moment they do &mdash; no second card prompt from us. The <b>real charge only happens when you open the result</b>, which you can do any time in the <b>7 days after the candidate approves</b>. If the candidate declines, doesn't answer within 72 hours, or you don't open it within that window, the hold quietly expires and you're never charged. Once you open it, it stays available from your account for 21 days.</div>
+        <div class="field">
+          <label for="rq-att-p">How did you obtain this candidate's information?</label>
+          <textarea class="input" id="rq-att-p" rows="3" style="resize:vertical;font-family:var(--font-body);line-height:1.6" value="{{ attestationDraft }}" sc-camel-on-change="{{ setAttestationDraft }}" placeholder="e.g. Applied through LinkedIn on Sep 3; recruiter Jane Smith sent me this resume"></textarea>
+          <div style="font-size:11px;color:var(--color-neutral-500);margin-top:6px;line-height:1.6">Required (10 to 500 characters). The candidate sees this text with your name, company and confirmed email.</div>
+        </div>
+        <div class="field">
+          <label for="rq-doc-p">Your document</label>
+          <input class="input" id="rq-doc-p" type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" sc-camel-on-change="{{ onPickRequestDoc }}">
+          <div style="font-size:11px;color:var(--color-neutral-500);margin-top:6px;line-height:1.6">Required. A PDF, PNG or JPEG of up to 10 MB. We check it for scripts and other active content before it is stored; a file that fails is refused and nothing is kept.</div>
+          <sc-if value="{{ reqDocHasName }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:var(--color-neutral-300);margin-top:6px">Selected: {{ reqDocName }}</div>
+          </sc-if>
+          <sc-if value="{{ reqDocErr }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:#e2735c;margin-top:6px;line-height:1.6">{{ reqDocErr }}</div>
+          </sc-if>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:var(--space-2);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:var(--space-3)">
+          <div style="font-size:13px;color:var(--color-neutral-200);line-height:1.6"><b>Before you upload</b></div>
+          <ul style="margin:0;padding-left:18px;font-size:12px;color:var(--color-neutral-300);line-height:1.7">
+            <li>The candidate will be able to see this exact file.</li>
+            <li>It is stored for 21 days from your request, then deleted.</li>
+            <li>It should be your own copy of the candidate's resume or application, containing nothing about other people.</li>
+          </ul>
+          <label style="display:flex;gap:var(--space-2);align-items:flex-start;font-size:12px;color:var(--color-neutral-300);line-height:1.6">
+            <input type="checkbox" checked="{{ reqConsent }}" sc-camel-on-change="{{ toggleReqConsent }}" style="accent-color:var(--color-accent);margin-top:3px">
+            <span>I understand and agree to the three points above.</span>
+          </label>
+        </div>
+        <sc-if value="{{ reqError }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:#e2735c;line-height:1.6">{{ reqError }}</div>
+        </sc-if>
+        <button type="button" class="btn btn-primary" style="align-self:flex-start" disabled="{{ sendRequestDisabled }}" sc-camel-on-click="{{ sendRequest }}">{{ sendRequestLabel }}</button>
       </sc-if>
       <sc-if value="{{ accessNoOption }}" hint-placeholder-val="{{ false }}">
         <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">This request can't be started from here. Run a new lookup, then request from its result screen.</div>
@@ -3054,8 +3141,16 @@ const __ds_scope = {};
             <div class="dialog-title" id="req-confirm-title" style="font-size:22px;line-height:1.3">You place a {{ confirmPriceLabel }} hold, not a charge, when you pay</div>
             <div style="display:flex;flex-direction:column;gap:var(--space-3);font-size:14px;line-height:1.6;color:var(--color-text)">
               <div><b>Nothing is charged now.</b> Sending this request is free.</div>
-              <div>If the candidate approves, we email you a link. From it you enter your card once on Stripe's own page: that places a <b>{{ confirmPriceLabel }} hold</b>, not a charge. The <b>real charge only happens the moment you are actually shown the result</b> &mdash; it opens by itself at that moment and stays open for 30 minutes.</div>
+              <div>If the candidate approves, we email you a link. From it you enter your card once on Stripe's own page: that places a <b>{{ confirmPriceLabel }} hold</b>, not a charge. The <b>real charge only happens the moment you are actually shown the result</b> &mdash; it opens by itself at that moment and stays open, reopenable for free, for 21 days.</div>
               <div>If the candidate declines or does not answer within 72 hours, nothing is ever placed on your card. If you place a hold but never come back to the link, the hold simply expires on its own within about a week and <b>you are never charged</b>.</div>
+            </div>
+          </sc-if>
+          <sc-if value="{{ confirmIsPaid }}" hint-placeholder-val="{{ false }}">
+            <div class="dialog-title" id="req-confirm-title" style="font-size:22px;line-height:1.3">This saves your card. It does not charge it.</div>
+            <div style="display:flex;flex-direction:column;gap:var(--space-3);font-size:14px;line-height:1.6;color:var(--color-text)">
+              <div><b>Nothing is charged now.</b> Sending this request only saves your card for later; no hold is placed yet.</div>
+              <div>If the candidate approves, we automatically place a <b>{{ confirmPriceLabel }} hold</b> on that saved card the moment they do &mdash; you won't be asked for it again. The <b>real charge only happens when you open the result</b>, any time in the <b>7 days after that approval</b>, not from today.</div>
+              <div>If the candidate declines, does not answer within 72 hours, or you do not open it within that 7-day window, the hold quietly expires and <b>you are never charged</b>.</div>
             </div>
           </sc-if>
           <div class="dialog-actions" style="justify-content:space-between;flex-wrap:wrap">
@@ -3087,7 +3182,20 @@ const __ds_scope = {};
           <button type="button" class="btn btn-ghost" sc-camel-on-click="{{ goHome }}">Back to home</button>
         </div>
       </sc-if>
+      <sc-if value="{{ requestSentIsPaid }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+          <button type="button" id="sent-back-mycomparisons" class="btn btn-primary" sc-camel-on-click="{{ openAccount }}">Back to My Comparisons</button>
+          <button type="button" class="btn btn-ghost" sc-camel-on-click="{{ goHome }}">Back to home</button>
+        </div>
+      </sc-if>
     </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isCardSetupReturn }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:480px;margin:0 auto;padding-top:80px;display:flex;flex-direction:column;gap:var(--space-3);align-items:center;text-align:center">
+    <div class="card-kicker">Saving your card</div>
+    <div style="font-size:15px;line-height:1.5">One moment…</div>
   </div>
   </sc-if>
 
@@ -3107,16 +3215,16 @@ const __ds_scope = {};
         <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">It was not opened in time, or it has ended. Nothing further can be done with this link; a new request to the candidate would be needed.</div>
       </sc-if>
       <sc-if value="{{ guestClosed }}" hint-placeholder-val="{{ false }}">
-        <div style="font-size:17px;line-height:1.5">This one-time view is closed.</div>
+        <div style="font-size:17px;line-height:1.5">Your view is closed.</div>
         <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">{{ guestClosedText }}</div>
       </sc-if>
       <sc-if value="{{ guestAwaiting }}" hint-placeholder-val="{{ false }}">
         <div style="font-size:17px;line-height:1.5">{{ guestLabel }} approved your request.</div>
-        <div style="font-size:14px;line-height:1.6">Opening {{ guestThe }} is a <b>one-time view</b> you can read for 30 minutes. Paying below places a hold of {{ guestPriceLabel }} on your card &mdash; <b>it does not charge you yet</b>. The <b>real charge happens only once you are actually shown the result</b>: if that is right now, it opens by itself the moment the hold is confirmed. If you leave and come back to this same link later, it opens (and you are charged) then instead. If you never come back at all, the hold simply expires on its own within about a week and you are never charged.</div>
+        <div style="font-size:14px;line-height:1.6">Opening {{ guestThe }} starts a <b>21-day window</b> you can reopen freely, for free, as many times as you like. Paying below places a hold of {{ guestPriceLabel }} on your card &mdash; <b>it does not charge you yet</b>. The <b>real charge happens only once you are actually shown the result</b>: if that is right now, it opens by itself the moment the hold is confirmed. If you leave and come back to this same link later, it opens (and you are charged) then instead. If you never come back at all, the hold simply expires on its own within about a week and you are never charged.</div>
         <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">{{ guestAwaitingHint }}</div>
         <label style="display:flex;gap:var(--space-2);align-items:flex-start;font-size:12px;color:var(--color-neutral-300);line-height:1.6">
           <input type="checkbox" checked="{{ guestAck }}" sc-camel-on-change="{{ toggleGuestAck }}" style="accent-color:var(--color-accent);margin-top:3px">
-          <span>I understand this places a hold, not a charge; the actual charge only happens once I am shown the result, which then closes 30 minutes later and cannot be reopened.</span>
+          <span>I understand this places a hold, not a charge; the actual charge only happens once I am shown the result, which then stays open for 21 days and can be reopened freely during that window.</span>
         </label>
         <sc-if value="{{ guestError }}" hint-placeholder-val="{{ false }}">
           <div style="font-size:12px;color:#e2735c;line-height:1.6">{{ guestError }}</div>
@@ -3126,7 +3234,7 @@ const __ds_scope = {};
       </sc-if>
       <sc-if value="{{ guestPending }}" hint-placeholder-val="{{ false }}">
         <div style="font-size:17px;line-height:1.5">Confirming your payment with Stripe…</div>
-        <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">This usually takes a few seconds. Nothing has been charged yet and your 30 minutes have not started: as soon as the hold is confirmed, the result opens by itself, and that is the moment you are charged. If you leave this page, open the same link again and it opens (and charges) then.</div>
+        <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">This usually takes a few seconds. Nothing has been charged yet and your 21-day window has not started: as soon as the hold is confirmed, the result opens by itself, and that is the moment you are charged. If you leave this page, open the same link again and it opens (and charges) then.</div>
         <sc-if value="{{ guestError }}" hint-placeholder-val="{{ false }}">
           <div style="font-size:12px;color:#e2735c;line-height:1.6">{{ guestError }}</div>
         </sc-if>
@@ -3138,8 +3246,8 @@ const __ds_scope = {};
         <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">We have your payment but could not confirm it automatically. Reply to your receipt email with the reference and we will sort it out; nothing has been opened.</div>
       </sc-if>
       <sc-if value="{{ guestStillOpen }}" hint-placeholder-val="{{ false }}">
-        <div style="font-size:17px;line-height:1.5">Your one-time view is still open.</div>
-        <div style="font-size:14px;line-height:1.6">It closes at {{ guestWindowEnd }}. Opening it again now is free and does not extend the time. After that it cannot be reopened.</div>
+        <div style="font-size:17px;line-height:1.5">Your view is still open.</div>
+        <div style="font-size:14px;line-height:1.6">It closes on {{ guestWindowEnd }}. Opening it again now is free and does not extend the time. After that it cannot be reopened.</div>
         <sc-if value="{{ guestError }}" hint-placeholder-val="{{ false }}">
           <div style="font-size:12px;color:#e2735c;line-height:1.6">{{ guestError }}</div>
         </sc-if>
@@ -3320,17 +3428,34 @@ class Component extends DCLogic {
     // succeeds simply replaces the session.
     let stored = null;
     try { stored = localStorage.getItem(this.EMP_TOKEN_KEY); } catch (e) { stored = null; }
-    let billingReturn = '', paymentReturn = '', comparisonToken = '';
-    try { const q = new URLSearchParams(window.location.search); billingReturn = q.get('billing') || ''; paymentReturn = q.get('payment') || ''; comparisonToken = (q.get('comparison') || '').toLowerCase(); } catch (e) { /* ignore */ }
-    if (billingReturn || paymentReturn || comparisonToken) { try { window.history.replaceState(null, '', window.location.pathname); } catch (e) { /* not critical */ } }
+    let billingReturn = '', paymentReturn = '', comparisonToken = '', cardSetupRequestId = '', cardSetupKind = '';
+    try {
+      const q = new URLSearchParams(window.location.search);
+      billingReturn = q.get('billing') || ''; paymentReturn = q.get('payment') || ''; comparisonToken = (q.get('comparison') || '').toLowerCase();
+      cardSetupRequestId = q.get('comparison_setup') || ''; cardSetupKind = q.get('setup') || '';
+    } catch (e) { /* ignore */ }
+    if (billingReturn || paymentReturn || comparisonToken || cardSetupRequestId) { try { window.history.replaceState(null, '', window.location.pathname); } catch (e) { /* not critical */ } }
     if (comparisonToken) this.enterGuest(comparisonToken, paymentReturn);
     else if (paymentReturn) this.setState({ screen: 'paymentReturn', paymentReturnKind: paymentReturn });
     const isBillingReturn = !!billingReturn && !paymentReturn && !comparisonToken && !token && !loginToken;
     if (isBillingReturn) this._billingKind = billingReturn;
+    // Gap #21, finding 7: back from the SetupIntent Checkout page (start_card_setup's success/cancel_url).
+    // This ALWAYS implies a signed-in session started it, so the neutral 'cardSetupReturn' screen shows
+    // until the stored session resumes and we can confirm the card actually landed (webhook-driven, same
+    // "never trust the browser's own return trip" rule as billing).
+    const isCardSetupReturn = !!cardSetupRequestId && !billingReturn && !paymentReturn && !comparisonToken && !token && !loginToken;
+    if (isCardSetupReturn) { this._cardSetupRequestId = cardSetupRequestId; this.setState({ screen: 'cardSetupReturn' }); }
     // (an emailed LOOKUP link does not stop the stored session being resumed: the two are independent, the lookup runs on the server by its token, and a signed-in
     // organization member who lands on the result must still be signed in to request the record. Only a SIGN-IN link takes priority.)
     if (stored && !loginToken) {
-      this.setState({ realToken: stored }, async () => { const loaded = await this.loadReal(); if (isBillingReturn) this.afterBillingReturn(billingReturn, loaded); });
+      this.setState({ realToken: stored }, async () => {
+        const loaded = await this.loadReal();
+        if (isBillingReturn) this.afterBillingReturn(billingReturn, loaded);
+        else if (isCardSetupReturn) this.afterCardSetupReturn(cardSetupRequestId, cardSetupKind, loaded);
+      });
+    } else if (isCardSetupReturn) {
+      // No stored session at all: the setup could not have been started without one, so this is a stale/reused link.
+      this.setState({ screen: 'signin', signinErr: 'Your session ended. Please sign in again.' });
     } else if (stored && loginToken) {
       // A sign-in link takes priority: the stored session is NOT resumed alongside it (two account loads racing, each for a different person, is exactly
       // what put the wrong organization on screen). If the link turns out not to work, the stored session is resumed afterwards (resumeDeferredStored).
@@ -3373,9 +3498,16 @@ class Component extends DCLogic {
 
   // Step 1: ask the server to email a confirmation link to the requester's address. Nothing is looked up
   // here; the candidate details are staged server-side and the lookup only runs when the link is used.
+  //
+  // Gap #21 (2026-09-26), "one verification": a SIGNED-IN person skips this whole email round-trip --
+  // check-existence's session_token path (see that function's own header) runs the lookup directly, in
+  // this same call, since the session itself is already real proof of email control. Same result shape
+  // either way (applyExistenceResult), same no-oracle hardening server-side; only the anonymous path still
+  // needs a confirmation email at all.
   async submitLookup() {
     const s = this.state;
     if (s.lookupSending) return;
+    if (s.real) { await this.submitLookupSignedIn(); return; }
     const email = (s.reqEmailInput || '').trim();
     if (!email) return;
     this.setState({ lookupSending: true, lookupFormError: null });
@@ -3413,6 +3545,69 @@ class Component extends DCLogic {
     this.setState({ lookupSending: false, lookupFormError: msg });
   }
 
+  // The signed-in branch of submitLookup: one call, no email, straight to the same result shape
+  // runTokenLookup produces from the anonymous link.
+  async submitLookupSignedIn() {
+    const s = this.state;
+    this.setState({ lookupSending: true, lookupFormError: null });
+    let res, data;
+    try {
+      res = await fetch(this.SUPABASE_FN_URL + '/check-existence', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_token: s.realToken || '',
+          requester_company: (s.reqCompanyInput || '').trim(),
+          candidate_name: (s.candNameInput || '').trim(),
+          candidate_email: (s.candEmailInput || '').trim(),
+          candidate_phone: (s.candPhoneInput || '').trim(),
+        }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ lookupSending: false, lookupFormError: "We couldn't reach the server. Check your connection and try again." });
+      return;
+    }
+    if (res.status === 401) { this.setState({ lookupSending: false }); this.dropRealSession(true); return; }
+    const code = data && data.error;
+    const msg = code === 'rate_limited' ? 'You have run several checks recently. Please try again in an hour.'
+      : code === 'candidate_name_required' ? 'Please enter the candidate’s first and last name.'
+      : code === 'candidate_email_invalid' ? 'The candidate’s email address doesn’t look right. Please check it.'
+      : code === 'candidate_contact_required' ? 'Please give the candidate’s email address or a 10-digit phone number.'
+      : !res.ok || !data || !data.ok ? "We couldn't run that check. Please try again." : null;
+    if (msg) { this.setState({ lookupSending: false, lookupFormError: msg }); return; }
+    this.setState({ lookupSending: false });
+    this.applyExistenceResult(data);
+  }
+
+  // Shared by the anonymous email-link path (runTokenLookup) and the signed-in path just above: the same
+  // {exists, lookup_id, claim_token, ...} shape either way, so this is the ONE place that turns it into
+  // screen state.
+  applyExistenceResult(data) {
+    if (!data.exists) { this.setState({ screen: 'noMatch', lookupResult: 'none', lookup: null, request: null }); return; }
+    const reqEmail = data.requester_email || '';
+    this.setState({
+      screen: 'result',
+      lookupResult: 'match',
+      response: 'pending',
+      pendingEmail: reqEmail,
+      lookup: {
+        id: 'LKP-' + String(data.lookup_id || '').replace(/-/g, '').slice(0, 6).toUpperCase(),
+        rawId: data.lookup_id || '',
+        claimToken: data.claim_token || '',
+        candidateName: data.candidate_name || '',
+        candidateStatus: '',
+        candidate: null,
+        contactUsed: data.contact_used || '',
+        requesterName: data.requester_name || 'Unnamed requester',
+        requesterCompany: data.requester_company || '',
+        requesterEmail: reqEmail,
+        domainType: this.domainTypeFor(reqEmail),
+        timestamp: data.completed_at || new Date().toISOString(),
+      },
+    });
+  }
+
   // A signed-in person's own details for the requester part of the lookup form (only fields still empty are filled). The confirmation email goes to this
   // address, and a signed-in organization member can request a record only when the lookup was confirmed with their own address.
   lookupPrefill() {
@@ -3447,6 +3642,9 @@ class Component extends DCLogic {
       signinEmail: '', signinName: '', signinBusy: false, signinErr: null, signinProblem: null, signinSentTo: '',
       acctNameDraft: '', orgNameDraft: '', newOrgNameDraft: '', inviteEmailDraft: '', acctNotice: null, acctErr: null, acctBusy: false,
       payments: [], paymentsLoaded: false, paymentsErr: null, paymentsLoadFailed: false,
+      // Gap #21 finding 8: pay-per-use requests this employer_user made, whatever state they are in. Loaded
+      // alongside everything else in runLoad() below, regardless of whether the person has an organization.
+      myPaidComparisons: [], myPaidLoaded: false, myPaidBusy: false, myPaidErr: null,
     };
   }
 
@@ -3510,6 +3708,10 @@ class Component extends DCLogic {
     const me = await call('me');
     let sup = await superseded(); if (sup !== null) return sup;
     if (!me.data.ok) return false;
+    // Independent of org status (Gap #21 finding 8): a pay-per-use request always carries this employer_user's own
+    // id, whether or not they belong to an organization, so this is fetched unconditionally, in parallel with the
+    // organization-only calls below.
+    const myPaidCall = call('list_my_paid_comparisons');
     let members = [], invites = [], billing = null;
     let cmp = { lookups: [], comparisons: [], cmpLoaded: false, cmpLoadErr: null };
     if (me.data.org) {
@@ -3519,10 +3721,13 @@ class Component extends DCLogic {
       if (got[1].data.ok) billing = got[1].data;
       cmp = this.cmpPatch(got[2].data, got[3].data);
     }
+    const myPaidRes = await myPaidCall;
+    sup = await superseded(); if (sup !== null) return sup;
+    const myPaid = myPaidRes.data && myPaidRes.data.ok ? { myPaidComparisons: myPaidRes.data.comparisons || [], myPaidLoaded: true } : { myPaidLoaded: true };
     this.setState(Object.assign({
       real: me.data, realMembers: members, realOrgInvites: invites, billing: billing,
       acctNameDraft: (me.data.user && me.data.user.name) || '', orgNameDraft: (me.data.org && me.data.org.name) || '',
-    }, cmp));
+    }, cmp, myPaid));
     return true;
   }
 
@@ -3587,6 +3792,36 @@ class Component extends DCLogic {
     this.setState({ billingReturnFailed: false });
     const loaded = await this.loadReal();
     this.afterBillingReturn(this._billingKind || 'return', loaded);
+  }
+
+  // Back from the SetupIntent Checkout page (Gap #21, finding 7). The card landing is webhook-driven
+  // (employer-stripe-events.ts's linkSavedCard), not this return trip, so this briefly polls
+  // list_my_paid_comparisons for the one request just set up rather than trusting `setup=success` alone --
+  // in every real run so far the webhook is already done by the time this page reloads, but the poll is
+  // the honest way to say so rather than assuming it.
+  async afterCardSetupReturn(requestId, kind, loaded) {
+    if (!loaded) {
+      if (!this.state.realToken) { this.setState({ screen: 'signin', signinErr: 'Your session ended. Please sign in again.' }); }
+      else this.setState({ screen: 'requestSent', requestSentKind: 'paidNoCard', requestSentLine: 'Request sent.', requestSentDetail: "We couldn't confirm your card just now. Add one any time before the candidate answers, from My Comparisons in your account." });
+      return;
+    }
+    if (kind === 'cancel') {
+      this.setState({ screen: 'requestSent', requestSentKind: 'paidNoCard', requestSentLine: 'Request sent.', requestSentDetail: 'You left before saving a card. You can add one any time before the candidate answers, from My Comparisons in your account -- nothing is charged until you do.' });
+      return;
+    }
+    let saved = false;
+    for (let i = 0; i < 4 && !saved; i++) {
+      if (i > 0) await new Promise(r => setTimeout(r, 1500));
+      const r = await this.empCall('list_my_paid_comparisons', {});
+      const row = r.data && r.data.ok ? (r.data.comparisons || []).find(c => c.id === requestId) : null;
+      if (row && row.card_saved) saved = true;
+    }
+    this.setState({
+      screen: 'requestSent', requestSentKind: 'paid', requestSentLine: 'Request sent.',
+      requestSentDetail: saved
+        ? "Your card is saved. If the candidate approves, we'll place the hold automatically and email you -- you won't need to enter a card again."
+        : "Your card was saved on Stripe's side, but we haven't confirmed it here yet. Check My Comparisons in your account in a moment; if it's still missing, you can add it there.",
+    });
   }
 
   async submitSignin() {
@@ -3746,30 +3981,9 @@ class Component extends DCLogic {
     if (res.status === 410) { this.setState({ screen: 'linkExpired' }); return; }
     if (res.status === 400 || res.status === 404) { this.setState({ screen: 'linkInvalid' }); return; }
     if (!res.ok || !data || !data.ok) { this.setState({ screen: 'lookupError' }); return; }
-    if (!data.exists) { this.setState({ screen: 'noMatch', lookupResult: 'none', lookup: null, request: null }); return; }
-    const reqEmail = data.requester_email || '';
-    this.setState({
-      screen: 'result',
-      lookupResult: 'match',
-      response: 'pending',
-      pendingEmail: reqEmail,
-      lookup: {
-        id: 'LKP-' + String(data.lookup_id || '').replace(/-/g, '').slice(0, 6).toUpperCase(),
-        rawId: data.lookup_id || '',
-        claimToken: data.claim_token || '',
-        // check-existence never returns candidate details; the name shown back is what the requester
-        // typed, which the server has just matched against the record.
-        candidateName: data.candidate_name || '',
-        candidateStatus: '',
-        candidate: null,
-        contactUsed: data.contact_used || '',
-        requesterName: data.requester_name || 'Unnamed requester',
-        requesterCompany: data.requester_company || '',
-        requesterEmail: reqEmail,
-        domainType: this.domainTypeFor(reqEmail),
-        timestamp: data.completed_at || new Date().toISOString(),
-      },
-    });
+    // check-existence never returns candidate details; the name shown back is what the requester
+    // typed, which the server has just matched against the record.
+    this.applyExistenceResult(data);
   }
 
 
@@ -3868,6 +4082,28 @@ class Component extends DCLogic {
     this.setState({ reqBusy: true, reqErr: null });
     const up = await this.uploadRequestDocument('guest');
     if (up.error) { this.setState({ reqBusy: false, reqErr: up.error }); return; }
+    // Gap #21 (2026-09-26): signed in -> the pay-per-use path (request_comparison_paid, employer-api.ts).
+    // reqClaimToken was only ever needed for the document upload just above; identity for the request
+    // itself comes from the session. Not signed in -> the original fully-anonymous path, unchanged below.
+    if (s.real) {
+      const r = await this.empCall('request_comparison_paid', { lookup_id: s.reqLookupId, attestation: s.reqAttestation, document_id: up.id });
+      if (r.status === 401) { this.setState({ reqBusy: false }); return; }
+      if (r.data && r.data.ok) {
+        this._reqDoc = null; this._reqDocUp = null;
+        this.setState({ reqLookupId: null, reqClaimToken: '', reqAttestation: '', reqDocName: '', reqConsent: false });
+        await this.startCardSetupNow(r.data.request_id, !!r.data.candidate_notified);
+        return;
+      }
+      const code = r.data && r.data.error;
+      this.setState({
+        reqBusy: false,
+        reqErr: this.reqDocErrorFor(code) || (code === 'attestation_invalid' ? 'Please say how you obtained the candidate\u2019s information (10 to 500 characters).'
+          : code === 'rate_limited' ? 'You have sent several requests today. Please try again tomorrow.'
+          : code === 'already_requested' ? 'You already have a request open for this candidate. Check your email for the link if it was approved.'
+          : "This request can't be made right now."),
+      });
+      return;
+    }
     const r = await this.gcall({ action: 'request', lookup_id: s.reqLookupId, claim_token: s.reqClaimToken, attestation: s.reqAttestation, document_id: up.id });
     if (r.data && r.data.ok) {
       this._reqDoc = null; this._reqDocUp = null;
@@ -3884,6 +4120,27 @@ class Component extends DCLogic {
         : code === 'rate_limited' ? 'You have sent several requests today. Please try again tomorrow.'
         : code === 'already_requested' ? 'You already have a request open for this candidate. Check your email for the link if it was approved.'
         : "This request can't be made right now."),
+    });
+  }
+
+  // Gap #21, finding 7: immediately after a successful pay-per-use request, kick off the Stripe SetupIntent
+  // (a card save, no hold) and redirect straight to its hosted page -- one motion from the employer's point
+  // of view, card collected at request time so the real hold can be placed automatically at approval with
+  // no second prompt. already_saved only happens on a retried call (the card was saved on an earlier attempt
+  // for this same request); a genuine failure to even START the setup still shows Request Sent, since the
+  // request itself is real either way -- My Comparisons (list_my_paid_comparisons) lets them add a card later.
+  async startCardSetupNow(requestId, notified) {
+    const notifiedLine = notified ? 'They have been emailed and can answer from their account.' : "We couldn't email them just now; we will keep trying, and they will also see it in their account.";
+    const r = await this.empCall('start_card_setup', { request_id: requestId });
+    if (r.status === 401) { this.setState({ reqBusy: false }); return; }
+    if (r.data && r.data.ok && r.data.url) { window.location.href = r.data.url; return; }
+    if (r.data && r.data.ok && r.data.already_saved) {
+      this.setState({ reqBusy: false, screen: 'requestSent', requestSentKind: 'paid', requestSentLine: notifiedLine });
+      return;
+    }
+    this.setState({
+      reqBusy: false, screen: 'requestSent', requestSentKind: 'paidNoCard', requestSentLine: notifiedLine,
+      requestSentDetail: "We couldn't start saving your card just now. You can add one any time before the candidate answers, from My Comparisons in your account -- nothing is charged until you do, and until then the hold simply can't be placed automatically.",
     });
   }
 
@@ -3958,15 +4215,18 @@ class Component extends DCLogic {
     await this.refreshGuest();
   }
 
-  // The 30 minute window: the page counts it down and drops the record the moment it ends (the server refuses a reopen regardless).
+  // The 21-day window: the page counts it down and drops the record the moment it ends (the server refuses a reopen regardless).
+  // Checking once a minute is plenty for a multi-day window (was every 5s back when this was a 30-minute window).
+  // Covers both the anonymous emailed-token path (c.guest) and the signed-in session path (c.paid) -- same
+  // countdown mechanic, different ending (endGuestView vs endPaidView) because only one of them has an account to return to.
   startGuestTimer() {
     if (this._guestTimer) clearInterval(this._guestTimer);
     this._guestTimer = setInterval(() => {
       const c = this.state.compare;
-      if (!c || !c.guest) { clearInterval(this._guestTimer); this._guestTimer = null; return; }
-      if (Date.now() >= new Date(c.windowEnds).getTime()) { this.endGuestView(); return; }
+      if (!c || !(c.guest || c.paid)) { clearInterval(this._guestTimer); this._guestTimer = null; return; }
+      if (Date.now() >= new Date(c.windowEnds).getTime()) { if (c.paid) this.endPaidView(); else this.endGuestView(); return; }
       this.setState({ guestTick: Date.now() });
-    }, 5000);
+    }, 60000);
   }
 
   endGuestView() {
@@ -4339,6 +4599,71 @@ class Component extends DCLogic {
       : 'Access has ended.';
   }
 
+  // Gap #21 finding 8: the pay-per-use twin of comparisonStatusLabel above. `hold_state` (from
+  // list_my_paid_comparisons) says what happened with the automatic hold, separately from the request's own
+  // approve/decline status, since the two can disagree (e.g. approved but the automatic hold failed).
+  paidComparisonStatusLabel(c) {
+    if (c.status === 'awaiting_candidate') {
+      const extra = !c.card_saved ? ' Add a card before they answer so the hold can be placed automatically the moment they do.'
+        : c.hold_state === 'none' ? ' Your card is saved; the hold is placed automatically the moment they approve.' : '';
+      return 'Waiting for the candidate to answer (they have until ' + this.fmtDate(c.answer_by) + ').' + extra;
+    }
+    if (c.status === 'not_authorized') return 'Not authorized. Nothing was ever charged.';
+    if (c.status === 'ready') {
+      if (c.hold_state === 'holding') return 'Approved. Ready to open until ' + this.fmtDate(c.available_until) + '. Opening it charges the hold now.';
+      if (c.hold_state === 'failed') return 'Approved, but the automatic hold failed. Opening it will ask you for a card.';
+      return 'Approved. No hold is on file, so opening it will ask you for a card.';
+    }
+    if (c.status === 'opened') return 'Opened ' + this.fmtDate(c.opened_at) + '. You can reopen it free' + (c.window_ends_at ? ' until ' + this.fmtDateTime(c.window_ends_at) : '') + '.';
+    return 'Access has ended.';
+  }
+
+  async openMyPaidComparison(id, labelHint) {
+    if (!id || this.state.myPaidBusy) return;
+    this.setState({ myPaidBusy: true, myPaidErr: null });
+    const r = await this.empCall('open_paid_comparison', { request_id: id });
+    if (r.status === 401) { this.setState({ myPaidBusy: false }); return; }
+    if (!r.data || !r.data.ok) {
+      const code = r.data && r.data.error;
+      const msg = code === 'payment_required' ? 'This needs a card on file before it can open. Add one below, then try again.'
+        : code === 'window_closed' ? 'This comparison’s 21-day window has closed. It cannot be reopened.'
+        : code === 'payment_unavailable' ? 'The saved card could not be charged. Add a new card below, then try again.'
+        : code === 'not_available' ? 'This request is no longer available.'
+        : "That didn't work. Please try again.";
+      this.setState({ myPaidBusy: false, myPaidErr: msg });
+      await this.loadReal();
+      return;
+    }
+    const d = r.data;
+    const row = (this.state.myPaidComparisons || []).find(c => c.id === id);
+    this.setState({
+      myPaidBusy: false, screen: 'compare', compareFrom: 'acct',
+      compare: { id: id, label: (row && row.candidate_label) || labelHint || 'Candidate', content: d.content, assembledAt: d.assembled_at, guest: false, paid: true, windowEnds: d.window_ends_at, firstOpen: !!d.first_open, document: d.document || null, generatedDocument: d.generated_document || null },
+    });
+    this.startGuestTimer();
+  }
+
+  async addCardForRequest(id) {
+    if (this.state.myPaidBusy) return;
+    this.setState({ myPaidBusy: true, myPaidErr: null });
+    const r = await this.empCall('start_card_setup', { request_id: id });
+    if (r.status === 401) { this.setState({ myPaidBusy: false }); return; }
+    if (r.data && r.data.ok && r.data.url) { window.location.href = r.data.url; return; }
+    if (r.data && r.data.ok && r.data.already_saved) { this.setState({ myPaidBusy: false }); await this.loadReal(); return; }
+    this.setState({ myPaidBusy: false, myPaidErr: "That didn't work. Please try again." });
+  }
+
+  // The countdown-and-auto-end twin of endGuestView(), for a paid view opened via the signed-in session
+  // (open_paid_comparison) instead of an emailed anonymous token. Unlike the anonymous path there is a real
+  // account to go back to, so this returns there instead of to the token-only 'guest' screen, and never calls
+  // the anonymous close endpoint (there is no guestToken to close).
+  endPaidView() {
+    if (this._guestTimer) { clearInterval(this._guestTimer); this._guestTimer = null; }
+    if (this._genDocUrl) { try { URL.revokeObjectURL(this._genDocUrl); } catch (x) { /* ignore */ } this._genDocUrl = null; }
+    this.setState({ screen: 'acct', compare: null, acctNotice: 'That comparison’s 21-day window has closed.' });
+    this.loadReal();
+  }
+
   renderVals() {
     const s = this.state;
     const lk = s.lookup || {};
@@ -4357,6 +4682,7 @@ class Component extends DCLogic {
     }));
     const subLive = !!(s.billing && s.billing.subscription && s.billing.subscription.live);
     return {
+      isCardSetupReturn: s.screen === 'cardSetupReturn',
       isBillingReturn: s.screen === 'billingReturn',
       billingReturnFailed: !!s.billingReturnFailed,
       billingReturnKicker: s.billingReturnFailed ? 'Account' : (s.billingReturnKind === 'success' ? 'Checking your payment' : 'Loading your account'),
@@ -4427,6 +4753,10 @@ class Component extends DCLogic {
         hasCompany: !!p.company, company: p.company || '',
         statusLabel: p.status === 'refunded' ? 'Refunded' : p.status === 'needs_review' ? 'Paid, under review' : 'Paid',
         hasReceipt: !!p.receipt_url, receiptUrl: p.receipt_url || '',
+        // Gap #21 HEADLINE: the server only sets this when the request is still genuinely openable (approved,
+        // and never opened or still inside its 21-day window) -- non-null here is itself the "can reopen" signal.
+        canOpen: !!p.comparison_request_id,
+        onOpen: () => this.openMyPaidComparison(p.comparison_request_id, p.candidate_label),
       })),
       openBillingPortal: () => this.billingAct('billing_portal'),
       cancelAtPeriodEnd: () => { if (window.confirm('Cancel at the end of the current period? The organization keeps its remaining lookups until then.')) this.billingAct('cancel_subscription', { when: 'period_end' }, { until: b => !!(b && b.subscription && b.subscription.cancel_at_period_end), done: 'Cancellation scheduled.' }); },
@@ -4525,10 +4855,11 @@ class Component extends DCLogic {
       setReqCompanyInput: (e) => this.setState({ reqCompanyInput: e.target.value, lookupResult: null }),
       setReqEmailInput: (e) => this.setState({ reqEmailInput: e.target.value, lookupResult: null }),
       submitLookup: () => this.submitLookup(),
+      // Gap #21 "one verification": a signed-in person's name/email come from their session (submitLookupSignedIn
+      // never reads reqNameInput/reqEmailInput), so those two fields are neither shown nor required for them below.
       lookupIncomplete: s.lookupSending || !((s.candNameInput || '').trim().split(/\s+/).filter(Boolean).length >= 2
         && ((s.candEmailInput || '').trim() || (s.candPhoneInput || '').trim())
-        && (s.reqNameInput || '').trim()
-        && (s.reqEmailInput || '').trim()),
+        && (!!s.real || ((s.reqNameInput || '').trim() && (s.reqEmailInput || '').trim()))),
       pendingRequesterEmail: s.pendingEmail || '',
       noop: (e) => { if (e && e.preventDefault) e.preventDefault(); },
       startOver: (e) => {
@@ -4564,12 +4895,13 @@ class Component extends DCLogic {
       }),
       resultAccessNote: s.real
         ? (s.real.org ? 'Signed in as ' + s.real.user.email + '.' : 'You are signed in but not part of an organization yet.')
-        : 'You can request as a guest (a one-time view, paid per view) or sign in with an organization account, whose plan covers these requests.',
+        : 'You can request as a guest (pay per request, reopenable free for 21 days once you open it) or sign in with an organization account, whose plan covers these requests.',
       accessCandidateLabel: s.reqLookupLabel || 'the candidate',
       accessEmailMismatch: !!s.real && !!s.real.org && !!s.reqLookupRequesterEmail && s.reqLookupRequesterEmail.trim().toLowerCase() !== (s.real.user.email || '').toLowerCase() && !s.reqClaimToken,
       accessEmailNote: 'This lookup was confirmed with ' + (s.reqLookupRequesterEmail || 'another address') + ', so it can only be requested from an account signed in with that address. You are signed in as ' + (s.real && s.real.user ? s.real.user.email : '') + '.',
       accessCanRequest: this.orgFormOk(),
-      accessGuestForm: !this.orgFormOk() && !!s.reqClaimToken,
+      accessGuestForm: !this.orgFormOk() && !!s.reqClaimToken && !s.real,
+      accessPaidForm: !this.orgFormOk() && !!s.reqClaimToken && !!s.real,
       accessNoOption: !this.orgFormOk() && !s.reqClaimToken && !(!!s.real && !!s.real.org),
       guestEmailLine: s.reqLookupRequesterEmail || 'the address you confirmed this lookup with',
       guestPriceLabel: this.money(s.guestPrice),
@@ -4591,7 +4923,8 @@ class Component extends DCLogic {
       },
       reqConfirmOpen: !!s.reqConfirmOpen && s.screen === 'access',
       confirmIsOrg: this.orgFormOk(),
-      confirmIsGuest: !this.orgFormOk(),
+      confirmIsGuest: !this.orgFormOk() && !s.real,
+      confirmIsPaid: !this.orgFormOk() && !!s.real,
       confirmPriceLabel: s.guestPrice ? this.money(s.guestPrice) : '\u2026',
       confirmQuotaLine: (() => {
         const b = s.billing && s.billing.subscription;
@@ -4620,7 +4953,7 @@ class Component extends DCLogic {
       guestReview: !!s.guest && s.guest.state === 'payment_review',
       guestReady: !!s.guest && s.guest.state === 'ready_to_open',
       guestStillOpen: !!s.guest && s.guest.state === 'open',
-      guestWindowEnd: s.guest && s.guest.window_ends_at ? new Date(s.guest.window_ends_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '',
+      guestWindowEnd: s.guest && s.guest.window_ends_at ? this.fmtDateTime(s.guest.window_ends_at) : '',
       guestLabel: (s.guest && s.guest.candidate_label) || 'The candidate',
       // What the guest is about to receive. The server tells us only after the candidate approved (before that the screen says nothing about it).
       guestKicker: (() => { const k = s.guest && s.guest.kind; return k === 'license_report' ? 'License status report' : k === 'resume_comparison' ? 'Comparison' : 'Verified record'; })(),
@@ -4633,7 +4966,7 @@ class Component extends DCLogic {
             ? 'You have no account, so nothing is stored for you. Have your own copy of the candidate\u2019s resume ready first: you can show it next to the record while it is open. This link stays valid until ' + until + ' if you do not pay.'
             : 'You have no account, so nothing is stored for you. This link stays valid until ' + until + ' if you do not pay.';
       })(),
-      guestReadyText: (() => { const k = s.guest && s.guest.kind; return k === 'license_report' ? 'Opening the report now starts your 30 minutes. It cannot be reopened after that.' : k === 'resume_comparison' ? 'Opening it now starts your 30 minutes. It cannot be reopened after that. Have your own copy ready, then open it.' : 'Opening it now starts your 30 minutes. It cannot be reopened after that.'; })(),
+      guestReadyText: (() => { const k = s.guest && s.guest.kind; return k === 'license_report' ? 'Opening the report now starts your 21-day window. You can reopen it as often as you like until then.' : k === 'resume_comparison' ? 'Opening it now starts your 21-day window. You can reopen it as often as you like until then. Have your own copy ready, then open it.' : 'Opening it now starts your 21-day window. You can reopen it as often as you like until then.'; })(),
       guestClosedText: (() => { const k = s.guest && s.guest.kind; const what = k === 'license_report' ? 'license status report' : k === 'resume_comparison' ? 'comparison' : ''; return 'It cannot be reopened, by you or by us, and nothing of it is kept for you. ' + (what ? 'A new ' + what + ' would need a new request to the candidate.' : 'A new request to the candidate would be needed.'); })(),
       guestAvailableUntil: s.guest && s.guest.available_until ? this.fmtDate(s.guest.available_until) : '',
       guestAck: !!s.guestAck,
@@ -4644,15 +4977,33 @@ class Component extends DCLogic {
       guestPay: () => this.guestPayNow(),
       guestRecheck: () => this.refreshGuest(),
       guestOpen: () => this.guestOpenNow(),
-      guestOpenLabel: s.guestBusy ? 'Opening…' : 'Open the ' + (s.guest && s.guest.kind === 'license_report' ? 'license report' : s.guest && s.guest.kind === 'resume_comparison' ? 'comparison' : 'record') + ' (starts your 30 minutes)',
+      guestOpenLabel: s.guestBusy ? 'Opening…' : 'Open the ' + (s.guest && s.guest.kind === 'license_report' ? 'license report' : s.guest && s.guest.kind === 'resume_comparison' ? 'comparison' : 'record') + ' (starts your 21-day window)',
       requestSentLine: s.requestSentLine,
-      requestSentIsOrg: s.requestSentKind !== 'guest',
+      requestSentIsOrg: s.requestSentKind === 'org',
       requestSentIsGuest: s.requestSentKind === 'guest',
+      // Gap #21: 'paid' (card saved) and 'paidNoCard' (card not saved yet) are both the signed-in pay-per-use
+      // path -- same "go to My Comparisons" ending either way, just different detail text (set directly by
+      // startCardSetupNow/afterCardSetupReturn above, in requestSentDetail state -- NOT recomputed here, since
+      // those two already say exactly what happened with the card and a generic line would just repeat or
+      // contradict it).
+      requestSentIsPaid: s.requestSentKind === 'paid' || s.requestSentKind === 'paidNoCard',
       requestSentDetail: s.requestSentKind === 'guest'
-        ? 'If they approve, we email a link to ' + (s.reqLookupRequesterEmail || 'the address you confirmed this lookup with') + '. That link is the only way in, so keep the email: you place a card hold from it, not a charge, and the real charge only happens the moment you are actually shown the one-time view. If you never come back to that link, the hold simply expires on its own and you are never charged. If they decline, or do not answer within 72 hours, we email only that the request was not authorized: we do not say which, and you are never charged either way.'
-        : 'You will get an email either way. If they approve, it says so and you open it from Request a comparison. If they decline, or do not answer within 72 hours, the email says only that the request was not authorized: we do not say which, and nothing is used from your plan.',
+        ? 'If they approve, we email a link to ' + (s.reqLookupRequesterEmail || 'the address you confirmed this lookup with') + '. That link is the only way in, so keep the email: you place a card hold from it, not a charge, and the real charge only happens the moment you are actually shown the result, which then stays open for 21 days. If you never come back to that link, the hold simply expires on its own and you are never charged. If they decline, or do not answer within 72 hours, we email only that the request was not authorized: we do not say which, and you are never charged either way.'
+        : s.requestSentKind === 'org'
+        ? 'You will get an email either way. If they approve, it says so and you open it from Request a comparison. If they decline, or do not answer within 72 hours, the email says only that the request was not authorized: we do not say which, and nothing is used from your plan.'
+        : s.requestSentDetail,
       cmpNote: s.cmpNote, cmpError: s.cmpErr || s.cmpLoadErr, cmpBusy: s.cmpBusy,
       noLookupRows: (s.lookups || []).length === 0,
+      // Gap #21 finding 8: independent of org status, shown on the account screen regardless of whether the person has an organization.
+      noMyPaidComparisons: (s.myPaidComparisons || []).length === 0,
+      myPaidBusy: !!s.myPaidBusy,
+      myPaidErr: s.myPaidErr,
+      myPaidRows: (s.myPaidComparisons || []).map((c) => ({
+        id: c.id, label: c.candidate_label, requestedLabel: this.fmtDate(c.requested_at),
+        statusLabel: this.paidComparisonStatusLabel(c),
+        canOpen: !!c.can_open, showAddCard: c.status === 'awaiting_candidate' && !c.card_saved,
+        onOpen: () => this.openMyPaidComparison(c.id), onAddCard: () => this.addCardForRequest(c.id),
+      })),
       lookupRows: lookupRowsFor('acct'),
       lookupRowsReq: lookupRowsFor('request'),
       comparisonsHeading: s.real && s.real.role === 'owner' ? 'Requests (whole organization)' : 'Your requests',
@@ -4670,11 +5021,11 @@ class Component extends DCLogic {
       })(),
       compareAsOf: this.fmtDateTime(cmp.assembledAt),
       compareApproved: 'The candidate approved this request; you opened it ' + (cmp.firstOpen ? 'just now.' : 'before.'),
-      compareMeterLabel: cmp.guest ? 'One-time view' : 'Your plan',
-      compareMeterLine: cmp.guest
-        ? 'Paid. ' + (() => { const ms = new Date(cmp.windowEnds).getTime() - Date.now(); const m = Math.max(0, Math.ceil(ms / 60000)); return 'Closes at ' + new Date(cmp.windowEnds).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) + ' (about ' + m + ' minute' + (m === 1 ? '' : 's') + ' left). After that it cannot be reopened.'; })()
+      compareMeterLabel: (cmp.guest || cmp.paid) ? 'Paid view' : 'Your plan',
+      compareMeterLine: (cmp.guest || cmp.paid)
+        ? 'Paid. ' + (() => { const ms = new Date(cmp.windowEnds).getTime() - Date.now(); const d = Math.max(0, Math.ceil(ms / 86400000)); return 'Reopenable free until ' + this.fmtDateTime(cmp.windowEnds) + ' (about ' + d + ' day' + (d === 1 ? '' : 's') + ' left). After that it cannot be reopened.'; })()
         : (cmp.metered && cmp.quota ? 'This used 1 lookup (' + cmp.quota.remaining + ' of ' + cmp.quota.included + ' left this period).' : 'No lookup used by this view (it was counted when first opened).'),
-      compareBackLabel: cmp.guest ? 'Close this one-time view' : (s.compareFrom === 'request' ? 'Back to your requests' : 'Back to your account'),
+      compareBackLabel: cmp.guest ? 'Close this view' : cmp.paid ? 'Back to My Comparisons' : (s.compareFrom === 'request' ? 'Back to your requests' : 'Back to your account'),
       compareEmpty: !(content.work || []).length && !(content.education || []).length && !(content.certifications || []).length,
       // 2026-09-22: the document captured when the request was submitted, if there still is one (21-day
       // retention). When present it is auto-loaded below; the manual-upload prompt is the fallback, not the default.
