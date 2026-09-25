@@ -52,6 +52,15 @@ const corsHeaders = {
 //     reference = the request id (counted once no matter how often it is retried or re-opened); if the organization has no active
 //     subscription or no lookups left the open is refused (402) and nothing is consumed, and the approved snapshot simply waits until
 //     it is discarded (7 days). Re-opening an already-opened snapshot never consumes another lookup.
+//
+// Pay-per-use comparisons (Gap #21, 2026-09-26 redesign): request_comparison_paid, start_card_setup,
+// list_my_paid_comparisons and open_paid_comparison are all access "any" (signed in, org and subscription both
+// optional) -- billed one Stripe payment per request instead of a subscription quota. See their own comments
+// for the full flow; in short, "one verification" (this same session now covers the existence lookup too, via
+// check-existence's session_token path), card saved at REQUEST time (start_card_setup, no hold placed), the
+// real hold placed AUTOMATICALLY the instant the candidate approves (place_hold_on_approval in employer-
+// comparison.ts, called from candidate-comparison-requests — no second card prompt), and real persistent access
+// once opened (21 days, was a 30-minute single view) reachable here or from Payment History (list_payments).
 // This is employer-side only. Candidate and staff endpoints are NOT changed by this and are still identified by
 // id in the request body (a separate, already-tracked cleanup).
 const REST = { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` };
@@ -107,6 +116,22 @@ async function stripe(method: string, path: string, form?: Record<string, string
     body,
   });
   return { ok: r.ok, status: r.status, data: await r.json().catch(() => ({})) };
+}
+// The real charge: capture an authorized, capturable hold. Deliberately the same shape as employer-comparison.ts's
+// own captureGuestHold (that file's own comment explains the idempotency/race handling in full) -- duplicated
+// rather than cross-called, matching how every other small helper (sha256Hex, stripe(), rest()...) in this project
+// is duplicated per edge function rather than imported, since each deploys independently.
+async function captureGuestHoldLocal(p: { id: string; stripe_payment_intent_id?: string | null }): Promise<boolean> {
+  if (!p.stripe_payment_intent_id) return false;
+  const markPaid = () => rest(`employer_payments?id=eq.${p.id}&status=eq.authorized`, { method: "PATCH", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ status: "paid", paid_at: new Date().toISOString() }) });
+  const cap = await stripe("POST", `/v1/payment_intents/${encodeURIComponent(p.stripe_payment_intent_id)}/capture`, undefined, `employer-guest-capture-${p.id}`);
+  if (cap.ok && cap.data?.status === "succeeded") { await markPaid(); return true; }
+  const check = await stripe("GET", `/v1/payment_intents/${encodeURIComponent(p.stripe_payment_intent_id)}`);
+  if (check.ok && check.data?.status === "succeeded") { await markPaid(); return true; }
+  if (check.ok && check.data?.status === "canceled") {
+    await rest(`employer_payments?id=eq.${p.id}&status=eq.authorized`, { method: "PATCH", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ status: "expired" }) });
+  }
+  return false;
 }
 // A live subscription whose last renewal could not be charged: lookups are paused until it is paid (see employer-stripe-events).
 const PAYMENT_PROBLEM_STATUSES = ["past_due", "unpaid"];
@@ -167,17 +192,28 @@ const ACTIONS: Record<string, Action> = {
   // Payment history (2026-09-22): every one-off payment made under the signed-in person's own email, whether or not
   // they had an account at the time -- same trick list_lookups already uses for pre-account activity, matched purely
   // by email string, not by a link recorded at payment time. Read-only.
+  //
+  // Gap #21 HEADLINE (2026-09-26): each payment now also carries comparison_request_id whenever that request is
+  // still genuinely openable by THIS signed-in employer (approved, and either never opened or still inside its
+  // access window) -- the client uses it to show a real "Open" action here, calling open_paid_comparison below,
+  // instead of only ever linking to the Stripe receipt (proof of payment, never proof of what it bought).
   list_payments: {
     access: "any",
     run: async ({ user }) => {
       const r = await rest("rpc/list_employer_payments", { method: "POST", body: JSON.stringify({ p_email: user.email }) });
       if (!r.ok) return fail(500, "list_failed");
       const list = await r.json();
+      const arr = Array.isArray(list) ? list : [];
+      const reqIds = [...new Set(arr.map((p: any) => p.comparison_request_id).filter(Boolean))];
+      const reqs = reqIds.length ? await rows(`comparison_requests?id=in.(${reqIds.join(",")})&employer_user_id=eq.${user.id}&select=id,status,first_delivered_at,view_window_ends_at`) : [];
+      const now = Date.now();
+      const openable = new Set((reqs || []).filter((rq: any) => rq.status === "approved" && (!rq.first_delivered_at || (rq.view_window_ends_at && new Date(rq.view_window_ends_at).getTime() > now))).map((rq: any) => rq.id));
       return ok({
-        payments: (Array.isArray(list) ? list : []).map((p: any) => ({
+        payments: arr.map((p: any) => ({
           id: p.id, amount_cents: p.amount_cents, currency: p.currency, kind: p.kind || "resume_comparison",
           candidate_label: p.candidate_label || null, company: p.company || null, status: p.status,
           date: p.paid_at || p.created_at, receipt_url: p.receipt_url || null,
+          comparison_request_id: p.comparison_request_id && openable.has(p.comparison_request_id) ? p.comparison_request_id : null,
         })),
       });
     },
@@ -647,6 +683,169 @@ const ACTIONS: Record<string, Action> = {
         await rest(`comparison_requests?id=eq.${r.id}&first_delivered_at=is.null`, { method: "PATCH", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ first_delivered_at: new Date().toISOString() }) });
       }
       return ok({ content: snap.content, assembled_at: snap.assembled_at, metered, quota, first_open: !r.first_delivered_at, document, generated_document: generatedDocument });
+    },
+  },
+
+  // ---- pay-per-use comparisons (Gap #21, 2026-09-26 redesign) ----
+  // A signed-in employer_user, org and subscription both optional, billed per request via Stripe (not the
+  // subscription quota above). "One verification": the SAME session used for everything else on this page now
+  // also covers the existence lookup (check-existence's session_token path) and the comparison request itself --
+  // no separate anonymous claim-token round-trip. Card collection moves to REQUEST time (start_card_setup, a
+  // Stripe SetupIntent -- no hold yet) so the actual hold can be placed AUTOMATICALLY the instant the candidate
+  // approves (place_hold_on_approval, employer-comparison.ts, called from candidate-comparison-requests) with no
+  // second "enter your card" prompt. HEADLINE requirement: once approved, access is a real 21-day window from
+  // first open (open_paid_comparison, SQL) instead of a 30-minute single view, reachable here AND from Payment
+  // History (list_payments above) by request id -- the same identity the whole way through is what makes that
+  // possible, where the old fully-anonymous guest token never could be.
+  request_comparison_paid: {
+    access: "any",
+    run: async ({ user, p }) => {
+      if (typeof p.lookup_id !== "string" || !UUID.test(p.lookup_id)) return fail(400, "lookup_id_invalid");
+      const attestation = typeof p.attestation === "string" ? p.attestation : "";
+      const documentId = typeof p.document_id === "string" && UUID.test(p.document_id) ? p.document_id : null;
+      const r = await rest("rpc/create_comparison_request", { method: "POST", body: JSON.stringify({ p_lookup_id: p.lookup_id, p_method: "guest", p_employer_user: user.id, p_attestation: attestation, p_document_id: documentId }) });
+      if (!r.ok) return fail(500, "request_failed");
+      const res = (await r.json())?.[0];
+      if (!res) return fail(500, "request_failed");
+      // `detail` (why the candidate was unavailable) is never forwarded.
+      if (!res.ok) {
+        if (res.reason === "attestation_invalid") return fail(400, "attestation_invalid");
+        if (res.reason === "document_required") return fail(400, "document_required");
+        if (res.reason === "document_invalid") return fail(400, "document_invalid");
+        if (res.reason === "rate_limited") return fail(429, "rate_limited");
+        if (res.reason === "already_open") return fail(409, "already_requested", { request_id: res.request_id });
+        return fail(409, "unavailable");
+      }
+      let notified = false;
+      try {
+        const n = await fetch(`${SUPABASE_URL}/functions/v1/candidate-comparison-requests`, {
+          method: "POST", headers: { "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "notify_candidate", request_id: res.request_id }),
+        });
+        notified = n.ok && (await n.json().catch(() => ({})))?.sent === true;
+      } catch (_e) { /* the sweep retries */ }
+      return ok({ request_id: res.request_id, status: "awaiting_candidate", candidate_notified: notified });
+    },
+  },
+  // Finding 7: a Stripe SetupIntent (hosted Checkout in "setup" mode) -- saves a card, places NO hold, charges
+  // nothing. The resulting customer + payment method land on the comparison_requests row via the
+  // checkout.session.completed webhook (employer-stripe-events.ts, product 'employer_card_setup'), not this
+  // call's own return trip, matching this project's standing rule that money/payment-method STATE is always
+  // webhook-driven, never trusted from the browser coming back.
+  start_card_setup: {
+    access: "any",
+    run: async ({ user, p }) => {
+      if (typeof p.request_id !== "string" || !UUID.test(p.request_id)) return fail(400, "request_id_invalid");
+      const r = (await rows(`comparison_requests?id=eq.${p.request_id}&employer_user_id=eq.${user.id}&access_method=eq.guest&select=id,stripe_customer_id,card_saved_at`))?.[0];
+      if (!r) return fail(404, "not_found");
+      if (r.card_saved_at) return ok({ already_saved: true });
+
+      let customerId: string | null = r.stripe_customer_id;
+      if (!customerId) {
+        const c = await stripe("POST", "/v1/customers", { email: user.email, ...(user.name ? { name: user.name } : {}), "metadata[employer_user_id]": user.id, "metadata[product]": "employer_guest_comparison" }, `employer-guest-customer-${p.request_id}`);
+        if (!c.ok) return fail(502, "stripe_error");
+        customerId = c.data.id as string;
+        await rest(`comparison_requests?id=eq.${p.request_id}&stripe_customer_id=is.null`, { method: "PATCH", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ stripe_customer_id: customerId }) });
+      }
+
+      const sess = await stripe("POST", "/v1/checkout/sessions", {
+        mode: "setup", customer: customerId!, client_reference_id: p.request_id,
+        "payment_method_types[0]": "card",
+        success_url: `${RETURN_BASE}?comparison_setup=${p.request_id}&setup=success`,
+        cancel_url: `${RETURN_BASE}?comparison_setup=${p.request_id}&setup=cancel`,
+        "metadata[product]": "employer_card_setup", "metadata[comparison_request_id]": p.request_id, "metadata[employer_user_id]": user.id,
+        "setup_intent_data[metadata][product]": "employer_card_setup", "setup_intent_data[metadata][comparison_request_id]": p.request_id,
+      });
+      if (!sess.ok || !sess.data.url) return fail(502, "stripe_error");
+      return ok({ url: sess.data.url });
+    },
+  },
+  // Pending/hold visibility (finding 8): every guest-billed (pay-per-use) request THIS employer_user has made,
+  // whatever state it is in -- awaiting the candidate, card not yet saved, hold placed, ready to open, opened,
+  // not authorized. Previously nothing about an in-flight request or hold showed up anywhere in the employer's
+  // own account before it completed; this is that missing record.
+  list_my_paid_comparisons: {
+    access: "any",
+    run: async ({ user }) => {
+      const reqs = await rows(`comparison_requests?employer_user_id=eq.${user.id}&access_method=eq.guest&select=id,status,created_at,expires_at,approved_at,snapshot_expires_at,first_delivered_at,view_window_ends_at,lookup_id,attestation,kind,card_saved_at,hold_attempted_at&order=created_at.desc&limit=100`);
+      if (!reqs) return fail(500, "list_failed");
+      const ids = reqs.map((r) => r.id);
+      const snaps = ids.length ? await rows(`comparison_snapshots?request_id=in.(${ids.join(",")})&select=request_id`) : [];
+      const lookupIds = [...new Set(reqs.map((r) => r.lookup_id).filter(Boolean))];
+      const lookups = lookupIds.length ? await rows(`employer_lookup_requests?id=in.(${lookupIds.join(",")})&select=id,candidate_label`) : [];
+      const pays = ids.length ? await rows(`employer_payments?comparison_request_id=in.(${ids.join(",")})&select=comparison_request_id,status,refunded_at`) : [];
+      const hasSnap = new Set((snaps || []).map((s) => s.request_id));
+      const now = Date.now();
+      return ok({
+        comparisons: reqs.map((r) => {
+          const status = employerStatus(r, hasSnap.has(r.id));
+          const lk = (lookups || []).find((l) => l.id === r.lookup_id);
+          const mine = (pays || []).filter((py) => py.comparison_request_id === r.id);
+          const windowOpen = !!r.first_delivered_at && r.view_window_ends_at && new Date(r.view_window_ends_at).getTime() > now;
+          return {
+            id: r.id, status, kind: status === "ready" || status === "opened" ? (r.kind || "resume_comparison") : null,
+            candidate_label: lk?.candidate_label || "Candidate", requested_at: r.created_at,
+            answer_by: status === "awaiting_candidate" ? r.expires_at : null,
+            available_until: status === "ready" ? r.snapshot_expires_at : null,
+            opened_at: r.first_delivered_at, window_ends_at: windowOpen ? r.view_window_ends_at : null,
+            card_saved: !!r.card_saved_at,
+            hold_state: mine.some((py) => py.status === "authorized") ? "holding" : mine.some((py) => py.status === "paid") ? "held" : mine.some((py) => py.status === "failed") ? "failed" : (r.hold_attempted_at ? "attempted" : "none"),
+            can_open: status === "ready" || status === "opened",
+            attestation: r.attestation,
+          };
+        }),
+      });
+    },
+  },
+  // HEADLINE requirement: the session-identified equivalent of employer-comparison.ts's `enter`/`open` for the
+  // emailed guest token -- same capture-then-redeem, same 21-day window, called by request id + this employer's
+  // own identity instead of a token, from either list_my_paid_comparisons above or Payment History.
+  open_paid_comparison: {
+    access: "any",
+    run: async ({ user, p }) => {
+      if (typeof p.request_id !== "string" || !UUID.test(p.request_id)) return fail(400, "request_id_invalid");
+      const r = (await rows(`comparison_requests?id=eq.${p.request_id}&employer_user_id=eq.${user.id}&access_method=eq.guest&select=id,candidate_id,status,first_delivered_at,view_window_ends_at`))?.[0];
+      if (!r) return fail(404, "not_found");
+      const now = Date.now();
+      const windowOpen = !!r.first_delivered_at && r.status === "approved" && !!r.view_window_ends_at && new Date(r.view_window_ends_at).getTime() > now;
+      if (!windowOpen && !r.first_delivered_at) {
+        const ps = await rows(`employer_payments?comparison_request_id=eq.${r.id}&select=id,status,stripe_payment_intent_id,refunded_at&order=created_at.desc`);
+        const authorized = ps.find((py) => py.status === "authorized" && !py.refunded_at);
+        if (authorized) await captureGuestHoldLocal(authorized);
+      }
+      const rr = await rest("rpc/open_paid_comparison", { method: "POST", body: JSON.stringify({ p_request_id: p.request_id, p_employer_user: user.id }) });
+      if (!rr.ok) return fail(500, "request_failed");
+      const res = (await rr.json())?.[0];
+      if (!res || !res.ok) {
+        const map: Record<string, [number, string]> = {
+          not_found: [404, "not_found"], payment_required: [402, "payment_required"], window_closed: [410, "window_closed"], not_available: [410, "not_available"], payment_unavailable: [409, "payment_unavailable"],
+        };
+        const [status, error] = map[res?.reason] || [500, "request_failed"];
+        return fail(status, error);
+      }
+      const live = await fetch(`${SUPABASE_URL}/functions/v1/candidate-comparison-requests`, {
+        method: "POST", headers: { "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "assemble_live", candidate_id: r.candidate_id }),
+      });
+      const liveJson = live.ok ? await live.json().catch(() => null) : null;
+      if (!liveJson || !liveJson.ok) return fail(500, "assemble_failed");
+
+      let document: { url: string; file_name: string; content_type: string; expires_in: number } | null = null;
+      const doc = (await rows(`comparison_request_documents?request_id=eq.${r.id}&select=storage_path,file_name,content_type`))?.[0];
+      if (doc && /^[0-9a-f-]{36}\.(pdf|png|jpg)$/.test(doc.storage_path)) {
+        const sres = await fetch(`${SUPABASE_URL}/storage/v1/object/sign/employer-documents/${doc.storage_path}`, { method: "POST", headers: JSON_H, body: JSON.stringify({ expiresIn: 60 }) });
+        const sj = sres.ok ? await sres.json().catch(() => null) : null;
+        if (sj && typeof sj.signedURL === "string") document = { url: `${SUPABASE_URL}/storage/v1${sj.signedURL}`, file_name: doc.file_name, content_type: doc.content_type, expires_in: 60 };
+      }
+      let generatedDocument: unknown = null;
+      const gen = await fetch(`${SUPABASE_URL}/functions/v1/candidate-comparison-requests`, {
+        method: "POST", headers: { "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "assemble_plain_document", candidate_id: r.candidate_id }),
+      });
+      const genJson = gen.ok ? await gen.json().catch(() => null) : null;
+      if (genJson && genJson.ok) generatedDocument = genJson.resume;
+
+      return ok({ content: liveJson.content, assembled_at: liveJson.assembled_at, window_ends_at: res.window_ends_at, first_open: !!res.first_open, document, generated_document: generatedDocument });
     },
   },
 };

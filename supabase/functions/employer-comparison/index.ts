@@ -11,37 +11,53 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "content-type",
 };
 
-// EMPLOYER COMPARISON, GUEST PATH (2026-09-20, Stage 3). For an employer with NO account: pay once, view once.
+// EMPLOYER COMPARISON, PAY-PER-USE PATH (2026-09-20, Stage 3; redesigned Gap #21, 2026-09-26). "Guest" now
+// means the BILLING model (one-off Stripe payment, no subscription) -- not "no identity": since Gap #21,
+// creating one of these requires a signed-in employer_user (see employer-api.ts's request_comparison_paid),
+// the same email-link login the org side already uses, org and subscription both optional. The email-only
+// anonymous claim-token path below is kept working for anything already in flight from before that change,
+// but is no longer how a new request gets created.
 //
-// Nothing here identifies a person by an id alone. There are exactly two capabilities, both random, both stored only as SHA-256 hashes:
-//   * the CLAIM token, returned once by check-existence to the browser that completed a matched Tier 1 lookup: it lets that browser
-//     REQUEST a comparison for that lookup (and is burned by a successful request);
-//   * the GUEST token, minted at approval and emailed to the requester's confirmed address (candidate-comparison-requests): it is the
-//     only way to see the request's state, pay for it and open it. A wrong or unknown token of either kind is the same 404/"unavailable".
+// Nothing here identifies a person by an id alone beyond that session (already handled in employer-api.ts).
+// This file still deals in two single-purpose random capabilities, both stored only as SHA-256 hashes:
+//   * the CLAIM token, returned once by check-existence to the browser that completed a matched Tier 1 lookup:
+//     it lets that browser REQUEST a comparison for that lookup (and is burned by a successful request);
+//   * the GUEST token, minted at approval and emailed to the requester's confirmed address (candidate-comparison-
+//     requests): the ORIGINAL way to see the request's state, pay for it and open it, still valid for anything
+//     already in flight. The HEADLINE, session-identified equivalent (open_paid_comparison, called from
+//     employer-api.ts's own action of the same name) is now the primary way in, reachable from Payment History.
 //
 // Actions (POST {action, ...}):
-//   price    -> the current one-time price (from employer_pricing; the page never carries a price of its own)
-//   request  -> {lookup_id, claim_token, attestation}: create the request (create_comparison_request, method "guest") and tell the candidate
+//   price                 -> the current one-time price (from employer_pricing; the page never carries a price of its own)
+//   place_hold_on_approval -> {request_id}: INTERNAL, service-role only (Gap #21, finding 7). See its own comment below --
+//               called by candidate-comparison-requests right after an approval to place the real hold automatically,
+//               using the card the employer saved at request time (employer-api.ts's start_card_setup). No second
+//               "enter your card" prompt at open time.
+//   request  -> {lookup_id, claim_token, attestation}: create the request (create_comparison_request, method "guest") and tell the candidate.
+//               Kept for anything already mid-flow; new requests go through employer-api.ts's request_comparison_paid instead.
 //   status   -> {token}: where this request stands (awaiting_payment | payment_pending | ready_to_open | open | closed | unavailable); read-only
-//   enter    -> {token}: A VISIT TO THE LINK, and THE NORMAL DELIVERY POINT (2026-09-21; authorize-then-capture 2026-09-22). Same answer as
-//               status, but if an authorized (capturable) hold exists it is CAPTURED right then — this is the actual charge, made only at
-//               genuine redemption, never before — and the result comes back in `delivered`; inside an open 30 minute window it is served
-//               again free. Idempotent: safe on every visit, so a redirect that never finished costs nothing (the next visit captures and
-//               delivers; a hold that expired uncaptured in the meantime simply never gets charged at all)
-//   pay      -> {token}: start (or resume) the ONE hold for this request (Stripe Checkout with capture_method=manual, card only); returns
-//               the Stripe hosted Checkout URL. Only for an approved, unopened request whose snapshot still has time; the amount is the
-//               server's price at that moment. Nothing is charged by this call — it only places a hold
-//   open     -> {token}: the same capture-and-redeem as `enter`, on request (kept as the fallback button). open_guest_comparison (SQL)
-//               redeems the paid payment exactly once and starts a 30 minute view window; opens inside the window re-serve the snapshot
-//               free; after it, 410 window_closed
+//   enter    -> {token}: A VISIT TO THE LINK (2026-09-21; authorize-then-capture 2026-09-22). Same answer as status, but if an
+//               authorized (capturable) hold exists it is CAPTURED right then — the actual charge, made only at genuine
+//               redemption, never before — and the result comes back in `delivered`; inside the (now 21-day, was 30-minute)
+//               window it is served again free. Idempotent: safe on every visit.
+//   pay      -> {token}: FALLBACK ONLY since Gap #21 (the normal path now saves a card at request time and holds automatically
+//               at approval) -- starts a hold via hosted Stripe Checkout for a request that has no usable saved card (never
+//               finished start_card_setup, or the automatic off-session attempt failed/needed SCA). Card only; nothing is
+//               charged by this call, only held.
+//   open     -> {token}: the same capture-and-redeem as `enter`, on request (kept as the fallback button). open_guest_comparison
+//               (SQL) redeems the paid payment exactly once and starts the (21-day) access window; opens inside the window
+//               re-serve the snapshot free; after it, 410 window_closed
 //   close    -> {token}: end the view now (the window closes and the snapshot is deleted)
 //
-// Money (2026-09-22, authorize-then-capture): `pay` only places a hold on the card (capture_method=manual). The hold is authorized —
-// capturable, still uncharged — only when the verified Stripe webhook (employer-stripe-events, payment_intent.amount_capturable_updated)
-// says so, never by the browser returning from Stripe. The hold is CAPTURED — the real, only charge — only inside `enter`/`open`, at the
-// moment of genuine redemption, and nowhere else. A hold nobody ever redeems simply expires on Stripe's own schedule (about 7 days for a
-// card, customer-initiated) and is never captured: no refund is ever needed because no charge ever happened. Card details are only ever
-// entered on Stripe's hosted page.
+// Money (2026-09-22, authorize-then-capture; automatic since Gap #21): the hold (whether placed automatically by
+// place_hold_on_approval or, as a fallback, via `pay`'s hosted Checkout) is capture_method=manual — a hold, not a
+// charge. It is authorized — capturable, still uncharged — only when the verified Stripe webhook (employer-stripe-
+// events, payment_intent.amount_capturable_updated) says so, never by the browser returning from Stripe. It is
+// CAPTURED — the real, only charge — only inside `enter`/`open`/open_paid_comparison, at the moment of genuine
+// redemption, and nowhere else. A hold nobody ever redeems simply expires on Stripe's own schedule (about 7 days
+// for a card, customer-initiated) and is never captured: no refund is ever needed because no charge ever happened.
+// Card details are only ever entered on Stripe's hosted page (start_card_setup's SetupIntent Checkout, or `pay`'s
+// fallback Checkout) — never handled or seen by any of our own code.
 const REST = { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` };
 const JSON_H = { ...REST, "Content-Type": "application/json" };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -77,6 +93,17 @@ async function stripe(method: string, path: string, form?: URLSearchParams, idem
     body: form ? form.toString() : undefined,
   });
   return { ok: r.ok, status: r.status, data: await r.json().catch(() => ({})) };
+}
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+function isServiceCaller(req: Request): boolean {
+  const h = req.headers.get("authorization") || "";
+  const t = h.toLowerCase().startsWith("bearer ") ? h.slice(7).trim() : "";
+  return !!t && !!SUPABASE_SERVICE_ROLE_KEY && safeEqual(t, SUPABASE_SERVICE_ROLE_KEY);
 }
 
 async function guestPrice(): Promise<{ amount_cents: number; currency: string } | null> {
@@ -154,6 +181,61 @@ export default {
       if (action === "price") {
         const p = await guestPrice();
         return p ? json({ ok: true, amount_cents: p.amount_cents, currency: p.currency }) : json({ ok: false, error: "pricing_unavailable" }, 500);
+      }
+
+      // ---- place_hold_on_approval (Gap #21, finding 7, 2026-09-26): internal only, service-role bearer. Called by
+      // candidate-comparison-requests immediately after an approval on a guest-billed (pay-per-use) request. Places
+      // the REAL hold automatically, right now, using the card the employer saved at REQUEST time via start_card_setup
+      // (employer-api.ts) -- no second "enter your card" prompt at open time. This is a genuine capture_method=manual
+      // hold (not a charge), off_session (the employer is not present at this moment) -- the same
+      // payment_intent.amount_capturable_updated webhook that already marks a checkout-placed hold 'authorized'
+      // (employer-stripe-events.ts) fires for this one too, unchanged, because the metadata shape is identical.
+      // hold_attempted_at makes this idempotent: an approval can only ever try once, even if this gets called twice.
+      // Outcomes this reports back (never throws for an ordinary payment failure, only for a genuine server error):
+      //   no_card_saved       the employer never finished start_card_setup -- nothing to charge yet
+      //   hold_placed         the hold went through; the approval email links straight to the result
+      //   requires_action     off-session confirmation hit Stripe's SCA/3-D-Secure requirement (rare for a US card) --
+      //                       falls back to the same hosted-Checkout `pay` flow this replaces, one time
+      //   hold_failed         a genuine decline/expired card/etc -- same fallback
+      if (action === "place_hold_on_approval") {
+        if (!isServiceCaller(req)) return json({ ok: false, error: "forbidden" }, 403);
+        const requestId = typeof body.request_id === "string" && UUID.test(body.request_id) ? body.request_id : "";
+        if (!requestId) return json({ ok: false, error: "request_id_invalid" }, 400);
+        const r2 = (await rows(`comparison_requests?id=eq.${requestId}&access_method=eq.guest&status=eq.approved&select=id,requester_email,requester_company,kind,lookup_id,stripe_customer_id,stripe_payment_method_id,hold_attempted_at`))?.[0];
+        if (!r2) return json({ ok: false, error: "not_found" }, 404);
+        if (r2.hold_attempted_at) return json({ ok: true, outcome: "already_attempted" });
+        await rest(`comparison_requests?id=eq.${r2.id}&hold_attempted_at=is.null`, { method: "PATCH", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ hold_attempted_at: new Date().toISOString() }) });
+        if (!r2.stripe_customer_id || !r2.stripe_payment_method_id) return json({ ok: true, outcome: "no_card_saved" });
+
+        const price = await guestPrice();
+        if (!price || !(price.amount_cents > 0)) return json({ ok: true, outcome: "pricing_unavailable" });
+        const label = (await rows(`employer_lookup_requests?id=eq.${r2.lookup_id}&select=candidate_label`))?.[0]?.candidate_label || null;
+        const insP = await rest("employer_payments", {
+          method: "POST", headers: { "Prefer": "return=representation" },
+          body: JSON.stringify({ amount_cents: price.amount_cents, currency: price.currency, payer_email: r2.requester_email, access_token_hash: await sha256Hex(randomHex(32)), comparison_request_id: r2.id, request_kind: r2.kind || "resume_comparison", requester_company: r2.requester_company || null, candidate_label: label }),
+        });
+        if (!insP.ok) return json({ ok: false, error: "payment_row_failed" }, 500);
+        const pay = (await insP.json())[0];
+
+        const lr = r2.kind === "license_report";
+        const form = new URLSearchParams();
+        form.set("amount", String(price.amount_cents));
+        form.set("currency", price.currency);
+        form.set("customer", r2.stripe_customer_id);
+        form.set("payment_method", r2.stripe_payment_method_id);
+        form.set("off_session", "true");
+        form.set("confirm", "true");
+        form.set("capture_method", "manual");
+        form.set("description", lr ? "Verifi license status report (one-time view)" : "Verifi comparison access (one-time view)");
+        for (const [k, v] of Object.entries({ product: "employer_guest_comparison", payment_id: pay.id, comparison_request_id: r2.id, kind: r2.kind || "resume_comparison" })) form.set(`metadata[${k}]`, v);
+        const pi = await stripe("POST", "/v1/payment_intents", form, `employer-guest-autohold-${pay.id}`);
+        if (pi.ok && (pi.data.status === "requires_capture" || pi.data.status === "succeeded")) {
+          await rest(`employer_payments?id=eq.${pay.id}`, { method: "PATCH", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ stripe_payment_intent_id: pi.data.id }) });
+          return json({ ok: true, outcome: "hold_placed" });
+        }
+        const code = pi.data?.error?.code || pi.data?.error?.type || "unknown";
+        await rest(`employer_payments?id=eq.${pay.id}`, { method: "PATCH", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ status: "failed" }) });
+        return json({ ok: true, outcome: code === "authentication_required" ? "requires_action" : "hold_failed", detail: code });
       }
 
       // ---- request (claim token) ----

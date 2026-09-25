@@ -19,7 +19,11 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 //
 // Handled:
 //   checkout.session.completed                 guest payment: link the session's PaymentIntent (paid -> mark paid; with manual capture this
-//                                               fires with payment_status "unpaid" — correctly a no-op until the capture events below)
+//                                               fires with payment_status "unpaid" — correctly a no-op until the capture events below).
+//                                               ALSO (Gap #21, 2026-09-26): a card-setup session (product 'employer_card_setup', from
+//                                               employer-api.ts's start_card_setup) — pulls the saved payment method off its SetupIntent
+//                                               and stores it on the comparison_requests row (linkSavedCard, below), so
+//                                               place_hold_on_approval (employer-comparison.ts) has a card to charge automatically at approval
 //   payment_intent.amount_capturable_updated    guest payment, authorize-then-capture (2026-09-22): the HOLD succeeded — capturable, still
 //                                               uncharged. Mark 'authorized' and extend the approved snapshot's floor to authorized_at + 7
 //                                               days (Stripe's own hold window for a card), never shortening a later expiry
@@ -40,6 +44,7 @@ const REST = { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${S
 const JSON_H = { ...REST, "Content-Type": "application/json" };
 const GUEST = "employer_guest_comparison";
 const ORG = "employer_org_subscription";
+const CARD_SETUP = "employer_card_setup";
 
 const rest = (path: string, init: RequestInit = {}) => fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...init, headers: { ...JSON_H, ...(init.headers || {}) } });
 const rows = async (path: string): Promise<any[]> => { const r = await rest(path); if (!r.ok) throw new Error(`db ${path.split("?")[0]} ${r.status}`); const j = await r.json(); return Array.isArray(j) ? j : []; };
@@ -269,11 +274,35 @@ async function invoicePaid(inv: any, eventCreated: number): Promise<string> {
   return sub.payment_failed_at ? "invoice_paid:failure_cleared" : "invoice_paid:nothing_to_clear";
 }
 
+// ---------- card setup (Gap #21, finding 7, 2026-09-26) ----------
+// A SetupIntent Checkout session (employer-api.ts's start_card_setup) completing: pulls the resulting payment
+// method off the SetupIntent and stores it on the comparison_requests row, so place_hold_on_approval
+// (employer-comparison.ts) has something to charge automatically the instant the candidate approves. Matches
+// this project's standing rule that payment-method STATE is only ever written from a verified webhook, never
+// trusted from the browser's own return trip (the success_url redirect proves nothing on its own).
+async function linkSavedCard(session: any): Promise<string> {
+  const requestId = session?.metadata?.comparison_request_id;
+  const setupIntentId = typeof session.setup_intent === "string" ? session.setup_intent : session.setup_intent?.id;
+  if (!requestId || !setupIntentId) return "card_setup_session_missing_fields";
+  const si = await stripe("GET", `/v1/setup_intents/${encodeURIComponent(setupIntentId)}`);
+  if (si.status !== "succeeded") return `setup_intent_${si.status}`;
+  const pmId = typeof si.payment_method === "string" ? si.payment_method : si.payment_method?.id;
+  const customerId = typeof si.customer === "string" ? si.customer : si.customer?.id;
+  if (!pmId) return "setup_intent_without_payment_method";
+  const upd = await rest(`comparison_requests?id=eq.${requestId}&card_saved_at=is.null`, {
+    method: "PATCH", headers: { "Prefer": "return=representation" },
+    body: JSON.stringify({ stripe_payment_method_id: pmId, ...(customerId ? { stripe_customer_id: customerId } : {}), stripe_setup_intent_id: setupIntentId, card_saved_at: new Date().toISOString() }),
+  });
+  const changed = upd.ok ? await upd.json() : [];
+  return Array.isArray(changed) && changed.length ? "card_saved" : "card_setup_already_linked_or_missing_request";
+}
+
 // ---------- dispatch ----------
 async function handle(event: any): Promise<string> {
   const obj = event?.data?.object || {};
   switch (event.type) {
     case "checkout.session.completed": {
+      if (obj.metadata?.product === CARD_SETUP) return await linkSavedCard(obj);
       if (obj.metadata?.product !== GUEST) return obj.metadata?.product === ORG ? "org_checkout_noted" : "ignored";
       const paymentId = obj.metadata?.payment_id;
       if (!paymentId) return "guest_session_without_payment_id";

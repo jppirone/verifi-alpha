@@ -512,8 +512,50 @@ async function sendGuestLink(requestId: string): Promise<boolean> {
   return ok;
 }
 
+// Gap #21 (2026-09-26): a guest-billed (pay-per-use) request now carries a real employer_user_id -- it was
+// created by a signed-in employer (employer-api.ts's request_comparison_paid), not the old fully-anonymous
+// claim-token flow. For that request, approval is the moment the real hold gets placed AUTOMATICALLY (finding
+// 7 -- no second "enter your card" prompt), using the card saved at request time, and the notice sent is "sign
+// in to open it" (Payment History / My Comparisons), the same shape as the org email below, not an emailed
+// single-use token link. Reuses guest_link_sent_at as its "has the requester been told" claim, same race-safe
+// conditional-PATCH pattern sendGuestLink already uses, so the sweep's retry (below) covers both paths with one
+// check. Legacy requests with no employer_user_id (anything already in flight before this migration) still go
+// through sendGuestLink, unchanged.
+async function noticeSignedInPaidApproval(r: { id: string; requester_email: string; requester_name: string | null; snapshot_expires_at: string; kind: string }): Promise<boolean> {
+  const claim = await rest(`comparison_requests?id=eq.${r.id}&guest_link_sent_at=is.null&status=eq.approved`, {
+    method: "PATCH", headers: { "Prefer": "return=representation" }, body: JSON.stringify({ guest_link_sent_at: new Date().toISOString() }),
+  });
+  const claimed = claim.ok ? await claim.json() : [];
+  if (!Array.isArray(claimed) || claimed.length === 0) return false;
+
+  // Place the real hold now, automatically, using the card saved at request time. Never blocks the notice: whatever
+  // the outcome, the requester is told to sign in, just with different copy for "ready" vs. "needs a payment method".
+  let outcome = "unknown";
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/employer-comparison`, {
+      method: "POST", headers: { "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "place_hold_on_approval", request_id: r.id }),
+    });
+    const j = res.ok ? await res.json().catch(() => ({})) : {};
+    outcome = typeof j.outcome === "string" ? j.outcome : "unknown";
+  } catch (_e) { /* falls through to the "sign in and add payment" copy below, same as a genuine hold failure */ }
+
+  const lr = r.kind === "license_report";
+  const ready = outcome === "hold_placed" || outcome === "already_attempted";
+  // Finding 7's own copy requirement (agreed with John directly): the 7-day window is stated explicitly and dated
+  // from THIS approval, never implied to run from request time, so a candidate who took days to answer never
+  // leaves the employer guessing at a clock that started before they were even notified.
+  const until = esc(new Date(r.snapshot_expires_at).toUTCString());
+  const what = lr ? ": what they shared is a license status report (each license on their account and whether it is verified)" : "";
+  const body = ready
+    ? `<p>Hi ${esc(r.requester_name || "there")},</p><p>The candidate approved your request${what}. <a href="${SITE}/employer.html">Sign in to Verifi employer access</a> to open it. The card you saved when you asked for this is only actually charged the moment you open it, not before. You have until <b>${until}</b> &mdash; a full 7 days from this approval, not from when you first asked &mdash; to open it; if you don't, nothing is ever charged.</p>`
+    : `<p>Hi ${esc(r.requester_name || "there")},</p><p>The candidate approved your request${what}. <a href="${SITE}/employer.html">Sign in to Verifi employer access</a> to add a payment method and open it. You have until <b>${until}</b> &mdash; a full 7 days from this approval, not from when you first asked.</p>`;
+  return await sendEmail(r.requester_email, lr ? "Your Verifi license status request was approved" : "Your Verifi comparison request was approved", body);
+}
+
 async function noticeRequesterApproved(requestId: string): Promise<boolean> {
-  const r = (await rows(`comparison_requests?id=eq.${requestId}&select=requester_email,requester_name,access_method,snapshot_expires_at,kind`))[0];
+  const r = (await rows(`comparison_requests?id=eq.${requestId}&select=id,requester_email,requester_name,access_method,employer_user_id,snapshot_expires_at,kind`))[0];
+  if (r && r.access_method === "guest" && r.employer_user_id) return await noticeSignedInPaidApproval(r);
   if (r && r.access_method === "guest") return await sendGuestLink(requestId);
   if (!r || r.access_method !== "org") return false;
   const lr = r.kind === "license_report";
@@ -551,10 +593,12 @@ export default {
         const unnotified = await rows(`comparison_requests?status=eq.pending&candidate_notified_at=is.null&created_at=lt.${encodeURIComponent(cutoff)}&select=id&limit=20`);
         let renotified = 0;
         for (const u of unnotified) if ((await notifyCandidate(u.id)).sent) renotified++;
-        // approval links for guests that never went out
+        // approval notices for guest-billed requests that never went out -- either shape (the legacy anonymous
+        // token link, or Gap #21's "sign in to open it" for a signed-in pay-per-use request): noticeRequesterApproved
+        // dispatches to the right one by whether the request carries an employer_user_id.
         const unlinked = await rows("comparison_requests?status=eq.approved&access_method=eq.guest&guest_link_sent_at=is.null&first_delivered_at=is.null&select=id&limit=20");
         let relinked = 0;
-        for (const u of unlinked) if (await sendGuestLink(u.id)) relinked++;
+        for (const u of unlinked) if (await noticeRequesterApproved(u.id)) relinked++;
         return json({ ok: true, expired: exp, requester_notices_sent: noticed, candidate_notices_retried: renotified, guest_links_sent: relinked });
       }
       if (action === "notify_candidate") {
