@@ -442,6 +442,20 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   empty string "" only when the resume genuinely never identifies any issuing body for that list at
   all, never because one particular item's own position made the shared label harder to visually
   associate with it.
+  HARD STOP ON A NEW HEADING (a separate, equally real failure in the OPPOSITE direction, reproduced
+  live 2026-09-24): the inheritance above applies ONLY within one list under one heading. The moment
+  a NEW heading appears — even a short, plainly-styled one, even one that sits directly adjacent to
+  the previous list with no visual gap, and even one that still names certifications generally — that
+  heading starts a brand-new, separately-attributed list. Do NOT carry the previous list's
+  issuing_body forward onto items under that new heading just because the resume doesn't print a new
+  provider name for it; a list under its own distinct heading with no visible issuing body of its own
+  means issuing_body="" for THAT list, never a value inherited from a different list above it.
+  Reproduced live: a "Professional Certifications" heading immediately following an "... — Coursiv"
+  list wrongly inherited "Coursiv" as issuing_body for every item under the NEW heading, despite those
+  items correctly getting their own distinct "heading" value — proving the heading boundary WAS
+  recognized, but issuing_body inheritance ignored it anyway. Judge issuing_body strictly by which
+  heading governs an item, the exact same test already used to determine that item's own "heading"
+  value, never by adjacency to a nearby list.
 
 - certifications' "heading" field = the section's own literal heading/label text, copied verbatim IN
   FULL, including any trailing parenthetical or annotation that's part of the same heading line (e.g.
@@ -848,6 +862,8 @@ CONTINUATION AWARENESS: the previous page ended mid-way through ${
           ? `a work-history entry at "${previousPageContext.company || "(unnamed)"}"`
           : previousPageContext.kind === "certifications_list"
           ? `a certifications list${previousPageContext.heading ? ` under heading "${previousPageContext.heading}"` : ""}`
+          : previousPageContext.kind === "skills_list"
+          ? `a skills-shaped list${previousPageContext.heading ? ` under heading "${previousPageContext.heading}"` : ""}`
           : `a freeform section${previousPageContext.heading ? ` titled "${previousPageContext.heading}"` : ""}`
       }. If THIS page opens with content that plainly continues that — no new heading before it — mark
 that opening section's "is_continuation_of_previous_page" as true and give it the SAME category as the
@@ -855,7 +871,16 @@ open item described above, even though this page shows no heading of its own for
 never repeats its header). The instant a genuinely NEW heading appears — even one that also sounds
 related (e.g. a different certifications heading following the one above) — that starts a brand-new
 section with its own independent category decision, never treated as more of the previous one just
-because it's topically similar.`
+because it's topically similar.
+SCOPE OF THIS NOTE (gap #16h fix, 2026-09-25 — a separate, real failure already confirmed live): this
+continuation-awareness note affects ONLY whether THIS page's own opening content continues the item
+described above. It must have ZERO influence on any other, unrelated judgment on this page — including
+the SAME-COMPANY-MULTIPLE-ROLES decision below. Decide that entirely from this page's own printed
+content, exactly as you would if this note weren't here at all. Reproduced live: a stale continuation
+hint about an entry that turned out to be already fully closed (nothing on this page actually continued
+it) measurably degraded this SAME call's unrelated same-company-merge judgment for content entirely
+within this page, no actual cross-page continuation involved — the mere presence of this note biased an
+unrelated decision it should never have touched.`
     : "";
 
   return `Identify every distinct SECTION on this page and assign each one a category — nothing else, at
@@ -993,6 +1018,10 @@ function resolveContinuationCategory(boundaries: BoundaryResult, previousPageCon
     resolvedCategory = "work_history";
   } else if (previousPageContext.kind === "certifications_list") {
     resolvedCategory = "certifications";
+  } else if (previousPageContext.kind === "skills_list") {
+    // Gap #16h fix (2026-09-25): skills_list is a new TrailingItemContext kind — a skills-shaped
+    // continuation resolves to the "skills" boundary category, the same as any other skills section.
+    resolvedCategory = "skills";
   } else if (previousPageContext.kind === "freeform") {
     // "needs_review" has no matching known category — leaving it "unknown" is already correct,
     // since step 2's own rules route "unknown" straight to needs_review, no contradiction possible.
@@ -1191,6 +1220,27 @@ certifications list as an unbroken continuation of the first, wrongly inheriting
 corrupting that second list's own item count in the process — judge every item strictly by whether a
 DIFFERENT heading string appeared before it on THIS page, never by whether that heading is topically
 similar to the previous list's.`;
+  } else if (ctx.kind === "skills_list") {
+    // Gap #16h fix (2026-09-25): new kind — a skills-shaped list (short bare phrases, not job
+    // responsibilities or full sentences) is a real, distinct continuation shape that used to be
+    // completely invisible to this whole mechanism; see describeTrailingItem's own comment for the
+    // live-reproduced failure this closes. Mirrors the certifications_list directive's own hard-stop
+    // language, since this is the exact same failure class (a genuinely different heading wrongly
+    // treated as more of the previous list) confirmed live for BOTH shapes.
+    directive = `
+The open item was a skills-shaped list${ctx.heading ? ` under the literal heading "${ctx.heading}"` : ""}, whose last visible entries on the previous page were: "...${ctx.snippet}"
+If THIS page's opening content is more short, bare phrases in that same list shape — not full
+sentences, not bullet points describing job responsibilities or achievements — with literally no
+heading of any kind before them, extract those into the "skills" array, not freeform: a skills-shaped
+list continuing across a page break is still one list. Set skills_heading="${ctx.heading || ""}"
+(copied verbatim, not reworded) for this page's skills block too, so the merge step recognizes it as
+the same list rather than a new, separately-headed one.
+HARD STOP CONDITION (the same failure class already confirmed for certifications lists — read this
+carefully): the instant this page shows its OWN new heading before this content — even a short,
+lightly-styled one, even one that still sounds related in topic — that heading starts a brand-new,
+separately-headed list; set skills_heading to THAT new heading, never "${ctx.heading || "the previous heading"}".
+A shared shape (short bare phrases) is never by itself a reason to treat two lists as one continuing
+list — only a literal page break with no heading, or the exact same heading string, in between is.`;
   } else {
     directive = `
 The open item was a freeform section${ctx.heading ? ` titled "${ctx.heading}"` : " with no visible heading"} (type: ${ctx.sectionType || "unknown"}), whose visible content ended with: "...${ctx.snippet}"
@@ -1255,7 +1305,7 @@ ${ocrText}
 // too much interpretation up to this page's own model call; explicit fields + a kind-specific,
 // directive instruction (below) is the fix actually being tried, not a further prose tweak.
 type TrailingItemContext = {
-  kind: "work_history" | "certifications_list" | "freeform";
+  kind: "work_history" | "certifications_list" | "freeform" | "skills_list";
   company?: string;
   title?: string;
   name?: string;

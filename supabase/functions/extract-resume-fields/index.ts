@@ -788,6 +788,20 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   empty string "" only when the resume genuinely never identifies any issuing body for that list at
   all, never because one particular item's own position made the shared label harder to visually
   associate with it.
+  HARD STOP ON A NEW HEADING (a separate, equally real failure in the OPPOSITE direction, reproduced
+  live 2026-09-24): the inheritance above applies ONLY within one list under one heading. The moment
+  a NEW heading appears — even a short, plainly-styled one, even one that sits directly adjacent to
+  the previous list with no visual gap, and even one that still names certifications generally — that
+  heading starts a brand-new, separately-attributed list. Do NOT carry the previous list's
+  issuing_body forward onto items under that new heading just because the resume doesn't print a new
+  provider name for it; a list under its own distinct heading with no visible issuing body of its own
+  means issuing_body="" for THAT list, never a value inherited from a different list above it.
+  Reproduced live: a "Professional Certifications" heading immediately following an "... — Coursiv"
+  list wrongly inherited "Coursiv" as issuing_body for every item under the NEW heading, despite those
+  items correctly getting their own distinct "heading" value — proving the heading boundary WAS
+  recognized, but issuing_body inheritance ignored it anyway. Judge issuing_body strictly by which
+  heading governs an item, the exact same test already used to determine that item's own "heading"
+  value, never by adjacency to a nearby list.
 
 - certifications' "heading" field = the section's own literal heading/label text, copied verbatim IN
   FULL, including any trailing parenthetical or annotation that's part of the same heading line (e.g.

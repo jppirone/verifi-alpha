@@ -782,6 +782,20 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   empty string "" only when the resume genuinely never identifies any issuing body for that list at
   all, never because one particular item's own position made the shared label harder to visually
   associate with it.
+  HARD STOP ON A NEW HEADING (a separate, equally real failure in the OPPOSITE direction, reproduced
+  live 2026-09-24): the inheritance above applies ONLY within one list under one heading. The moment
+  a NEW heading appears — even a short, plainly-styled one, even one that sits directly adjacent to
+  the previous list with no visual gap, and even one that still names certifications generally — that
+  heading starts a brand-new, separately-attributed list. Do NOT carry the previous list's
+  issuing_body forward onto items under that new heading just because the resume doesn't print a new
+  provider name for it; a list under its own distinct heading with no visible issuing body of its own
+  means issuing_body="" for THAT list, never a value inherited from a different list above it.
+  Reproduced live: a "Professional Certifications" heading immediately following an "... — Coursiv"
+  list wrongly inherited "Coursiv" as issuing_body for every item under the NEW heading, despite those
+  items correctly getting their own distinct "heading" value — proving the heading boundary WAS
+  recognized, but issuing_body inheritance ignored it anyway. Judge issuing_body strictly by which
+  heading governs an item, the exact same test already used to determine that item's own "heading"
+  value, never by adjacency to a nearby list.
 
 - certifications' "heading" field = the section's own literal heading/label text, copied verbatim IN
   FULL, including any trailing parenthetical or annotation that's part of the same heading line (e.g.
@@ -1451,7 +1465,7 @@ function globalizePosition(pageNumber: number, localPosition: number | undefined
 // single-page content was 100% reliable across all 9 runs. Explicit fields let the next page's own
 // prompt give a directive, kind-specific instruction instead of asking the model to parse a sentence.
 type TrailingItemContext = {
-  kind: "work_history" | "certifications_list" | "freeform";
+  kind: "work_history" | "certifications_list" | "freeform" | "skills_list";
   company?: string;
   title?: string;
   name?: string;
@@ -1492,10 +1506,31 @@ function describeTrailingItem(extraction: ExtractionResult): TrailingItemContext
     if (typeof w.position !== "number") continue;
     candidates.push({
       position: w.position,
-      // Open only when the role has no fixed closing date (blank, or "Present"/"Current"/"Now") — a
-      // role stating its own end date is a complete, closed fact and isn't plausibly still being
-      // described on the next page.
-      open: isOpenEndedDate(w.end_date),
+      // Gap #16h fix (2026-09-25, real regression found retesting John's beast resume a 3rd time):
+      // the 9-23 fix's own `isOpenEndedDate(w.end_date)` gate is the WRONG proxy for "is this job's
+      // bullet list still being printed" — it answers "is the job still ongoing in real life"
+      // instead, and those are unrelated questions that pointed opposite ways on this exact document.
+      // Reproduced live via raw per-page extraction JSON: "AI Solutions Consultant" (2023-Present, no
+      // end date, but its own 5 bullets were ALREADY fully printed on page 2) got flagged open;
+      // "Indian River County" (2019-2023, closed end date, but its bullet list was genuinely
+      // truncated mid-list by the SAME page break — 2 of 4 bullets) got excluded solely because it
+      // has a real end date, even though it's the LATER, more-recently-printed entry. The wrong hint
+      // propagated forward, and the next page's real continuation bullets got attached to a phantom,
+      // dateless copy of the already-finished job instead of merging into the genuinely open one.
+      // Fix: treat work_history the same as freeform below — unconditionally a candidate whenever
+      // it has a position, highest position on the page wins outright, no date filtering. This still
+      // correctly picks a genuinely-open (no end date) job whenever it IS the highest-position entry
+      // (the ordinary case, unchanged) — it just no longer lets a job's own end date silently disqualify
+      // it from being chosen when it's the one that's actually last on the page. This does reopen the
+      // ORIGINAL 2026-09-23 risk (a fully-closed job last on a page can still get flagged "trailing"
+      // and hand the next page a hint describing content that isn't actually continuing) — that risk is
+      // mitigated on the RECEIVING side instead: see the new scoping sentence in
+      // rasterize-pdf-page's buildBoundaryDetectionInstructions, which stops a stale/wrong hint from
+      // being able to bleed into that same call's unrelated SAME-COMPANY-MULTIPLE-ROLES judgment (the
+      // actual, confirmed harm mechanism from the original 2026-09-23 finding) rather than trying to
+      // perfectly guess the right candidate from page content alone, which isn't reliably knowable
+      // without seeing the following page.
+      open: true,
       build: () => ({ kind: "work_history", company: w.company || "", title: w.title || "", heading: w.heading || "", snippet: (w.job_responsibilities || "").slice(-220) }),
     });
   }
@@ -1535,6 +1570,27 @@ function describeTrailingItem(extraction: ExtractionResult): TrailingItemContext
       // signal — keep treating the position-last one as plausibly open, unchanged from before this fix.
       open: true,
       build: () => ({ kind: "freeform", heading: f.heading || "", sectionType: f.section_type || "needs_review", snippet: (f.content || "").slice(-220) }),
+    });
+  }
+  // Gap #16h fix (2026-09-25): this function used to consider ONLY work_history/certifications/
+  // freeform — a page's own "skills" array (which covers EVERY skills-shaped list on the page, not
+  // just whichever one happens to be the "primary" established heading; see splitCrossPageSkills for
+  // how a non-primary one like "WORKPLACE STRENGTHS" gets routed) was structurally invisible to
+  // trailing-item selection, regardless of whether it was genuinely the last thing on the page.
+  // Reproduced live: a page ending mid-way through a skills-shaped "WORKPLACE STRENGTHS" list (3 of 5
+  // items, `skills_position` higher than every work_history/freeform candidate on that page) could
+  // never be selected — describeTrailingItem fell back to an earlier, already-COMPLETE freeform
+  // section instead, and the next page's real continuation items got attached to that wrong section.
+  // Same unconditional treatment as freeform (no closing-date-equivalent signal exists for a skills
+  // list either): whenever the page reported any skills at all, it's a candidate, position from
+  // `skills_position` — the same single value the rest of the pipeline already uses to place the
+  // whole block. This covers every skills-shaped section a document might have, not just the one
+  // instance that happened to be reported.
+  if (extraction.skills.length > 0 && typeof extraction.skills_position === "number") {
+    candidates.push({
+      position: extraction.skills_position,
+      open: true,
+      build: () => ({ kind: "skills_list", heading: extraction.skills_heading || "", snippet: extraction.skills.slice(-8).join(", ") }),
     });
   }
   const openCandidates = candidates.filter((c) => c.open);
@@ -1654,7 +1710,54 @@ function mergeBoundaryContinuations(extraction: ExtractionResult): ExtractionRes
     mergedWorkHistory.push({ ...item });
   }
 
-  return { ...extraction, freeform: mergedFreeform, work_history: mergedWorkHistory };
+  // Gap #16h fix (2026-09-25): certifications still get no MERGE here by design (each continuation
+  // cert is already its own complete, self-sufficient entry — nothing to combine rows for) — but that
+  // design relies on the per-page extraction call always correctly leaving a continuation cert's own
+  // "heading" blank (to inherit the previous page's shared heading/issuing_body, per
+  // buildContinuationContext's certifications_list directive) whenever there's genuinely no new
+  // heading on the page. Confirmed live this isn't reliable: a single certification alone at the top
+  // of a page, immediately after a genuine multi-item list closed out the previous page, came back
+  // with "heading" set to its OWN NAME (self-referential) instead of blank, and "issuing_body" left
+  // empty — invented rather than inherited ("AI Video Generation & Cinematic Workflows (Veo)" printed
+  // twice in the final PDF as a result — once as its own invented heading, once as the item under it).
+  // Deterministically correct that one specific, narrow signature, the same way the freeform/
+  // work_history loops above cover the model not reliably applying THEIR continuation directives:
+  // a certification is the FIRST one extracted from its page, its own "heading" exactly equals its
+  // own "name" (case/whitespace-insensitive — the self-referential tell; a genuine standalone item
+  // with no heading would have heading=""), and the page-adjacent PREVIOUS page's LAST certification
+  // itself shares its heading with at least one sibling on THAT page (i.e. it really was an open
+  // multi-item list, not a standalone fact — the same hasSiblingUnderSameHeading signal
+  // describeTrailingItem itself already uses) — only then, adopt that list's heading and issuing_body
+  // onto this item. Scoped this tightly on purpose: never fires for a genuinely standalone cert with
+  // heading="" (untouched), and never overwrites an issuing_body the model was confident enough to
+  // fill in itself.
+  const certifications = [...extraction.certifications].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+  const certPageOf = (c: (typeof certifications)[number]) => pageOf(c.position);
+  const firstCertSeenOnPage = new Set<number>();
+  for (let i = 0; i < certifications.length; i++) {
+    const item = certifications[i];
+    const itemPage = certPageOf(item);
+    if (itemPage === null) continue;
+    const isFirstOnItsPage = !firstCertSeenOnPage.has(itemPage);
+    firstCertSeenOnPage.add(itemPage);
+    if (!isFirstOnItsPage) continue;
+    const selfReferential = !!(item.heading || "").trim() && norm(item.heading || "") === norm(item.name || "");
+    if (!selfReferential) continue;
+    let prevCert: (typeof certifications)[number] | undefined;
+    for (let j = i - 1; j >= 0; j--) {
+      if (certPageOf(certifications[j]) !== null) { prevCert = certifications[j]; break; }
+    }
+    const prevPage = prevCert ? certPageOf(prevCert) : null;
+    if (!prevCert || prevPage === null || itemPage !== prevPage + 1) continue;
+    const prevHeading = (prevCert.heading || "").trim();
+    if (!prevHeading) continue;
+    const prevHasSibling = certifications.some((c) => c !== prevCert && certPageOf(c) === prevPage && norm(c.heading || "") === norm(prevHeading));
+    if (!prevHasSibling) continue;
+    item.heading = prevCert.heading;
+    if (!(item.issuing_body || "").trim()) item.issuing_body = prevCert.issuing_body;
+  }
+
+  return { ...extraction, freeform: mergedFreeform, work_history: mergedWorkHistory, certifications };
 }
 
 // Item B (2026-09-13 PDF-regression follow-up session): server-side, deterministic replacement for
