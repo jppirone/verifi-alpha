@@ -1674,6 +1674,60 @@ function mergeBoundaryContinuations(extraction: ExtractionResult): ExtractionRes
     mergedFreeform.push({ ...item });
   }
 
+  // Gap #16h follow-up fix (2026-09-25, found live re-verifying the gap #16h fixes against the
+  // ACTUAL generated PDF, not just the DB — the exact rigor the user asked for going forward):
+  // making work_history unconditionally "open" above (the gap #16h fix #1) changed what
+  // continuation hint later pages receive, and that measurably degraded a DIFFERENT, previously-
+  // correct judgment later in the SAME completion — the same class of collateral-damage risk
+  // already flagged in that fix's own comment, just a different concrete symptom than the one
+  // anticipated there. Reproduced live: re-uploading the beast resume post-fix, the genuinely NEW
+  // "Business Operations & Portfolio Manager" / Thomson Healthcare job (the first NEW work_history
+  // header on the page right after a correctly-handled headerless continuation) came back with
+  // "heading" self-referentially set to its OWN title ("Business Operations & Portfolio Manager")
+  // instead of "PROFESSIONAL EXPERIENCE" — the same shared heading its two siblings both correctly
+  // got, and the same heading this exact entry correctly got before the gap #16h fix (confirmed
+  // directly against the raw per-page JSON captured during that fix's own root-cause pass). The
+  // generated PDF then printed this job's title twice — once as an invented section heading of its
+  // own, once as the item under it — visually identical to the certifications self-referential-
+  // heading bug already fixed above for certifications, just the work_history equivalent.
+  // Deterministic correction, same philosophy as the certifications fix and for the same reason
+  // (the per-page call can't be trusted to always apply its own field-definition rule correctly):
+  // when a work_history entry's own "heading" is self-referential (equals its own title, or its own
+  // "title at company", case/whitespace-insensitive — the same invented-rather-than-blank tell) AND
+  // at least one OTHER work_history entry anywhere in this document has a real, non-self-referential
+  // heading shared by two or more entries (the document's genuine, dominant section heading), adopt
+  // that dominant heading instead. Deliberately global rather than same-page/page-adjacent only: the
+  // failure isn't about page position, it's the model losing track of the section heading for one
+  // specific entry — the document's own dominant heading is the correct answer regardless of which
+  // page that entry happened to land on.
+  const selfReferentialWH = (w: (typeof extraction.work_history)[number]) => {
+    const h = norm(w.heading || "");
+    if (!h) return false;
+    const titleOnly = norm(w.title || "");
+    const titleAtCompany = norm(`${w.title || ""} at ${w.company || ""}`);
+    return h === titleOnly || h === titleAtCompany;
+  };
+  const headingCounts = new Map<string, number>();
+  for (const w of extraction.work_history) {
+    if (selfReferentialWH(w)) continue;
+    const h = (w.heading || "").trim();
+    if (!h) continue;
+    headingCounts.set(norm(h), (headingCounts.get(norm(h)) || 0) + 1);
+  }
+  let dominantHeading: string | null = null;
+  let dominantCount = 0;
+  for (const w of extraction.work_history) {
+    const h = (w.heading || "").trim();
+    if (!h || selfReferentialWH(w)) continue;
+    const count = headingCounts.get(norm(h)) || 0;
+    if (count > dominantCount) { dominantCount = count; dominantHeading = h; }
+  }
+  if (dominantHeading && dominantCount >= 2) {
+    for (const w of extraction.work_history) {
+      if (selfReferentialWH(w)) w.heading = dominantHeading;
+    }
+  }
+
   const workHistory = [...extraction.work_history].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
   const mergedWorkHistory: typeof workHistory = [];
   // Audit finding, 2026-09-14 (non-determinism study follow-up): prevPage used to be re-derived from
