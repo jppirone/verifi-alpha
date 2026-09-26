@@ -1602,7 +1602,82 @@ function reconstructByWordClustering(words: TextItem[]): string {
   }
   const col0Lines = reconstructColumn(col0);
   const col1Lines = reconstructColumn(col1);
-  return col1Lines.length ? col0Lines.join("\n") + "\n\n" + col1Lines.join("\n") : col0Lines.join("\n");
+  return correctAiOcrMisreads(col1Lines.length ? col0Lines.join("\n") + "\n\n" + col1Lines.join("\n") : col0Lines.join("\n"));
+}
+
+// Item A (2026-09-26 batch): tesseract-wasm systematically misreads the two-letter acronym "AI" as
+// "Al" (capital A + lowercase l) — confirmed via direct evidence to be a genuine OCR-level error
+// (the raw text out of tesseract already reads "Al" everywhere the source document says "AI"), not
+// a rendering issue and not something any individual extraction prompt introduces downstream. A
+// config-level Tesseract fix was investigated and ruled out: tessedit_char_whitelist is documented
+// broken in LSTM mode, the "ambiguous words" mechanism is an offline model-training tool (not a
+// runtime setting), and tessdata_best offers only a general ~5% accuracy nudge from the SAME
+// underlying network (not a targeted fix for this bigram) while directly conflicting with this
+// platform's 2-second CPU-time budget per invocation. Fixed here instead, once, as the very last
+// step inside reconstructByWordClustering — every downstream consumer (boundary detection, field
+// extraction, freeform sections) inherits the same corrected text, rather than each extraction
+// prompt needing its own patch. That per-prompt-patch approach is exactly how this went wrong
+// before: certification_items.name preserved "Al" under its own verbatim-copy instruction while
+// heading/content fields on the SAME page inconsistently "corrected" it or didn't, depending on how
+// strictly that specific field's own prompt instruction treated verbatim copying — genuinely
+// inconsistent even within one field type on one document. Mirrored in upload-resume/index.ts's own
+// copy of reconstructByWordClustering (the image-upload path) — see that file's own copy of this
+// same comment.
+//
+// Deliberately conservative and deterministic — not another LLM call; this exact class of
+// prompt-only fix already failed to hold reliably twice this same session. Only ever corrects "Al"
+// (never "AL", the Alabama abbreviation, and never "al", a different failure mode never observed)
+// when at least one concrete, curated context signal fires; a following capitalized word not on the
+// curated AI_FOLLOWER_WORDS list always protects a name-shaped match ("Al Martinez," "Al Thompson")
+// even when a weaker signal would otherwise apply. When no signal fires at all, the text is left
+// unchanged — silence, not a guess. Full test list (hyphen-suffix, heading-position, vocab/named-
+// product adjacency, plus fabricated do-not-touch cases: a name, an aluminum/materials reference, a
+// chemical formula, and a genuinely ambiguous case with no signal either way) verified via a
+// standalone unit test before this was wired in.
+const AI_HYPHEN_SUFFIXES = /^(powered|generated|assisted|enabled|driven|based|native|first|ready)\b/i;
+const AI_VOCAB_WORDS = /\b(tools?|platforms?|capabilit(?:y|ies)|literacy|solutions?|strateg(?:y|ies)|workflows?|applications?|models?|prompt(?:ing)?|chatbots?|automation|algorithms?|technology|technologies|agents?|generative|artificial)\b/i;
+const AI_NAMED_PRODUCTS = /\b(ChatGPT|Claude|Gemini|DeepSeek|MidJourney|Stable Diffusion|Veo|Jasper|Lovable|Copilot|GPT|LLM)\b/g;
+// Words that legitimately follow a real "AI" in resume vocabulary — used only to tell "Al Solutions"
+// (correct this) apart from "Al Martinez" (a name; never correct this) when nothing stronger (a
+// hyphen-suffix or a heading position) has already decided it.
+const AI_FOLLOWER_WORDS = new Set(["Solutions", "Model", "Models", "Content", "Video", "Visual", "Fundamentals", "Tool", "Tools", "Platform", "Platforms", "Brand", "Prompt", "Strategy", "Application", "Applications", "Capabilities", "Literacy", "Portfolio", "Certifications", "Technology", "Projects"]);
+
+function correctAiOcrMisreads(text: string): string {
+  const lines = text.split("\n");
+  return lines.map((line, i) => {
+    const alpha = line.replace(/[^A-Za-z]/g, "").length;
+    const upper = line.replace(/[^A-Z]/g, "").length;
+    const wordCount = line.trim().split(/\s+/).filter(Boolean).length;
+    // Heading heuristic: a genuine multi-word ALL CAPS line — a resume section heading never opens
+    // with a person's own first name.
+    const isHeadingLine = alpha > 0 && upper / alpha > 0.7 && wordCount >= 3;
+    const contextWindow = [lines[i - 1] || "", line, lines[i + 1] || ""].join(" ");
+    const namedProductCount = new Set((contextWindow.match(AI_NAMED_PRODUCTS) || []).map((s) => s.toLowerCase())).size;
+
+    return line.replace(/\bAl(?=[A-Z][a-z]|[^A-Za-z]|$)/g, (match, offset: number) => {
+      const before = line.slice(0, offset);
+      const after = line.slice(offset + match.length);
+      const isLineStart = before.trim() === "";
+
+      // RULE 1 (strongest — always correct): hyphen-compound suffix. A real name is never
+      // hyphen-compounded like "Al-powered."
+      if (/^-/.test(after) && AI_HYPHEN_SUFFIXES.test(after.slice(1))) return "AI";
+      // RULE 2 (strongest — always correct): first token of a genuine multi-word ALL CAPS heading.
+      if (isLineStart && isHeadingLine) return "AI";
+
+      // PROTECTION: followed directly by a capitalized word (with or without the OCR-collapsed
+      // space, e.g. "AlContent") that ISN'T one of this document's own real AI-vocabulary
+      // followers — treat as a name and leave it alone, even if RULE 3 below would otherwise fire.
+      const followerMatch = after.match(/^\s?([A-Z][a-z]+)/);
+      if (followerMatch && !AI_FOLLOWER_WORDS.has(followerMatch[1])) return match;
+
+      // RULE 3: nearby AI vocabulary or 2+ named AI products in this line or its neighbors.
+      if (AI_VOCAB_WORDS.test(contextWindow) || namedProductCount >= 2) return "AI";
+
+      // Default: no positive signal fired — leave unchanged. Silence, not a guess.
+      return match;
+    });
+  }).join("\n");
 }
 
 const WASM_URL = "https://cdn.jsdelivr.net/npm/tesseract-wasm@0.11.0/dist/tesseract-core.wasm";
