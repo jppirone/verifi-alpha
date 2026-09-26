@@ -360,10 +360,15 @@ const claim = {
   education: (e: Rec) => [e.degree, e.field_of_study, e.institution, e.location, [printDate(e.start_date, e.start_date_precision), printDate(e.end_date, e.end_date_precision)].filter(Boolean).join(" – ")].filter(Boolean).join(", "),
   certification: (c: Rec) => [c.name, c.issuing_body, c.license_number ? `Lic #${c.license_number}` : null, printDate(c.issue_date, c.issue_date_precision)].filter(Boolean).join(", "),
   license: (c: Rec, state: string) => [c.name || "License", c.issuing_body, c.license_number ? `Lic #${c.license_number}` : null, state].filter(Boolean).join(", "), // verify-license's claimFor
+  // Item B (2026-09-26 batch): mirrors the fix in confirm-resume-data/index.ts's own
+  // claimForNeedsReview — see that file's own comment for the full story. Used to prepend the
+  // section heading ("EDUCATION: ...") ahead of the content preview, producing a doubled, run-on
+  // string whenever content itself opened with its own phrase. Heading dropped here entirely, now
+  // shown as its own separate label in candidate.html via list-candidate-verification-items'
+  // sectionHeading field instead of folded into this text.
   needsReview: (f: Rec) => {
-    const heading = (f.heading || "").trim(), content = (f.content || "").trim();
-    const preview = content.length > 140 ? content.slice(0, 140) + "…" : content;
-    return heading ? `${heading}: ${preview}` : preview || "(no heading, no content)";
+    const content = (f.content || "").trim();
+    return content.length > 140 ? content.slice(0, 140) + "…" : content || "(no content)";
   },
 };
 
@@ -533,7 +538,15 @@ function buildOps(c: any, optIn: OptIn, newDoc: string, baseDoc: string | null, 
   for (const p of F.pairs) { ops.kept.push({ kind: "freeform", id: aF[p.i].id, fields: { position: sF[p.j].position ?? null, heading: sF[p.j].heading ?? null } }); ops.staged_delete.freeform.push(sF[p.j].id); lineage("freeform", aF[p.i].id, "reconfirmed"); }
   for (const j of F.added) {
     const f = sF[j];
-    ops.added.push({ kind: "freeform", staged_id: f.id, queue: f.section_type === "needs_review" ? { type: "Needs Review", claim: claim.needsReview(f), status: "Needs Reconciliation", internal_note: NEEDS_REVIEW_NOTE(f) } : null });
+    // Item B (2026-09-26 batch): source_item_id added to this queue object — found missing here
+    // during the same session's live verification, the identical gap just fixed in confirm-resume-
+    // data's own needs_review insert (every other category there already sets it; this one never
+    // did). Purely additive: the claim-text match just above (line ~535, for finding a REMOVED
+    // section's old queue row to close) is a completely separate lookup that never reads
+    // source_item_id, so this doesn't touch that logic at all — it only fixes source_item_id being
+    // null on newly-created rows, which is what list-candidate-verification-items' sectionHeading
+    // join needs to work for a needs_review row created via resubmission, not just initial confirm.
+    ops.added.push({ kind: "freeform", staged_id: f.id, queue: f.section_type === "needs_review" ? { type: "Needs Review", claim: claim.needsReview(f), status: "Needs Reconciliation", internal_note: NEEDS_REVIEW_NOTE(f), source_item_id: f.id } : null });
     lineage("freeform", f.id, "origin");
   }
 

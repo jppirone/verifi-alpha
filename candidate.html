@@ -4342,7 +4342,7 @@ a:hover{color:var(--color-accent)}
               <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:var(--space-3)">
                 <div>
                   <div class="card-title" style="margin-bottom:2px">{{ row.claim }}</div>
-                  <div style="font-size:12px;color:var(--color-neutral-500)">{{ row.categoryLabel }} · {{ row.id }}</div>
+                  <div style="font-size:12px;color:var(--color-neutral-500)">{{ row.categorySubtitle }}</div>
                 </div>
                 <span class="tag {{ row.tagClass }}">{{ row.safeLabel }}</span>
               </div>
@@ -7136,6 +7136,13 @@ class Component extends DCLogic {
         return {
           id: it.id,
           categoryLabel: this.VERIFICATION_CATEGORY_LABELS[it.type] || it.type,
+          // Item B (2026-09-26 batch): the section heading ("EDUCATION," etc.) used to be folded
+          // directly into `claim` itself ("EDUCATION: Continuing Education: 55+ hours...") — a real,
+          // confirmed bug (heading and content were each correctly extracted; the concatenation was
+          // the problem). claim below is now always the verbatim content preview; the heading is
+          // added as its own extra segment on the subtitle line instead (same "X · Y" pattern this
+          // line already used for categoryLabel/id), never concatenated into the claim text.
+          categorySubtitle: [this.VERIFICATION_CATEGORY_LABELS[it.type] || it.type, (it.sectionHeading || '').trim() || null, it.id].filter(Boolean).join(' · '),
           claim: it.claim || '(no description on file)',
           safeLabel: isNeedsReview ? 'Flagged, not submitted' : isUncheckable ? 'Not checked' : this.verificationSafeLabel(it.status),
           tagClass: isNeedsReview || isUncheckable ? 'tag-neutral' : this.verificationTagClass(it.status),

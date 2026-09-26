@@ -133,11 +133,20 @@ function claimForCertification(c: CertificationEdit): string {
 }
 // Truncated, not the full content — this is a queue-list preview (claim), not the review surface
 // itself; internal_note below carries the full, untruncated content plus the reason it's flagged.
+//
+// Item B (2026-09-26 batch): this used to prepend the section heading ("EDUCATION: ...") ahead of
+// the content preview. That's a genuine, confirmed bug, just not the extraction-boundary kind it
+// looked like at first: heading and content are each correctly, separately extracted — the bug is
+// purely in this concatenation, which has no awareness that content can itself open with its own
+// phrase (e.g. "Continuing Education: 55+ hours...", the candidate's own sentence, verbatim) that
+// reads as a doubled, run-on label once "EDUCATION: " is glued in front of it. Rather than trying to
+// detect an echo (fragile — misses future phrasing variations), the heading is dropped from this
+// string entirely and shown as its own separate label in candidate.html instead (see
+// list-candidate-verification-items' sectionHeading field, added the same session) — content here is
+// now always the verbatim preview, nothing prepended.
 function claimForNeedsReview(f: FreeformEdit): string {
-  const heading = (f.heading || "").trim();
   const content = (f.content || "").trim();
-  const preview = content.length > 140 ? content.slice(0, 140) + "…" : content;
-  return heading ? `${heading}: ${preview}` : preview || "(no heading, no content)";
+  return content.length > 140 ? content.slice(0, 140) + "…" : content || "(no content)";
 }
 // Gap #18 (2026-09-25): same truncated-preview shape as claimForNeedsReview, reused for the other
 // freeform types (additional_info/hobbies_other/summary) now that they get their own queue row too —
@@ -636,6 +645,15 @@ export default {
           received: today,
           status: "Needs Reconciliation",
           internal_note: `Auto-flagged: unstructured content from the candidate's resume that didn't map to a defined category (heading: ${JSON.stringify(f.heading || "(none)")}). Not independently validated against the uploaded document the way the structured fields above it are — review for anything that reads like an inserted job-description-style claim rather than content genuinely present on the original resume. Full content:\n\n${f.content || ""}`,
+          // Item B (2026-09-26 batch): source_item_id was missing here — every other category
+          // (work_history/education/certifications/skills/the other freeform types just below) sets
+          // it, but this needs_review block never did, presumably predating that pattern. Found live
+          // while verifying the sectionHeading join this same session: without it,
+          // list-candidate-verification-items has nothing to join against, so the one type that
+          // originally motivated this whole fix (a needs_review row) would have gotten a null
+          // sectionHeading forever, right back to the same "heading nowhere to be found" state the
+          // fix exists to solve. Added for the same reason every other category already has it.
+          source_item_id: f.id,
           bundle_id: resume_document_id, ...flagCarry(f),
         });
       }

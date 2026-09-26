@@ -177,6 +177,22 @@ export default {
         }).then((r) => r.ok ? r.json() : []).catch(() => [])
         : [];
       const eduById = new Map(eduRows.map((e: any) => [e.id, e]));
+      // Item B (2026-09-26 batch): same join pattern as Education just above, for the four freeform-
+      // sourced types (Needs Review, Additional Info, Hobbies & Other, Summary — all share source_item_id
+      // pointing at candidate_freeform_sections). claimForNeedsReview/claim.needsReview used to fold the
+      // section's own heading ("EDUCATION") into the claim text itself ("EDUCATION: Continuing
+      // Education: 55+ hours..." — a doubled, run-on string whenever content opened with its own
+      // phrase, a real confirmed bug). The heading is no longer in claim at all; it's returned here as
+      // its own field instead, so candidate.html can show it as a separate label next to the category,
+      // never concatenated into the claim text.
+      const FREEFORM_TYPES = new Set(["Needs Review", "Additional Info", "Hobbies & Other", "Summary"]);
+      const freeformIds = rows.filter((r: any) => FREEFORM_TYPES.has(r.type) && r.source_item_id).map((r: any) => r.source_item_id);
+      const freeformRows: any[] = freeformIds.length
+        ? await fetch(SUPABASE_URL + "/rest/v1/candidate_freeform_sections?select=id,heading&candidate_id=eq." + encodeURIComponent(candidate_id) + "&id=in.(" + freeformIds.map(encodeURIComponent).join(",") + ")", {
+          headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": "Bearer " + SUPABASE_SERVICE_ROLE_KEY },
+        }).then((r) => r.ok ? r.json() : []).catch(() => [])
+        : [];
+      const freeformById = new Map(freeformRows.map((f: any) => [f.id, f]));
       const items = rows.map((r: any) => {
         const isDiscrepancy = r.status === "Discrepancy";
         return {
@@ -195,6 +211,9 @@ export default {
           flaggedByCandidate: !!r.flagged_by_candidate,
           education: r.type === "Education" && r.source_item_id && eduById.get(r.source_item_id)
             ? { degree: eduById.get(r.source_item_id).degree || "", fieldOfStudy: eduById.get(r.source_item_id).field_of_study || "", institution: eduById.get(r.source_item_id).institution || "", location: eduById.get(r.source_item_id).location || "" }
+            : null,
+          sectionHeading: FREEFORM_TYPES.has(r.type) && r.source_item_id && freeformById.get(r.source_item_id)
+            ? (freeformById.get(r.source_item_id).heading || "").trim() || null
             : null,
         };
       });
