@@ -1865,7 +1865,49 @@ function mergeBoundaryContinuations(extraction: ExtractionResult): ExtractionRes
     });
   }
 
-  return { ...extraction, freeform: rescuedFreeform, work_history: mergedWorkHistory, certifications };
+  return { ...extraction, freeform: rescuedFreeform, work_history: mergedWorkHistory, certifications: dedupeCertifications(certifications) };
+}
+
+// Item 7 (2026-09-25/26 batch, root-caused after two earlier prompt-only patches both failed to hold
+// under real re-verification — see this function's own git history for the full chase): the model
+// sometimes extracts the SAME certification twice — once correctly, from the real bulleted list it
+// belongs to, and once again as a phantom duplicate, when a LATER, unrelated section's own narrative
+// prose happens to mention that same credential by name (e.g. a project description reading "...
+// completed 55+ hours of structured certification coursework through Coursiv..." echoing the real
+// list's own heading vocabulary almost verbatim). A direct, repeated empirical probe confirmed this
+// is NOT a boundary-detection failure (6/6 clean runs correctly categorized the narrative section as
+// "additional_info", never "certifications") and a prompt-only instruction telling the extraction
+// call never to do this did not reliably hold either (reproduced again on a genuine, fresh, full
+// end-to-end pipeline run after that prompt fix was deployed). Same philosophy as the
+// self-referential-heading rescues just above this function, for the identical underlying reason:
+// "the per-page call can't be trusted to always apply its own field-definition rule correctly" — a
+// deterministic, code-level correction that doesn't depend on the model ever getting it right in the
+// first place. Matches on normalized name + heading + issuing_body together (not name alone) to stay
+// conservative — a real resume with two DIFFERENT credentials that happen to share a bare name under
+// different headings must never be silently merged; this only fires when all three identifying fields
+// agree, which is the actual signature of a genuine duplicate, not a coincidence. Keeps the FIRST
+// occurrence by position (the real list entry, since the phantom duplicate is always a later,
+// unrelated mention), backfilling any field the kept item left blank from the dropped duplicate
+// first, so no real information is lost even in the edge case where the duplicate happened to carry
+// a detail (a license number, a date) the original didn't.
+function dedupeCertifications(certifications: ExtractionResult["certifications"]): ExtractionResult["certifications"] {
+  const norm = (s: string) => (s || "").trim().toLowerCase().replace(/\s+/g, " ").replace(/l/g, "i");
+  const seen = new Map<string, (typeof certifications)[number]>();
+  const result: typeof certifications = [];
+  for (const c of certifications) {
+    const key = `${norm(c.name)}|||${norm(c.heading || "")}|||${norm(c.issuing_body || "")}`;
+    const kept = seen.get(key);
+    if (!kept) {
+      seen.set(key, c);
+      result.push(c);
+      continue;
+    }
+    // Duplicate found — backfill any blank field on the kept entry from this one, then drop it.
+    for (const field of ["license_number", "issue_date", "expiration_date"] as const) {
+      if (!kept[field] && c[field]) kept[field] = c[field];
+    }
+  }
+  return result;
 }
 
 // Item B (2026-09-13 PDF-regression follow-up session): server-side, deterministic replacement for
@@ -2550,6 +2592,13 @@ export default {
         let extraction: ExtractionResult;
         try {
           extraction = dedupePositions(await runVisionExtraction(sanitized_base64, sectionBoundaries));
+          // Item 7 (2026-09-25/26 batch): same deterministic certifications de-dup as the PDF path's
+          // mergeBoundaryContinuations — see that function's own comment for the full root-cause
+          // story. A single-page image call can't have a CROSS-page duplicate, but the identical
+          // within-page failure shape (a real list entry plus a phantom one pulled from unrelated
+          // narrative prose on the same page) is structurally possible here too, so this stays
+          // consistent rather than only covering the PDF path.
+          extraction.certifications = dedupeCertifications(extraction.certifications);
           extraction.skills_heading = resolveSkillsHeading(sectionBoundaries, extraction);
         } catch (visionErr) {
           await supabase.from("resume_documents").update({ extraction_status: "failed" }).eq("id", docId);
