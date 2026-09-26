@@ -4916,11 +4916,12 @@ a:hover{color:var(--color-accent)}
           </div>
         </sc-if>
 
-        <sc-if value="{{ hasFlaggedContent }}" hint-placeholder-val="{{ false }}">
+        <sc-if value="{{ hasCzFreeformSections }}" hint-placeholder-val="{{ false }}">
+          <sc-for list="{{ czFreeformSections }}" as="fs" hint-placeholder-count="1">
           <div style="display:flex;flex-direction:column;gap:var(--space-3)">
-            <div class="card-kicker">Flagged content</div>
-            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Content from your resume that didn't clearly fit a standard category. It's included in your profile and export by default, tagged as not independently verified (see Verification Status); its text can't be edited here. Untick a section to leave it out.</div>
-            <sc-for list="{{ flaggedContentItems }}" as="fc" hint-placeholder-count="2">
+            <div class="card-kicker">{{ fs.label }}</div>
+            <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">{{ fs.note }}</div>
+            <sc-for list="{{ fs.items }}" as="fc" hint-placeholder-count="2">
               <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
                 <label style="display:flex;gap:10px;align-items:center;font-size:13px;color:var(--color-neutral-300);cursor:pointer">
                   <input type="checkbox" checked="{{ fc.checked }}" disabled="{{ fc.disabled }}" sc-camel-on-change="{{ fc.onToggle }}"> {{ fc.heading }}</label>
@@ -4931,6 +4932,7 @@ a:hover{color:var(--color-accent)}
               </div>
             </sc-for>
           </div>
+          </sc-for>
         </sc-if>
 
       </div>
@@ -4943,9 +4945,9 @@ a:hover{color:var(--color-accent)}
            (including free) so a candidate is never blindsided by content silently missing from their
            PDF. Left off by default (needs_review) is a real, deliberate paywall on the CONTENT; whether
            that exclusion is happening at all was previously invisible outside Content Manager. -->
-      <sc-if value="{{ czHasExcludedFlaggedContent }}" hint-placeholder-val="{{ false }}">
+      <sc-if value="{{ czHasExcludedFreeform }}" hint-placeholder-val="{{ false }}">
         <div class="card elev-sm" style="font-size:12px;color:var(--color-neutral-400);line-height:1.6;margin-bottom:var(--space-3);padding:10px 14px">
-          {{ czExcludedFlaggedContentNote }} See Content Manager to review it.
+          {{ czExcludedFreeformNote }} See Content Manager to review it.
         </div>
       </sc-if>
 
@@ -6418,6 +6420,12 @@ class Component extends DCLogic {
     this._czChain = (this._czChain || Promise.resolve()).then(run, run);
     return this._czChain;
   }
+
+  // Item C (2026-09-26): the freeform-backed czCategories() keys Content Manager's read-only
+  // sections now reuse -- everything work/education/skills/certifications-shaped stays out of this
+  // set on purpose, since those already have their own dedicated, independently-editable Content
+  // Manager blocks (czEducationItems etc.) that this change doesn't touch.
+  CZ_FREEFORM_KEYS = new Set(['needsReview', 'additionalInfo', 'secondarySkills', 'misc']);
 
   czCategories() {
     const R = this.state.czData;
@@ -12392,29 +12400,44 @@ class Component extends DCLogic {
         onToggle: (ev) => this.czToggleItem({ id: c.id, kind: 'certification', included: !!c.included }, ev),
       })),
       hasCzCertifications: !!(czReady && (s.czData.certifications || []).length),
-      // Gap #18 (2026-09-25): included by default now for every tier — shown read-only (its text is
-      // locked to the extraction, same as before); a PAID candidate can untick to exclude it from
-      // delivery, free tier sees the same checked list but can't act on it (disabled, not hidden).
-      flaggedContentItems: ((czReady && s.czData.other_sections) || [])
-        .filter(f => f.section_type === 'needs_review')
-        .map(f => ({
-          heading: (f.heading || '').trim() || 'Untitled section',
-          content: f.content || '',
-          checked: !!f.included,
-          disabled: s.accountTier !== 'paid' || s.czSaving,
-          lockedNote: s.accountTier !== 'paid',
-          onToggle: (e) => this.czToggleItem({ id: f.id, kind: 'freeform', included: !!f.included }, e),
-        })),
-      hasFlaggedContent: !!(czReady && (s.czData.other_sections || []).some(f => f.section_type === 'needs_review')),
-      // Views-tab notice (2026-09-23, repurposed 2026-09-25 for gap #18): now that nothing is excluded
-      // by default at any tier, this only ever fires for a paid candidate who has actively, personally
-      // chosen to exclude one of these sections via the toggle above — free tier can never produce an
-      // override, so !f.included can no longer be true for them (needed no code change here, just this
-      // updated comment and the wording below, which used to imply an automatic system exclusion and
-      // now always describes the candidate's own deliberate choice).
-      czHasExcludedFlaggedContent: !!(czReady && (s.czData.other_sections || []).some(f => f.section_type === 'needs_review' && !f.included)),
-      czExcludedFlaggedContentNote: (() => {
-        const n = ((czReady && s.czData.other_sections) || []).filter(f => f.section_type === 'needs_review' && !f.included).length;
+      // Item C (2026-09-26): this used to cover only section_type 'needs_review' ("Flagged content")
+      // -- additional_info/hobbies_other/skills_secondary sections are equally real, delivered-by-
+      // default profile content (confirmed live against a real candidate: assemble_customized_resume
+      // already returns all of them, and the sibling Customization tab already displays all four via
+      // czCategories(), which this now reuses directly instead of re-deriving its own needs_review-only
+      // subset). Read-only display only, same as Customization's own rendering of these categories --
+      // no text-editing UI is added here; that's deliberately deferred to Item G (routing all field
+      // modifications to staff review), so it isn't built now only to be redone once that lands.
+      czFreeformSections: czReady ? this.czCategories()
+        .filter(c => this.CZ_FREEFORM_KEYS.has(c.key))
+        .map(c => ({
+          key: c.key,
+          label: c.label,
+          note: c.key === 'needsReview'
+            ? 'Content from your resume that didn’t clearly fit a standard category. It’s included in your profile and export by default, tagged as not independently verified (see Verification Status); its text can’t be edited here. Untick a section to leave it out.'
+            : 'A recognized resume section, included in your profile and export by default; its text can’t be edited here. Untick a section to leave it out.',
+          items: c.items.map(it => ({
+            id: it.id,
+            heading: it.label,
+            content: it.preview || '',
+            checked: !!it.included,
+            disabled: s.accountTier !== 'paid' || s.czSaving,
+            lockedNote: s.accountTier !== 'paid',
+            onToggle: (e) => this.czToggleItem({ id: it.id, kind: it.kind, included: !!it.included }, e),
+          })),
+        })) : [],
+      hasCzFreeformSections: czReady && this.czCategories().some(c => this.CZ_FREEFORM_KEYS.has(c.key) && c.items.length),
+      // Views-tab notice (2026-09-23, repurposed 2026-09-25 for gap #18, generalized 2026-09-26 for
+      // Item C): now that nothing is excluded by default at any tier, this only ever fires for a paid
+      // candidate who has actively, personally chosen to exclude one of these sections via the toggle
+      // above -- free tier can never produce an override. Used to count only needs_review exclusions,
+      // so a paid candidate who excluded an Additional Info/Hobbies/Additional-skills section via
+      // Customization saw no notice here at all despite genuinely having excluded something real from
+      // their PDF -- now counts across the same four buckets czFreeformSections above reads from.
+      czHasExcludedFreeform: czReady && this.czCategories().some(c => this.CZ_FREEFORM_KEYS.has(c.key) && c.items.some(i => !i.included)),
+      czExcludedFreeformNote: (() => {
+        if (!czReady) return '';
+        const n = this.czCategories().filter(c => this.CZ_FREEFORM_KEYS.has(c.key)).reduce((sum, c) => sum + c.items.filter(i => !i.included).length, 0);
         if (!n) return '';
         return n === 1
           ? 'You’ve excluded one section from this PDF.'
