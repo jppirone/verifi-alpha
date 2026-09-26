@@ -382,6 +382,34 @@ const FACT_COLS: Record<string, Record<string, string[]>> = {
 };
 const DESCRIPTIVE_COLS = ["position", "heading", "extraction_confidence"];
 const NEEDS_REVIEW_NOTE = (f: Rec) => `Auto-flagged: unstructured content from the candidate's resume that didn't map to a defined category (heading: ${JSON.stringify(f.heading || "(none)")}). Not independently validated against the uploaded document the way the structured fields above it are — review for anything that reads like an inserted job-description-style claim rather than content genuinely present on the original resume. Full content:\n\n${f.content || ""}`;
+// Item D (2026-09-26): every freeform section_type now gets a real verification_items row when ADDED
+// via a resubmission, not just needs_review -- mirrors confirm-resume-data's own
+// verificationTypeForFreeform()/queueInserts loop for a candidate's FIRST submission (same type
+// literals, same "Verification Not Possible" status and note for the four not-independently-
+// checkable types, same source_item_id back-reference). Before this, the identical content got a
+// "Not checked" Verification Status row when a candidate's first submission included it, but never
+// got one when the same kind of content arrived via a resubmission instead -- same content, visible
+// or not depending only on which flow added it. Reuses claim.needsReview (a plain truncated verbatim
+// preview, no type-specific formatting) for every type, same as confirm-resume-data's own
+// claimForFreeformOther being a bare alias of claimForNeedsReview there.
+function freeformQueueRow(f: Rec): { type: string; claim: string; status: string; internal_note: string; source_item_id: string } | null {
+  const type = f.section_type === "needs_review" ? "Needs Review"
+    : f.section_type === "additional_info" ? "Additional Info"
+    : f.section_type === "hobbies_other" ? "Hobbies & Other"
+    : f.section_type === "summary" ? "Summary"
+    : f.section_type === "skills_secondary" ? "Additional Skills"
+    : null;
+  if (!type) return null;
+  const isNeedsReview = f.section_type === "needs_review";
+  return {
+    type,
+    claim: claim.needsReview(f),
+    status: isNeedsReview ? "Needs Reconciliation" : "Verification Not Possible",
+    internal_note: isNeedsReview ? NEEDS_REVIEW_NOTE(f)
+      : `Candidate-stated resume content (${f.section_type}, heading: ${JSON.stringify(f.heading || "(none)")}), not independently verifiable against any outside source. Shown on the candidate's own Verification Status tab as "Not checked."`,
+    source_item_id: f.id,
+  };
+}
 
 // The record a CHANGED item becomes: the verified record with ONLY the changed facts rewritten (a fact the new file omits, or states in a way the
 // matcher treats as the same, keeps its verified value). One function so the plan the candidate reviews and the update apply commits can never
@@ -538,15 +566,13 @@ function buildOps(c: any, optIn: OptIn, newDoc: string, baseDoc: string | null, 
   for (const p of F.pairs) { ops.kept.push({ kind: "freeform", id: aF[p.i].id, fields: { position: sF[p.j].position ?? null, heading: sF[p.j].heading ?? null } }); ops.staged_delete.freeform.push(sF[p.j].id); lineage("freeform", aF[p.i].id, "reconfirmed"); }
   for (const j of F.added) {
     const f = sF[j];
-    // Item B (2026-09-26 batch): source_item_id added to this queue object — found missing here
-    // during the same session's live verification, the identical gap just fixed in confirm-resume-
-    // data's own needs_review insert (every other category there already sets it; this one never
-    // did). Purely additive: the claim-text match just above (line ~535, for finding a REMOVED
-    // section's old queue row to close) is a completely separate lookup that never reads
-    // source_item_id, so this doesn't touch that logic at all — it only fixes source_item_id being
-    // null on newly-created rows, which is what list-candidate-verification-items' sectionHeading
-    // join needs to work for a needs_review row created via resubmission, not just initial confirm.
-    ops.added.push({ kind: "freeform", staged_id: f.id, queue: f.section_type === "needs_review" ? { type: "Needs Review", claim: claim.needsReview(f), status: "Needs Reconciliation", internal_note: NEEDS_REVIEW_NOTE(f), source_item_id: f.id } : null });
+    // Item D (2026-09-26): every freeform section_type gets a real queue object now, via
+    // freeformQueueRow() -- see that function's own comment. Previously only needs_review did; the
+    // other four types always got queue: null here, so a resubmission that added new content of
+    // those types never created the Verification Status row confirm-resume-data would have created
+    // for the exact same content on a first submission. source_item_id (Item B) is set inside
+    // freeformQueueRow() the same way it always was for needs_review.
+    ops.added.push({ kind: "freeform", staged_id: f.id, queue: freeformQueueRow(f) });
     lineage("freeform", f.id, "origin");
   }
 

@@ -185,7 +185,10 @@ export default {
       // phrase, a real confirmed bug). The heading is no longer in claim at all; it's returned here as
       // its own field instead, so candidate.html can show it as a separate label next to the category,
       // never concatenated into the claim text.
-      const FREEFORM_TYPES = new Set(["Needs Review", "Additional Info", "Hobbies & Other", "Summary"]);
+      // Item D (2026-09-26): "Additional Skills" added -- skills_secondary is the fifth freeform
+      // section_type (confirm-resume-data/resume-resubmission now both queue it, same as its
+      // siblings), so it needs the same sectionHeading join every other freeform type already gets.
+      const FREEFORM_TYPES = new Set(["Needs Review", "Additional Info", "Hobbies & Other", "Summary", "Additional Skills"]);
       const freeformIds = rows.filter((r: any) => FREEFORM_TYPES.has(r.type) && r.source_item_id).map((r: any) => r.source_item_id);
       const freeformRows: any[] = freeformIds.length
         ? await fetch(SUPABASE_URL + "/rest/v1/candidate_freeform_sections?select=id,heading&candidate_id=eq." + encodeURIComponent(candidate_id) + "&id=in.(" + freeformIds.map(encodeURIComponent).join(",") + ")", {

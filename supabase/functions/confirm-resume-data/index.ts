@@ -160,11 +160,17 @@ function claimForSkill(sk: SkillEdit): string {
 // Gap #18: the candidate-facing category label for each new freeform type's queue row — see
 // candidate.html's own VERIFICATION_CATEGORY_LABELS (kept in sync by hand, same convention already
 // used for every other type literal shared between this function and that file).
+// Item D (2026-09-26): skills_secondary added -- it was never included in the caller's filter below
+// (real, confirmed gap: Content Manager/Customization/the PDF already show this content, but it
+// could never reach Verification Status at all), same "not independently verifiable" treatment as
+// additional_info/hobbies_other/summary, "Additional Skills" to match Customization's own "Additional
+// skills" bucket label.
 function verificationTypeForFreeform(sectionType: string): string {
   if (sectionType === "additional_info") return "Additional Info";
   if (sectionType === "hobbies_other") return "Hobbies & Other";
   if (sectionType === "summary") return "Summary";
-  return "Additional Info"; // defensive fallback; every caller below already filters to these three
+  if (sectionType === "skills_secondary") return "Additional Skills";
+  return "Additional Info"; // defensive fallback; every caller below already filters to these four
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -692,7 +698,9 @@ export default {
         });
       }
       for (const f of freeform) {
-        if (f.section_type !== "additional_info" && f.section_type !== "hobbies_other" && f.section_type !== "summary") continue;
+        // Item D (2026-09-26): skills_secondary added -- see verificationTypeForFreeform's own
+        // comment. Same treatment as its three siblings here, nothing else about this loop changes.
+        if (f.section_type !== "additional_info" && f.section_type !== "hobbies_other" && f.section_type !== "summary" && f.section_type !== "skills_secondary") continue;
         const { data: idRow } = await supabase.rpc("nextval_verification_item_id");
         queueInserts.push({
           id: idRow, candidate_id, type: verificationTypeForFreeform(f.section_type), claim: claimForFreeformOther(f), received: today,

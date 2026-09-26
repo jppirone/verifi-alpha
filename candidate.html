@@ -6936,7 +6936,10 @@ class Component extends DCLogic {
   // (own rendering, not a category-summary card). Kept in sync by hand with confirm-resume-data's own
   // verificationTypeForFreeform()/type literals — same convention already used for every other type
   // string shared between that function and this file.
-  VERIFICATION_CATEGORY_LABELS = { 'Job Experience': 'Job Experience', 'Education': 'Education', 'Certification': 'Certifications', 'License': 'Licenses', 'Needs Review': 'Flagged content', 'Skill': 'Skills', 'Additional Info': 'Additional Info', 'Hobbies & Other': 'Hobbies & Other', 'Summary': 'Summary' };
+  // Item D (2026-09-26): 'Additional Skills' added -- skills_secondary was the one freeform type that
+  // could never reach this screen at all (confirm-resume-data never queued it). Label matches
+  // Customization's own "Additional skills" bucket wording.
+  VERIFICATION_CATEGORY_LABELS = { 'Job Experience': 'Job Experience', 'Education': 'Education', 'Certification': 'Certifications', 'License': 'Licenses', 'Needs Review': 'Flagged content', 'Skill': 'Skills', 'Additional Info': 'Additional Info', 'Hobbies & Other': 'Hobbies & Other', 'Summary': 'Summary', 'Additional Skills': 'Additional skills' };
   VERIFICATION_CATEGORY_ORDER = ['Job Experience', 'Education', 'Certification', 'License'];
 
   // The P133 verification floor: a category only ever shows as having a confirmed status if at
@@ -7115,7 +7118,7 @@ class Component extends DCLogic {
         // verification pipeline at all, so it has no place in either Active or Completed -- only All
         // shows it. (Active already excluded it as a side effect of it always being terminal-status;
         // this makes that exclusion explicit and correct for Completed too, which is the real gap.)
-        const isUncheckableType = it.type === 'Skill' || it.type === 'Additional Info' || it.type === 'Hobbies & Other' || it.type === 'Summary';
+        const isUncheckableType = it.type === 'Skill' || it.type === 'Additional Info' || it.type === 'Hobbies & Other' || it.type === 'Summary' || it.type === 'Additional Skills';
         if (filter !== 'all' && isUncheckableType) return false;
         if (filter === 'active' && terminal) return false;
         if (filter === 'completed' && !terminal) return false;
@@ -7140,7 +7143,7 @@ class Component extends DCLogic {
         // (assemble_customized_resume's 'verification.status': 'not_checked') — rather than falling
         // through to 'Verification Not Possible''s own normal label ("No way to verify this was
         // found"), which is worded for a genuinely-attempted-and-failed case, not "never applicable."
-        const isUncheckable = it.type === 'Skill' || it.type === 'Additional Info' || it.type === 'Hobbies & Other' || it.type === 'Summary';
+        const isUncheckable = it.type === 'Skill' || it.type === 'Additional Info' || it.type === 'Hobbies & Other' || it.type === 'Summary' || it.type === 'Additional Skills';
         return {
           id: it.id,
           categoryLabel: this.VERIFICATION_CATEGORY_LABELS[it.type] || it.type,
