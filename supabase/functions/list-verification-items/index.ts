@@ -120,22 +120,57 @@ export default {
         : [];
       const licenseById = new Map(licenseRows.map((l) => [l.id, l]));
 
-      const [workHistoryContacts, certContacts] = await Promise.all([
+      // Item G, Part 1 (2026-09-26): the same source_item_id join pattern above, generalized to cover
+      // the two types it never did (Education, Skill) plus the five freeform-sourced types (all backed
+      // by candidate_freeform_sections) -- purely to expose candidate_edited_fields (Item F) so a badge
+      // can be shown regardless of which category an item belongs to. education_items/skill_items
+      // weren't previously fetched here at all; work_history_items/certification_items already were,
+      // for the contact-hint feature, so candidate_edited_fields is just added to their existing select.
+      const FREEFORM_TYPES = new Set(["Needs Review", "Additional Info", "Hobbies & Other", "Summary", "Additional Skills"]);
+      const educationIds = [...new Set(rows.filter((r: any) => r.type === "Education" && r.source_item_id).map((r: any) => r.source_item_id))];
+      const skillIds = [...new Set(rows.filter((r: any) => r.type === "Skill" && r.source_item_id).map((r: any) => r.source_item_id))];
+      const freeformIds = [...new Set(rows.filter((r: any) => FREEFORM_TYPES.has(r.type) && r.source_item_id).map((r: any) => r.source_item_id))];
+
+      const [workHistoryContacts, certContacts, educationRows, skillRows, freeformRows] = await Promise.all([
         workHistoryIds.length
-          ? fetch(`${SUPABASE_URL}/rest/v1/work_history_items?id=in.(${workHistoryIds.join(",")})&select=id,company,employer_name_override,employer_location_override,contact_phone,contact_name`, { headers: REST_HEADERS }).then((r) => r.ok ? r.json() : [])
+          ? fetch(`${SUPABASE_URL}/rest/v1/work_history_items?id=in.(${workHistoryIds.join(",")})&select=id,company,employer_name_override,employer_location_override,contact_phone,contact_name,candidate_edited_fields`, { headers: REST_HEADERS }).then((r) => r.ok ? r.json() : [])
           : Promise.resolve([]),
         certIds.length
-          ? fetch(`${SUPABASE_URL}/rest/v1/certification_items?id=in.(${certIds.join(",")})&select=id,verification_link,contact_phone`, { headers: REST_HEADERS }).then((r) => r.ok ? r.json() : [])
+          ? fetch(`${SUPABASE_URL}/rest/v1/certification_items?id=in.(${certIds.join(",")})&select=id,verification_link,contact_phone,candidate_edited_fields`, { headers: REST_HEADERS }).then((r) => r.ok ? r.json() : [])
+          : Promise.resolve([]),
+        educationIds.length
+          ? fetch(`${SUPABASE_URL}/rest/v1/education_items?id=in.(${educationIds.join(",")})&select=id,candidate_edited_fields`, { headers: REST_HEADERS }).then((r) => r.ok ? r.json() : [])
+          : Promise.resolve([]),
+        skillIds.length
+          ? fetch(`${SUPABASE_URL}/rest/v1/skill_items?id=in.(${skillIds.join(",")})&select=id,candidate_edited_fields`, { headers: REST_HEADERS }).then((r) => r.ok ? r.json() : [])
+          : Promise.resolve([]),
+        freeformIds.length
+          ? fetch(`${SUPABASE_URL}/rest/v1/candidate_freeform_sections?id=in.(${freeformIds.join(",")})&select=id,candidate_edited_fields`, { headers: REST_HEADERS }).then((r) => r.ok ? r.json() : [])
           : Promise.resolve([]),
       ]);
       const workHistoryContactById = new Map((workHistoryContacts as any[]).map((w) => [w.id, w]));
       const certContactById = new Map((certContacts as any[]).map((c) => [c.id, c]));
+      const educationById = new Map((educationRows as any[]).map((e) => [e.id, e]));
+      const skillById = new Map((skillRows as any[]).map((s) => [s.id, s]));
+      const freeformById = new Map((freeformRows as any[]).map((f) => [f.id, f]));
 
       const items = rows.map((r: any) => {
         const wc = r.type === "Job Experience" && r.source_item_id ? workHistoryContactById.get(r.source_item_id) : null;
         const cc = r.type === "Certification" && r.source_item_id ? certContactById.get(r.source_item_id) : null;
         const employerNameOverride = wc?.employer_name_override || null;
         const employerLocationOverride = wc?.employer_location_override || null;
+        // Item G, Part 1: whichever source row this item's type maps to -- exactly one of these is
+        // ever non-null for a given row, since a row's type determines which table its source_item_id
+        // points into. null (not undefined) here is the "nothing to check" default, same as every
+        // other lookup on this row already does.
+        const editedFieldsObj: Record<string, true> | null =
+          (wc?.candidate_edited_fields) ||
+          (cc?.candidate_edited_fields) ||
+          (r.type === "Education" && r.source_item_id ? educationById.get(r.source_item_id)?.candidate_edited_fields : null) ||
+          (r.type === "Skill" && r.source_item_id ? skillById.get(r.source_item_id)?.candidate_edited_fields : null) ||
+          (FREEFORM_TYPES.has(r.type) && r.source_item_id ? freeformById.get(r.source_item_id)?.candidate_edited_fields : null) ||
+          null;
+        const editedFieldNames = editedFieldsObj ? Object.keys(editedFieldsObj) : [];
         const contactPhone = wc?.contact_phone || cc?.contact_phone || null;
         const contactName = wc?.contact_name || null;
         const verificationLink = cc?.verification_link || null;
@@ -199,6 +234,13 @@ export default {
         employerNameOverride, employerLocationOverride, contactPhone, contactName, verificationLink,
         employerNameResolved,
         hasContactHint: !!(employerNameOverride || employerLocationOverride || contactPhone || contactName || verificationLink),
+        // Item G, Part 1 (2026-09-26): whether the candidate edited any field on the item this queue
+        // row was created from, and which ones -- see editedFieldsObj's own comment just above for
+        // where this comes from. Independent of flaggedByCandidate (a candidate can edit a field
+        // without flagging anything, or flag something they never touched) and independent of
+        // opt-in/status -- this reflects the underlying item, not the queue row's own state.
+        hasEditedFields: editedFieldNames.length > 0,
+        editedFieldNames,
         timeline: (r.verification_item_timeline || []).map((t: any) => ({
           date: t.event_date,
           actor: t.actor,

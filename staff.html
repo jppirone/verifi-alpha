@@ -2311,8 +2311,46 @@ th.sortable{cursor:pointer;user-select:none}
                — see this filter's own view-model (flaggedScoped) for why it composes with, rather than
                replaces, the other two toggles. -->
           <button type="button" class="btn {{ filterFlaggedClass }}" style="font-size:12px" onClick="{{ showFlaggedOnly }}">Flagged by candidate ({{ flaggedCount }})</button>
+          <!-- Item G, Part 1 (2026-09-26): candidate_edited_fields (Item F) surfaced the same way
+               flagged_by_candidate already is -- independent of status/correction/flagged, same
+               single-select-among-these-four button-bar behavior every filter here already has (each
+               button resets the others; see showAllItems/showCorrectionOnly/showFlaggedOnly's own
+               setState calls). -->
+          <button type="button" class="btn {{ filterEditedClass }}" style="font-size:12px" onClick="{{ showEditedOnly }}">Edited ({{ editedCount }})</button>
         </div>
       </div>
+      <!-- Item G, Part 2 (2026-09-26): deliberately separate from the filter bar above -- these items
+           have no verification_items row at all (never opted in), so they can't be reached by
+           narrowing the normal queue no matter which of the four buttons above is active. A spot-check
+           surface, not a backlog: loads only the first time this is clicked (see loadUnqueuedEdits's
+           own header), and is never counted in queueScopeNote or any of the counts above. -->
+      <div style="display:flex;justify-content:flex-end;margin-bottom:var(--space-3)">
+        <button type="button" class="btn {{ unqueuedEditsButtonClass }}" style="font-size:12px" onClick="{{ toggleUnqueuedEdits }}">{{ unqueuedEditsButtonLabel }}</button>
+      </div>
+      <sc-if value="{{ showUnqueuedEdits }}" hint-placeholder-val="{{ false }}">
+        <div class="card elev-sm" style="margin-bottom:var(--space-4);display:flex;flex-direction:column;gap:var(--space-3)">
+          <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Confirmed items the candidate edited before submitting, for a category they never opted into verification for — so there is no queue row, no status, and nothing to assign. Read-only: a place to spot-check, not a backlog to clear.</div>
+          <sc-if value="{{ unqueuedEditsLoading }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:var(--color-neutral-500)">Loading…</div>
+          </sc-if>
+          <sc-if value="{{ unqueuedEditsError }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:#e2735c">{{ unqueuedEditsError }}</div>
+          </sc-if>
+          <sc-if value="{{ unqueuedEditsEmpty }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:var(--color-neutral-500)">None found.</div>
+          </sc-if>
+          <sc-for list="{{ unqueuedEditRows }}" as="row" hint-placeholder-count="2">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:var(--space-3);border-top:1px solid var(--color-divider);padding-top:var(--space-2)">
+              <div style="display:flex;flex-direction:column;gap:2px">
+                <div style="font-size:13px;color:var(--color-neutral-200)">{{ row.candidateName }} <span style="color:var(--color-neutral-500)">· {{ row.category }}</span></div>
+                <div style="font-size:12px;color:var(--color-neutral-400)">{{ row.claim }}</div>
+                <div style="font-size:11px;color:#5a8fc2">Edited: {{ row.editedFieldsText }}</div>
+              </div>
+              <button type="button" class="btn btn-ghost" style="font-size:12px;flex:none" onClick="{{ row.onOpenDoc }}">View</button>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
       <div style="display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:flex-end;margin-bottom:var(--space-4)">
         <div class="field" style="flex:1;min-width:160px;margin:0">
           <label for="filter-name" style="font-size:11px">Candidate name</label>
@@ -2404,6 +2442,13 @@ th.sortable{cursor:pointer;user-select:none}
                 <span class="{{ row.statusTagClass }}">{{ row.status }}</span>
                 <sc-if value="{{ row.flaggedByCandidate }}" hint-placeholder-val="{{ false }}">
                   <div style="margin-top:4px"><span class="tag tag-outline" style="color:#b26a00;border-color:#b26a00;white-space:nowrap">🚩 Flagged</span></div>
+                </sc-if>
+                <!-- Item G, Part 1 (2026-09-26): same badge shape as 🚩 Flagged just above, deliberately
+                     a different color (#5a8fc2, blue) so the two are distinguishable at a glance --
+                     flagged-by-candidate and edited-by-candidate are independent signals about the
+                     same item. -->
+                <sc-if value="{{ row.hasEditedFields }}" hint-placeholder-val="{{ false }}">
+                  <div style="margin-top:4px" title="{{ row.editedFieldsTitle }}"><span class="tag tag-outline" style="color:#5a8fc2;border-color:#5a8fc2;white-space:nowrap">✎ Edited</span></div>
                 </sc-if>
                 <sc-if value="{{ row.syncError }}" hint-placeholder-val="{{ false }}">
                   <div style="margin-top:4px">
@@ -2746,6 +2791,20 @@ th.sortable{cursor:pointer;user-select:none}
       </div>
       </sc-if>
 
+      <!-- Item G, Part 1 (2026-09-26): own card, not folded into the candidate's-note card above --
+           an item can have edited fields with no candidate note or flag at all (most will: editing a
+           field doesn't require flagging it). Read-only here; no action a staff member takes on this
+           card changes anything (unlike the flag-resolve button above, which is a real action). -->
+      <sc-if value="{{ detailHasEditedFields }}" hint-placeholder-val="{{ false }}">
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-4)">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3)">
+          <div class="card-kicker">Edited by candidate</div>
+          <span class="tag tag-outline" style="color:#5a8fc2;border-color:#5a8fc2">✎ Edited</span>
+        </div>
+        <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.5">Fields changed from what extraction originally read: {{ detailEditedFieldsText }}.</div>
+      </div>
+      </sc-if>
+
       <sc-if value="{{ detailCorrectionRequested }}" hint-placeholder-val="{{ false }}">
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3);margin-bottom:var(--space-4)">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3)">
@@ -3058,6 +3117,13 @@ class Component extends DCLogic {
     // Item-flagging (2026-09-23): a second, independent boolean-flag toggle, same pattern as
     // correctionFilter above — composes with it and the text/dropdown filters rather than replacing them.
     flaggedFilter: false,
+    // Item G, Part 1 (2026-09-26): candidate_edited_fields (Item F) surfaced the same way — same
+    // single-select-among-the-filter-buttons behavior every button in that bar already has.
+    editedFilter: false,
+    // Item G, Part 2 (2026-09-26): the on-demand, admin-only, deliberately-separate surface for
+    // edited-but-never-queued items — see toggleUnqueuedEdits/loadUnqueuedEdits's own header. Loads
+    // lazily on first click, same convention as resumeFailuresLoaded/loadResumeFailures.
+    showUnqueuedEdits: false, unqueuedEditsLoaded: false, unqueuedEditsLoading: false, unqueuedEditsError: null, unqueuedEdits: [],
     // Real search/filter, added after confirming none existed: candidate name (reuses the
     // candidateName field list-verification-items already resolves — first_name+last_name with a
     // full_name fallback for pre-existing candidates, untouched here), item ID (the real VQ-####
@@ -3605,6 +3671,39 @@ class Component extends DCLogic {
     this.setState({ resumeFailuresLoading: false, resumeFailuresLoaded: true, resumeFailuresError: false, resumeFailures: data.items });
   }
 
+  // Item G, Part 2 (2026-09-26): deliberately separate from loadItems' own normal-queue poll -- these
+  // items have no verification_items row at all (see list_unqueued_edited_items's own migration
+  // header), so they're never included in, or counted by, anything the normal queue already tracks.
+  // Loads once, lazily, the first time a staff member opens the toggle (same convention as
+  // loadResumeFailures above) -- never eagerly, never on every queue poll. Admin-only; the server
+  // refuses a worker with 403, surfaced here the same way staff-employer-documents' own 403 already is
+  // ("This page is for admins only") rather than hiding the button for workers.
+  toggleUnqueuedEdits() {
+    const opening = !this.state.showUnqueuedEdits;
+    this.setState({ showUnqueuedEdits: opening });
+    if (opening && !this.state.unqueuedEditsLoaded && !this.state.unqueuedEditsLoading) this.loadUnqueuedEdits();
+  }
+
+  async loadUnqueuedEdits() {
+    this.setState({ unqueuedEditsLoading: true, unqueuedEditsError: null });
+    let res, data;
+    try {
+      res = await this.staffFetch('/list-unqueued-edited-items', {});
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ unqueuedEditsLoading: false, unqueuedEditsLoaded: true, unqueuedEditsError: "Couldn't reach the server. Try again." });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      this.setState({
+        unqueuedEditsLoading: false, unqueuedEditsLoaded: true,
+        unqueuedEditsError: res.status === 403 ? 'This page is for admins only.' : "Couldn't load this. Try again.",
+      });
+      return;
+    }
+    this.setState({ unqueuedEditsLoading: false, unqueuedEditsLoaded: true, unqueuedEditsError: null, unqueuedEdits: data.items });
+  }
+
   // Employer documents tab (admin only; the server refuses anyone else with 403). The list shows only what the server says qualifies:
   // approved requests whose document is still stored.
   async runDocSearch() {
@@ -3850,13 +3949,15 @@ class Component extends DCLogic {
     // Item-flagging (2026-09-23): a second, independent toggle — composes with correctionFilter
     // (AND), not a replacement for it, since a row can be both correction-requested and flagged.
     const flaggedScoped = s.flaggedFilter ? correctionScoped.filter(it => it.flaggedByCandidate) : correctionScoped;
+    // Item G, Part 1 (2026-09-26): same shape as flaggedScoped above.
+    const editedScoped = s.editedFilter ? flaggedScoped.filter(it => it.hasEditedFields) : flaggedScoped;
 
     // Real search/filter (see state's own comment for why each of these three exists and what it
     // reads). All three narrow together (AND, not OR) — a name query, an ID query, and a category
     // pick are each independently optional; whichever ones are non-empty all have to match.
     const nameQuery = s.nameFilter.trim().toLowerCase();
     const idQuery = s.itemIdFilter.trim().toLowerCase();
-    const scoped = flaggedScoped.filter((it) => {
+    const scoped = editedScoped.filter((it) => {
       if (nameQuery && !(it.candidateName || '').toLowerCase().includes(nameQuery)) return false;
       if (idQuery && !(it.id || '').toLowerCase().includes(idQuery)) return false;
       if (s.typeFilter && it.type !== s.typeFilter) return false;
@@ -3894,6 +3995,10 @@ class Component extends DCLogic {
       receivedDisp: this.fmt(it.received), desiredDisp: this.fmt(it.desired), followUpDisp: this.fmt(it.followUp),
       automatedCheck: it.automatedCheck, status: it.status, statusTagClass: this.statusTagClass(it.status),
       flaggedByCandidate: !!it.flaggedByCandidate,
+      // Item G, Part 1 (2026-09-26): editedFieldsTitle backs the badge's own hover title (a quick
+      // "which fields" hint without opening the detail view, which has its own full card for it).
+      hasEditedFields: !!it.hasEditedFields,
+      editedFieldsTitle: (it.editedFieldNames || []).length ? 'Edited: ' + it.editedFieldNames.join(', ') : '',
       registryFlag: this.isNotActiveMatch(it),
       registryFlagText: this.isLapsedAfterVerified(it) ? 'Was verified · now not active' : 'License found · not active',
       hasCandidateNote: !!it.candidateNote,
@@ -4109,18 +4214,42 @@ class Component extends DCLogic {
       arrowCorrection: arrow('correctionRequested'), sortByCorrection: setSort('correctionRequested'),
 
       correctionCount: scopedAll.filter(it => it.correctionRequested).length,
-      filterAllClass: (s.correctionFilter || s.flaggedFilter) ? 'btn-ghost' : 'btn-secondary',
+      filterAllClass: (s.correctionFilter || s.flaggedFilter || s.editedFilter) ? 'btn-ghost' : 'btn-secondary',
       filterCorrectionClass: s.correctionFilter ? 'btn-secondary' : 'btn-ghost',
-      showAllItems: () => this.setState({ correctionFilter: false, flaggedFilter: false }),
-      showCorrectionOnly: () => this.setState({ correctionFilter: true, flaggedFilter: false }),
+      showAllItems: () => this.setState({ correctionFilter: false, flaggedFilter: false, editedFilter: false }),
+      showCorrectionOnly: () => this.setState({ correctionFilter: true, flaggedFilter: false, editedFilter: false }),
       // Item-flagging (2026-09-23): same toggle-button pattern as Correction requested above, just a
       // second, independent boolean — see flaggedScoped's own comment on why it composes rather than replaces.
       flaggedCount: scopedAll.filter(it => it.flaggedByCandidate).length,
       filterFlaggedClass: s.flaggedFilter ? 'btn-secondary' : 'btn-ghost',
-      showFlaggedOnly: () => this.setState({ flaggedFilter: true, correctionFilter: false }),
+      showFlaggedOnly: () => this.setState({ flaggedFilter: true, correctionFilter: false, editedFilter: false }),
+      // Item G, Part 1 (2026-09-26): same toggle-button pattern as the two above.
+      editedCount: scopedAll.filter(it => it.hasEditedFields).length,
+      filterEditedClass: s.editedFilter ? 'btn-secondary' : 'btn-ghost',
+      showEditedOnly: () => this.setState({ editedFilter: true, correctionFilter: false, flaggedFilter: false }),
+
+      // Item G, Part 2 (2026-09-26): the on-demand, admin-only unqueued-edits toggle/list.
+      unqueuedEditsButtonLabel: s.unqueuedEditsLoaded ? `Edited, not submitted (${s.unqueuedEdits.length})` : 'Edited, not submitted',
+      unqueuedEditsButtonClass: s.showUnqueuedEdits ? 'btn-secondary' : 'btn-ghost',
+      toggleUnqueuedEdits: () => this.toggleUnqueuedEdits(),
+      showUnqueuedEdits: s.showUnqueuedEdits,
+      unqueuedEditsLoading: s.unqueuedEditsLoading,
+      unqueuedEditsError: s.unqueuedEditsError,
+      unqueuedEditsEmpty: s.unqueuedEditsLoaded && !s.unqueuedEditsLoading && !s.unqueuedEditsError && s.unqueuedEdits.length === 0,
+      unqueuedEditRows: s.unqueuedEdits.map((it) => ({
+        candidateName: it.candidateName || '—',
+        category: it.category,
+        claim: it.claim || '(no content)',
+        editedFieldsText: (it.editedFieldNames || []).join(', ') || '—',
+        onOpenDoc: () => this.viewSourceDocument(it.candidateId),
+      })),
 
       detailHasCandidateNote: !!(selected && selected.candidateNote),
       detailCandidateNote: selected ? (selected.candidateNote || '') : '',
+      // Item G, Part 1 (2026-09-26): its own card in the detail view — see the template's own comment
+      // on why this isn't folded into the candidate's-note card above.
+      detailHasEditedFields: !!(selected && selected.hasEditedFields),
+      detailEditedFieldsText: (selected && selected.editedFieldNames || []).join(', '),
       detailCandidateNoteAt: selected && selected.candidateNoteAt ? new Date(selected.candidateNoteAt).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '',
       detailFlaggedByCandidate: !!(selected && selected.flaggedByCandidate),
       // Item-flagging (2026-09-23): the only write this makes is flagged_by_candidate: false — never
