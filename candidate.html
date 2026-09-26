@@ -2738,7 +2738,7 @@ a:hover{color:var(--color-accent)}
   <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
     <div style="display:flex;flex-direction:column;gap:var(--space-2)">
       <div style="font-size:15px">What should we verify?</div>
-      <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Check any category you want us to attempt. Nothing is checked by default. Anything left unchecked shows as Not Verified, and functionally, that's no different from never having used this system at all for that category.</div>
+      <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Check any category you want us to attempt. Nothing is checked by default for these three. Anything left unchecked shows as Not Verified, and functionally, that's no different from never having used this system at all for that category.</div>
     </div>
     <div style="display:flex;flex-direction:column;gap:var(--space-2)">
       <label style="display:flex;gap:8px;align-items:center;font-size:13px;color:var(--color-neutral-300);cursor:pointer">
@@ -2753,8 +2753,22 @@ a:hover{color:var(--color-accent)}
         <input type="checkbox" checked="{{ optInCertifications }}" sc-camel-on-change="{{ toggleOptInCertifications }}">
         <span>Certifications</span>
       </label>
+      <!-- Item E (2026-09-26): this checkbox covers certifications only -- it used to read as though it
+           also governed licenses (nothing said otherwise), when license verification is actually
+           unconditional and was never gated by this box at all. Clarified in place, at the point of
+           decision, not just in the callout below. -->
+      <div style="font-size:11px;color:var(--color-neutral-600);padding-left:26px;margin-top:-4px">Licenses are handled separately and always verified — see below.</div>
     </div>
     <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6;border-top:1px solid var(--color-divider);padding-top:var(--space-3)">Checking a box means we'll attempt every source available to us in that category. Leaving it unchecked means that category's fields may show Unable to Verify, or more precisely, Not Verified, since nothing was ever attempted.</div>
+    <!-- Item E (2026-09-26): licenses are the one exception to everything above -- deliberately, permanently
+         unconditional (not a gap to close, a decision not to change), confirmed by tracing every layer of the
+         pipeline: detect-license-mentions runs on extraction alone, confirm-resume-data's license loop and its
+         verify-license calls are never gated by opt_in.certifications, and verify-license's own state-registry
+         adapters don't even require trade_soc_code. The intro paragraph above ("Nothing is checked by default")
+         was straightforwardly false for this one category; this says so plainly instead of leaving it implied. -->
+    <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.6;background:var(--color-neutral-900);border:1px solid var(--color-accent);border-radius:var(--radius-sm);padding:var(--space-3)">
+      <strong>Licenses are different.</strong> If we detect a professional license anywhere in your resume, we will always verify it against the relevant state licensing board, regardless of what you select above. This can't be turned off.
+    </div>
   </div>
   <div style="font-size:11px;color:var(--color-neutral-600)">Uploads are rate-limited to prevent this step being used to spam confirmation email.</div>
   <sc-if value="{{ emailSendError }}" hint-placeholder-val="{{ false }}">
@@ -3046,7 +3060,7 @@ a:hover{color:var(--color-accent)}
       <sc-if value="{{ resumeHasAnyVerifiableCategory }}" hint-placeholder-val="{{ false }}">
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-2)">
         <div class="card-kicker">Submit for verification</div>
-        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Choose which categories you'd like verified. Nothing is submitted until you confirm below.</div>
+        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Choose which of these you'd like verified. Nothing is submitted until you confirm below.</div>
         <sc-if value="{{ resumeHasWorkHistory }}" hint-placeholder-val="{{ false }}">
           <label style="display:flex;gap:8px;align-items:center;font-size:13px;color:var(--color-neutral-300);cursor:pointer">
             <input type="checkbox" checked="{{ optInWorkHistory }}" sc-camel-on-change="{{ toggleOptInWorkHistory }}">
@@ -3064,6 +3078,17 @@ a:hover{color:var(--color-accent)}
             <input type="checkbox" checked="{{ optInCertifications }}" sc-camel-on-change="{{ toggleOptInCertifications }}">
             <span>Certifications</span>
           </label>
+          <!-- Item E (2026-09-26): same carve-out as the intake screen -- this checkbox never actually
+               governed license verification (that's unconditional, see resumeHasLicense's own comment),
+               but nothing here said so, letting "Certifications" read as though it covered licenses too. -->
+          <sc-if value="{{ resumeHasLicense }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:11px;color:var(--color-neutral-600);padding-left:26px;margin-top:-4px">Licenses are handled separately and always verified — see below.</div>
+          </sc-if>
+        </sc-if>
+        <sc-if value="{{ resumeHasLicense }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.6;background:var(--color-neutral-900);border:1px solid var(--color-accent);border-radius:var(--radius-sm);padding:var(--space-3)">
+            <strong>Licenses are different.</strong> We detected a professional license on your resume. We always verify it against the relevant state licensing board, regardless of what you select above. This can't be turned off.
+          </div>
         </sc-if>
       </div>
       </sc-if>
@@ -13063,6 +13088,11 @@ class Component extends DCLogic {
       resumeHasCertifications: !!(s.resumeExtraction) && s.resumeExtraction.certifications.length > 0,
       resumeHasAnyVerifiableCategory: !!(s.resumeExtraction) &&
         (s.resumeExtraction.work_history.length > 0 || s.resumeExtraction.education.length > 0 || s.resumeExtraction.certifications.length > 0),
+      // Item E (2026-09-26): gates the same "licenses are always verified, not opt-in" disclosure this
+      // screen's Certifications checkbox needs -- a license is stored as a certification_items row (so
+      // it's already covered by resumeHasCertifications above), but that alone doesn't say anything
+      // about whether one was actually detected. license_items is the real signal.
+      resumeHasLicense: !!(s.resumeExtraction) && (s.resumeExtraction.license_items || []).length > 0,
       // Positional fidelity (see the position migration's own header): one merged, position-sorted
       // list standing in for what used to be four separate fixed-order cards (work history,
       // education, certifications, skills) plus a single needs_review card. A null/missing position
