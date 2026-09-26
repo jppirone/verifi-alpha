@@ -2896,6 +2896,17 @@ a:hover{color:var(--color-accent)}
   <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:22px;margin:0">Confirm your resume data</h1>
   <p style="margin:0;color:var(--color-neutral-400);font-size:13px;line-height:1.5">We read this off the document you uploaded. Check it against the original on the left and correct anything that's wrong — you're fixing our reading of it, not typing from scratch.</p>
 
+  <!-- Item F (2026-09-26): threshold nudge (3+ edited fields) toward the existing start-over action,
+       surfaced near the top of the screen rather than only inside the submit-time acknowledgment modal
+       below. Links to the same rejectResumeModalOpen flow "This isn't right — start over" already uses
+       further down this screen, not a new action. -->
+  <sc-if value="{{ showEditCleanupNudge }}" hint-placeholder-val="{{ false }}">
+    <div class="card elev-sm" style="border:1px solid var(--color-warning,#c77d1e);display:flex;flex-direction:column;gap:var(--space-2)">
+      <div style="font-size:13px;color:var(--color-neutral-200);line-height:1.6">You've corrected several fields. If your document didn't scan or convert well, uploading a cleaner copy may be faster than fixing each field by hand.</div>
+      <button type="button" class="btn btn-ghost" style="align-self:flex-start;font-size:12px" sc-camel-on-click="{{ openStartOverFromNudge }}">Upload a different file instead</button>
+    </div>
+  </sc-if>
+
   <sc-if value="{{ resumeExtractionLoading }}" hint-placeholder-val="{{ false }}">
     <div class="card elev-sm" style="padding:var(--space-8);text-align:center;color:var(--color-neutral-400);font-size:14px">Loading your resume data…</div>
   </sc-if>
@@ -3367,6 +3378,29 @@ a:hover{color:var(--color-accent)}
         <div class="dialog-actions">
           <button type="button" class="btn btn-secondary" disabled="{{ rejectResumePending }}" sc-camel-on-click="{{ closeRejectResumeModal }}">Cancel</button>
           <button type="button" class="btn btn-primary" disabled="{{ rejectResumePending }}" sc-camel-on-click="{{ confirmRejectResume }}">{{ rejectResumeConfirmLabel }}</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- Item F (2026-09-26): recorded acknowledgment before submitting with edited fields present --
+       same dialog-backdrop/dialog/title/body/actions shape as resubAckOpen (the resume-resubmission
+       equivalent), deliberately: this is meant to carry the same weight, a real recorded
+       acknowledgment, not a dismissable-only warning. Only ever opened when
+       resumeTotalEditedFieldCount() > 0 -- see confirmResumeData above. -->
+  <sc-if value="{{ editAckOpen }}" hint-placeholder-val="{{ false }}">
+    <div class="dialog-backdrop">
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="edit-ack-modal-title" style="width:min(520px,100%);max-height:90vh;overflow-y:auto">
+        <div class="dialog-title" id="edit-ack-modal-title">Before you submit</div>
+        <div class="dialog-body" style="display:flex;flex-direction:column;gap:var(--space-3);line-height:1.6">
+          <div>You edited some of what we read off your document. That's exactly what this screen is for — fixing a misread word, a wrong date, an OCR mistake.</div>
+          <div>But once you submit, <b>an edited field becomes your stated claim, and is recorded as edited</b> — separately and permanently from what the extraction originally found. This is not the same as disputing a verification result later: it's part of what you're submitting right now, before anything has been checked.</div>
+          <div>If a field still doesn't look right, fix it here first. If you're unsure whether a change is accurate, consider leaving the original reading in place instead.</div>
+          <div style="font-size:12px;color:var(--color-neutral-500)">This only affects the fields you actually changed — nothing else about your submission is different.</div>
+        </div>
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ closeEditAck }}">Cancel</button>
+          <button type="button" class="btn btn-primary" sc-camel-on-click="{{ confirmEditAck }}">I understand — submit</button>
         </div>
       </div>
     </div>
@@ -7913,6 +7947,9 @@ class Component extends DCLogic {
     licenseDetecting: false,
     // Item 1 (2026-09-11 status-check session, CRITICAL): see discardResumeDocument's own header.
     rejectResumeModalOpen: false, rejectResumePending: false, rejectResumeError: null,
+    // Item F (2026-09-26): the recorded-acknowledgment gate for submitting with edited fields present
+    // — see submitResumeConfirmation/EDIT_ACK_VERSION and the editAckOpen modal in the template.
+    editAckOpen: false,
     // Candidate item-flagging, pre-confirm modal (2026-09-23): see flagItemProps/openFlagModal.
     flagModalOpen: false, flagModalCategory: null, flagModalItemId: null, flagModalNote: '',
     // Item C (2026-09-08 regression session): the new employer/certification contact-details
@@ -10785,9 +10822,14 @@ class Component extends DCLogic {
       // A date the candidate types is their own value, not the source's: month-level precision (what every resume label
       // showed before), and a blank work/education end date means Present (the field's own label says so).
       const isDate = /_date$/.test(field);
+      // Item F (2026-09-26): every editable field now records its own "_edited" flag the same way
+      // dates always have -- previously only dates set this; every other field (company, title,
+      // institution, name, issuing_body, license_number, job_responsibilities...) silently accepted a
+      // change with no trace anywhere that it happened. See EDITABLE_FIELDS/resumeEditedFieldsFor for
+      // where this gets read back out and whitelisted before it's ever transmitted.
       const patch = isDate
         ? { [field]: value, [field + '_precision']: value ? 'month' : (field === 'end_date' && category !== 'certifications' ? 'present' : null), [field + '_edited']: true }
-        : { [field]: value };
+        : { [field]: value, [field + '_edited']: true };
       const list = st.resumeExtraction[category].map(item => item.id === id ? { ...item, ...patch } : item);
       return { resumeExtraction: { ...st.resumeExtraction, [category]: list } };
     });
@@ -10868,7 +10910,7 @@ class Component extends DCLogic {
   updateResumeFreeform(id, value) {
     this.setState(st => {
       if (!st.resumeExtraction) return {};
-      const list = st.resumeExtraction.freeform.map(item => item.id === id ? { ...item, content: value } : item);
+      const list = st.resumeExtraction.freeform.map(item => item.id === id ? { ...item, content: value, content_edited: true } : item);
       return { resumeExtraction: { ...st.resumeExtraction, freeform: list } };
     });
   }
@@ -10881,7 +10923,7 @@ class Component extends DCLogic {
   updateResumeSkill(id, value) {
     this.setState(st => {
       if (!st.resumeExtraction) return {};
-      const list = st.resumeExtraction.skills.map(item => item.id === id ? { ...item, skill_text: value } : item);
+      const list = st.resumeExtraction.skills.map(item => item.id === id ? { ...item, skill_text: value, skill_text_edited: true } : item);
       return { resumeExtraction: { ...st.resumeExtraction, skills: list } };
     });
   }
@@ -10900,9 +10942,55 @@ class Component extends DCLogic {
       const idSet = new Set(ids);
       const list = st.resumeExtraction[category].map(item => idSet.has(item.id) ? { ...item, heading: value } : item);
       const editedHeadingGroups = new Set(st.editedHeadingGroups || []);
-      editedHeadingGroups.add(category + ':' + ids[0]);
+      // Item F (2026-09-26): every id in the group now gets marked, not just ids[0] -- the same
+      // heading value is written to every item in the group above, so a downstream reader keying off
+      // an individual item's own id (see resumeEditedFieldsFor) used to only ever see the edit for
+      // whichever id happened to be first, silently missing it for every other item in the group.
+      for (const id of ids) editedHeadingGroups.add(category + ':' + id);
       return { resumeExtraction: { ...st.resumeExtraction, [category]: list }, editedHeadingGroups };
     });
+  }
+
+  // Item F (2026-09-26): which fields, per category, have a real extracted value that a candidate
+  // edit can meaningfully diverge from -- and therefore ever get an "_edited" flag worth recording.
+  // Deliberately excludes: work_history's employer_name_override/employer_location_override/
+  // contact_phone/contact_name (candidate-added outreach details collected post-license-detection,
+  // never extracted from the document in the first place); certifications' verification_link and
+  // trade_soc_code (confirmed via grep of every extraction prompt: neither is ever populated by
+  // extraction, so there's no original reading to have changed); license state (already has its own,
+  // separate, pre-existing state_source 'ocr'/'candidate' column -- this is that same idea, already
+  // proven in production for one field, now generalized to the rest). heading is handled separately
+  // via editedHeadingGroups (shared across a group for work/education/certifications) rather than a
+  // per-item flag, and is added in resumeEditedFieldsFor below, not listed here.
+  EDITABLE_FIELDS = {
+    work_history: ['company', 'title', 'location', 'start_date', 'end_date', 'job_responsibilities'],
+    education: ['institution', 'degree', 'field_of_study', 'location', 'start_date', 'end_date'],
+    certifications: ['name', 'issuing_body', 'license_number', 'issue_date', 'expiration_date'],
+    skills: ['skill_text'],
+    freeform: ['content'],
+  };
+  // The wire-format list for one item: exactly the fields confirm-resume-data will accept and store
+  // in candidate_edited_fields, never raw client state (a stray "_edited" key candidate.html doesn't
+  // know about, or a rename, can't leak through as a field name the server has never heard of).
+  resumeEditedFieldsFor(category, item, headingEdited) {
+    const fields = (this.EDITABLE_FIELDS[category] || []).filter(f => !!item[f + '_edited']);
+    if (headingEdited) fields.push('heading');
+    return fields;
+  }
+  // Total edited-field count across the whole submission, every category combined -- drives both the
+  // top-of-screen cleanup nudge (>= 3, see showEditCleanupNudge) and whether the submit-time
+  // acknowledgment is required at all (> 0, see submitResumeConfirmation).
+  resumeTotalEditedFieldCount() {
+    const ex = this.state.resumeExtraction;
+    if (!ex) return 0;
+    const groups = this.state.editedHeadingGroups || new Set();
+    let n = 0;
+    (ex.work_history || []).forEach(w => { n += this.resumeEditedFieldsFor('work_history', w, groups.has('work_history:' + w.id)).length; });
+    (ex.education || []).forEach(x => { n += this.resumeEditedFieldsFor('education', x, groups.has('education:' + x.id)).length; });
+    (ex.certifications || []).forEach(c => { n += this.resumeEditedFieldsFor('certifications', c, groups.has('certifications:' + c.id)).length; });
+    (ex.skills || []).forEach(sk => { n += this.resumeEditedFieldsFor('skills', sk, false).length; });
+    (ex.freeform || []).forEach(f => { n += this.resumeEditedFieldsFor('freeform', f, groups.has('freeform:' + f.id)).length; });
+    return n;
   }
 
   // Same idea as updateResumeSectionHeading above, for a single needs_review freeform row's own
@@ -11029,10 +11117,18 @@ class Component extends DCLogic {
     return out;
   }
 
+  // Item F (2026-09-26): version string for the submit-time edited-field acknowledgment -- same
+  // dated-version convention as RESUB_ACK_VERSION below, its own independent value since this gates a
+  // different action. confirm-resume-data refuses the submit without a matching value whenever any
+  // item carries a non-empty edited_fields list; see editAckOpen/EDIT_ACK_VERSION's own use below.
+  EDIT_ACK_VERSION = 'v1-2026-09-26';
+
   async submitResumeConfirmation() {
     if (!this.state.resumeExtraction || !this.state.resumeCandidateId || this.state.resumeConfirmPending) return;
     this.setState({ resumeConfirmPending: true, resumeConfirmError: null });
     const ex = this.state.resumeExtraction;
+    const groups = this.state.editedHeadingGroups || new Set();
+    const editedCount = this.resumeTotalEditedFieldCount();
     const body = {
       candidate_id: this.state.resumeCandidateId,
       // Item D (2026-09-08 regression session): foundation-only threading for the future "bundle"
@@ -11052,22 +11148,34 @@ class Component extends DCLogic {
       // saveFlagModal/openFlagModal — echoed on every category below so confirm-resume-data can
       // persist the flag onto the draft row and, for the categories that create one, carry it onto
       // the new verification_items row too.
-      work_history: ex.work_history.map(w => ({ id: w.id, company: w.company, title: w.title, location: w.location, start_date: w.start_date, end_date: w.end_date, start_date_precision: w.start_date_precision || null, end_date_precision: w.end_date_precision || null, job_responsibilities: w.job_responsibilities, heading: w.heading || null, flagged: !!w._flagged, flag_note: w._flagNote || '' })),
-      education: ex.education.map(x => ({ id: x.id, institution: x.institution, degree: x.degree, field_of_study: x.field_of_study, location: x.location, start_date: x.start_date, end_date: x.end_date, start_date_precision: x.start_date_precision || null, end_date_precision: x.end_date_precision || null, heading: x.heading || null, flagged: !!x._flagged, flag_note: x._flagNote || '' })),
+      // edited_fields (Item F, 2026-09-26): the wire-format list from resumeEditedFieldsFor -- exactly
+      // the fields this item's candidate actually changed, whitelisted to the ones with a real
+      // extracted value to diverge from. confirm-resume-data stores this verbatim (re-whitelisted
+      // server-side too, never trusted blind) as candidate_edited_fields.
+      work_history: ex.work_history.map(w => ({ id: w.id, company: w.company, title: w.title, location: w.location, start_date: w.start_date, end_date: w.end_date, start_date_precision: w.start_date_precision || null, end_date_precision: w.end_date_precision || null, job_responsibilities: w.job_responsibilities, heading: w.heading || null, flagged: !!w._flagged, flag_note: w._flagNote || '', edited_fields: this.resumeEditedFieldsFor('work_history', w, groups.has('work_history:' + w.id)) })),
+      education: ex.education.map(x => ({ id: x.id, institution: x.institution, degree: x.degree, field_of_study: x.field_of_study, location: x.location, start_date: x.start_date, end_date: x.end_date, start_date_precision: x.start_date_precision || null, end_date_precision: x.end_date_precision || null, heading: x.heading || null, flagged: !!x._flagged, flag_note: x._flagNote || '', edited_fields: this.resumeEditedFieldsFor('education', x, groups.has('education:' + x.id)) })),
       // source_match is echoed back (not edited here) so confirm-resume-data can flag a
       // structurally-unmatched certification for staff regardless of the opt-in checkbox below —
       // see that function's own header (bug-2 defense-in-depth).
-      certifications: ex.certifications.map(c => ({ id: c.id, name: c.name, issuing_body: c.issuing_body, license_number: c.license_number, verification_link: c.verification_link || null, issue_date: c.issue_date, expiration_date: c.expiration_date, issue_date_precision: c.issue_date_precision || null, expiration_date_precision: c.expiration_date_precision || null, source_match: c.source_match, trade_soc_code: c.trade_soc_code || null, heading: c.heading || null, flagged: !!c._flagged, flag_note: c._flagNote || '' })),
-      skills: ex.skills.map(s => ({ id: s.id, skill_text: s.skill_text, flagged: !!s._flagged, flag_note: s._flagNote || '' })),
+      certifications: ex.certifications.map(c => ({ id: c.id, name: c.name, issuing_body: c.issuing_body, license_number: c.license_number, verification_link: c.verification_link || null, issue_date: c.issue_date, expiration_date: c.expiration_date, issue_date_precision: c.issue_date_precision || null, expiration_date_precision: c.expiration_date_precision || null, source_match: c.source_match, trade_soc_code: c.trade_soc_code || null, heading: c.heading || null, flagged: !!c._flagged, flag_note: c._flagNote || '', edited_fields: this.resumeEditedFieldsFor('certifications', c, groups.has('certifications:' + c.id)) })),
+      skills: ex.skills.map(s => ({ id: s.id, skill_text: s.skill_text, flagged: !!s._flagged, flag_note: s._flagNote || '', edited_fields: this.resumeEditedFieldsFor('skills', s, false) })),
       // section_type/heading are echoed back (not edited here) so confirm-resume-data can flag
       // needs_review rows for staff without a second round-trip to look up what kind of freeform
       // row each id is — see that function's own header.
-      freeform: ex.freeform.map(f => ({ id: f.id, content: f.content, section_type: f.section_type, heading: f.heading, flagged: !!f._flagged, flag_note: f._flagNote || '' })),
+      freeform: ex.freeform.map(f => ({ id: f.id, content: f.content, section_type: f.section_type, heading: f.heading, flagged: !!f._flagged, flag_note: f._flagNote || '', edited_fields: this.resumeEditedFieldsFor('freeform', f, groups.has('freeform:' + f.id)) })),
       // Detected licenses (automatic license verification): state is optional here — a license with
       // no state is simply saved unverified; confirm-resume-data only fires verification when both
       // a state and a license number are present.
       licenses: (ex.license_items || []).map(l => ({ id: l.id, state: l.state || null, remove: !!l._remove })),
       opt_in: { work_history: this.state.optInWorkHistory, education: this.state.optInEducation, certifications: this.state.optInCertifications },
+      // Item F (2026-09-26): required, and only present, whenever at least one field above carries a
+      // non-empty edited_fields -- this submit only ever reaches confirm-resume-data through
+      // confirmResumeData below, which opens editAckOpen first and refuses to call this function until
+      // the candidate has actually clicked through it, so by the time editedCount > 0 gets here the
+      // acknowledgment is always genuine, not just assumed. confirm-resume-data enforces the same
+      // requirement server-side regardless (see its own header) -- this client-side gate is what makes
+      // the modal meaningful, not what makes the submission safe.
+      ...(editedCount > 0 ? { acknowledged: true, ack_text_version: this.EDIT_ACK_VERSION } : {}),
     };
     let res, data;
     try {
@@ -13294,7 +13402,27 @@ class Component extends DCLogic {
       resumeConfirmDisabled: s.resumeConfirmPending || s.licenseDetecting,
       resumeConfirmError: s.resumeConfirmError,
       resumeConfirmLabel: s.resumeConfirmPending ? 'Saving…' : (s.licenseDetecting ? 'Checking for licenses…' : 'Confirm and continue'),
-      confirmResumeData: () => this.submitResumeConfirmation(),
+      // Item F (2026-09-26): edited content only ever reaches submitResumeConfirmation through here --
+      // any field edit anywhere routes through the recorded-acknowledgment modal first (editAckOpen)
+      // rather than submitting straight through, same gating shape as resubAckOpen's own "start" button.
+      confirmResumeData: () => {
+        if (this.resumeTotalEditedFieldCount() > 0) { this.setState({ editAckOpen: true }); return; }
+        this.submitResumeConfirmation();
+      },
+      // Item F (2026-09-26): top-of-screen nudge once 3+ fields have been edited -- a real signal that
+      // hand-fixing the OCR reading might be slower than just uploading a cleaner copy, surfaced before
+      // the submit-time modal, not only inside it. Links to the same start-over action just below
+      // (openRejectResumeModal/rejectResumeModalOpen), not a new one.
+      showEditCleanupNudge: this.resumeTotalEditedFieldCount() >= 3,
+      openStartOverFromNudge: () => this.setState({ rejectResumeModalOpen: true, rejectResumeError: null }),
+      // Item F (2026-09-26): the recorded acknowledgment itself -- styled and structured identically to
+      // resubAckOpen (same dialog-backdrop/dialog/title/body/actions shape). Confirming closes this and
+      // calls the real submit, which reads resumeTotalEditedFieldCount() itself and attaches
+      // acknowledged/ack_text_version -- this modal doesn't set any flag other than closing itself, the
+      // submit call is what actually sends the acknowledgment.
+      editAckOpen: s.editAckOpen,
+      closeEditAck: () => this.setState({ editAckOpen: false }),
+      confirmEditAck: () => { this.setState({ editAckOpen: false }); this.submitResumeConfirmation(); },
       // Item 1 (2026-09-11 status-check session, CRITICAL): see discardResumeDocument's own header.
       rejectResumeModalOpen: s.rejectResumeModalOpen,
       rejectResumePending: s.rejectResumePending,

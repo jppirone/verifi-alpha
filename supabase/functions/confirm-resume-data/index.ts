@@ -38,8 +38,13 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 // see flagFields()) and, for the three categories that create a verification_items row in the same
 // request, carried onto that new row too so staff see it immediately, not just on the draft item.
 type FlagEdit = { flagged?: boolean; flag_note?: string };
-type WorkHistoryEdit = { id: string; company?: string; title?: string; location?: string; start_date?: string; end_date?: string; start_date_precision?: string | null; end_date_precision?: string | null; job_responsibilities?: string; heading?: string | null } & FlagEdit;
-type EducationEdit = { id: string; institution?: string; degree?: string; field_of_study?: string; location?: string; start_date?: string; end_date?: string; start_date_precision?: string | null; end_date_precision?: string | null; heading?: string | null } & FlagEdit;
+// EditedFields (Item F, 2026-09-26): the client's own record of which fields on this item it actually
+// changed from what extraction originally found — see EDITABLE_FIELDS below for the per-category
+// whitelist this gets re-checked against before anything is stored. Never trusted as sent: a client
+// could claim any string here, so whitelistEditedFields() is what actually decides what's written.
+type EditedFields = { edited_fields?: unknown };
+type WorkHistoryEdit = { id: string; company?: string; title?: string; location?: string; start_date?: string; end_date?: string; start_date_precision?: string | null; end_date_precision?: string | null; job_responsibilities?: string; heading?: string | null } & FlagEdit & EditedFields;
+type EducationEdit = { id: string; institution?: string; degree?: string; field_of_study?: string; location?: string; start_date?: string; end_date?: string; start_date_precision?: string | null; end_date_precision?: string | null; heading?: string | null } & FlagEdit & EditedFields;
 // source_match is echoed back by the client (candidate.html already has it, straight from
 // get-resume-extraction) for the same reason section_type/heading are on FreeformEdit below — this
 // function only needs it to decide which certifications get the unconditional staff flag, not to
@@ -53,7 +58,7 @@ type EducationEdit = { id: string; institution?: string; degree?: string; field_
 // accepted here regardless of which the item turns out to be, same as every other field on this row. Same
 // validation as the later employer-contact-details screen already applies to the same column: http(s) only,
 // capped at 500 chars, blank clears it.
-type CertificationEdit = { id: string; name?: string; issuing_body?: string; license_number?: string; verification_link?: string | null; issue_date?: string; expiration_date?: string; issue_date_precision?: string | null; expiration_date_precision?: string | null; source_match?: string; trade_soc_code?: string | null; heading?: string | null } & FlagEdit;
+type CertificationEdit = { id: string; name?: string; issuing_body?: string; license_number?: string; verification_link?: string | null; issue_date?: string; expiration_date?: string; issue_date_precision?: string | null; expiration_date_precision?: string | null; source_match?: string; trade_soc_code?: string | null; heading?: string | null } & FlagEdit & EditedFields;
 // License edits (automatic license verification): a license is a certification row (edited through
 // CertificationEdit above — name, number, dates) plus a 1:1 license_items extension holding only the
 // issuing state. state is only ever a 2-letter US state/DC code (validated below) and is never
@@ -70,8 +75,34 @@ function stateOrNull(v: unknown): string | null {
 // section_type/heading are echoed back by the client (candidate.html already has them, straight
 // from get-resume-extraction) rather than re-fetched here — this function only needs them to decide
 // which freeform rows are needs_review for the staff-queue flag below, not to validate anything.
-type FreeformEdit = { id: string; content?: string; section_type?: string; heading?: string } & FlagEdit;
-type SkillEdit = { id: string; skill_text?: string } & FlagEdit;
+type FreeformEdit = { id: string; content?: string; section_type?: string; heading?: string } & FlagEdit & EditedFields;
+type SkillEdit = { id: string; skill_text?: string } & FlagEdit & EditedFields;
+
+// Item F (2026-09-26): per-category whitelist of fields that have a real extracted value to diverge
+// from -- mirrors candidate.html's own EDITABLE_FIELDS exactly (kept in sync by hand, same convention
+// already used for every other client/server-shared literal set in this codebase). Deliberately
+// excludes work_history's employer/contact override fields, certifications' verification_link and
+// trade_soc_code (none of these are ever populated by extraction — confirmed by grepping every
+// extraction prompt — so there's nothing an "edit" could diverge from), and license state (already has
+// its own, separate, pre-existing state_source column). 'heading' is valid for every category since it
+// is itself always a real extracted (or blank) value on every row type.
+const EDITABLE_FIELDS: Record<string, string[]> = {
+  work_history: ["company", "title", "location", "start_date", "end_date", "job_responsibilities", "heading"],
+  education: ["institution", "degree", "field_of_study", "location", "start_date", "end_date", "heading"],
+  certifications: ["name", "issuing_body", "license_number", "issue_date", "expiration_date", "heading"],
+  skills: ["skill_text"],
+  freeform: ["content", "heading"],
+};
+// Returns null (not an empty object) when nothing survives whitelisting, so a caller can tell "no
+// edits" apart from "an object with no keys" without a second check, and so candidate_edited_fields
+// is written as SQL NULL rather than an empty jsonb object for an unedited row.
+function whitelistEditedFields(category: string, raw: unknown): Record<string, true> | null {
+  if (!Array.isArray(raw)) return null;
+  const allowed = new Set(EDITABLE_FIELDS[category] || []);
+  const out: Record<string, true> = {};
+  for (const f of raw) { if (typeof f === "string" && allowed.has(f)) out[f] = true; }
+  return Object.keys(out).length ? out : null;
+}
 
 // A flag with no (or whitespace-only) note is not persisted as a flag -- an empty flag would give
 // staff nothing to act on. max 1000 chars, same cap as the Education-resubmit note.
@@ -262,6 +293,13 @@ export default {
         candidate_location = null,
         work_history = [], education = [], certifications = [], skills = [], freeform = [], licenses = [],
         opt_in = { work_history: false, education: false, certifications: false },
+        // Item F (2026-09-26): the recorded acknowledgment for submitting with edited fields present —
+        // see EDIT_ACK_TEXT_VERSION below and candidate.html's own EDIT_ACK_VERSION/editAckOpen modal.
+        // Required, and checked, only when at least one item below actually has whitelisted edits;
+        // otherwise these are simply ignored, same as resume-resubmission's own ack_text_version is
+        // ignored by every action except "start".
+        acknowledged = false,
+        ack_text_version = null,
       }: {
         candidate_id: string;
         resume_document_id?: string | null;
@@ -273,6 +311,8 @@ export default {
         freeform: FreeformEdit[];
         licenses?: LicenseEdit[];
         opt_in: { work_history: boolean; education: boolean; certifications: boolean };
+        acknowledged?: boolean;
+        ack_text_version?: string | null;
       } = body;
 
       if (!candidate_id) {
@@ -284,6 +324,29 @@ export default {
       // function: a bad link fails the whole confirm cleanly rather than leaving a partial write behind.
       if (certifications.some((c) => isBadVerificationLink(c.verification_link))) {
         return new Response(JSON.stringify({ ok: false, error: "verification_link_invalid" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // Item F (2026-09-26): whitelisted once, up front, and reused below both for the ack gate and for
+      // the actual .update() calls — never recomputed from raw client input a second time, so the same
+      // whitelist decision is what gets checked AND what gets stored, with no gap between them.
+      const editedFieldsByCategory = {
+        work_history: work_history.map((w) => whitelistEditedFields("work_history", w.edited_fields)),
+        education: education.map((x) => whitelistEditedFields("education", x.edited_fields)),
+        certifications: certifications.map((c) => whitelistEditedFields("certifications", c.edited_fields)),
+        skills: skills.map((s) => whitelistEditedFields("skills", s.edited_fields)),
+        freeform: freeform.map((f) => whitelistEditedFields("freeform", f.edited_fields)),
+      };
+      const hasAnyEditedFields = ([] as (Record<string, true> | null)[])
+        .concat(editedFieldsByCategory.work_history, editedFieldsByCategory.education, editedFieldsByCategory.certifications, editedFieldsByCategory.skills, editedFieldsByCategory.freeform)
+        .some((x) => x !== null);
+      const EDIT_ACK_TEXT_VERSION = "v1-2026-09-26";
+      // Real server-side enforcement, not just a client-side nag: a request with edited fields but no
+      // matching acknowledgment is refused before anything is claimed or written, same shape as
+      // resume-resubmission's own "start" action refusing without acknowledged/ack_text_version.
+      if (hasAnyEditedFields && (acknowledged !== true || ack_text_version !== EDIT_ACK_TEXT_VERSION)) {
+        return new Response(JSON.stringify({ ok: false, error: "edit_ack_required", ack_text_version: EDIT_ACK_TEXT_VERSION }), {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
@@ -330,7 +393,14 @@ export default {
               "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
               "Prefer": "return=representation",
             },
-            body: JSON.stringify({ confirmed_at: claimAt, candidate_location: candidate_location || null }),
+            // Item F (2026-09-26): the recorded acknowledgment itself, in the same atomic PATCH as
+            // confirmed_at/candidate_location above -- same durability, same "only ever set once, at
+            // confirm time" reasoning. Stays null on any document where nothing was edited: no ack was
+            // ever required (hasAnyEditedFields false), so none is recorded.
+            body: JSON.stringify({
+              confirmed_at: claimAt, candidate_location: candidate_location || null,
+              ...(hasAnyEditedFields ? { edit_ack_at: claimAt, edit_ack_text_version: EDIT_ACK_TEXT_VERSION } : {}),
+            }),
           },
         );
         const claimedRows = claimRes.ok ? await claimRes.json() : [];
@@ -358,7 +428,7 @@ export default {
       // resumeConfirm forever, with no error ever surfaced to explain why. Verified live before this
       // was written: a deliberately stale id on one category now returns a real error instead of a
       // false ok:true.
-      for (const w of work_history) {
+      for (const [wi, w] of work_history.entries()) {
         const { data, error } = await supabase.from("work_history_items").update({
           company: w.company ?? null, title: w.title ?? null,
           location: w.location ?? null,
@@ -372,6 +442,9 @@ export default {
           // contiguous resumeConfirm group — see candidate.html's updateResumeSectionHeading), so
           // this is the first write this field has ever gotten past initial extraction.
           heading: w.heading ?? null,
+          // Item F (2026-09-26): which of the fields above, if any, the candidate actually changed —
+          // see whitelistEditedFields's own header. null (not {}) when nothing was edited.
+          candidate_edited_fields: editedFieldsByCategory.work_history[wi],
           ...(() => { const f = flagFields(w); return { flagged_by_candidate: f.flagged_by_candidate, candidate_flag_note: f.candidate_flag_note, candidate_flag_note_at: f.flagged_by_candidate ? nowIso : null }; })(),
           candidate_confirmed: true, updated_at: nowIso,
         }).eq("id", w.id).eq("candidate_id", candidate_id).select("id");
@@ -381,7 +454,7 @@ export default {
           });
         }
       }
-      for (const e of education) {
+      for (const [ei, e] of education.entries()) {
         const { data, error } = await supabase.from("education_items").update({
           institution: e.institution ?? null, degree: e.degree ?? null, field_of_study: e.field_of_study ?? null,
           location: e.location ?? null,
@@ -391,6 +464,7 @@ export default {
             end_date_precision: cleanPrecision(e.end_date_precision, dateOrNull(e.end_date), true),
           } : {}),
           heading: e.heading ?? null,
+          candidate_edited_fields: editedFieldsByCategory.education[ei],
           ...(() => { const f = flagFields(e); return { flagged_by_candidate: f.flagged_by_candidate, candidate_flag_note: f.candidate_flag_note, candidate_flag_note_at: f.flagged_by_candidate ? nowIso : null }; })(),
           candidate_confirmed: true, updated_at: nowIso,
         }).eq("id", e.id).eq("candidate_id", candidate_id).select("id");
@@ -400,7 +474,7 @@ export default {
           });
         }
       }
-      for (const c of certifications) {
+      for (const [ci, c] of certifications.entries()) {
         const { data, error } = await supabase.from("certification_items").update({
           name: c.name ?? null, issuing_body: c.issuing_body ?? null, license_number: c.license_number ?? null,
           verification_link: cleanVerificationLink(c.verification_link),
@@ -411,6 +485,7 @@ export default {
           } : {}),
           trade_soc_code: c.trade_soc_code ?? null,
           heading: c.heading ?? null,
+          candidate_edited_fields: editedFieldsByCategory.certifications[ci],
           ...(() => { const f = flagFields(c); return { flagged_by_candidate: f.flagged_by_candidate, candidate_flag_note: f.candidate_flag_note, candidate_flag_note_at: f.flagged_by_candidate ? nowIso : null }; })(),
           candidate_confirmed: true, updated_at: nowIso,
         }).eq("id", c.id).eq("candidate_id", candidate_id).select("id");
@@ -424,10 +499,11 @@ export default {
       // never enters the verification_items staff queue below, matching freeform's own lifecycle.
       // No opt-in flag for skills exists (it was never one of the three categories collected at
       // signup, and this build doesn't add a fourth) — deliberately out of scope, not an oversight.
-      for (const sk of skills) {
+      for (const [ski, sk] of skills.entries()) {
         const skFlag = flagFields(sk);
         const { data, error } = await supabase.from("skill_items").update({
           skill_text: sk.skill_text ?? "",
+          candidate_edited_fields: editedFieldsByCategory.skills[ski],
           flagged_by_candidate: skFlag.flagged_by_candidate, candidate_flag_note: skFlag.candidate_flag_note, candidate_flag_note_at: skFlag.flagged_by_candidate ? nowIso : null,
           candidate_confirmed: true, updated_at: nowIso,
         }).eq("id", sk.id).eq("candidate_id", candidate_id).select("id");
@@ -437,13 +513,14 @@ export default {
           });
         }
       }
-      for (const f of freeform) {
+      for (const [fi, f] of freeform.entries()) {
         const { data, error } = await supabase.from("candidate_freeform_sections").update({
           content: f.content ?? null,
           // Item #3 (2026-09-17): heading is now candidate-editable on resumeConfirm for freeform
           // rows too (summary/hobbies_other/needs_review) — previously echoed back read-only and
           // never actually written here.
           heading: f.heading ?? null,
+          candidate_edited_fields: editedFieldsByCategory.freeform[fi],
           ...(() => { const fl = flagFields(f); return { flagged_by_candidate: fl.flagged_by_candidate, candidate_flag_note: fl.candidate_flag_note, candidate_flag_note_at: fl.flagged_by_candidate ? nowIso : null }; })(),
           candidate_confirmed: true, updated_at: nowIso,
         }).eq("id", f.id).eq("candidate_id", candidate_id).select("id");
