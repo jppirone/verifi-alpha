@@ -3162,62 +3162,67 @@ a:hover{color:var(--color-accent)}
                  those and was wrongly asked for them before this fix (also silently auto-flagging it for
                  manual review in confirm-resume-data for "missing" a field it was never supposed to have) —
                  it gets a verification link instead, the field that actually proves a certification. -->
+            <!-- Item 6 reclassification (2026-09-25 batch): "Issuing state" used to sit in its own
+                 accent-bordered box, visually separated from License number and Trade/occupation just
+                 above it — no data bug at all (confirmed one single, correctly-structured record), but
+                 the layout made it read as a second, standalone entity. Fixed by grouping License
+                 number, Trade/occupation, and Issuing state into ONE shared, consistently-styled
+                 license block, with a single "Professional license" badge/action row governing all
+                 three fields together instead of Issuing state alone. -->
             <sc-if value="{{ item.isLicense }}" hint-placeholder-val="{{ false }}">
-            <!-- Item 7 (2026-09-12 live-testing session): a sibling field to Name, not a replacement —
-                 a real license/permit/registration number when the resume prints one, separate from
-                 whatever informal or formal name the candidate's own document uses. -->
-            <div class="field"><label>License number</label><input class="input" value="{{ item.licenseNumber }}" sc-camel-on-change="{{ item.onLicenseNumber }}"></div>
+            <div class="field" style="padding:var(--space-2);border:1px solid var(--color-accent);border-radius:var(--radius-md,8px);display:flex;flex-direction:column;gap:var(--space-2)">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap">
+                <span class="tag tag-outline">Professional license</span>
+                <button type="button" class="btn btn-ghost" style="font-size:12px" sc-camel-on-click="{{ item.onRemoveLicense }}">This isn't a license</button>
+              </div>
+              <!-- Item 7 (2026-09-12 live-testing session): a sibling field to Name, not a replacement —
+                   a real license/permit/registration number when the resume prints one, separate from
+                   whatever informal or formal name the candidate's own document uses. -->
+              <div class="field"><label>License number</label><input class="input" value="{{ item.licenseNumber }}" sc-camel-on-change="{{ item.onLicenseNumber }}"></div>
+              <!-- Item 8 (2026-09-12 live-testing session): trade/occupation type — the routing field a
+                   future licensing-board check needs to know which board to check against. Not blocked
+                   at Confirm if left blank, but a license with no trade/occupation selected is routed to
+                   manual review instead of a normal queue item (see confirm-resume-data) — the caption
+                   below says so plainly rather than leaving it a silent, invisible rule. -->
+              <div class="field">
+                <label>Trade / occupation</label>
+                <sc-raw-select class="input" value="{{ item.tradeSocCode }}" sc-camel-on-change="{{ item.onTradeSocCode }}">
+                  <option value="">Select trade or occupation…</option>
+                  <sc-for list="{{ socTradeOptions }}" as="opt" hint-placeholder-count="3">
+                    <option value="{{ opt.code }}">{{ opt.label }}</option>
+                  </sc-for>
+                </sc-raw-select>
+                <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6;margin-top:var(--space-1)">Used to route this license to the right licensing board for automated checks. If left blank, this license is sent for manual review instead.</div>
+              </div>
+              <div class="field">
+                <label>Issuing state <span style="font-weight:400;color:var(--color-neutral-500)">(optional to continue — required for automatic verification)</span></label>
+                <sc-raw-select class="input" value="{{ item.licenseState }}" sc-camel-on-change="{{ item.onLicenseState }}">
+                  <option value="">Select the issuing state…</option>
+                  <sc-for list="{{ usStateOptions }}" as="st" hint-placeholder-count="3">
+                    <option value="{{ st.code }}">{{ st.name }}</option>
+                  </sc-for>
+                </sc-raw-select>
+                <sc-if value="{{ item.licenseHasEvidence }}" hint-placeholder-val="{{ false }}">
+                  <div style="font-size:11px;color:var(--color-neutral-500);margin-top:var(--space-1)">State read from your resume: “{{ item.licenseEvidence }}”</div>
+                </sc-if>
+                <sc-if value="{{ item.licenseNoState }}" hint-placeholder-val="{{ false }}">
+                  <div style="font-size:11px;color:var(--color-warning,#c77d1e);margin-top:var(--space-1)">No state selected — this license will be saved as not verified. You can add the state later from the Verification tab.</div>
+                </sc-if>
+                <sc-if value="{{ item.licenseStateSupported }}" hint-placeholder-val="{{ false }}">
+                  <div style="font-size:11px;color:var(--color-neutral-500);margin-top:var(--space-1)">Licenses from this state are checked automatically after you continue.</div>
+                </sc-if>
+                <sc-if value="{{ item.licenseStateUnsupported }}" hint-placeholder-val="{{ false }}">
+                  <div style="font-size:11px;color:var(--color-neutral-500);margin-top:var(--space-1)">Automatic checks aren't available for this state yet — this license will be saved as not verified.</div>
+                </sc-if>
+              </div>
+            </div>
             </sc-if>
             <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
               <div class="field" style="flex:1;min-width:140px"><label>Issue date<span style="font-weight:normal;font-size:11px;color:var(--color-neutral-500)">{{ item.issueDateNote }}</span></label><input class="input" type="date" value="{{ item.issueDate }}" sc-camel-on-change="{{ item.onIssueDate }}"></div>
               <div class="field" style="flex:1;min-width:140px"><label>Expiration date<span style="font-weight:normal;font-size:11px;color:var(--color-neutral-500)">{{ item.expirationDateNote }}</span></label><input class="input" type="date" value="{{ item.expirationDate }}" sc-camel-on-change="{{ item.onExpirationDate }}"></div>
             </div>
-            <sc-if value="{{ item.isLicense }}" hint-placeholder-val="{{ false }}">
-            <!-- Item 8 (2026-09-12 live-testing session): trade/occupation type — the routing field a
-                 future licensing-board check needs to know which board to check against. Not blocked
-                 at Confirm if left blank, but a license with no trade/occupation selected is routed to
-                 manual review instead of a normal queue item (see confirm-resume-data) — the caption
-                 below says so plainly rather than leaving it a silent, invisible rule. -->
-            <div class="field">
-              <label>Trade / occupation</label>
-              <sc-raw-select class="input" value="{{ item.tradeSocCode }}" sc-camel-on-change="{{ item.onTradeSocCode }}">
-                <option value="">Select trade or occupation…</option>
-                <sc-for list="{{ socTradeOptions }}" as="opt" hint-placeholder-count="3">
-                  <option value="{{ opt.code }}">{{ opt.label }}</option>
-                </sc-for>
-              </sc-raw-select>
-              <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6;margin-top:var(--space-1)">Used to route this license to the right licensing board for automated checks. If left blank, this license is sent for manual review instead.</div>
-            </div>
-            </sc-if>
             <sc-if value="{{ item.isCertificationOnly }}" hint-placeholder-val="{{ false }}">
             <div class="field"><label>Verification link <span style="font-weight:400;color:var(--color-neutral-500)">(optional)</span></label><input class="input" placeholder="https://" value="{{ item.verificationLink }}" sc-camel-on-change="{{ item.onVerificationLink }}"></div>
-            </sc-if>
-            <sc-if value="{{ item.isLicense }}" hint-placeholder-val="{{ false }}">
-            <div class="field" style="padding:var(--space-2);border:1px solid var(--color-accent);border-radius:var(--radius-md,8px)">
-              <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap;margin-bottom:var(--space-1)">
-                <span class="tag tag-outline">Professional license</span>
-                <button type="button" class="btn btn-ghost" style="font-size:12px" sc-camel-on-click="{{ item.onRemoveLicense }}">This isn't a license</button>
-              </div>
-              <label>Issuing state <span style="font-weight:400;color:var(--color-neutral-500)">(optional to continue — required for automatic verification)</span></label>
-              <sc-raw-select class="input" value="{{ item.licenseState }}" sc-camel-on-change="{{ item.onLicenseState }}">
-                <option value="">Select the issuing state…</option>
-                <sc-for list="{{ usStateOptions }}" as="st" hint-placeholder-count="3">
-                  <option value="{{ st.code }}">{{ st.name }}</option>
-                </sc-for>
-              </sc-raw-select>
-              <sc-if value="{{ item.licenseHasEvidence }}" hint-placeholder-val="{{ false }}">
-                <div style="font-size:11px;color:var(--color-neutral-500);margin-top:var(--space-1)">State read from your resume: “{{ item.licenseEvidence }}”</div>
-              </sc-if>
-              <sc-if value="{{ item.licenseNoState }}" hint-placeholder-val="{{ false }}">
-                <div style="font-size:11px;color:var(--color-warning,#c77d1e);margin-top:var(--space-1)">No state selected — this license will be saved as not verified. You can add the state later from the Verification tab.</div>
-              </sc-if>
-              <sc-if value="{{ item.licenseStateSupported }}" hint-placeholder-val="{{ false }}">
-                <div style="font-size:11px;color:var(--color-neutral-500);margin-top:var(--space-1)">Licenses from this state are checked automatically after you continue.</div>
-              </sc-if>
-              <sc-if value="{{ item.licenseStateUnsupported }}" hint-placeholder-val="{{ false }}">
-                <div style="font-size:11px;color:var(--color-neutral-500);margin-top:var(--space-1)">Automatic checks aren't available for this state yet — this license will be saved as not verified.</div>
-              </sc-if>
-            </div>
             </sc-if>
           </div>
           </sc-for>
