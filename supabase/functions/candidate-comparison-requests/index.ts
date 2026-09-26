@@ -238,7 +238,12 @@ async function assembleResumeSnapshot(candidateId: string): Promise<Assembled> {
   // Only rows on a document the candidate has confirmed.
   const docs = await rows(`resume_documents?candidate_id=eq.${candidateId}&confirmed_at=not.is.null&select=id`);
   const docList = docs.map((d) => d.id).join(",");
-  const base = `candidate_id=eq.${candidateId}&candidate_confirmed=eq.true&resume_document_id=in.(${docList})`; // only used when docList is non-empty
+  // staff_blocked_at=is.null (2026-09-26): the ONE exception to "every item, always, never filtered" in
+  // this function's own header -- a staff content-block is enforcement, not candidate self-exclusion, so
+  // it's the one thing this deliberately-unfiltered assembler still has to honor. See staff-block-item's
+  // own header for the full feature; assemble_customized_resume (Customization/Content Manager/PDF) has
+  // the identical exclusion added the same way, in its own WHERE clauses.
+  const base = `candidate_id=eq.${candidateId}&candidate_confirmed=eq.true&resume_document_id=in.(${docList})&staff_blocked_at=is.null`; // only used when docList is non-empty
   const [work, edu, certs, vis, lics] = await Promise.all([
     docList ? rows(`work_history_items?${base}&select=id,company,title,location,start_date,start_date_precision,end_date,end_date_precision,position&order=position.asc`) : Promise.resolve([]),
     docList ? rows(`education_items?${base}&select=id,institution,degree,field_of_study,location,start_date,start_date_precision,end_date,end_date_precision,position&order=position.asc`) : Promise.resolve([]),

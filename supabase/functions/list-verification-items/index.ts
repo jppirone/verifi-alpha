@@ -116,7 +116,11 @@ export default {
       // hand-typed search terms.
       const licenseIds = [...new Set(rows.filter((r: any) => r.type === "License" && r.source_item_id).map((r: any) => r.source_item_id))];
       const licenseRows: any[] = licenseIds.length
-        ? await fetch(`${SUPABASE_URL}/rest/v1/license_items?id=in.(${licenseIds.join(",")})&select=id,state,state_source,verification_outcome,verification_reason,verification_source,verified_at,verification_detail,certification_items(name,issuing_body,license_number)`, { headers: REST_HEADERS }).then((r) => r.ok ? r.json() : [])
+        // Staff content-block (2026-09-26): certification_items is the row that actually carries the
+        // staff_block_* columns -- license_items itself never got them (see the migration's own
+        // header) -- so a License-type item's blocked state lives on its linked cert, reached through
+        // this embedded relation, not on license_items.id itself.
+        ? await fetch(`${SUPABASE_URL}/rest/v1/license_items?id=in.(${licenseIds.join(",")})&select=id,state,state_source,verification_outcome,verification_reason,verification_source,verified_at,verification_detail,certification_items(id,name,issuing_body,license_number,staff_blocked_at,staff_block_reason_code)`, { headers: REST_HEADERS }).then((r) => r.ok ? r.json() : [])
         : [];
       const licenseById = new Map(licenseRows.map((l) => [l.id, l]));
 
@@ -133,19 +137,19 @@ export default {
 
       const [workHistoryContacts, certContacts, educationRows, skillRows, freeformRows] = await Promise.all([
         workHistoryIds.length
-          ? fetch(`${SUPABASE_URL}/rest/v1/work_history_items?id=in.(${workHistoryIds.join(",")})&select=id,company,employer_name_override,employer_location_override,contact_phone,contact_name,candidate_edited_fields`, { headers: REST_HEADERS }).then((r) => r.ok ? r.json() : [])
+          ? fetch(`${SUPABASE_URL}/rest/v1/work_history_items?id=in.(${workHistoryIds.join(",")})&select=id,company,employer_name_override,employer_location_override,contact_phone,contact_name,candidate_edited_fields,staff_blocked_at,staff_block_reason_code`, { headers: REST_HEADERS }).then((r) => r.ok ? r.json() : [])
           : Promise.resolve([]),
         certIds.length
-          ? fetch(`${SUPABASE_URL}/rest/v1/certification_items?id=in.(${certIds.join(",")})&select=id,verification_link,contact_phone,candidate_edited_fields`, { headers: REST_HEADERS }).then((r) => r.ok ? r.json() : [])
+          ? fetch(`${SUPABASE_URL}/rest/v1/certification_items?id=in.(${certIds.join(",")})&select=id,verification_link,contact_phone,candidate_edited_fields,staff_blocked_at,staff_block_reason_code`, { headers: REST_HEADERS }).then((r) => r.ok ? r.json() : [])
           : Promise.resolve([]),
         educationIds.length
-          ? fetch(`${SUPABASE_URL}/rest/v1/education_items?id=in.(${educationIds.join(",")})&select=id,candidate_edited_fields`, { headers: REST_HEADERS }).then((r) => r.ok ? r.json() : [])
+          ? fetch(`${SUPABASE_URL}/rest/v1/education_items?id=in.(${educationIds.join(",")})&select=id,candidate_edited_fields,staff_blocked_at,staff_block_reason_code`, { headers: REST_HEADERS }).then((r) => r.ok ? r.json() : [])
           : Promise.resolve([]),
         skillIds.length
-          ? fetch(`${SUPABASE_URL}/rest/v1/skill_items?id=in.(${skillIds.join(",")})&select=id,candidate_edited_fields`, { headers: REST_HEADERS }).then((r) => r.ok ? r.json() : [])
+          ? fetch(`${SUPABASE_URL}/rest/v1/skill_items?id=in.(${skillIds.join(",")})&select=id,candidate_edited_fields,staff_blocked_at,staff_block_reason_code`, { headers: REST_HEADERS }).then((r) => r.ok ? r.json() : [])
           : Promise.resolve([]),
         freeformIds.length
-          ? fetch(`${SUPABASE_URL}/rest/v1/candidate_freeform_sections?id=in.(${freeformIds.join(",")})&select=id,candidate_edited_fields`, { headers: REST_HEADERS }).then((r) => r.ok ? r.json() : [])
+          ? fetch(`${SUPABASE_URL}/rest/v1/candidate_freeform_sections?id=in.(${freeformIds.join(",")})&select=id,candidate_edited_fields,staff_blocked_at,staff_block_reason_code`, { headers: REST_HEADERS }).then((r) => r.ok ? r.json() : [])
           : Promise.resolve([]),
       ]);
       const workHistoryContactById = new Map((workHistoryContacts as any[]).map((w) => [w.id, w]));
@@ -171,6 +175,28 @@ export default {
           (FREEFORM_TYPES.has(r.type) && r.source_item_id ? freeformById.get(r.source_item_id)?.candidate_edited_fields : null) ||
           null;
         const editedFieldNames = editedFieldsObj ? Object.keys(editedFieldsObj) : [];
+        // Staff content-block (2026-09-26): same lookup shape as editedFieldsObj just above, for
+        // whichever source row this item's type maps to. License is its own case: the license_items
+        // row itself was never given staff_block_* columns (only certification_items was), so a
+        // License item's blocked state comes from its linked cert via the embedded relation above.
+        const licCert = r.type === "License" && r.source_item_id ? licenseById.get(r.source_item_id)?.certification_items : null;
+        const blockedSrc =
+          wc || cc || licCert ||
+          (r.type === "Education" && r.source_item_id ? educationById.get(r.source_item_id) : null) ||
+          (r.type === "Skill" && r.source_item_id ? skillById.get(r.source_item_id) : null) ||
+          (FREEFORM_TYPES.has(r.type) && r.source_item_id ? freeformById.get(r.source_item_id) : null) ||
+          null;
+        const isBlocked = !!(blockedSrc && blockedSrc.staff_blocked_at);
+        // Which table/row staff-block-item needs to act on this item -- kept as an explicit pair
+        // (rather than reusing r.type/r.source_item_id directly) because License is the one case where
+        // they diverge: the block target is the linked cert's id, not license_items.id.
+        const blockItemKind =
+          r.type === "Job Experience" ? "work_history" :
+          r.type === "Education" ? "education" :
+          (r.type === "Certification" || r.type === "License") ? "certification" :
+          r.type === "Skill" ? "skill" :
+          FREEFORM_TYPES.has(r.type) ? "freeform" : null;
+        const blockItemId = r.type === "License" ? (licCert ? licCert.id : null) : (r.source_item_id || null);
         const contactPhone = wc?.contact_phone || cc?.contact_phone || null;
         const contactName = wc?.contact_name || null;
         const verificationLink = cc?.verification_link || null;
@@ -241,6 +267,18 @@ export default {
         // opt-in/status -- this reflects the underlying item, not the queue row's own state.
         hasEditedFields: editedFieldNames.length > 0,
         editedFieldNames,
+        // Staff content-block (2026-09-26): a blocked item's queue row is never removed from this
+        // staff-facing list the way it's removed from the candidate's own (list-candidate-verification-
+        // items excludes it entirely -- "not counted as a normal verification item" is a candidate-
+        // facing rule, not a staff-visibility one) -- staff still needs to see and act on it here, just
+        // with a clear indicator so it isn't mistaken for a normal open item.
+        isBlocked,
+        blockReasonCode: isBlocked ? (blockedSrc.staff_block_reason_code || null) : null,
+        // Needed by staff.html to call staff-block-item's block/unblock/history actions on this item --
+        // null/null for a row whose type this build doesn't map to a blockable table (there are none
+        // today; kept as an honest fallback rather than assuming every future type is covered).
+        blockItemKind,
+        blockItemId,
         timeline: (r.verification_item_timeline || []).map((t: any) => ({
           date: t.event_date,
           actor: t.actor,

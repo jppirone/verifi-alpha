@@ -2296,6 +2296,7 @@ th.sortable{cursor:pointer;user-select:none}
     <sc-if value="{{ isAdmin }}" hint-placeholder-val="{{ false }}">
       <button type="button" class="btn {{ tabReportingClass }}" onClick="{{ selectTabReporting }}">Reporting</button>
       <button type="button" class="btn {{ tabDocsClass }}" onClick="{{ selectTabDocs }}">Employer documents</button>
+      <button type="button" class="btn {{ tabBlocksClass }}" onClick="{{ selectTabBlocks }}">Content blocks</button>
     </sc-if>
   </div>
 
@@ -2449,6 +2450,12 @@ th.sortable{cursor:pointer;user-select:none}
                      same item. -->
                 <sc-if value="{{ row.hasEditedFields }}" hint-placeholder-val="{{ false }}">
                   <div style="margin-top:4px" title="{{ row.editedFieldsTitle }}"><span class="tag tag-outline" style="color:#5a8fc2;border-color:#5a8fc2;white-space:nowrap">✎ Edited</span></div>
+                </sc-if>
+                <!-- Staff content-block (2026-09-26): a blocked item's queue row stays visible here
+                     (unlike the candidate-facing list, which excludes it entirely) -- this badge is
+                     what keeps it from being mistaken for a normal open item. -->
+                <sc-if value="{{ row.isBlocked }}" hint-placeholder-val="{{ false }}">
+                  <div style="margin-top:4px"><span class="tag tag-outline" style="color:#b00020;border-color:#b00020;white-space:nowrap">🔒 Blocked</span></div>
                 </sc-if>
                 <sc-if value="{{ row.syncError }}" hint-placeholder-val="{{ false }}">
                   <div style="margin-top:4px">
@@ -2805,6 +2812,81 @@ th.sortable{cursor:pointer;user-select:none}
       </div>
       </sc-if>
 
+      <!-- Staff content-block (2026-09-26): universal -- shown for any item type this build maps to a
+           blockable table (detailBlockSupported). Blocking removes the item everywhere the candidate's
+           data is represented (PDF, Customization, Content Manager, both comparison outputs, and the
+           candidate's normal Verification Status list) except the candidate's own read-only "Held for
+           correction" line -- see staff-block-item's own header for the full enforcement list. -->
+      <sc-if value="{{ detailBlockSupported }}" hint-placeholder-val="{{ false }}">
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3);margin-bottom:var(--space-4)">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3)">
+          <div class="card-kicker">Content block</div>
+          <sc-if value="{{ detailIsBlocked }}" hint-placeholder-val="{{ false }}">
+            <span class="tag tag-outline" style="color:#b00020;border-color:#b00020">🔒 Blocked</span>
+          </sc-if>
+        </div>
+
+        <sc-if value="{{ detailIsBlocked }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.5">Candidate sees: "{{ detailBlockCandidateSentence }}"</div>
+          <button type="button" class="btn btn-secondary" style="align-self:flex-start" disabled="{{ blockActionSaving }}" onClick="{{ unblockSelected }}">Unblock</button>
+        </sc-if>
+
+        <sc-if value="{{ detailBlockIdle }}" hint-placeholder-val="{{ true }}">
+          <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.5">Blocks this item everywhere the candidate's data is represented until it's corrected. The candidate only ever sees the fixed sentence below, never this note.</div>
+          <button type="button" class="btn btn-secondary" style="align-self:flex-start" onClick="{{ openBlockForm }}">Block this item</button>
+        </sc-if>
+
+        <sc-if value="{{ blockFormOpen }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:var(--space-2);border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
+            <div class="field" style="max-width:420px">
+              <label for="block-reason">Candidate sees</label>
+              <sc-raw-select class="input" id="block-reason" value="{{ blockReasonDraft }}" onChange="{{ setBlockReasonDraft }}">
+                <sc-for list="{{ blockReasonOptions }}" as="opt" hint-placeholder-count="2">
+                  <option value="{{ opt.value }}">{{ opt.label }}</option>
+                </sc-for>
+              </sc-raw-select>
+            </div>
+            <div class="field">
+              <label for="block-note">Internal note (staff only, required)</label>
+              <textarea class="input" id="block-note" rows="2" value="{{ blockNoteDraft }}" onChange="{{ setBlockNoteDraft }}" style="border-color:var(--color-neutral-600)"></textarea>
+            </div>
+            <sc-if value="{{ blockActionError }}" hint-placeholder-val="{{ false }}">
+              <span style="font-size:12px;color:#b00020">{{ blockActionError }}</span>
+            </sc-if>
+            <div style="display:flex;gap:var(--space-2)">
+              <button type="button" class="btn btn-primary" disabled="{{ blockActionSaving }}" onClick="{{ submitBlock }}">Block and log</button>
+              <button type="button" class="btn btn-ghost" onClick="{{ cancelBlockForm }}">Cancel</button>
+            </div>
+          </div>
+        </sc-if>
+
+        <div style="border-top:1px solid var(--color-divider);padding-top:var(--space-2)">
+          <button type="button" class="btn btn-ghost" style="font-size:12px" onClick="{{ toggleBlockHistory }}">{{ blockHistoryToggleLabel }}</button>
+          <sc-if value="{{ blockHistoryOpen }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-direction:column;gap:6px;margin-top:var(--space-2)">
+              <sc-if value="{{ blockHistoryLoading }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:12px;color:var(--color-neutral-500)">Loading…</div>
+              </sc-if>
+              <sc-if value="{{ blockHistoryError }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:12px;color:#b00020">{{ blockHistoryError }}</div>
+              </sc-if>
+              <sc-if value="{{ blockHistoryEmpty }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:12px;color:var(--color-neutral-500)">No block/unblock events on this item.</div>
+              </sc-if>
+              <sc-for list="{{ blockHistoryRows }}" as="ev" hint-placeholder-count="1">
+                <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.5;border-top:1px solid var(--color-divider);padding-top:4px">
+                  <span style="color:var(--color-neutral-300)">{{ ev.actionLabel }}</span> · {{ ev.actor }} · {{ ev.dateDisp }}
+                  <sc-if value="{{ ev.hasNote }}" hint-placeholder-val="{{ false }}">
+                    <div>{{ ev.note }}</div>
+                  </sc-if>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+        </div>
+      </div>
+      </sc-if>
+
       <sc-if value="{{ detailCorrectionRequested }}" hint-placeholder-val="{{ false }}">
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3);margin-bottom:var(--space-4)">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3)">
@@ -2973,6 +3055,97 @@ th.sortable{cursor:pointer;user-select:none}
     </div>
   </sc-if>
 
+  <!-- Staff content-block (2026-09-26): "find candidate -> find item" admin-only lookup -- the one
+       entry point for blocking an item that has no verification_items row at all (never opted into
+       verification), which the badge on the normal queue can never reach. -->
+  <sc-if value="{{ tabIsBlocks }}" hint-placeholder-val="{{ false }}">
+    <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+      <div class="card-title">Content blocks</div>
+      <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">Find a candidate, then block or unblock any confirmed item of theirs directly -- including an item that was never opted into verification and so has no queue row on the Queue tab. A block removes the item everywhere the candidate's data is represented (PDF, Customization, Content Manager, both comparison outputs, normal verification counting) until it's corrected; the candidate only ever sees a fixed instructional sentence, never your internal note.</div>
+
+      <sc-if value="{{ cbShowSearch }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;gap:var(--space-2);align-items:flex-end;flex-wrap:wrap">
+          <div class="field" style="flex:1;min-width:240px;max-width:420px">
+            <label for="cb-search">Candidate ID, name or email</label>
+            <input class="input" id="cb-search" value="{{ cbQuery }}" onChange="{{ setCbQuery }}">
+          </div>
+          <button type="button" class="btn btn-primary" disabled="{{ cbSearchDisabled }}" onClick="{{ runCbSearch }}">{{ cbSearchLabel }}</button>
+        </div>
+        <sc-if value="{{ cbError }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:#b00020;line-height:1.6">{{ cbError }}</div>
+        </sc-if>
+        <sc-if value="{{ cbNoMatch }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:var(--color-neutral-500)">No candidate matches that.</div>
+        </sc-if>
+        <sc-for list="{{ cbCandidateRows }}" as="c" hint-placeholder-count="1">
+          <div style="border-top:1px solid var(--color-divider);padding-top:var(--space-2);display:flex;justify-content:space-between;align-items:center;gap:var(--space-3)">
+            <div style="font-weight:500">{{ c.name }} <span style="font-weight:400;font-size:12px;color:var(--color-neutral-500)">{{ c.email }} · {{ c.id }}</span></div>
+            <button type="button" class="btn btn-ghost" style="font-size:12px" onClick="{{ c.onSelect }}">View items</button>
+          </div>
+        </sc-for>
+      </sc-if>
+
+      <sc-if value="{{ cbShowCandidate }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3);border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
+          <div style="font-weight:500">{{ cbCandidateName }} <span style="font-weight:400;font-size:12px;color:var(--color-neutral-500)">{{ cbCandidateEmail }}</span></div>
+          <button type="button" class="btn btn-ghost" style="font-size:12px" onClick="{{ backToCbSearch }}">← Back to search</button>
+        </div>
+        <sc-if value="{{ cbItemsLoading }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:var(--color-neutral-500)">Loading…</div>
+        </sc-if>
+        <sc-if value="{{ cbItemsError }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:#b00020">{{ cbItemsError }}</div>
+        </sc-if>
+        <sc-if value="{{ cbItemsEmpty }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:var(--color-neutral-500)">No confirmed items found for this candidate.</div>
+        </sc-if>
+        <sc-if value="{{ cbActionError }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:#b00020">{{ cbActionError }}</div>
+        </sc-if>
+        <sc-for list="{{ cbItemRows }}" as="row" hint-placeholder-count="2">
+          <div style="border-top:1px solid var(--color-divider);padding-top:var(--space-2);display:flex;flex-direction:column;gap:6px">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:var(--space-3)">
+              <div style="display:flex;flex-direction:column;gap:2px">
+                <div style="font-size:13px;color:var(--color-neutral-200)">{{ row.label }} <span style="color:var(--color-neutral-500)">· {{ row.categoryLabel }}</span></div>
+                <div style="font-size:11px;color:var(--color-neutral-500)">{{ row.queueNote }}</div>
+              </div>
+              <sc-if value="{{ row.blocked }}" hint-placeholder-val="{{ false }}">
+                <span class="tag tag-outline" style="color:#b00020;border-color:#b00020;white-space:nowrap">🔒 Blocked</span>
+              </sc-if>
+            </div>
+            <sc-if value="{{ row.blocked }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:12px;color:var(--color-neutral-400)">Candidate sees: "{{ row.candidateSentence }}"</div>
+              <button type="button" class="btn btn-secondary" style="align-self:flex-start;font-size:12px" disabled="{{ cbActionSaving }}" onClick="{{ row.onUnblock }}">Unblock</button>
+            </sc-if>
+            <sc-if value="{{ row.idle }}" hint-placeholder-val="{{ true }}">
+              <button type="button" class="btn btn-secondary" style="align-self:flex-start;font-size:12px" onClick="{{ row.onOpenForm }}">Block this item</button>
+            </sc-if>
+            <sc-if value="{{ row.formOpen }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:var(--space-2);border-top:1px solid var(--color-divider);padding-top:var(--space-2)">
+                <div class="field" style="max-width:420px;margin:0">
+                  <label>Candidate sees</label>
+                  <sc-raw-select class="input" value="{{ cbReasonDraft }}" onChange="{{ setCbReasonDraft }}">
+                    <sc-for list="{{ cbReasonOptions }}" as="opt" hint-placeholder-count="2">
+                      <option value="{{ opt.value }}">{{ opt.label }}</option>
+                    </sc-for>
+                  </sc-raw-select>
+                </div>
+                <div class="field" style="margin:0">
+                  <label>Internal note (staff only, required)</label>
+                  <textarea class="input" rows="2" value="{{ cbNoteDraft }}" onChange="{{ setCbNoteDraft }}" style="border-color:var(--color-neutral-600)"></textarea>
+                </div>
+                <div style="display:flex;gap:var(--space-2)">
+                  <button type="button" class="btn btn-primary" style="font-size:12px" disabled="{{ cbActionSaving }}" onClick="{{ row.onSubmitBlock }}">Block and log</button>
+                  <button type="button" class="btn btn-ghost" style="font-size:12px" onClick="{{ row.onCancelForm }}">Cancel</button>
+                </div>
+              </div>
+            </sc-if>
+          </div>
+        </sc-for>
+      </sc-if>
+    </div>
+  </sc-if>
+
 </div>
 </sc-if>
 
@@ -3059,6 +3232,25 @@ class Component extends DCLogic {
   // happened, but no conclusive answer came back). Requires the same resolution evidence as every
   // other status in this list.
   RESOLUTION_STATUSES = ['Confirmed', 'Discrepancy', 'Verification Not Possible', 'Unable to Verify'];
+
+  // Staff content-block (2026-09-26): the exact closed set staff-block-item validates server-side
+  // (REASON_CODES) and the exact sentence each maps to, kept in sync with
+  // list-candidate-verification-items' own REASON_SENTENCES -- shown here only so staff can see what
+  // the candidate will see when picking a reason; the candidate never sees this internal note field.
+  BLOCK_REASON_OPTIONS = [
+    { value: 'needs_correction', label: 'This item needs to be corrected before it can be included in your profile.' },
+    { value: 'resubmit_required', label: 'This item is on hold pending review. Resubmit your resume to update it.' },
+  ];
+  BLOCK_REASON_SENTENCES = {
+    needs_correction: 'This item needs to be corrected before it can be included in your profile.',
+    resubmit_required: 'This item is on hold pending review. Resubmit your resume to update it.',
+  };
+  blockActionLabel(action) {
+    if (action === 'blocked') return 'Blocked';
+    if (action === 'cleared_manually') return 'Unblocked (manual)';
+    if (action === 'cleared_by_resubmission') return 'Cleared automatically (resubmission)';
+    return action;
+  }
 
   // True for a License queue item whose last automatic check found the license in the registry with a correct name match, but the
   // registry lists it as not currently valid (verify-license reason code exact_match_not_active). Read from stored data only.
@@ -3159,6 +3351,18 @@ class Component extends DCLogic {
     resumeFailures: [], resumeFailuresLoading: false, resumeFailuresLoaded: false, resumeFailuresError: false,
     // Employer documents tab (admin only): see staff-employer-documents' own header.
     docQuery: '', docBusy: false, docError: null, docCandidates: null, docLink: null, docLinkNote: '',
+    // Staff content-block (2026-09-26): detail-panel Block/Unblock form + history, reset on
+    // closeDetail same as correctionMode/correctionDraft above.
+    blockFormOpen: false, blockReasonDraft: 'needs_correction', blockNoteDraft: '', blockActionSaving: false, blockActionError: null,
+    blockHistoryOpen: false, blockHistoryLoading: false, blockHistoryError: null, blockHistory: [],
+    // Staff content-block: the admin-only "Content blocks" tab -- find candidate, then find item,
+    // for an item that may have no verification_items row at all (see staff-block-item's
+    // list_candidate_items action header). Same shape as the docQuery/docCandidates search above,
+    // deliberately not shared with it (different endpoint, different result shape, different second
+    // step).
+    cbQuery: '', cbBusy: false, cbError: null, cbCandidates: null,
+    cbSelectedCandidate: null, cbItems: [], cbItemsLoading: false, cbItemsError: null,
+    cbFormOpenKey: null, cbReasonDraft: 'needs_correction', cbNoteDraft: '', cbActionSaving: false, cbActionError: null,
     // Item 12 (2026-09-07 wiring audit): the real staff roster (list-staff-users, see its own
     // header), replacing the hardcoded WORKERS array. Loaded once per session alongside loadItems —
     // see applyStaffSession.
@@ -3704,6 +3908,178 @@ class Component extends DCLogic {
     this.setState({ unqueuedEditsLoading: false, unqueuedEditsLoaded: true, unqueuedEditsError: null, unqueuedEdits: data.items });
   }
 
+  // Staff content-block (2026-09-26): block/unblock/history for the item currently open in the detail
+  // panel. Server-side scoping (admin/service, or worker-owns-item — see staff-block-item's own
+  // header) is authoritative; this client just surfaces whatever the server decides, including its
+  // 403, rather than trying to precompute the rule here too.
+  openBlockForm() {
+    this.setState({ blockFormOpen: true, blockReasonDraft: 'needs_correction', blockNoteDraft: '', blockActionError: null });
+  }
+  cancelBlockForm() {
+    this.setState({ blockFormOpen: false, blockNoteDraft: '', blockActionError: null });
+  }
+  async submitBlock() {
+    const it = this.state.items.find((i) => i.id === this.state.selectedId);
+    if (!it || this.state.blockActionSaving) return;
+    if (!it.blockItemKind || !it.blockItemId) { this.setState({ blockActionError: "This item type can't be blocked yet." }); return; }
+    const note = (this.state.blockNoteDraft || '').trim();
+    if (!note) { this.setState({ blockActionError: 'An internal note is required.' }); return; }
+    const reasonCode = this.state.blockReasonDraft;
+    this.setState({ blockActionSaving: true, blockActionError: null });
+    let res, data;
+    try {
+      res = await this.staffFetch('/staff-block-item', {
+        action: 'block', candidate_id: it.candidateId, item_kind: it.blockItemKind, item_id: it.blockItemId,
+        reason_code: reasonCode, note,
+      });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ blockActionSaving: false, blockActionError: "Couldn't reach the server. Try again." });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      this.setState({ blockActionSaving: false, blockActionError: res.status === 403 ? 'You can only block items assigned to you.' : res.status === 404 ? "That item couldn't be found." : "Couldn't save that. Try again." });
+      return;
+    }
+    this.setState((st) => ({
+      blockActionSaving: false, blockFormOpen: false, blockNoteDraft: '',
+      items: st.items.map((i) => i.id === it.id ? { ...i, isBlocked: true, blockReasonCode: reasonCode } : i),
+    }));
+    if (this.state.blockHistoryOpen) this.loadBlockHistory();
+  }
+  async unblockSelected() {
+    const it = this.state.items.find((i) => i.id === this.state.selectedId);
+    if (!it || this.state.blockActionSaving || !it.blockItemKind || !it.blockItemId) return;
+    this.setState({ blockActionSaving: true, blockActionError: null });
+    let res, data;
+    try {
+      res = await this.staffFetch('/staff-block-item', { action: 'unblock', candidate_id: it.candidateId, item_kind: it.blockItemKind, item_id: it.blockItemId });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ blockActionSaving: false, blockActionError: "Couldn't reach the server. Try again." });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      this.setState({ blockActionSaving: false, blockActionError: res.status === 403 ? 'You can only unblock items assigned to you.' : "Couldn't save that. Try again." });
+      return;
+    }
+    this.setState((st) => ({
+      blockActionSaving: false,
+      items: st.items.map((i) => i.id === it.id ? { ...i, isBlocked: false, blockReasonCode: null } : i),
+    }));
+    if (this.state.blockHistoryOpen) this.loadBlockHistory();
+  }
+  toggleBlockHistory() {
+    const opening = !this.state.blockHistoryOpen;
+    this.setState({ blockHistoryOpen: opening });
+    if (opening) this.loadBlockHistory();
+  }
+  async loadBlockHistory() {
+    const it = this.state.items.find((i) => i.id === this.state.selectedId);
+    if (!it || !it.blockItemKind || !it.blockItemId) return;
+    this.setState({ blockHistoryLoading: true, blockHistoryError: null });
+    let res, data;
+    try {
+      res = await this.staffFetch('/staff-block-item', { action: 'history', candidate_id: it.candidateId, item_kind: it.blockItemKind, item_id: it.blockItemId });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ blockHistoryLoading: false, blockHistoryError: "Couldn't reach the server. Try again." });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      this.setState({ blockHistoryLoading: false, blockHistoryError: res.status === 403 ? 'You can only view history for items assigned to you.' : "Couldn't load this. Try again." });
+      return;
+    }
+    this.setState({ blockHistoryLoading: false, blockHistoryError: null, blockHistory: data.events || [] });
+  }
+
+  // Content blocks tab (admin only; server refuses anyone else with 403) -- "find candidate -> find
+  // item" for an item that may have no verification_items row at all. Same two-step shape as
+  // staff-block-item's own list_candidate_items header describes.
+  async runCbSearch() {
+    const q = (this.state.cbQuery || '').trim();
+    if (this.state.cbBusy || q.length < 2) return;
+    this.setState({ cbBusy: true, cbError: null });
+    let res, data;
+    try { res = await this.staffFetch('/staff-block-item', { action: 'search_candidates', query: q }); data = await res.json().catch(() => ({})); }
+    catch (e) { this.setState({ cbBusy: false, cbError: "Couldn't reach the server. Try again." }); return; }
+    if (!res.ok || !data.ok) {
+      this.setState({ cbBusy: false, cbError: res.status === 403 ? 'This page is for admins only.' : data.error === 'query_invalid' ? 'Enter at least 2 characters (a candidate ID, name or email).' : "Couldn't run that search. Try again." });
+      return;
+    }
+    this.setState({ cbBusy: false, cbCandidates: data.candidates || [] });
+  }
+  selectCbCandidate(c) {
+    this.setState({ cbSelectedCandidate: c, cbItems: [], cbItemsError: null, cbFormOpenKey: null, cbNoteDraft: '', cbActionError: null });
+    this.loadCbItems(c.id);
+  }
+  backToCbSearch() {
+    this.setState({ cbSelectedCandidate: null, cbItems: [], cbItemsError: null, cbFormOpenKey: null });
+  }
+  async loadCbItems(candidateId) {
+    this.setState({ cbItemsLoading: true, cbItemsError: null });
+    let res, data;
+    try { res = await this.staffFetch('/staff-block-item', { action: 'list_candidate_items', candidate_id: candidateId }); data = await res.json().catch(() => ({})); }
+    catch (e) { this.setState({ cbItemsLoading: false, cbItemsError: "Couldn't reach the server. Try again." }); return; }
+    if (!res.ok || !data.ok) {
+      this.setState({ cbItemsLoading: false, cbItemsError: res.status === 403 ? 'This page is for admins only.' : "Couldn't load this candidate's items. Try again." });
+      return;
+    }
+    this.setState({ cbItemsLoading: false, cbItemsError: null, cbItems: data.items || [] });
+  }
+  cbKey(kind, id) { return kind + ':' + id; }
+  openCbBlockForm(kind, id) {
+    this.setState({ cbFormOpenKey: this.cbKey(kind, id), cbReasonDraft: 'needs_correction', cbNoteDraft: '', cbActionError: null });
+  }
+  cancelCbBlockForm() {
+    this.setState({ cbFormOpenKey: null, cbNoteDraft: '', cbActionError: null });
+  }
+  async submitCbBlock(kind, id) {
+    const cand = this.state.cbSelectedCandidate;
+    if (!cand || this.state.cbActionSaving) return;
+    const note = (this.state.cbNoteDraft || '').trim();
+    if (!note) { this.setState({ cbActionError: 'An internal note is required.' }); return; }
+    const reasonCode = this.state.cbReasonDraft;
+    this.setState({ cbActionSaving: true, cbActionError: null });
+    let res, data;
+    try {
+      res = await this.staffFetch('/staff-block-item', { action: 'block', candidate_id: cand.id, item_kind: kind, item_id: id, reason_code: reasonCode, note });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ cbActionSaving: false, cbActionError: "Couldn't reach the server. Try again." });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      this.setState({ cbActionSaving: false, cbActionError: "Couldn't save that. Try again." });
+      return;
+    }
+    this.setState((st) => ({
+      cbActionSaving: false, cbFormOpenKey: null, cbNoteDraft: '',
+      cbItems: st.cbItems.map((row) => row.item_kind === kind && row.item_id === id ? { ...row, blocked: true, reason_code: reasonCode } : row),
+    }));
+  }
+  async cbUnblock(kind, id) {
+    const cand = this.state.cbSelectedCandidate;
+    if (!cand || this.state.cbActionSaving) return;
+    this.setState({ cbActionSaving: true, cbActionError: null });
+    let res, data;
+    try {
+      res = await this.staffFetch('/staff-block-item', { action: 'unblock', candidate_id: cand.id, item_kind: kind, item_id: id });
+      data = await res.json().catch(() => ({}));
+    } catch (e) {
+      this.setState({ cbActionSaving: false, cbActionError: "Couldn't reach the server. Try again." });
+      return;
+    }
+    if (!res.ok || !data.ok) {
+      this.setState({ cbActionSaving: false, cbActionError: "Couldn't save that. Try again." });
+      return;
+    }
+    this.setState((st) => ({
+      cbActionSaving: false,
+      cbItems: st.cbItems.map((row) => row.item_kind === kind && row.item_id === id ? { ...row, blocked: false, reason_code: null } : row),
+    }));
+  }
+
   // Employer documents tab (admin only; the server refuses anyone else with 403). The list shows only what the server says qualifies:
   // approved requests whose document is still stored.
   async runDocSearch() {
@@ -3999,6 +4375,7 @@ class Component extends DCLogic {
       // "which fields" hint without opening the detail view, which has its own full card for it).
       hasEditedFields: !!it.hasEditedFields,
       editedFieldsTitle: (it.editedFieldNames || []).length ? 'Edited: ' + it.editedFieldNames.join(', ') : '',
+      isBlocked: !!it.isBlocked,
       registryFlag: this.isNotActiveMatch(it),
       registryFlagText: this.isLapsedAfterVerified(it) ? 'Was verified · now not active' : 'License found · not active',
       hasCandidateNote: !!it.candidateNote,
@@ -4130,6 +4507,54 @@ class Component extends DCLogic {
           onView: () => this.openEmployerDocument(r.request_id),
         })),
       })),
+      // Staff content-block (2026-09-26): admin-only tab, same isAdmin gate as tabIsDocs above.
+      tabIsBlocks: s.tab === 'blocks' && isAdmin,
+      tabBlocksClass: s.tab === 'blocks' ? 'btn-secondary' : 'btn-ghost',
+      selectTabBlocks: () => this.setState({ tab: 'blocks', selectedId: null }),
+      cbQuery: s.cbQuery,
+      setCbQuery: (e) => this.setState({ cbQuery: e.target.value }),
+      cbSearchDisabled: s.cbBusy || (s.cbQuery || '').trim().length < 2,
+      cbSearchLabel: s.cbBusy ? 'Searching…' : 'Search',
+      runCbSearch: () => this.runCbSearch(),
+      cbError: s.cbError,
+      cbShowSearch: !s.cbSelectedCandidate,
+      cbNoMatch: !s.cbSelectedCandidate && Array.isArray(s.cbCandidates) && s.cbCandidates.length === 0,
+      cbCandidateRows: (s.cbCandidates || []).map((c) => ({
+        name: c.name || '(no name)', email: c.email || '', id: c.id,
+        onSelect: () => this.selectCbCandidate(c),
+      })),
+      cbShowCandidate: !!s.cbSelectedCandidate,
+      cbCandidateName: s.cbSelectedCandidate ? (s.cbSelectedCandidate.name || '(no name)') : '',
+      cbCandidateEmail: s.cbSelectedCandidate ? (s.cbSelectedCandidate.email || '') : '',
+      backToCbSearch: () => this.backToCbSearch(),
+      cbItemsLoading: s.cbItemsLoading,
+      cbItemsError: s.cbItemsError,
+      cbItemsEmpty: !s.cbItemsLoading && !s.cbItemsError && s.cbItems.length === 0,
+      cbActionError: s.cbActionError,
+      cbReasonOptions: this.BLOCK_REASON_OPTIONS,
+      cbReasonDraft: s.cbReasonDraft,
+      setCbReasonDraft: (e) => this.setState({ cbReasonDraft: e.target.value }),
+      cbNoteDraft: s.cbNoteDraft,
+      setCbNoteDraft: (e) => this.setState({ cbNoteDraft: e.target.value }),
+      cbActionSaving: s.cbActionSaving,
+      cbItemRows: s.cbItems.map((row) => {
+        const key = this.cbKey(row.item_kind, row.item_id);
+        return {
+          key,
+          label: row.label,
+          categoryLabel: ({ work_history: 'Job Experience', education: 'Education', certification: 'Certification', skill: 'Skill', freeform: 'Additional content' })[row.item_kind] || row.item_kind,
+          blocked: !!row.blocked,
+          candidateSentence: row.blocked ? (this.BLOCK_REASON_SENTENCES[row.reason_code] || this.BLOCK_REASON_SENTENCES.needs_correction) : '',
+          queueNote: row.queue_item_id ? ('Queue: ' + (row.queue_status || '—') + (row.assigned_to ? (' · ' + row.assigned_to) : '')) : 'Never queued for verification',
+          formOpen: s.cbFormOpenKey === key,
+          idle: !row.blocked && s.cbFormOpenKey !== key,
+          onOpenForm: () => this.openCbBlockForm(row.item_kind, row.item_id),
+          onCancelForm: () => this.cancelCbBlockForm(),
+          onSubmitBlock: () => this.submitCbBlock(row.item_kind, row.item_id),
+          onUnblock: () => this.cbUnblock(row.item_kind, row.item_id),
+        };
+      }),
+
       selectTabQueue: () => this.setState({ tab: 'queue' }),
       selectTabReporting: () => {
         this.setState({ tab: 'reporting', selectedId: null });
@@ -4250,6 +4675,38 @@ class Component extends DCLogic {
       // on why this isn't folded into the candidate's-note card above.
       detailHasEditedFields: !!(selected && selected.hasEditedFields),
       detailEditedFieldsText: (selected && selected.editedFieldNames || []).join(', '),
+      // Staff content-block (2026-09-26): detailBlockSupported is false only for a row this build
+      // doesn't map to a blockable table (see blockItemKind/blockItemId's own comment in
+      // list-verification-items) -- an honest gap, not hidden behind a misleading enabled button.
+      detailBlockSupported: !!(selected && selected.blockItemKind && selected.blockItemId),
+      detailIsBlocked: !!(selected && selected.isBlocked),
+      detailBlockIdle: !!(selected && !selected.isBlocked && !s.blockFormOpen),
+      detailBlockCandidateSentence: selected && selected.isBlocked ? (this.BLOCK_REASON_SENTENCES[selected.blockReasonCode] || this.BLOCK_REASON_SENTENCES.needs_correction) : '',
+      blockFormOpen: s.blockFormOpen,
+      blockReasonOptions: this.BLOCK_REASON_OPTIONS,
+      blockReasonDraft: s.blockReasonDraft,
+      setBlockReasonDraft: (e) => this.setState({ blockReasonDraft: e.target.value }),
+      blockNoteDraft: s.blockNoteDraft,
+      setBlockNoteDraft: (e) => this.setState({ blockNoteDraft: e.target.value }),
+      blockActionError: s.blockActionError,
+      blockActionSaving: s.blockActionSaving,
+      openBlockForm: () => this.openBlockForm(),
+      cancelBlockForm: () => this.cancelBlockForm(),
+      submitBlock: () => this.submitBlock(),
+      unblockSelected: () => this.unblockSelected(),
+      blockHistoryOpen: s.blockHistoryOpen,
+      blockHistoryToggleLabel: s.blockHistoryOpen ? 'Hide block history' : 'Show block history',
+      toggleBlockHistory: () => this.toggleBlockHistory(),
+      blockHistoryLoading: s.blockHistoryLoading,
+      blockHistoryError: s.blockHistoryError,
+      blockHistoryEmpty: s.blockHistoryOpen && !s.blockHistoryLoading && !s.blockHistoryError && s.blockHistory.length === 0,
+      blockHistoryRows: s.blockHistory.map((ev) => ({
+        actionLabel: this.blockActionLabel(ev.action),
+        actor: ev.actor,
+        dateDisp: ev.event_date ? new Date(ev.event_date).toLocaleString() : '',
+        note: ev.note || '',
+        hasNote: !!ev.note,
+      })),
       detailCandidateNoteAt: selected && selected.candidateNoteAt ? new Date(selected.candidateNoteAt).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '',
       detailFlaggedByCandidate: !!(selected && selected.flaggedByCandidate),
       // Item-flagging (2026-09-23): the only write this makes is flagged_by_candidate: false — never
@@ -4319,7 +4776,7 @@ class Component extends DCLogic {
         this.setState({ correctionMode: null, correctionDraft: '', declineDraft: '' });
       },
 
-      closeDetail: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ selectedId: null, correctionMode: null, correctionDraft: '', declineDraft: '', noteSaveState: 'idle', ...this.resetAutomatedCheckState(null, null) }); },
+      closeDetail: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ selectedId: null, correctionMode: null, correctionDraft: '', declineDraft: '', noteSaveState: 'idle', blockFormOpen: false, blockNoteDraft: '', blockActionError: null, blockHistoryOpen: false, blockHistory: [], blockHistoryError: null, ...this.resetAutomatedCheckState(null, null) }); },
       hasNextUnresolved: !!nextUnresolved,
       nextUnresolvedLabel: nextUnresolved ? ('Next unresolved (' + nextUnresolved.id + ') →') : '',
       openNextUnresolved: (e) => {

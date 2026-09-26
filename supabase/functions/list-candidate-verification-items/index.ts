@@ -196,7 +196,51 @@ export default {
         }).then((r) => r.ok ? r.json() : []).catch(() => [])
         : [];
       const freeformById = new Map(freeformRows.map((f: any) => [f.id, f]));
-      const items = rows.map((r: any) => {
+
+      // Staff content-block (2026-09-26): read directly from all five item tables -- independent of
+      // whether an item was ever queued for verification, since scope is universal (see
+      // staff-block-item's own header) and a blocked item may never have had a verification_items row
+      // at all. Two things this drives: (1) `held` below, the candidate's own visibility into what's
+      // blocked -- see the reason-sentence map, a closed set matching staff-block-item's REASON_CODES
+      // exactly, never staff's free-text internal note; (2) blockedSourceIds, used just below to drop
+      // a blocked item's own queue row (if it has one) out of `items` entirely -- "not counted as a
+      // normal verification item" -- so it never shows twice (once normally, once as held).
+      const REASON_SENTENCES: Record<string, string> = {
+        needs_correction: "This item needs to be corrected before it can be included in your profile.",
+        resubmit_required: "This item is on hold pending review. Resubmit your resume to update it.",
+      };
+      const blockedBase = `candidate_id=eq.${encodeURIComponent(candidate_id)}&candidate_confirmed=eq.true&staff_blocked_at=not.is.null`;
+      const REST_H = { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": "Bearer " + SUPABASE_SERVICE_ROLE_KEY };
+      const [blockedWork, blockedEdu, blockedCert, blockedSkill, blockedFree] = await Promise.all([
+        fetch(`${SUPABASE_URL}/rest/v1/work_history_items?${blockedBase}&select=id,company,title,staff_block_reason_code`, { headers: REST_H }).then((r) => r.ok ? r.json() : []).catch(() => []),
+        fetch(`${SUPABASE_URL}/rest/v1/education_items?${blockedBase}&select=id,institution,degree,staff_block_reason_code`, { headers: REST_H }).then((r) => r.ok ? r.json() : []).catch(() => []),
+        fetch(`${SUPABASE_URL}/rest/v1/certification_items?${blockedBase}&select=id,name,issuing_body,staff_block_reason_code`, { headers: REST_H }).then((r) => r.ok ? r.json() : []).catch(() => []),
+        fetch(`${SUPABASE_URL}/rest/v1/skill_items?${blockedBase}&select=id,skill_text,staff_block_reason_code`, { headers: REST_H }).then((r) => r.ok ? r.json() : []).catch(() => []),
+        fetch(`${SUPABASE_URL}/rest/v1/candidate_freeform_sections?${blockedBase}&select=id,heading,content,staff_block_reason_code`, { headers: REST_H }).then((r) => r.ok ? r.json() : []).catch(() => []),
+      ]);
+      const held = [
+        ...blockedWork.map((w: any) => ({ category: "Job Experience", preview: [w.title, w.company].filter(Boolean).join(", ") || "(no title)", message: REASON_SENTENCES[w.staff_block_reason_code] || REASON_SENTENCES.needs_correction })),
+        ...blockedEdu.map((e: any) => ({ category: "Education", preview: [e.degree, e.institution].filter(Boolean).join(", ") || "(no degree)", message: REASON_SENTENCES[e.staff_block_reason_code] || REASON_SENTENCES.needs_correction })),
+        ...blockedCert.map((c: any) => ({ category: "Certification", preview: [c.name, c.issuing_body].filter(Boolean).join(", ") || "(no name)", message: REASON_SENTENCES[c.staff_block_reason_code] || REASON_SENTENCES.needs_correction })),
+        ...blockedSkill.map((s: any) => ({ category: "Skill", preview: s.skill_text || "(no text)", message: REASON_SENTENCES[s.staff_block_reason_code] || REASON_SENTENCES.needs_correction })),
+        ...blockedFree.map((f: any) => ({ category: "Additional content", preview: (f.heading || "").trim() || (f.content || "").replace(/\s+/g, " ").trim().slice(0, 80) || "(no content)", message: REASON_SENTENCES[f.staff_block_reason_code] || REASON_SENTENCES.needs_correction })),
+      ];
+      const blockedSourceIds = new Set<string>([...blockedWork, ...blockedEdu, ...blockedCert, ...blockedSkill, ...blockedFree].map((r: any) => r.id));
+      // A License-type row's block signal lives on its linked certification_items row, not on
+      // license_items itself (license_items never got staff_block_* columns -- see list-
+      // verification-items' own comment on licCert for the identical reasoning on the staff side).
+      // Resolve each License row's linked cert id here so a blocked license's own queue row is
+      // excluded from `items` the same way any other blocked item's is.
+      const blockedCertIdSet = new Set<string>(blockedCert.map((c: any) => c.id));
+      const licenseTypeSourceIds = rows.filter((r: any) => r.type === "License" && r.source_item_id).map((r: any) => r.source_item_id);
+      const licenseLinkRows: any[] = licenseTypeSourceIds.length
+        ? await fetch(SUPABASE_URL + "/rest/v1/license_items?select=id,linked_certification_id&id=in.(" + licenseTypeSourceIds.map(encodeURIComponent).join(",") + ")", { headers: REST_H }).then((r) => r.ok ? r.json() : []).catch(() => [])
+        : [];
+      for (const l of licenseLinkRows) {
+        if (l.linked_certification_id && blockedCertIdSet.has(l.linked_certification_id)) blockedSourceIds.add(l.id);
+      }
+
+      const items = rows.filter((r: any) => !(r.source_item_id && blockedSourceIds.has(r.source_item_id))).map((r: any) => {
         const isDiscrepancy = r.status === "Discrepancy";
         return {
           id: r.id,
@@ -233,7 +277,10 @@ export default {
       });
       const licRows: any[] = licRes.ok ? await licRes.json() : [];
       const queueStatusById = new Map(rows.map((r: any) => [r.id, r.status]));
-      const licenses = licRows.map((l: any) => {
+      // Same exclusion as `items` above, applied here too -- a blocked license must not appear as
+      // candidate-stated content either, only in `held` (already covered: blockedCert's own held
+      // entry fires regardless of whether the cert has a license_items extension).
+      const licenses = licRows.filter((l: any) => !(l.linked_certification_id && blockedCertIdSet.has(l.linked_certification_id))).map((l: any) => {
         const qStatus = l.queue_item_id ? queueStatusById.get(l.queue_item_id) : null;
         return {
           id: l.id,
@@ -253,7 +300,7 @@ export default {
         };
       });
 
-      return new Response(JSON.stringify({ ok: true, items, licenses }), {
+      return new Response(JSON.stringify({ ok: true, items, licenses, held }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     } catch (e) {

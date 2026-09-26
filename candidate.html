@@ -4353,6 +4353,23 @@ a:hover{color:var(--color-accent)}
           Verification is hybrid: an automated employer-lookup database is checked first where it has coverage; a human verifier attempts contact for anything it doesn't cover. Some items may remain permanently unresolved despite that effort. That's reflected honestly below, not hidden.
         </div>
 
+        <!-- Staff content-block (2026-09-26): visible, but deliberately separate from the normal item
+             list below (its own card, above the filter controls) -- these were never counted as normal
+             verification items and don't belong in the Active/Completed/All filter's own counts. Read-
+             only: no status pill, no action, just what's held and the one fixed instruction for it. -->
+        <sc-if value="{{ hasHeldItems }}" hint-placeholder-val="{{ false }}">
+          <div class="card elev-sm" style="border:1px solid var(--color-warning,#c77d1e);display:flex;flex-direction:column;gap:var(--space-3)">
+            <div class="card-kicker">Held for correction</div>
+            <sc-for list="{{ heldItemRows }}" as="row" hint-placeholder-count="1">
+              <div style="border-top:1px solid var(--color-divider);padding-top:var(--space-2);display:flex;flex-direction:column;gap:2px">
+                <div style="font-size:12px;color:var(--color-neutral-500)">{{ row.category }}</div>
+                <div style="font-size:13px;color:var(--color-neutral-300)">{{ row.preview }}</div>
+                <div style="font-size:12px;color:var(--color-neutral-400);margin-top:2px">{{ row.message }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+
         <sc-if value="{{ showNotifyNote }}" hint-placeholder-val="{{ true }}">
           <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6;border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:var(--space-3)">
             Don't want to keep checking back? Verify your phone number and opt in to system messages, and we'll text you specifically when a status changes here, nothing else. Entirely optional. <a href="#" sc-camel-on-click="{{ goVerifyPhoneFromNote }}">Verify a phone number</a>
@@ -7531,6 +7548,11 @@ class Component extends DCLogic {
       verificationItemsError: null,
       verificationItems: data.items || [],
       verificationLicenses: data.licenses || [],
+      // Staff content-block (2026-09-26): items held pending correction -- see
+      // list-candidate-verification-items' own header on why this is a separate array rather than
+      // folded into verificationItems (a blocked item's own queue row, if it has one, is excluded from
+      // items entirely, so it never shows both there and here at once).
+      heldItems: data.held || [],
       verificationItemsLoadedFor: candidateId,
     });
   }
@@ -7964,6 +7986,7 @@ class Component extends DCLogic {
     licenseEditId: null, licenseEditState: '', licenseEditNumber: '', licenseEditPending: false, licenseEditError: '', licenseEditNotice: '',
     eduEditId: null, eduDraft: { degree: '', fieldOfStudy: '', institution: '', location: '' }, eduNoteDraft: '', eduEditPending: false, eduEditError: '', eduEditNotice: '',
     verificationItems: [], verificationLicenses: [], verificationItemsLoading: false, verificationItemsError: null, verificationItemsLoadedFor: null,
+    heldItems: [],
     correctionResponseOpenId: null, correctionValueDraft: '', correctionNoteDraft: '',
     correctionSubmitPending: false, correctionSubmitError: null,
     // Candidate item-flagging, post-confirm plain-note modal (2026-09-23): see openPostFlagModal/submitPlainFlag.
@@ -12784,6 +12807,13 @@ class Component extends DCLogic {
       verificationItemRows: this.getVerificationItemRows(),
       hasVerificationItemRows: this.getVerificationItemRows().length > 0,
       showNoActiveItems: !s.verificationItemsLoading && !s.verificationItemsError && this.getVerificationItemRows().length === 0,
+      // Staff content-block (2026-09-26): `held` comes pre-shaped from the server
+      // ({category, preview, message} -- see list-candidate-verification-items' own header) since this
+      // is a closed, non-interactive read-only list -- no client-side mapping needed beyond passing it
+      // through. Shown independent of the Active/Completed/All filter above; a held item was never
+      // counted as a normal verification item, so it doesn't belong to any of those tabs.
+      heldItemRows: s.heldItems,
+      hasHeldItems: s.heldItems.length > 0,
       verificationCategorySummaries: this.getVerificationCategorySummaries(),
       // Item 7 (2026-09-12 live-testing session, follow-up build): the durable contact-details
       // modal's own bindings — see openContactDetailsModal's own header.
