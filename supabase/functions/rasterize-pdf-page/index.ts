@@ -259,6 +259,22 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   whatever form it appears; use an empty string "" when no location is given for that role — never
   infer or guess one from the employer's real-world location.
 
+- DELIMITER-AGNOSTIC DATE RECOGNITION ON A HEADER LINE (a real, confirmed failure mode): a header
+  line's date range must be read by its SHAPE (a month/year or year, a dash or "to," another
+  month/year or "Present") regardless of which character sits between the location/title and the
+  date — most header lines on a page share one delimiter (a bullet, a pipe, a comma), but an OCR'd
+  page can render that SAME delimiter as a different, unexpected character on one specific line (a
+  bullet OCR'd as "@" instead of the "•"/"©" used everywhere else on the page) without the date
+  itself being any less real or any less present. Never let an unfamiliar delimiter on one line cause
+  that line's own date to be dropped, and never let it bleed into how a SEPARATE, LATER header line's
+  own date is read, even when that later line's own delimiter is completely ordinary. A real,
+  confirmed failure mode: a header line reading "...New York, NY @ Apr 2011-Aug 2015" (an anomalous
+  "@" where the rest of the page used a bullet) lost its own date entirely, AND the very next entry's
+  header line — despite using a completely normal bullet delimiter itself — also lost its date in the
+  same extraction, an attention-drift effect between two adjacent entries. Read each header line's
+  date range independently, by shape, never by whether its delimiter matches the page's dominant
+  pattern.
+
 - work_history's "heading" field = the literal heading/label text of the OUTER SECTION this entry sits
   under on THIS page, exactly as printed (e.g. "PROFESSIONAL EXPERIENCE", "Employment History") — the
   ONE section title that governs the entire block of company entries, copied verbatim, not reworded,
@@ -340,11 +356,24 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
     - "job_responsibilities" = rebuild the full internal structure as one piece of text, nothing
       dropped: first, any company-level description or context that applies to the whole tenure and
       isn't specific to either individual role (what the company does, an acquisition note, and
-      similar) — copied verbatim, on its own line(s); then, for each role in chronological order, a
-      line naming that role and its own exact date range (e.g. "Recruiter, September 2023 - June
-      2024:"), followed by that role's own bullets exactly as printed, using "\n" between lines per the
-      LINE-BREAK PRESERVATION rule above. Never shorten, summarize, or drop any real content from either
-      role or from the company-level context while combining them — the combining is structural only.
+      similar) — copied verbatim, on its own line(s); then, for each role, IN THE SAME ORDER THE
+      SOURCE RESUME ITSELF PRINTED THEM — never re-sorted into chronological order. Resumes commonly
+      print the most recent/senior role of a merged tenure FIRST (standard reverse-chronological
+      convention, the same convention this whole section already follows entry-to-entry), but this
+      field must mirror whatever order THIS specific resume actually used, in either direction — do not
+      assume a direction and do not re-sort by date. A real, confirmed failure mode: a resume printed
+      "Senior Recruiter, July 2024 - August 2026" before "Recruiter, September 2023 - June 2024" (newer
+      role first, standard convention); the merged job_responsibilities came back with the Recruiter
+      block first and the Senior Recruiter block second — silently reversed from how the source
+      presented them, even though both roles' own content and dates were each individually correct.
+      This field's own role-block order is independent of, and must not be confused with, the "title"
+      rule above (which always orders earlier-role-first, "First Title to Second Title," regardless of
+      print order — that is a separate, deliberate summary-field convention, not a mistake to mirror
+      here). For each role block: a line naming that role and its own exact date range (e.g.
+      "Recruiter, September 2023 - June 2024:"), followed by that role's own bullets exactly as
+      printed, using "\n" between lines per the LINE-BREAK PRESERVATION rule above. Never shorten,
+      summarize, or drop any real content from either role or from the company-level context while
+      combining them — the combining is structural only.
 
   Separately, do NOT apply any of this (merge or not) when two entries merely share an employer NAME
   but read as genuinely separate, disconnected stints — a real gap where the candidate left and later
@@ -398,6 +427,36 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   hours figure, a topic word) with the NEVER FABRICATE rule's own worked example below. Matching that
   example's WORDING is never a reason to withhold extraction from an itemized list that is otherwise
   real — only the ABSENCE of individually named items is.
+
+  THE REVERSE DIRECTION IS EQUALLY REAL — NARRATIVE PROSE IS NEVER A SECOND SOURCE OF THE SAME LIST'S
+  ITEMS (a real, confirmed failure mode, the direct counterpart to the rule just above — that rule
+  says a real bulleted list must still be extracted even when narrative prose elsewhere describes the
+  same coursework; this rule says that narrative prose must NEVER, itself, produce an extra
+  certifications entry for an item the bulleted list already covers). A sentence that MENTIONS one or
+  more of a list's own items by name — inside a summary paragraph, inside a different section's
+  project/role description, or anywhere else that reads as flowing prose rather than a bulleted list
+  of its own — is describing that already-extracted credential, not presenting a second, independent
+  occurrence of it. Never emit a second certifications entry, under the same or any heading, just
+  because a name from an already-extracted list also appears inside a sentence elsewhere ON A
+  DIFFERENT PAGE OR THE SAME PAGE. THIS RULE APPLIES ACROSS PAGES TOO: if a bulleted list on an
+  earlier page already produced a real certifications entry, a later page's own narrative prose that
+  merely references the same credential by name must never produce a second one — you cannot see the
+  earlier page's own extracted output directly, but the shape test still applies: judge THIS page's
+  own text on its own — is it itself a bulleted/itemized list of named items under its own heading
+  (extract it, it's real), or is it a sentence of connected prose that happens to mention a name, a
+  provider, or an hours figure (never extract a certifications entry from it, no matter how closely
+  its vocabulary echoes a real list, on this page or any other). A real, confirmed failure mode: a
+  "AI & Emerging Technology Certifications — Coursiv (55+ Hours)" list on one page correctly produced
+  9 entries, the 9th being "AI Video Generation & Cinematic Workflows (Veo)" — then a LATER,
+  UNRELATED section on a different page ("AI Projects & Portfolio") described a personal project in
+  prose reading "...evaluated 9 leading generative AI platforms ChatGPT, Claude, Gemini, DeepSeek,
+  Jasper, MidJourney, Stable Diffusion, Veo, and Lovable... completed 55+ hours of structured
+  certification coursework through Coursiv to formalize findings" — a sentence that happens to reuse
+  "Veo," "55+ hours," and "Coursiv," the exact vocabulary of the real list, purely because it's
+  genuinely describing that same coursework as part of a project narrative. This produced a SECOND,
+  phantom "Veo" certifications entry (heading and issuing_body correctly copied from the real list,
+  but positioned elsewhere in the output, disconnected from its 8 real siblings) — a duplicate that
+  should never have been emitted at all, from either page's own extraction call.
 
 - certifications' "license_number" field = the credential's own license, permit, or registration
   number, when the resume actually prints one (e.g. "Lic # CFC1425829", "License No. 12345", "Cert
