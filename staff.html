@@ -3090,6 +3090,32 @@ th.sortable{cursor:pointer;user-select:none}
           <div style="font-weight:500">{{ cbCandidateName }} <span style="font-weight:400;font-size:12px;color:var(--color-neutral-500)">{{ cbCandidateEmail }}</span></div>
           <button type="button" class="btn btn-ghost" style="font-size:12px" onClick="{{ backToCbSearch }}">← Back to search</button>
         </div>
+
+        <!-- Candidate-wide block history: loads automatically (not behind a click) so a pattern across
+             DIFFERENT items -- "this was blocked, candidate resubmitted, cleared on <date>" -- is visible
+             to staff before they decide whether to block a new item, not something they have to know to
+             go looking for. Shown above the item list, ahead of any block/unblock decision. -->
+        <div style="border-top:1px solid var(--color-divider);padding-top:var(--space-3);display:flex;flex-direction:column;gap:6px">
+          <div class="card-kicker">Block history, all items</div>
+          <sc-if value="{{ cbHistoryLoading }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:var(--color-neutral-500)">Loading…</div>
+          </sc-if>
+          <sc-if value="{{ cbHistoryError }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:#b00020">{{ cbHistoryError }}</div>
+          </sc-if>
+          <sc-if value="{{ cbHistoryEmpty }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:var(--color-neutral-500)">No item of this candidate's has ever been blocked.</div>
+          </sc-if>
+          <sc-for list="{{ cbHistoryRows }}" as="ev" hint-placeholder-count="1">
+            <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.5;border-top:1px solid var(--color-divider);padding-top:4px">
+              <span style="color:var(--color-neutral-300)">{{ ev.actionLabel }}</span> · {{ ev.itemLabel }} <span style="color:var(--color-neutral-500)">({{ ev.categoryLabel }})</span> · {{ ev.actor }} · {{ ev.dateDisp }}
+              <sc-if value="{{ ev.hasNote }}" hint-placeholder-val="{{ false }}">
+                <div>{{ ev.note }}</div>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+
         <sc-if value="{{ cbItemsLoading }}" hint-placeholder-val="{{ false }}">
           <div style="font-size:12px;color:var(--color-neutral-500)">Loading…</div>
         </sc-if>
@@ -3363,6 +3389,9 @@ class Component extends DCLogic {
     cbQuery: '', cbBusy: false, cbError: null, cbCandidates: null,
     cbSelectedCandidate: null, cbItems: [], cbItemsLoading: false, cbItemsError: null,
     cbFormOpenKey: null, cbReasonDraft: 'needs_correction', cbNoteDraft: '', cbActionSaving: false, cbActionError: null,
+    // Candidate-wide block history (candidate_history action) -- every item this candidate has ever had
+    // blocked, across all five tables, not just the one currently being looked at. See selectCbCandidate.
+    cbHistory: [], cbHistoryLoading: false, cbHistoryError: null,
     // Item 12 (2026-09-07 wiring audit): the real staff roster (list-staff-users, see its own
     // header), replacing the hardcoded WORKERS array. Loaded once per session alongside loadItems —
     // see applyStaffSession.
@@ -4010,11 +4039,12 @@ class Component extends DCLogic {
     this.setState({ cbBusy: false, cbCandidates: data.candidates || [] });
   }
   selectCbCandidate(c) {
-    this.setState({ cbSelectedCandidate: c, cbItems: [], cbItemsError: null, cbFormOpenKey: null, cbNoteDraft: '', cbActionError: null });
+    this.setState({ cbSelectedCandidate: c, cbItems: [], cbItemsError: null, cbFormOpenKey: null, cbNoteDraft: '', cbActionError: null, cbHistory: [], cbHistoryError: null });
     this.loadCbItems(c.id);
+    this.loadCbHistory(c.id);
   }
   backToCbSearch() {
-    this.setState({ cbSelectedCandidate: null, cbItems: [], cbItemsError: null, cbFormOpenKey: null });
+    this.setState({ cbSelectedCandidate: null, cbItems: [], cbItemsError: null, cbFormOpenKey: null, cbHistory: [], cbHistoryError: null });
   }
   async loadCbItems(candidateId) {
     this.setState({ cbItemsLoading: true, cbItemsError: null });
@@ -4026,6 +4056,20 @@ class Component extends DCLogic {
       return;
     }
     this.setState({ cbItemsLoading: false, cbItemsError: null, cbItems: data.items || [] });
+  }
+  // Loaded automatically alongside the item list (not click-to-reveal) -- the whole point is that a
+  // repeat pattern on a DIFFERENT item is visible to staff before they even decide whether to block the
+  // new one, not something they have to know to go looking for.
+  async loadCbHistory(candidateId) {
+    this.setState({ cbHistoryLoading: true, cbHistoryError: null });
+    let res, data;
+    try { res = await this.staffFetch('/staff-block-item', { action: 'candidate_history', candidate_id: candidateId }); data = await res.json().catch(() => ({})); }
+    catch (e) { this.setState({ cbHistoryLoading: false, cbHistoryError: "Couldn't reach the server. Try again." }); return; }
+    if (!res.ok || !data.ok) {
+      this.setState({ cbHistoryLoading: false, cbHistoryError: res.status === 403 ? 'This page is for admins only.' : "Couldn't load this candidate's block history. Try again." });
+      return;
+    }
+    this.setState({ cbHistoryLoading: false, cbHistoryError: null, cbHistory: data.events || [] });
   }
   cbKey(kind, id) { return kind + ':' + id; }
   openCbBlockForm(kind, id) {
@@ -4554,6 +4598,21 @@ class Component extends DCLogic {
           onUnblock: () => this.cbUnblock(row.item_kind, row.item_id),
         };
       }),
+      // Candidate-wide block history -- see loadCbHistory's own header for why this loads automatically
+      // rather than behind a click, and blockActionLabel for the action-label mapping (shared with the
+      // per-item history view on the normal queue detail).
+      cbHistoryLoading: s.cbHistoryLoading,
+      cbHistoryError: s.cbHistoryError,
+      cbHistoryEmpty: !s.cbHistoryLoading && !s.cbHistoryError && s.cbHistory.length === 0,
+      cbHistoryRows: s.cbHistory.map((ev) => ({
+        actionLabel: this.blockActionLabel(ev.action),
+        itemLabel: ev.label,
+        categoryLabel: ({ work_history: 'Job Experience', education: 'Education', certification: 'Certification', skill: 'Skill', freeform: 'Additional content' })[ev.item_kind] || ev.item_kind,
+        actor: ev.actor,
+        dateDisp: ev.event_date ? new Date(ev.event_date).toLocaleString() : '',
+        note: ev.note || '',
+        hasNote: !!ev.note,
+      })),
 
       selectTabQueue: () => this.setState({ tab: 'queue' }),
       selectTabReporting: () => {

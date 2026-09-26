@@ -28,13 +28,22 @@ const corsHeaders = {
 //                      apply_resume_resubmission's own header); this exists for a staff correction or a
 //                      mistaken block, not for routine use.
 //   history {candidate_id, item_kind, item_id}              the staff_block_events trail for one item.
+//   candidate_history {candidate_id}                        admin only. The staff_block_events trail for
+//                      EVERY item this candidate has ever had blocked, across all five tables -- so a
+//                      pattern ("this was blocked, candidate resubmitted, cleared on <date>") is visible
+//                      to staff even when the candidate repeats it on a DIFFERENT item later, not just
+//                      when re-viewing the exact same item's own history. Each event carries a best-
+//                      effort current label for its item; an item removed by a later resubmission (see
+//                      apply_resume_resubmission's REMOVED loop, which logs before deleting the row)
+//                      still shows in the trail, just without a live label.
 //
 // SCOPING for block/unblock/history: admin (or service) can act on anything. A worker can act only on
 // an item that already has a verification_items row assigned to them -- same "only what's assigned to
 // you" rule the rest of the staff role policy already enforces (see list-verification-items' own
 // header). An item with NO queue row at all (never opted into verification) has no "assigned to me"
 // concept, so only admin/service can block/unblock/view history for one -- same reasoning as
-// list_candidate_items being admin-only.
+// list_candidate_items being admin-only. candidate_history is admin-only for the same reason: it
+// necessarily spans items a worker may not otherwise be scoped to see.
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const REST = { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` };
@@ -156,6 +165,45 @@ export default {
           ...free.map((f: any) => mk("freeform", f.id, [f.heading, (f.content || "").replace(/\s+/g, " ").trim().slice(0, 80)].filter(Boolean).join(": ") || "(no content)", f.staff_blocked_at, f.staff_block_reason_code)),
         ];
         return json({ ok: true, items });
+      }
+
+      if (action === "candidate_history") {
+        if (!isAdminCaller(caller)) return json({ ok: false, error: "forbidden" }, 403);
+        const candidateId = typeof body.candidate_id === "string" ? body.candidate_id : "";
+        if (!UUID.test(candidateId)) return json({ ok: false, error: "candidate_id_invalid" }, 400);
+        const events = await rows(`staff_block_events?candidate_id=eq.${candidateId}&select=item_kind,item_id,event_date,actor,action,reason_code,note&order=event_date.desc`);
+        if (!events.length) return json({ ok: true, events: [] });
+        // Best-effort current label per distinct (item_kind, item_id) touched by any event -- one batched
+        // lookup per kind rather than one query per event.
+        const idsByKind: Record<string, Set<string>> = {};
+        for (const e of events) (idsByKind[e.item_kind] ||= new Set()).add(e.item_id);
+        const SELECT_BY_KIND: Record<string, string> = {
+          work_history: "id,company,title", education: "id,institution,degree", certification: "id,name,issuing_body",
+          skill: "id,skill_text", freeform: "id,heading,content",
+        };
+        const labelByKey = new Map<string, string>();
+        await Promise.all(Object.entries(idsByKind).map(async ([kind, ids]) => {
+          const tbl = KIND_TABLE[kind];
+          if (!tbl || !SELECT_BY_KIND[kind]) return;
+          const found = await rows(`${tbl}?id=in.(${Array.from(ids).join(",")})&select=${SELECT_BY_KIND[kind]}`);
+          for (const r of found as any[]) {
+            const label =
+              kind === "work_history" ? ([r.title, r.company].filter(Boolean).join(", ") || "(no title)") :
+              kind === "education" ? ([r.degree, r.institution].filter(Boolean).join(", ") || "(no degree)") :
+              kind === "certification" ? ([r.name, r.issuing_body].filter(Boolean).join(", ") || "(no name)") :
+              kind === "skill" ? (r.skill_text || "(no text)") :
+              ([r.heading, (r.content || "").replace(/\s+/g, " ").trim().slice(0, 80)].filter(Boolean).join(": ") || "(no content)");
+            labelByKey.set(`${kind}:${r.id}`, label);
+          }
+        }));
+        return json({
+          ok: true,
+          events: events.map((e: any) => ({
+            item_kind: e.item_kind, item_id: e.item_id,
+            label: labelByKey.get(`${e.item_kind}:${e.item_id}`) || "(item no longer exists)",
+            event_date: e.event_date, actor: e.actor, action: e.action, reason_code: e.reason_code, note: e.note,
+          })),
+        });
       }
 
       // ---- block / unblock / history: candidate_id + item_kind + item_id required, worker-scoped ----
