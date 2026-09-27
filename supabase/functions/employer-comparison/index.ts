@@ -209,7 +209,18 @@ export default {
 
         const price = await guestPrice();
         if (!price || !(price.amount_cents > 0)) return json({ ok: true, outcome: "pricing_unavailable" });
-        const label = (await rows(`employer_lookup_requests?id=eq.${r2.lookup_id}&select=candidate_label`))?.[0]?.candidate_label || null;
+        // Real bug found live (2026-09-27, item 17's own regression check): lookup_id is null for
+        // every guest request created via the no-prior-lookup "Request a comparison" direct path
+        // (create_comparison_request_direct's own p_lookup_id defaults to null) -- interpolating a JS
+        // null here produced the URL `...?id=eq.null`, which PostgREST rejects for a uuid column
+        // (needs `is.null`, not `eq.null`), so rows() threw. Uncaught here, that silently aborted the
+        // WHOLE function after hold_attempted_at was already durably set two lines up -- no payment
+        // row, no hold, no error surfaced anywhere (this call's own caller wraps it in try/catch and
+        // falls through to the same copy a genuine decline would show). Every direct-path guest
+        // request's automatic hold-at-approval was silently skipped by this, not just occasionally --
+        // confirmed live, not theorized, by reproducing it with a real request/approval/candidate
+        // round trip before this fix.
+        const label = r2.lookup_id ? (await rows(`employer_lookup_requests?id=eq.${r2.lookup_id}&select=candidate_label`))?.[0]?.candidate_label || null : null;
         const insP = await rest("employer_payments", {
           method: "POST", headers: { "Prefer": "return=representation" },
           body: JSON.stringify({ amount_cents: price.amount_cents, currency: price.currency, payer_email: r2.requester_email, access_token_hash: await sha256Hex(randomHex(32)), comparison_request_id: r2.id, request_kind: r2.kind || "resume_comparison", requester_company: r2.requester_company || null, candidate_label: label }),
