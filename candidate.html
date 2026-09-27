@@ -3406,6 +3406,29 @@ a:hover{color:var(--color-accent)}
     </div>
   </sc-if>
 
+  <!-- Item F/G extension (2026-09-27): Content Manager's own version of the modal just above, for the
+       two things on that screen that introduce or change content beyond what your document extracted —
+       rewriting a job's responsibilities, or adding a skill from nothing. Same weight, same "recorded,
+       not just shown" shape — but asked once (per ack_text_version), the first time either is attempted,
+       not at a submit step this screen doesn't have. Only ever opened by czSave's own ack gate — see
+       that function's header. -->
+  <sc-if value="{{ czEditAckOpen }}" hint-placeholder-val="{{ false }}">
+    <div class="dialog-backdrop">
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="cz-edit-ack-modal-title" style="width:min(520px,100%);max-height:90vh;overflow-y:auto">
+        <div class="dialog-title" id="cz-edit-ack-modal-title">Before you continue</div>
+        <div class="dialog-body" style="display:flex;flex-direction:column;gap:var(--space-3);line-height:1.6">
+          <div>Rewriting a job's description, or adding a skill here, goes beyond what your uploaded document said — this content was never part of what was extracted, and it isn't checked the way your verified record is.</div>
+          <div>Once you save it, <b>it's recorded as something you added or changed</b> — separately and permanently from your original document. It appears on your resume exactly as you write it.</div>
+          <div style="font-size:12px;color:var(--color-neutral-500)">You'll only see this once. It doesn't apply to anything you toggle on or off, only to text you write yourself here.</div>
+        </div>
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ czCancelEditAck }}">Cancel</button>
+          <button type="button" class="btn btn-primary" sc-camel-on-click="{{ czConfirmEditAck }}">I understand — save it</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
   <!-- Candidate item-flagging (2026-09-23): one shared modal for every item card above (work
        history/education/certifications/skills/freeform, incl. Summary/Hobbies) — see
        flagItemProps/openFlagModal. Purely local until Confirm; see submitResumeConfirmation for
@@ -6426,7 +6449,10 @@ class Component extends DCLogic {
       this.setState({ czLoading: true });
       const r = await this.czCall('get-customization', { view: 'editor' });
       if (r.http === 200 && r.j.ok && r.j.resume && r.j.resume.available) {
-        this.setState({ czData: r.j.resume, czLoadedFor: id, czLoading: false, czLoadFailed: false }, () => this.applyCzContactToProfile(r.j.resume));
+        this.setState({
+          czData: r.j.resume, czLoadedFor: id, czLoading: false, czLoadFailed: false,
+          czEditAckGiven: !!(r.j.edit_ack && r.j.edit_ack.given),
+        }, () => this.applyCzContactToProfile(r.j.resume));
         return r.j.resume;
       }
       this.setState({ czLoading: false, czLoadFailed: true });
@@ -6470,31 +6496,99 @@ class Component extends DCLogic {
       case 'email_invalid': return "That email address doesn't look valid.";
       case 'item_not_found': return 'That item is no longer on your resume. We reloaded the latest.';
       case 'account_deactivated': case 'not_full_resume': return "This account can't be customized right now.";
+      case 'edit_ack_required': return "Please confirm the notice about added or rewritten content before this saves.";
       default: return "We couldn't save that change, so nothing was changed. Please try again.";
     }
   }
 
+  // Item F/G extension (2026-09-27): matches CUSTOMIZATION_EDIT_ACK_VERSION in save-customization/
+  // get-customization exactly -- bump both together if this notice's copy ever changes materially enough
+  // to need re-asking everyone.
+  CZ_EDIT_ACK_VERSION = 'v1-2026-09-27';
+
+  // An op that introduces or rewrites content beyond what the document itself said, as opposed to
+  // toggling existing extracted content on/off. Server re-derives this same classification independently
+  // from the validated op shape (never trusts the client's) -- see save-customization's own header.
+  czOpNeedsEditAck(op) {
+    if (op.op === 'add_skill') return true;
+    if (op.op === 'text' && op.kind === 'work' && op.value !== null) return true;
+    return false;
+  }
+
   // ONE write path. Operations are sent one request at a time, in order; base_version is read at the moment each one runs, so queued changes made in quick
   // succession never conflict with each other. Resolves true only when the server confirmed the save; on any failure nothing was changed on the server.
-  czSave(ops) {
+  //
+  // Item F/G extension (2026-09-27): the one choke point every czSave call passes through, so the ack gate
+  // below covers every caller (czEditDescription, czAddSkill) without each needing its own copy of this
+  // check. The first time a batch contains a qualifying op and no ack has been recorded yet, the save is
+  // deferred (not sent) and the modal opens instead, holding the exact ops in czPendingAckOps; confirming
+  // it calls czSave(ops, true) directly to resend the very same ops with the acknowledgment attached --
+  // see czConfirmEditAck/czCancelEditAck below.
+  czSave(ops, includeAck) {
+    if (!includeAck && !this.state.czEditAckGiven && ops.some((op) => this.czOpNeedsEditAck(op))) {
+      this.setState({ czEditAckOpen: true, czPendingAckOps: ops });
+      return Promise.resolve(false);
+    }
     const run = async () => {
       if (!this.czReady()) await this.loadCz();
       if (!this.czReady()) { this.setState({ czError: "Your resume content isn't loaded yet. Please try again in a moment." }); return false; }
       this.setState({ czSaving: true, czError: null });
-      const r = await this.czCall('save-customization', { base_version: this.state.czData.customization.version, ops });
+      const body = { base_version: this.state.czData.customization.version, ops };
+      if (includeAck) { body.acknowledged = true; body.ack_text_version = this.CZ_EDIT_ACK_VERSION; }
+      const r = await this.czCall('save-customization', body);
       if (r.http === 200 && r.j.ok && r.j.resume) {
-        this.setState({ czData: r.j.resume, czSaving: false, czError: null });
+        this.setState({ czData: r.j.resume, czEditAckGiven: !!(r.j.edit_ack && r.j.edit_ack.given), czSaving: false, czError: null });
         this.czFlashSaved();
         return true;
       }
       const msg = this.czErrorMessage(r);
       const e = r.j && r.j.error;
       if (e === 'version_conflict' || e === 'item_not_found' || e === 'tier_required') await this.loadCz();
+      // Safety net only: the client already gates above, so this should be unreachable in normal use
+      // (a stale local flag from another tab is the one real way to still hit it) -- reopen the same modal
+      // with the same ops rather than just showing an error the candidate can't act on.
+      if (e === 'edit_ack_required') { this.setState({ czSaving: false, czError: null, czEditAckGiven: false, czEditAckOpen: true, czPendingAckOps: ops }); return false; }
       this.setState({ czSaving: false, czError: msg });
       return false;
     };
     this._czChain = (this._czChain || Promise.resolve()).then(run, run);
     return this._czChain;
+  }
+
+  // Confirming resends the exact ops czSave deferred, this time with the acknowledgment attached --
+  // mirrors czEditDescription's own success/failure draft cleanup (delete on success, mark notSaved on
+  // failure) since that cleanup never ran the first time around (czSave returned false before ever
+  // reaching the network).
+  async czConfirmEditAck() {
+    const ops = this.state.czPendingAckOps;
+    this.setState({ czEditAckOpen: false, czPendingAckOps: null });
+    if (!ops || !ops.length) return;
+    const ok = await this.czSave(ops, true);
+    const workOp = ops.find((op) => op.op === 'text' && op.kind === 'work');
+    if (workOp) {
+      this.setState((st) => {
+        const d = { ...st.czDrafts }, er = { ...st.czDraftErr };
+        if (ok) { delete d[workOp.item_id]; delete er[workOp.item_id]; } else { er[workOp.item_id] = true; }
+        return { czDrafts: d, czDraftErr: er };
+      });
+    }
+  }
+
+  // Declining leaves nothing saved (the deferred ops are simply dropped) and reverts a pending job-
+  // description draft so the textarea shows the real saved value again instead of unsent typed text with
+  // no indication it was never sent. A pending add_skill needs no revert: czNewSkill still holds what was
+  // typed, unsent, exactly as if they'd never clicked Add.
+  czCancelEditAck() {
+    const ops = this.state.czPendingAckOps || [];
+    this.setState({ czEditAckOpen: false, czPendingAckOps: null });
+    const workOp = ops.find((op) => op.op === 'text' && op.kind === 'work');
+    if (workOp) {
+      this.setState((st) => {
+        const d = { ...st.czDrafts }, er = { ...st.czDraftErr };
+        delete d[workOp.item_id]; delete er[workOp.item_id];
+        return { czDrafts: d, czDraftErr: er };
+      });
+    }
   }
 
   // Item C (2026-09-26): the freeform-backed czCategories() keys Content Manager's read-only
@@ -8043,6 +8137,11 @@ class Component extends DCLogic {
     // Customization (Stage 2): the server's reconciled resume is the source of truth; this is only a cache of the last response plus UI-only flags.
     czData: null, czLoadedFor: null, czLoading: false, czLoadFailed: false, czSaving: false, czSaved: false, czError: null,
     czDrafts: {}, czDraftErr: {}, czNewSkill: '', czResetConfirm: false, contactSaveError: null,
+    // Item F/G extension (2026-09-27): whether a job_responsibilities rewrite or add_skill has ever been
+    // acknowledged (re-synced from the server's own edit_ack.given on every load/save, not trusted as
+    // durable client state on its own — see czSave's header); czPendingAckOps holds the exact ops a gated
+    // save will resend once the modal is confirmed.
+    czEditAckGiven: false, czEditAckOpen: false, czPendingAckOps: null,
     // Item B (2026-09-08 session): no longer seeded from a client fixture — real backend now,
     // see ensureSummariesLoaded's own header. Starts empty; the Content Manager tab's first visit
     // loads (and auto-seeds server-side, from the real extracted summary) the real rows.
@@ -12616,6 +12715,9 @@ class Component extends DCLogic {
       czNewSkill: s.czNewSkill,
       setCzNewSkill: (e) => this.setState({ czNewSkill: e.target.value }),
       addSkillField: () => this.czAddSkill(),
+      czEditAckOpen: s.czEditAckOpen,
+      czCancelEditAck: () => this.czCancelEditAck(),
+      czConfirmEditAck: () => this.czConfirmEditAck(),
       hasRemovedSkills: czReady && ((s.czData.skills && s.czData.skills.items) || []).some(x => !x.included && x.kind === 'skill'),
       removedSkills: ((czReady && s.czData.skills && s.czData.skills.items) || []).filter(x => !x.included && x.kind === 'skill').map(x => ({
         text: x.text,

@@ -13,6 +13,11 @@ const corsHeaders = {
 //   (what the candidate's PDF and any future feed consume).
 // Auth: the candidate's OWN live session, or the service-role key. Anything else is the same 401. Read-only: nothing is written.
 // Customization is applied only while the candidate is paid; a free candidate gets the un-customized data with customization.entitled = false.
+//
+// Item F/G extension (2026-09-27): also reports edit_ack.given, so the client's local ack flag is correct
+// from the very first load, not only after a save that happened to need it -- see save-customization's own
+// header for the full acknowledgment mechanism this mirrors.
+const CUSTOMIZATION_EDIT_ACK_VERSION = "v1-2026-09-27";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const REST = { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" };
@@ -58,7 +63,10 @@ export default {
       });
       if (!r.ok) return json({ ok: false, error: "assemble_failed" }, 500);
       const resume = await r.json();
-      return json({ ok: true, resume });
+      const ackRow = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=customization_edit_ack_at,customization_edit_ack_text_version`, { headers: REST })
+        .then((res) => res.ok ? res.json() : null).then((a) => (a && a[0]) || null).catch(() => null);
+      const ackGiven = !!(ackRow && ackRow.customization_edit_ack_at && ackRow.customization_edit_ack_text_version === CUSTOMIZATION_EDIT_ACK_VERSION);
+      return json({ ok: true, resume, edit_ack: { given: ackGiven, version: CUSTOMIZATION_EDIT_ACK_VERSION } });
     } catch (_e) {
       return json({ ok: false, error: "unhandled" }, 500);
     }

@@ -21,6 +21,25 @@ const corsHeaders = {
 // 422 field_locked and NOTHING in the request is applied (the whole request is validated first, then written in a single database transaction).
 // Concurrency: base_version must equal the current version (409 version_conflict returns the current one). Tier: paid only (403 tier_required).
 // Auth: the candidate's OWN live session, or the service-role key. Anything else is the same 401.
+//
+// Item F/G extension (2026-09-27): a 'text'/kind:'work' op with a non-null value (rewriting an already-
+// confirmed job's responsibilities), or an 'add_skill' op (a claim with no extracted source at all), is
+// content the candidate is introducing or changing beyond what came off their document -- the same
+// category of thing Item F's resumeConfirm ack already gates, just reached from a screen with no single
+// "submit" moment to hang a batch modal off of. Gated here instead, per call: opNeedsEditAck below decides
+// which ops need it; a one-time acknowledgment (candidates.customization_edit_ack_at/
+// _text_version, NOT resume_documents -- Customization isn't tied to any one document/submit event, and an
+// ack recorded there could go stale or vanish on resubmission) is required and recorded the first time,
+// never asked again for that ack_text_version. Reverting an override back to null needs no ack: it reduces
+// what's claimed, it doesn't introduce anything. candidate_edited_fields itself (work_history_items,
+// merged not replaced) and the add_skill staff signal (list_unqueued_edited_items) are both written/read
+// entirely inside apply_customization_ops / that RPC -- see 20260927030000_customization_edit_tracking.sql.
+const CUSTOMIZATION_EDIT_ACK_VERSION = "v1-2026-09-27";
+function opNeedsEditAck(op: Record<string, unknown>): boolean {
+  if (op.op === "add_skill") return true;
+  if (op.op === "text" && op.kind === "work" && op.value !== null) return true;
+  return false;
+}
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const REST = { "apikey": SERVICE_KEY, "Authorization": `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" };
@@ -181,6 +200,25 @@ export default {
       try { ops = body.ops.map((o: unknown, i: number) => checkOp(o, i + 1)); }
       catch (e) { if (e instanceof Reject) return json({ ok: false, error: e.code, ...e.extra }, e.status); throw e; }
 
+      // Item F/G extension: the ack check itself, re-derived server-side from the validated ops (never
+      // trusting what the client claims it needs to ack) -- see this file's own header. Always fetched,
+      // not only when this batch needs it, so the response's edit_ack.given stays an honest, current
+      // answer for the client's own local flag on every call, not just the ones that happened to need it.
+      const ackRow = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=customization_edit_ack_at,customization_edit_ack_text_version`, { headers: REST })
+        .then((res) => res.ok ? res.json() : null).then((a) => (a && a[0]) || null).catch(() => null);
+      let ackGiven = !!(ackRow && ackRow.customization_edit_ack_at && ackRow.customization_edit_ack_text_version === CUSTOMIZATION_EDIT_ACK_VERSION);
+      const needsAck = ops.some(opNeedsEditAck);
+      if (needsAck && !ackGiven) {
+        const suppliedOk = body.acknowledged === true && body.ack_text_version === CUSTOMIZATION_EDIT_ACK_VERSION;
+        if (!suppliedOk) return json({ ok: false, error: "edit_ack_required", ack_text_version: CUSTOMIZATION_EDIT_ACK_VERSION }, 422);
+        const ackRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}`, {
+          method: "PATCH", headers: { ...REST, "Prefer": "return=minimal" },
+          body: JSON.stringify({ customization_edit_ack_at: new Date().toISOString(), customization_edit_ack_text_version: CUSTOMIZATION_EDIT_ACK_VERSION }),
+        });
+        if (!ackRes.ok) return json({ ok: false, error: "save_failed" }, 500);
+        ackGiven = true;
+      }
+
       const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/apply_customization_ops`, {
         method: "POST", headers: REST,
         body: JSON.stringify({ p_candidate: candidateId, p_base_version: body.base_version, p_ops: ops }),
@@ -200,7 +238,7 @@ export default {
       const a = await fetch(`${SUPABASE_URL}/rest/v1/rpc/assemble_customized_resume`, {
         method: "POST", headers: REST, body: JSON.stringify({ p_candidate: candidateId, p_ignore_overrides: false, p_delivered_only: false }),
       });
-      return json({ ok: true, version: result?.version, resume: a.ok ? await a.json() : null });
+      return json({ ok: true, version: result?.version, resume: a.ok ? await a.json() : null, edit_ack: { given: ackGiven, version: CUSTOMIZATION_EDIT_ACK_VERSION } });
     } catch (_e) {
       return json({ ok: false, error: "unhandled" }, 500);
     }
