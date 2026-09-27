@@ -1938,6 +1938,62 @@ function mergeBoundaryContinuations(extraction: ExtractionResult): ExtractionRes
   return { ...extraction, freeform: rescuedFreeform, work_history: mergedWorkHistory, certifications: dedupeCertifications(certifications) };
 }
 
+// Gap #23 (2026-09-27, root-caused against a real re-test of John's hybrid resume ("626"), confirmed
+// directly against the source PDF's own extracted text, not guessed from the rendered PDF): a real gap
+// distinct from mergeBoundaryContinuations above -- that one only ever looks ACROSS a page boundary. This
+// is the SAME-PAGE counterpart, and it exists because education has no field that can hold a narrative
+// aside the way work_history's own job_responsibilities (a single string) keeps a role's prose from ever
+// splitting off into its own record. Reproduced live: page 4 has a genuine EDUCATION section -- a
+// structured degree entry immediately followed, in the true reading order, by a one-line narrative
+// "Continuing Education: 55+ hours..." note that does not fit education's schema (institution/degree/
+// field_of_study -- no field exists for a narrative aside). That note correctly falls through to
+// freeform/needs_review, correctly keeping the "EDUCATION" heading verbatim, but lands as an entirely
+// separate record with its OWN, independently-assigned position. FIELD_DEFINITIONS already tells the
+// model position is ONE reading-order counter across every category on the page together, not per
+// category -- despite that explicit instruction, the model still assigned this page's structured
+// education entry a LOWER position than an unrelated freeform section ("WORKPLACE STRENGTHS") that
+// genuinely precedes Education in the true reading order. The visible symptom: the generated PDF prints
+// EDUCATION (degree line), then WORKPLACE STRENGTHS, then EDUCATION again (needs_review, the
+// continuing-ed line) -- a section split apart by an unrelated section landing between its own two
+// halves. describeTrailingItem's own header deliberately, correctly, excludes education from cross-page
+// continuation hints (a degree fact is not open-ended) -- but that reasoning was only ever about the
+// CROSS-PAGE case; it says nothing about, and this codebase had nothing addressing, the SEPARATE
+// same-page case this fixes. Deterministic, general-purpose fix (never a one-off "Continuing Education"
+// wording patch): whenever a freeform item shares its EXACT heading (same normalization as
+// mergeBoundaryContinuations' own norm() above, including the same confirmed "l"->"i" vision-OCR fold)
+// with a structured work_history/education/certification entry on the SAME page, its position is
+// overridden to sit immediately after that structured sibling's -- never merged INTO the structured row
+// (no schema field exists to hold it), just repositioned so an unrelated section can never land between
+// them again. Runs AFTER mergeBoundaryContinuations (cross-page merging gets first claim on the model's
+// original, unmodified positions, so this can never disturb that logic's own page-adjacency checks) and
+// BEFORE dedupePositions (which only removes ties -- it never corrects a wrong relative order, so this
+// correction has to land before dedupePositions runs for it to survive into the final stored position).
+function anchorSameHeadingFreeform(extraction: ExtractionResult): ExtractionResult {
+  const pageOf = (pos: number | undefined) => (typeof pos === "number" ? Math.floor(pos / PAGE_POSITION_SPAN) : null);
+  const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ").replace(/l/g, "i");
+  type StructuredRef = { heading: string; position: number; page: number | null };
+  const structured: StructuredRef[] = [
+    ...extraction.work_history.map((w) => ({ heading: norm(w.heading || ""), position: w.position ?? 0, page: pageOf(w.position) })),
+    ...extraction.education.map((e) => ({ heading: norm(e.heading || ""), position: e.position ?? 0, page: pageOf(e.position) })),
+    ...extraction.certifications.map((c) => ({ heading: norm(c.heading || ""), position: c.position ?? 0, page: pageOf(c.position) })),
+  ].filter((s) => s.heading);
+  for (const f of extraction.freeform) {
+    const fHeading = norm(f.heading || "");
+    const fPage = pageOf(f.position);
+    if (!fHeading || fPage === null) continue;
+    // The LAST (highest-position) same-page, same-heading structured sibling -- when a heading covers
+    // several structured entries (e.g. two degrees under one "EDUCATION" heading), the freeform aside
+    // belongs after all of them, not wedged between two structured siblings.
+    const sibling = structured
+      .filter((s) => s.page === fPage && s.heading === fHeading)
+      .sort((a, b) => b.position - a.position)[0];
+    if (!sibling) continue;
+    const anchoredPosition = sibling.position + 0.5;
+    if (f.position === undefined || Math.abs(f.position - anchoredPosition) > 0.001) f.position = anchoredPosition;
+  }
+  return extraction;
+}
+
 // Item 7 (2026-09-25/26 batch, root-caused after two earlier prompt-only patches both failed to hold
 // under real re-verification — see this function's own git history for the full chase): the model
 // sometimes extracts the SAME certification twice — once correctly, from the real bulleted list it
@@ -2158,7 +2214,7 @@ function mergeExtractions(pages: Array<{ pageNumber: number; extraction: Extract
       ...crossPageSkillsSecondary, // gap #16a fix — see splitCrossPageSkills; positions already globalized there
     ],
   };
-  return mergeBoundaryContinuations(merged);
+  return anchorSameHeadingFreeform(mergeBoundaryContinuations(merged));
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -2661,7 +2717,15 @@ export default {
         }
         let extraction: ExtractionResult;
         try {
-          extraction = dedupePositions(await runVisionExtraction(sanitized_base64, sectionBoundaries));
+          // Gap #23 (2026-09-27): same same-page heading-sibling anchor as the PDF path's
+          // anchorSameHeadingFreeform — see that function's own comment for the full root-cause
+          // story. A single-page image call can't have a cross-page split, but the identical
+          // same-page failure shape (a freeform aside sharing its heading with a structured sibling,
+          // e.g. education's own "Continuing Education" note, landing with a position that lets an
+          // unrelated section wedge between them) is structurally possible here too, so this stays
+          // consistent rather than only covering the PDF path — same reasoning Item 7's own
+          // certifications de-dup below already applies to this path.
+          extraction = dedupePositions(anchorSameHeadingFreeform(await runVisionExtraction(sanitized_base64, sectionBoundaries)));
           // Item 7 (2026-09-25/26 batch): same deterministic certifications de-dup as the PDF path's
           // mergeBoundaryContinuations — see that function's own comment for the full root-cause
           // story. A single-page image call can't have a CROSS-page duplicate, but the identical
