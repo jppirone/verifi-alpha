@@ -2439,7 +2439,12 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
   const { error: pdfStatusErr } = await supabase.from("resume_documents")
     .update({ extraction_status: "extracted", extracted_at: new Date().toISOString(), extraction_lease_until: null }).eq("id", docId);
   if (pdfStatusErr) return jsonResponse({ ok: false, error: "status_update_failed", detail: pdfStatusErr.message }, 500);
-  await supabase.from("resume_extraction_pages").delete().eq("resume_document_id", docId); // scratch space; best-effort
+  // Gap #23 residual follow-up (2026-09-27): no longer deleted here. Still scratch space -- the merged
+  // result above is the real record -- but immediate deletion made the raw per-page extraction (position
+  // values included) permanently unrecoverable the instant a resume finished, which is exactly what blocked
+  // investigating a real, reported same-page cross-category ordering bug. Now swept on a 7-day retention
+  // window instead (cleanup_expired_resume_extraction_pages, 20260927040000_resume_extraction_pages_retention_window.sql)
+  // -- long enough to investigate a freshly-reported case, not kept indefinitely.
 
   const { data: signedPdf } = await supabase.storage.from(BUCKET).createSignedUrl(originalPath, 3600);
   return jsonResponse({
