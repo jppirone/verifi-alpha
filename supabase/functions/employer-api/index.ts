@@ -137,6 +137,50 @@ async function captureGuestHoldLocal(p: { id: string; stripe_payment_intent_id?:
   }
   return false;
 }
+// Copy-accuracy-audit follow-up, item 17 (2026-09-27): closes a real stuck state. Until now, an approved
+// pay-per-use request that never got a hold (the employer never finished start_card_setup before
+// place_hold_on_approval ran once, automatically, at approval -- or that one attempt failed) had NO way
+// forward: "Add a card" only ever rendered pre-approval (showAddCard's old condition), and even if a card
+// were added late, nothing ever re-attempted the hold -- place_hold_on_approval is itself a strict
+// one-shot (hold_attempted_at blocks any second call, by design, for the UNATTENDED automatic path).
+//
+// Unlike that automatic path, THIS one runs only when the employer is actively here, clicking Open, well
+// after approval -- there is no reason to place a hold now and defer the charge again; charge directly
+// (capture_method: automatic) the moment a usable card exists. On success this inserts the employer_payments
+// row already 'paid', mirroring captureGuestHoldLocal's own markPaid() above; the real payment_intent.succeeded
+// webhook (employer-stripe-events.ts, markGuestPaid) still fires from Stripe's side regardless of which of our
+// own code paths triggered it, and is idempotent against a status that has already moved past created/failed/
+// authorized (its own UPDATE clause), so it just backfills receipt_url/stripe_charge_id and sends the receipt --
+// exactly the same idempotent-backfill relationship captureGuestHoldLocal's synchronous markPaid() already has
+// with that webhook, not a new pattern. Never throws for an ordinary decline/SCA-required outcome -- returns
+// false and open_paid_comparison's own RPC call falls back to its existing 'payment_required' error, unchanged.
+async function chargeGuestNow(requestId: string, reqRow: { stripe_customer_id?: string | null; stripe_payment_method_id?: string | null; requester_email: string; requester_company?: string | null; kind?: string | null; lookup_id?: string | null }): Promise<boolean> {
+  if (!reqRow.stripe_customer_id || !reqRow.stripe_payment_method_id) return false;
+  const price = (await rows("employer_pricing?key=eq.guest_comparison&select=amount_cents,currency"))?.[0];
+  if (!price || !(price.amount_cents > 0)) return false;
+  const label = reqRow.lookup_id ? (await rows(`employer_lookup_requests?id=eq.${reqRow.lookup_id}&select=candidate_label`))?.[0]?.candidate_label || null : null;
+  const tokenHash = await sha256Hex(Array.from(crypto.getRandomValues(new Uint8Array(32))).map((b) => b.toString(16).padStart(2, "0")).join(""));
+  const insP = await rest("employer_payments", {
+    method: "POST", headers: { "Prefer": "return=representation" },
+    body: JSON.stringify({ amount_cents: price.amount_cents, currency: price.currency, payer_email: reqRow.requester_email, access_token_hash: tokenHash, comparison_request_id: requestId, request_kind: reqRow.kind || "resume_comparison", requester_company: reqRow.requester_company || null, candidate_label: label }),
+  });
+  if (!insP.ok) return false;
+  const pay = (await insP.json())?.[0];
+  if (!pay) return false;
+  const form: Record<string, string> = {
+    amount: String(price.amount_cents), currency: price.currency, customer: reqRow.stripe_customer_id, payment_method: reqRow.stripe_payment_method_id,
+    off_session: "true", confirm: "true", capture_method: "automatic",
+    description: reqRow.kind === "license_report" ? "Verifi license status report (one-time view)" : "Verifi comparison access (one-time view)",
+  };
+  for (const [k, v] of Object.entries({ product: "employer_guest_comparison", payment_id: pay.id, comparison_request_id: requestId, kind: reqRow.kind || "resume_comparison" })) form[`metadata[${k}]`] = v;
+  const pi = await stripe("POST", "/v1/payment_intents", form, `employer-guest-latecharge-${pay.id}`);
+  if (pi.ok && pi.data?.status === "succeeded") {
+    await rest(`employer_payments?id=eq.${pay.id}&status=eq.created`, { method: "PATCH", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ status: "paid", paid_at: new Date().toISOString(), stripe_payment_intent_id: pi.data.id }) });
+    return true;
+  }
+  await rest(`employer_payments?id=eq.${pay.id}`, { method: "PATCH", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ status: "failed", stripe_payment_intent_id: pi.data?.id || null }) });
+  return false;
+}
 // A live subscription whose last renewal could not be charged: lookups are paused until it is paid (see employer-stripe-events).
 const PAYMENT_PROBLEM_STATUSES = ["past_due", "unpaid"];
 async function hasPaymentProblem(orgId: string): Promise<boolean> {
@@ -937,7 +981,7 @@ const ACTIONS: Record<string, Action> = {
     access: "any",
     run: async ({ user, p }) => {
       if (typeof p.request_id !== "string" || !UUID.test(p.request_id)) return fail(400, "request_id_invalid");
-      const r = (await rows(`comparison_requests?id=eq.${p.request_id}&employer_user_id=eq.${user.id}&access_method=eq.guest&select=id,candidate_id,status,first_delivered_at,view_window_ends_at`))?.[0];
+      const r = (await rows(`comparison_requests?id=eq.${p.request_id}&employer_user_id=eq.${user.id}&access_method=eq.guest&select=id,candidate_id,status,first_delivered_at,view_window_ends_at,stripe_customer_id,stripe_payment_method_id,requester_email,requester_company,kind,lookup_id`))?.[0];
       if (!r) return fail(404, "not_found");
       const now = Date.now();
       const windowOpen = !!r.first_delivered_at && r.status === "approved" && !!r.view_window_ends_at && new Date(r.view_window_ends_at).getTime() > now;
@@ -945,6 +989,11 @@ const ACTIONS: Record<string, Action> = {
         const ps = await rows(`employer_payments?comparison_request_id=eq.${r.id}&select=id,status,stripe_payment_intent_id,refunded_at&order=created_at.desc`);
         const authorized = ps.find((py) => py.status === "authorized" && !py.refunded_at);
         if (authorized) await captureGuestHoldLocal(authorized);
+        // Item 17: no hold exists at all (never placed, or a prior attempt failed) -- if a card is on file
+        // now, charge directly rather than leaving this stuck (see chargeGuestNow's own header comment).
+        else if (r.status === "approved" && !ps.some((py) => py.status === "paid" && !py.refunded_at)) {
+          await chargeGuestNow(r.id, r);
+        }
       }
       const rr = await rest("rpc/open_paid_comparison", { method: "POST", body: JSON.stringify({ p_request_id: p.request_id, p_employer_user: user.id }) });
       if (!rr.ok) return fail(500, "request_failed");

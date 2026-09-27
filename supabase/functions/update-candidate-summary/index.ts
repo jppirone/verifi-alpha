@@ -66,6 +66,19 @@ async function authGateCandidate(req: Request, body: any): Promise<Response | nu
   if (cid && await authIsCandidateSession(body, cid)) return null;
   return UNAUTHORIZED();
 }
+// Copy-accuracy-audit follow-up, item 18 (2026-09-27): editing a summary version (including the one
+// auto-seeded row a free-tier candidate has) is a paid-tier feature -- Content Manager's free-tier
+// preview copy says "the responsibilities as first submitted... free accounts get one summary" (i.e.
+// unedited). Until now this was enforced only by hiding the edit UI client-side. Matches apply_
+// customization_ops' own tier check, duplicated here since this endpoint doesn't go through that RPC.
+async function requirePaidTier(candidateId: string): Promise<boolean> {
+  const r = await fetch(`${AUTH_SB_URL}/rest/v1/candidates?id=eq.${candidateId}&select=tier`, {
+    headers: { "apikey": AUTH_SB_KEY, "Authorization": `Bearer ${AUTH_SB_KEY}` },
+  });
+  const row = r.ok ? (await r.json())[0] : null;
+  return !!row && row.tier === "paid";
+}
+const TIER_REQUIRED = () => new Response(JSON.stringify({ ok: false, error: "tier_required" }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
 export default {
   fetch: withSupabase({ auth: "none" }, async (req, _ctx) => {
@@ -82,6 +95,7 @@ export default {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
+      if (!(await requirePaidTier(candidate_id))) return TIER_REQUIRED();
 
       if (typeof content === "string" && content.length > 4000) {
         return new Response(JSON.stringify({ ok: false, error: "content_too_long", max: 4000 }), { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } });

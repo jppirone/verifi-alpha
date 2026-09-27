@@ -57,6 +57,21 @@ async function authGateCandidate(req: Request, body: any): Promise<Response | nu
   if (cid && await authIsCandidateSession(body, cid)) return null;
   return UNAUTHORIZED();
 }
+// Copy-accuracy-audit follow-up, item 18 (2026-09-27): named summary versions are a paid-tier feature
+// (Content Manager's own copy: "keep as many named summary versions as you want" on paid, "one summary"
+// on free) -- but until now that was enforced only by hiding the "+ New Summary" button client-side. A
+// free-tier session with a valid session_token could call this endpoint directly and get the paid
+// behavior anyway. Matches apply_customization_ops' own tier check (SQL: `if c.tier is distinct from
+// 'paid' then raise exception 'tier_required'`), duplicated here per this project's per-function
+// convention since this endpoint doesn't go through that RPC at all.
+async function requirePaidTier(candidateId: string): Promise<boolean> {
+  const r = await fetch(`${AUTH_SB_URL}/rest/v1/candidates?id=eq.${candidateId}&select=tier`, {
+    headers: { "apikey": AUTH_SB_KEY, "Authorization": `Bearer ${AUTH_SB_KEY}` },
+  });
+  const row = r.ok ? (await r.json())[0] : null;
+  return !!row && row.tier === "paid";
+}
+const TIER_REQUIRED = () => new Response(JSON.stringify({ ok: false, error: "tier_required" }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
 export default {
   fetch: withSupabase({ auth: "none" }, async (req, _ctx) => {
@@ -73,6 +88,7 @@ export default {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
+      if (!(await requirePaidTier(candidate_id))) return TIER_REQUIRED();
 
       if (typeof content === "string" && content.length > 4000) {
         return new Response(JSON.stringify({ ok: false, error: "content_too_long", max: 4000 }), { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } });

@@ -374,7 +374,10 @@ async function sendCorrectionNotices(supabase: any, candidateId: string): Promis
       return { label: [cert.name || "your license", cert.license_number ? `Lic #${cert.license_number}` : ""].filter(Boolean).join(", "), message: c.correction_message || "" };
     });
 
-    const tab = cand.account_type === "license_only" ? "License Status" : "Verification Status";
+    // Matches candidate.html's real verificationTabLabel binding: a license_only account's tab is
+    // literally labeled "Validation" on screen, never "License Status" (copy-accuracy fix, 2026-09-27 --
+    // the old string sent candidates looking for a tab name that doesn't exist).
+    const tab = cand.account_type === "license_only" ? "Validation" : "Verification Status";
     const intro = entries.length === 1
       ? `<p>We couldn't verify your license <strong>${escHtml(entries[0].label)}</strong>. ${escHtml(entries[0].message)}</p>`
       : `<p>We couldn't verify ${entries.length} of your licenses:</p><ul>${entries.map((e: any) => `<li><strong>${escHtml(e.label)}</strong> — ${escHtml(e.message)}</li>`).join("")}</ul>`;

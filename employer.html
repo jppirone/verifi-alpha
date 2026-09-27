@@ -2392,8 +2392,8 @@ const __ds_scope = {};
          lookup is never a dead end that leaves no trace in the account it now persists a session for. -->
     <sc-if value="{{ acctNoOrg }}" hint-placeholder-val="{{ true }}">
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
-        <div class="card-kicker">Your lookups</div>
-        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Every existence check you've run, signed in with {{ acctEmail }}, whether or not it found a match. A match stays reachable to request here for 30 days.</div>
+        <div class="card-kicker">Your lookups (last 30 days, matched)</div>
+        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Existence checks that found a match, run with {{ acctEmail }} in the last 30 days. A match stays reachable to request here for 30 days.</div>
         <div style="display:flex;flex-direction:column;gap:var(--space-2);align-items:flex-start">
           <button type="button" id="acct-check-candidate-noorg" class="btn btn-secondary" sc-camel-on-click="{{ checkCandidateFromAccount }}">Check a candidate</button>
         </div>
@@ -2771,7 +2771,7 @@ const __ds_scope = {};
         <div style="font-size:13px;color:var(--color-neutral-200);line-height:1.6"><b>Before you upload</b></div>
         <ul style="margin:0;padding-left:18px;font-size:12px;color:var(--color-neutral-300);line-height:1.7">
           <li>The candidate will be able to see this exact file, if this goes through.</li>
-          <li>It is stored for 21 days from your request, then deleted.</li>
+          <li>{{ directDocRetentionNote }}</li>
           <li>It should be your own copy of the candidate's resume or application, containing nothing about other people.</li>
         </ul>
         <label style="display:flex;gap:var(--space-2);align-items:flex-start;font-size:12px;color:var(--color-neutral-300);line-height:1.6">
@@ -3107,7 +3107,7 @@ const __ds_scope = {};
           <div style="font-size:13px;color:var(--color-neutral-200);line-height:1.6"><b>Before you upload</b></div>
           <ul style="margin:0;padding-left:18px;font-size:12px;color:var(--color-neutral-300);line-height:1.7">
             <li>The candidate will be able to see this exact file.</li>
-            <li>It is stored for 21 days from your request, then deleted.</li>
+            <li>It's normally kept for up to 21 days from your request, then deleted -- sooner if the request is declined or expires first.</li>
             <li>It should be your own copy of the candidate's resume or application, containing nothing about other people.</li>
           </ul>
           <label style="display:flex;gap:var(--space-2);align-items:flex-start;font-size:12px;color:var(--color-neutral-300);line-height:1.6">
@@ -3143,7 +3143,7 @@ const __ds_scope = {};
           <div style="font-size:13px;color:var(--color-neutral-200);line-height:1.6"><b>Before you upload</b></div>
           <ul style="margin:0;padding-left:18px;font-size:12px;color:var(--color-neutral-300);line-height:1.7">
             <li>The candidate will be able to see this exact file.</li>
-            <li>It is stored for 21 days from your request, then deleted.</li>
+            <li>It's normally kept for up to 21 days from your request, then deleted -- sooner if the request is declined or expires first.</li>
             <li>It should be your own copy of the candidate's resume or application, containing nothing about other people.</li>
           </ul>
           <label style="display:flex;gap:var(--space-2);align-items:flex-start;font-size:12px;color:var(--color-neutral-300);line-height:1.6">
@@ -3184,7 +3184,7 @@ const __ds_scope = {};
           <div style="font-size:13px;color:var(--color-neutral-200);line-height:1.6"><b>Before you upload</b></div>
           <ul style="margin:0;padding-left:18px;font-size:12px;color:var(--color-neutral-300);line-height:1.7">
             <li>The candidate will be able to see this exact file.</li>
-            <li>It is stored for 21 days from your request, then deleted.</li>
+            <li>It's kept for as long as the request stays open -- normally up to 105 days if this becomes a resume comparison, or up to 45 days for a license report -- and deleted once the request is declined or expires.</li>
             <li>It should be your own copy of the candidate's resume or application, containing nothing about other people.</li>
           </ul>
           <label style="display:flex;gap:var(--space-2);align-items:flex-start;font-size:12px;color:var(--color-neutral-300);line-height:1.6">
@@ -5046,6 +5046,13 @@ class Component extends DCLogic {
       // candidate identity + attestation + document + consent, no prior existence check.
       directUsesOrg: this.orgFormOk(),
       directUsesGuest: !this.orgFormOk(),
+      // Copy-accuracy fix (2026-09-27): this screen doesn't know the candidate's kind (resume_comparison
+      // vs license_report) before submission -- create_comparison_request_direct resolves that server-side
+      // with no prior lookup -- so this states both real purge_after ceilings rather than picking one, and
+      // is honest that deletion is triggered by the request reaching a terminal status, not a fixed clock.
+      directDocRetentionNote: this.orgFormOk()
+        ? "It's kept for as long as the request stays open -- normally up to 105 days if this becomes a resume comparison, or up to 45 days for a license report -- and deleted once the request is declined or expires."
+        : "It's normally kept for up to 21 days from your request, then deleted -- sooner if the request is declined or expires first.",
       directIncomplete: s.reqBusy
         || (s.candNameInput || '').trim().split(/\s+/).filter(Boolean).length < 2
         || !((s.candEmailInput || '').trim() || (s.candPhoneInput || '').trim())
@@ -5198,7 +5205,14 @@ class Component extends DCLogic {
       myPaidRows: (s.myPaidComparisons || []).map((c) => ({
         id: c.id, label: c.candidate_label, requestedLabel: this.fmtDate(c.requested_at),
         statusLabel: this.paidComparisonStatusLabel(c),
-        canOpen: !!c.can_open, showAddCard: c.status === 'awaiting_candidate' && !c.card_saved,
+        canOpen: !!c.can_open,
+        // Item 17 fix (2026-09-27): was pre-approval only, which stranded an approved request with no
+        // successful hold (never saved a card in time, or the one automatic attempt failed) -- clicking
+        // Open just errored with no path forward. 'holding' (an authorized hold, captured on open) and
+        // 'held' (already paid) both need no card; every other hold_state on a 'ready' request means
+        // opening it will fail without one, matching what open_paid_comparison can now actually recover
+        // from by charging directly (chargeGuestNow) once a card exists.
+        showAddCard: (c.status === 'awaiting_candidate' && !c.card_saved) || (c.status === 'ready' && c.hold_state !== 'holding' && c.hold_state !== 'held'),
         onOpen: () => this.openMyPaidComparison(c.id), onAddCard: () => this.addCardForRequest(c.id),
       })),
       lookupRows: lookupRowsFor('acct'),

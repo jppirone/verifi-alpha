@@ -56,6 +56,17 @@ async function authGateCandidate(req: Request, body: any): Promise<Response | nu
   if (cid && await authIsCandidateSession(body, cid)) return null;
   return UNAUTHORIZED();
 }
+// Copy-accuracy-audit follow-up, item 18 (2026-09-27): matches create/update-candidate-summary's own
+// new tier check (see either's own header) and apply_customization_ops' own precedent of gating every
+// op uniformly, including reset, for a non-paid tier -- same treatment here, not a new inconsistency.
+async function requirePaidTier(candidateId: string): Promise<boolean> {
+  const r = await fetch(`${AUTH_SB_URL}/rest/v1/candidates?id=eq.${candidateId}&select=tier`, {
+    headers: { "apikey": AUTH_SB_KEY, "Authorization": `Bearer ${AUTH_SB_KEY}` },
+  });
+  const row = r.ok ? (await r.json())[0] : null;
+  return !!row && row.tier === "paid";
+}
+const TIER_REQUIRED = () => new Response(JSON.stringify({ ok: false, error: "tier_required" }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
 export default {
   fetch: withSupabase({ auth: "none" }, async (req, _ctx) => {
@@ -72,6 +83,7 @@ export default {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
+      if (!(await requirePaidTier(candidate_id))) return TIER_REQUIRED();
 
       const res = await fetch(
         `${SUPABASE_URL}/rest/v1/candidate_summary_versions?id=eq.${encodeURIComponent(id)}&candidate_id=eq.${encodeURIComponent(candidate_id)}`,

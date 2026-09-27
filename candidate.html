@@ -2801,7 +2801,7 @@ a:hover{color:var(--color-accent)}
   <div class="tag tag-outline">Step 1 of 3</div>
   <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:24px;margin:0">Identity verification</h1>
   <div class="card elev-sm" style="width:100%;padding:var(--space-6);text-align:left;display:flex;flex-direction:column;gap:var(--space-3)">
-    <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.5">You're being redirected to complete identity verification with our verification partner. This is required before you can track a license on this path.</div>
+    <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.5">This step will verify your identity with a verification partner once that integration is live. In this alpha it's a placeholder for testing: nothing is actually verified yet, and continuing below does not check who you are.</div>
     <div style="border:1px dashed var(--color-divider);border-radius:var(--radius-md);padding:var(--space-6);text-align:center;font-size:12px;color:var(--color-neutral-500)">generic identity-verification vendor placeholder</div>
   </div>
   <button type="button" class="btn btn-primary btn-block" sc-camel-on-click="{{ confirmLicenseKyc }}">Simulate verification complete</button>
@@ -3228,7 +3228,7 @@ a:hover{color:var(--color-accent)}
                     <option value="{{ opt.code }}">{{ opt.label }}</option>
                   </sc-for>
                 </sc-raw-select>
-                <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6;margin-top:var(--space-1)">Used to route this license to the right licensing board for automated checks. If left blank, this license is sent for manual review instead.</div>
+                <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6;margin-top:var(--space-1)">Helps our team route this for a closer look if it needs one. If left blank on a license you've opted into Certifications verification for (or one we couldn't match to your document), it may be sent for manual review instead of an automated check.</div>
               </div>
               <div class="field">
                 <label>Issuing state <span style="font-weight:400;color:var(--color-neutral-500)">(optional to continue — required for automatic verification)</span></label>
@@ -4045,7 +4045,7 @@ a:hover{color:var(--color-accent)}
             <sc-if value="{{ resubCanStart }}" hint-placeholder-val="{{ false }}">
               <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;align-items:center">
                 <button type="button" class="btn btn-primary" id="resub-start" sc-camel-on-click="{{ openResubAck }}">Update my resume</button>
-                <span style="font-size:11px;color:var(--color-neutral-500)">Up to 3 updates a day.</span>
+                <span style="font-size:11px;color:var(--color-neutral-500)">Up to 3 updates a day, and 10 in any 30-day period.</span>
               </div>
             </sc-if>
           </div>
@@ -4054,7 +4054,7 @@ a:hover{color:var(--color-accent)}
         <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
           <div class="card-kicker">Email</div>
           <div style="font-size:14px">{{ accountEmail }}</div>
-          <div style="font-size:12px;color:var(--color-neutral-500)">Changing your email is a separate, protected flow, not an inline edit here. It requires re-authenticating, confirming the new address, and notifies the old one.</div>
+          <div style="font-size:12px;color:var(--color-neutral-500)">Not available yet in this alpha -- there is no way to change your login email at this time.</div>
           <button type="button" class="btn btn-secondary" style="align-self:flex-start" sc-camel-on-click="{{ noop }}">Change email</button>
         </div>
 
@@ -4071,7 +4071,7 @@ a:hover{color:var(--color-accent)}
                sit here (four buttons resetting contact state to hardcoded fake scenarios) is gone —
                removed entirely, not left dormant. See seedContactFromAccount's own header. -->
           <sc-if value="{{ isFullResumeAccount }}" hint-placeholder-val="{{ true }}">
-          <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Two separate things live here: the values printed on your resume and delivered to partners, and the values we have independently verified. They do not have to match. A verified value is only ever sent if you put it in a printed field yourself.</div>
+          <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Two separate things live here: the values printed on your resume and delivered to downstream recipients, and the values we have independently verified. They do not have to match. A verified value is only ever sent if you put it in a printed field yourself.</div>
           </sc-if>
           <sc-if value="{{ isLicenseOnlyAccount }}" hint-placeholder-val="{{ false }}">
           <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">The email address you log in with, and a phone number you can confirm with a code. We use these to reach you about your licenses.</div>
@@ -4084,7 +4084,7 @@ a:hover{color:var(--color-accent)}
               <input class="input" id="pf-printed-phone" placeholder="+1 (___) ___-____" value="{{ printedPhone }}" disabled="{{ printedContactLocked }}" sc-camel-on-change="{{ setPrintedPhone }}">
             </div>
             <sc-if value="{{ printedPhoneHasValue }}" hint-placeholder-val="{{ true }}">
-              <div style="font-size:12px;color:var(--color-accent-300);line-height:1.6">This number will appear on any resume generated from this system and will be sent to every downstream partner.</div>
+              <div style="font-size:12px;color:var(--color-accent-300);line-height:1.6">This number will appear on any resume generated from this system and will be sent to every downstream recipient.</div>
             </sc-if>
             <sc-if value="{{ printedPhoneDiffersFromResume }}" hint-placeholder-val="{{ false }}">
               <div style="display:flex;flex-direction:column;gap:6px;padding:var(--space-3);border:1px solid var(--color-neutral-800);border-radius:var(--radius-md)">
@@ -4108,7 +4108,7 @@ a:hover{color:var(--color-accent)}
               <input class="input" id="pf-phone" placeholder="+1 (___) ___-____" value="{{ verifiedPhoneEntry }}" sc-camel-on-change="{{ setVerifiedPhoneEntry }}">
             </div>
             <sc-if value="{{ verifiedPhoneEditedFullResume }}" hint-placeholder-val="{{ false }}">
-              <div style="font-size:12px;color:var(--color-accent-300);line-height:1.6">This number will not be printed or delivered if a Printed Number is present above. Downstream partners will still be told a verified number is on file, without disclosing what it is.</div>
+              <div style="font-size:12px;color:var(--color-accent-300);line-height:1.6">This number will not be printed or delivered if a Printed Number is present above. Downstream recipients will still be told a verified number is on file, without disclosing what it is.</div>
             </sc-if>
             <div style="display:flex;align-items:center;gap:var(--space-3)">
               <sc-if value="{{ phoneSendDisabled }}" hint-placeholder-val="{{ true }}">
@@ -4131,7 +4131,7 @@ a:hover{color:var(--color-accent)}
 
             <sc-if value="{{ isFullResumeAccount }}" hint-placeholder-val="{{ true }}">
             <div style="display:flex;flex-direction:column;gap:6px;padding:var(--space-3);border:1px solid var(--color-neutral-800);border-radius:var(--radius-md)">
-              <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">What partners receive, phone</div>
+              <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">What recipients receive, phone</div>
               <sc-if value="{{ phoneDeliveryVerified }}" hint-placeholder-val="{{ false }}">
                 <div style="display:flex;align-items:center;gap:8px;font-size:13px"><span class="tag tag-accent">Confirmed (simulated)</span> <span>{{ printedPhone }}</span></div>
               </sc-if>
@@ -4139,7 +4139,7 @@ a:hover{color:var(--color-accent)}
                 <div style="display:flex;align-items:center;gap:8px;font-size:13px"><span class="tag tag-outline">Candidate-stated</span> <span>{{ printedPhone }}</span></div>
                 <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Sent as you stated it, not independently verified.</div>
                 <sc-if value="{{ phoneVerifiedOnFile }}" hint-placeholder-val="{{ false }}">
-                  <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Partners are also told a verified number exists privately on file, without its value.</div>
+                  <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Recipients are also told a verified number exists privately on file, without its value.</div>
                 </sc-if>
               </sc-if>
               <sc-if value="{{ phoneDeliveryPrivate }}" hint-placeholder-val="{{ false }}">
@@ -4157,7 +4157,7 @@ a:hover{color:var(--color-accent)}
               <input class="input" id="pf-printed-email" placeholder="you@email.com" value="{{ printedEmail }}" disabled="{{ printedContactLocked }}" sc-camel-on-change="{{ setPrintedEmail }}">
             </div>
             <sc-if value="{{ printedEmailEdited }}" hint-placeholder-val="{{ false }}">
-              <div style="font-size:12px;color:var(--color-accent-300);line-height:1.6">This email will appear on any resume generated from this system and will be sent to every downstream partner.</div>
+              <div style="font-size:12px;color:var(--color-accent-300);line-height:1.6">This email will appear on any resume generated from this system and will be sent to every downstream recipient.</div>
             </sc-if>
             <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Editable at any time. What you save here is what your resume PDF and any licensed feed print; leaving it empty prints no address.</div>
             <sc-if value="{{ printedContactLocked }}" hint-placeholder-val="{{ false }}">
@@ -4186,13 +4186,13 @@ a:hover{color:var(--color-accent)}
 
             <sc-if value="{{ isFullResumeAccount }}" hint-placeholder-val="{{ true }}">
             <div style="display:flex;flex-direction:column;gap:6px;padding:var(--space-3);border:1px solid var(--color-neutral-800);border-radius:var(--radius-md)">
-              <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">What partners receive, email</div>
+              <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">What recipients receive, email</div>
               <sc-if value="{{ emailDeliveryVerified }}" hint-placeholder-val="{{ false }}">
                 <div style="display:flex;align-items:center;gap:8px;font-size:13px"><span class="tag tag-accent">Verified</span> <span>{{ printedEmail }}</span></div>
               </sc-if>
               <sc-if value="{{ emailDeliveryStated }}" hint-placeholder-val="{{ false }}">
                 <div style="display:flex;align-items:center;gap:8px;font-size:13px"><span class="tag tag-outline">Candidate-stated</span> <span>{{ printedEmail }}</span></div>
-                <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Sent as you stated it, not independently verified. Partners are also told a verified email exists privately on file, without its value.</div>
+                <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Sent as you stated it, not independently verified. Recipients are also told a verified email exists privately on file, without its value.</div>
               </sc-if>
               <sc-if value="{{ emailDeliveryPrivate }}" hint-placeholder-val="{{ true }}">
                 <div style="font-size:13px;color:var(--color-neutral-300)">Valid email on file: yes, private</div>
@@ -4240,7 +4240,7 @@ a:hover{color:var(--color-accent)}
         <sc-if value="{{ isFullResumeAccount }}" hint-placeholder-val="{{ true }}">
         <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
           <div class="card-kicker">Document header on generated files</div>
-          <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Choose which version of your header we use when we generate a resume or share your profile with a partner.</div>
+          <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Choose which version of your header we use when we generate a resume or share your profile with a recipient.</div>
           <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;color:var(--color-neutral-300);cursor:pointer">
             <input type="radio" name="header-display-mode" checked="{{ headerModeIsPrinted }}" sc-camel-on-change="{{ selectHeaderModePrinted }}" style="margin-top:2px">
             <span>Use my document as printed<br><span style="font-size:12px;color:var(--color-neutral-500)">Reproduces your document exactly, including any suffix or middle name.</span></span>
@@ -4267,7 +4267,7 @@ a:hover{color:var(--color-accent)}
         <sc-if value="{{ showCrossValidationPromptFullResume }}" hint-placeholder-val="{{ false }}">
           <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
             <div class="card-kicker">Confirm both channels</div>
-            <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">Now that your phone number is confirmed, you can cross-validate it with your email in one step: a code sent to your email confirms your phone number, and a code sent via SMS confirms your email address, proving you control both. Optional here; it will only be required later, right before enabling a downstream feed on the Sharing tab.</div>
+            <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">Now that your phone number is confirmed, you can cross-validate it with your email in one step. In this alpha this step is simulated: no code is actually sent to either channel, so it does not prove you control both. Optional here; it will only be asked for later, right before enabling a downstream feed on the Sharing tab.</div>
             <div style="display:flex;gap:var(--space-2)">
               <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ openCrossValidation }}">Confirm both channels now</button>
               <button type="button" class="btn btn-ghost" sc-camel-on-click="{{ skipCrossValidationPrompt }}">Skip for now</button>
@@ -4284,18 +4284,6 @@ a:hover{color:var(--color-accent)}
             <input type="checkbox" checked="{{ notifyEmail }}" sc-camel-on-change="{{ toggleNotifyEmail }}" style="margin-top:2px">
             <span>Email system messages<br><span style="font-size:12px;color:var(--color-neutral-500)">Sent to the email used to sign up.</span></span>
           </label>
-          <sc-if value="{{ notifySmsDisabled }}" hint-placeholder-val="{{ true }}">
-            <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;color:var(--color-neutral-500);cursor:not-allowed">
-              <input type="checkbox" disabled="disabled" style="margin-top:2px">
-              <span>SMS system messages<br><span style="font-size:12px;color:var(--color-neutral-500)">Verify your phone number above to enable this option.</span></span>
-            </label>
-          </sc-if>
-          <sc-if value="{{ notifySmsEnabled }}" hint-placeholder-val="{{ false }}">
-            <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;color:var(--color-neutral-300);cursor:pointer">
-              <input type="checkbox" checked="{{ notifySms }}" sc-camel-on-change="{{ toggleNotifySms }}" style="margin-top:2px">
-              <span>SMS system messages</span>
-            </label>
-          </sc-if>
         </div>
 
         <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
@@ -4370,11 +4358,6 @@ a:hover{color:var(--color-accent)}
           </div>
         </sc-if>
 
-        <sc-if value="{{ showNotifyNote }}" hint-placeholder-val="{{ true }}">
-          <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6;border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:var(--space-3)">
-            Don't want to keep checking back? Verify your phone number and opt in to system messages, and we'll text you specifically when a status changes here, nothing else. Entirely optional. <a href="#" sc-camel-on-click="{{ goVerifyPhoneFromNote }}">Verify a phone number</a>
-          </div>
-        </sc-if>
 
         <div style="display:flex;gap:var(--space-3);align-items:center;flex-wrap:wrap">
           <div class="seg" style="align-self:flex-start">
@@ -4695,7 +4678,7 @@ a:hover{color:var(--color-accent)}
         </div>
 
         <div style="font-size:11px;color:var(--color-neutral-600);line-height:1.6">
-          Your name always appears and can't be turned off. Your phone and email appear only if you've chosen to print one on Profile Info — including the option to print your system-verified number or email instead of typing a different one, available on every plan, free or paid. Flagged content is included by default, tagged as not independently verified: untick a section below to leave it out, on a paid plan. Write and name summary versions on the Content Manager tab.
+          Your name always appears and can't be turned off. Printing a phone or email on your resume -- including the option to print your system-verified number or email instead of typing a different one -- is part of customization, which is on paid plans; on a free plan they stay private. Flagged content is included by default, tagged as not independently verified: untick a section below to leave it out, on a paid plan. Write and name summary versions on the Content Manager tab.
         </div>
 
         <div class="card elev-sm" style="display:flex;flex-direction:column;gap:2px;opacity:0.7">
@@ -5466,7 +5449,7 @@ a:hover{color:var(--color-accent)}
             </sc-raw-tbody>
           </sc-raw-table>
         </div>
-        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Download a record of your account's activity as a CSV: your license checks, the correction emails we sent you, name changes, and employer lookups that matched you. For each license it has its latest state and the check results recorded for it, not every intermediate attempt. There is no on-screen table, just a date-ranged download.</div>
+        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Download a record of your account's activity as a CSV: your license checks, the correction emails we sent you, name changes, employer lookups that matched you, and account milestones (sign-up, identity verification step, phone confirmation, subscription start). For each license it has its latest state and the check results recorded for it, not every intermediate attempt. There is no on-screen table, just a date-ranged download.</div>
         <div style="display:flex;gap:var(--space-4);flex-wrap:wrap;align-items:flex-end">
           <div class="field" style="max-width:200px">
             <label for="la-start">From (optional)</label>
@@ -6057,7 +6040,7 @@ a:hover{color:var(--color-accent)}
       <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="printed-phone-prompt-title">
         <div class="dialog-title" id="printed-phone-prompt-title">Use this as your Printed Number too?</div>
         <div class="dialog-body">
-          {{ confirmedPhoneNumber }} is verified. Your Printed Number is empty. Putting it there prints it on your resume and sends it to downstream partners. Leaving it empty sends no number.
+          {{ confirmedPhoneNumber }} is verified. Your Printed Number is empty. Putting it there prints it on your resume and sends it to downstream recipients. Leaving it empty sends no number.
         </div>
         <div class="dialog-actions">
           <button type="button" class="btn btn-ghost" sc-camel-on-click="{{ declinePrintedPhonePrompt }}">Leave empty</button>
@@ -6110,10 +6093,10 @@ a:hover{color:var(--color-accent)}
         </sc-if>
         <sc-if value="{{ cvReadyForCrossValidation }}" hint-placeholder-val="{{ false }}">
         <div class="dialog-body">
-          A code sent to your email confirms your phone number, and a code sent via SMS confirms your email address, proving one person controls both. This is separate from, and in addition to, identity verification.
+          In this alpha, this step is simulated: no code is actually sent to your email or by SMS, and entering anything below marks both as confirmed regardless of what you type. It does not prove you control either channel. This is separate from, and in addition to, identity verification.
         </div>
         <div class="field">
-          <label for="cv-email-code">Code sent to {{ accountEmail }} (confirms your phone number)</label>
+          <label for="cv-email-code">Code field for {{ accountEmail }} (not actually sent -- enter anything)</label>
           <div style="display:flex;gap:var(--space-2);align-items:center">
             <input class="input" id="cv-email-code" placeholder="123456" value="{{ cvEmailCodeInput }}" sc-camel-on-change="{{ setCvEmailCodeInput }}" disabled="{{ cvEmailConfirmed }}">
             <sc-if value="{{ cvEmailConfirmed }}" hint-placeholder-val="{{ false }}"><span class="tag tag-accent" style="flex-shrink:0">Confirmed</span></sc-if>
@@ -6121,7 +6104,7 @@ a:hover{color:var(--color-accent)}
           </div>
         </div>
         <div class="field">
-          <label for="cv-sms-code">Code sent via SMS to {{ confirmedPhoneNumber }} (confirms your email address)</label>
+          <label for="cv-sms-code">Code field for SMS to {{ confirmedPhoneNumber }} (not actually sent -- enter anything)</label>
           <div style="display:flex;gap:var(--space-2);align-items:center">
             <input class="input" id="cv-sms-code" placeholder="123456" value="{{ cvSmsCodeInput }}" sc-camel-on-change="{{ setCvSmsCodeInput }}" disabled="{{ cvSmsConfirmed }}">
             <sc-if value="{{ cvSmsConfirmed }}" hint-placeholder-val="{{ false }}"><span class="tag tag-accent" style="flex-shrink:0">Confirmed</span></sc-if>
@@ -8512,7 +8495,7 @@ class Component extends DCLogic {
         ? 'Write your Summary versions, your Skills, and the responsibilities under each verified role here, then choose which Summary goes to each partner on the Customization tab.'
         : 'Editing responsibilities, skills, and multiple Summary versions is a paid feature; free accounts use the same single summary everywhere.' },
       { tab: 'contentManager', title: 'Skills', body: paid
-        ? 'Skills are individual fields, up to 15, delivered word for word: nothing is renamed, merged, or mapped to a standard term. Anything past 15 sits in the scratch box under the grid, which is never delivered and never appears in a generated view. Copy from it by hand if you want one of those terms sent.'
+        ? 'Skills are individual fields, delivered word for word: nothing is renamed, merged, or mapped to a standard term. You can keep up to 15, or as many as were originally on your resume if that’s more, whichever is larger. The scratch space under the grid is just a place to jot things down while you edit -- it’s never saved and never delivered. Copy anything you want kept into a skill field.'
         : 'Editing skills field by field is a paid feature; free accounts send the skills list exactly as it was first parsed.' },
       { tab: 'customization', title: 'Customization', body: paid ? 'Choose which resume categories (name, summary, experience, education, skills, certifications) that each of LinkedIn, Indeed, and Glassdoor receives.' : 'Content customization per recipient is a paid feature; free accounts send the same one document version to everyone.' },
       { tab: 'views', title: 'Views', body: paid ? 'Preview exactly what LinkedIn, Indeed, or Glassdoor will see, based on what you\u2019ve chosen on the Customization tab.' : 'See the one document version that\u2019s sent to everyone you share with.' },
@@ -8611,8 +8594,8 @@ class Component extends DCLogic {
       destination: 'The Activity tab logs exactly what was sent to which partner and when, with a downloadable audit trail.',
       prove_delivery: 'The Activity tab\u2019s export includes recipient acknowledgment status for every share, so you can confirm delivery yourself.',
       complicated: 'If a specific part of the account is confusing, Open AI chat below can walk through it.',
-      unverifiable: 'Verification Status shows the specific reason code behind each unable-to-verify item, and re-attempts are always free.',
-      verification_slow: 'Verification retries are candidate-initiated, free at every tier, with no scheduled wait. You can request one any time from Verification Status.',
+      unverifiable: 'Verification Status shows reason detail where it’s available (a Discrepancy or a license finding). If something needs a fresh look, resubmitting your resume is free at every tier.',
+      verification_slow: 'Resubmitting your resume -- free at every tier, with no scheduled wait -- is today’s way to trigger a fresh look. You can start one any time from Profile Info.',
       other: 'Thanks for sharing this. It\u2019s logged with your account.',
     };
     if (s.accountType === 'license_only') {

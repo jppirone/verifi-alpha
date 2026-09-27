@@ -486,7 +486,12 @@ async function noticeRequesterNotAuthorized(requestId: string): Promise<boolean>
   const ok = await sendEmail(
     r.requester_email,
     "Your Verifi comparison request was not authorized",
-    `<p>Hi ${esc(r.requester_name || "there")},</p><p>Your request to compare a candidate's record was <b>not authorized</b>, so no comparison is available and nothing was charged. That outcome reflects the candidate's own choice, which we do not control or influence, and we cannot share anything further about it.</p>`,
+    // Copy-accuracy fix (2026-09-27): this same email fires for THREE different causes -- an explicit
+    // decline, a 72h timeout with no action taken, or the candidate's account being deactivated (see
+    // employerStatus()'s own comment in employer-api.ts: "A candidate's decline, a timeout and a
+    // deactivation are all not_authorized"). The old copy said this "reflects the candidate's own choice"
+    // unconditionally, which is only true for the first of the three.
+    `<p>Hi ${esc(r.requester_name || "there")},</p><p>Your request to compare a candidate's record was <b>not authorized</b>, so no comparison is available and nothing was charged. This can happen because the candidate declined, took no action before the request's deadline, or is no longer active on Verifi -- we cannot share anything further about which.</p>`,
   );
   if (!ok) await rest(`comparison_requests?id=eq.${requestId}`, { method: "PATCH", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ requester_notified_at: null }) });
   return ok;
