@@ -608,6 +608,60 @@ async function discardAttemptDoc(cid: string, docId: string): Promise<{ ok: bool
   return { ok: true };
 }
 
+// Overlapping employment detection (2026-09-27): Design_Principles.docx P142 / Business_Model_Decision_
+// Log.docx Decision 40. Duplicated verbatim from confirm-resume-data's own copy (this codebase has no
+// shared-lib folder for edge functions -- confirmed before duplicating rather than assumed), so both
+// entry points agree on what counts as an overlap.
+//
+// There is no existing hook this can ride on: computePlan's own diff (matchWork/W.pairs[].cls) is
+// field-agnostic -- a "changed" pair does not specifically mean dates changed, it means SOME fact
+// conflicted, and an overlap can just as easily come from a brand-new ADDED job with no date change on
+// anything else at all. So this runs as its own dedicated pass over the profile computePlan already
+// matched, not as a special case bolted onto the matcher.
+function effectiveWorkEnd(endDate: string | null | undefined, endPrecision: unknown): string | null {
+  if (endPrecision === "present") return new Date().toISOString().slice(0, 10);
+  return typeof endDate === "string" && endDate ? endDate : null;
+}
+type OverlapItem = { id: string; start: string | null; end: string | null };
+// A pair is flagged when the overlapping span exceeds 30 days -- exactly 30 does not trigger (spec's own
+// test case), 31+ does. Every pair is returned in one pass; one hold per detection RUN, however many
+// pairs it finds (never one hold per pair).
+function detectWorkOverlaps(items: OverlapItem[]): Array<{ a: string; b: string; days: number }> {
+  const out: Array<{ a: string; b: string; days: number }> = [];
+  for (let i = 0; i < items.length; i++) {
+    for (let j = i + 1; j < items.length; j++) {
+      const a = items[i], b = items[j];
+      if (!a.start || !a.end || !b.start || !b.end) continue;
+      const aS = Date.parse(a.start), aE = Date.parse(a.end), bS = Date.parse(b.start), bE = Date.parse(b.end);
+      if (!Number.isFinite(aS) || !Number.isFinite(aE) || !Number.isFinite(bS) || !Number.isFinite(bE)) continue;
+      const overlapStart = Math.max(aS, bS), overlapEnd = Math.min(aE, bE);
+      if (overlapEnd <= overlapStart) continue;
+      const days = Math.round((overlapEnd - overlapStart) / 86400000);
+      if (days > 30) out.push({ a: a.id, b: b.id, days });
+    }
+  }
+  return out;
+}
+// The work-history set as it will exist AFTER this resubmission applies, built from computePlan's own
+// ctx without any extra query: kept pairs keep the ACTIVE row's dates (apply never touches a kept
+// item's dates -- see apply_resume_resubmission's own KEPT loop), changed pairs use the same merged
+// facts the plan's own new_claim is built from (the actual dates that will be written), added items use
+// their staged row's own dates, removed items are simply absent -- they leave the profile.
+function postApplyWorkItems(ctx: any): (OverlapItem & { row: Rec })[] {
+  const { aW, sW, W } = ctx;
+  const out: (OverlapItem & { row: Rec })[] = [];
+  for (const p of W.pairs) {
+    const o = aW[p.oldIdx], n = sW[p.newIdx];
+    const r = p.cls === "kept" ? o : mergeFacts("work", o, n, p.changes).merged;
+    out.push({ id: o.id, start: typeof r.start_date === "string" ? r.start_date : null, end: effectiveWorkEnd(r.end_date, r.end_date_precision), row: r });
+  }
+  for (const j of W.added) {
+    const n = sW[j];
+    out.push({ id: n.id, start: typeof n.start_date === "string" ? n.start_date : null, end: effectiveWorkEnd(n.end_date, n.end_date_precision), row: n });
+  }
+  return out;
+}
+
 async function computePlan(resub: any, doc: any): Promise<{ plan: any; fingerprint: string; ctx: any }> {
   const cid = resub.candidate_id, newDoc = doc.id;
   const confirmedDocs = (await rows(`resume_documents?candidate_id=eq.${cid}&confirmed_at=not.is.null&select=id`)).map((d) => d.id);
@@ -727,6 +781,17 @@ async function computePlan(resub: any, doc: any): Promise<{ plan: any; fingerpri
   plan.counts = { added: plan.added.length + plan.skills.added.length, kept: plan.kept.length + S.pairs.length, changed: plan.changed.length, removed: plan.removed.length + plan.skills.removed.length };
   plan.base_document_id = resub.base_document_id;
   plan.new_document_id = newDoc;
+
+  // Overlapping employment detection (2026-09-27): computed against the profile as it will exist AFTER
+  // this resubmission applies (postApplyWorkItems), so the candidate sees the same blocking modal at
+  // review time that apply will actually enforce -- not a preview that can disagree with the real gate.
+  // aLabel/bLabel (label.work already folds in the date range) let the review screen render this
+  // without a second lookup, the same way every other plan entry already carries its own label.
+  const postApplyWork = postApplyWorkItems({ aW, sW, W });
+  const postApplyWorkById = new Map(postApplyWork.map((r) => [r.id, r.row]));
+  plan.overlaps = detectWorkOverlaps(postApplyWork).map((p) => ({
+    ...p, aLabel: label.work(postApplyWorkById.get(p.a)), bLabel: label.work(postApplyWorkById.get(p.b)),
+  }));
 
   // Fingerprint of the ACTIVE profile the plan was computed against (Stage 2 recomputes it and refuses to apply a plan built on an older state).
   const fp = canonical([
@@ -890,6 +955,17 @@ export default {
         if (await sha256Hex(canonical(current.plan)) !== body.plan_hash) return await stale();
         const tradable = new Set<string>([...current.plan.added.filter((a: any) => a.kind === "certification").map((a: any) => a.staged_id), ...current.plan.changed.filter((c: any) => c.kind === "certification").map((c: any) => c.item_id)]);
         if (Object.keys(trades).some((id) => !tradable.has(id))) return json({ ok: false, error: "cert_trade_not_applicable" }, 400);
+
+        // Overlapping employment detection (2026-09-27): gated here, against the freshly re-derived
+        // plan's own overlaps (never the stale plan the client already saw -- same reasoning as the
+        // plan_hash re-derivation just above), same overlap_action/overlap_explanation contract as
+        // confirm-resume-data's own gate.
+        if (current.plan.overlaps.length > 0) {
+          const validAction = body.overlap_action === "explained" || body.overlap_action === "ignored";
+          const explanationOk = body.overlap_action !== "explained" || (typeof body.overlap_explanation === "string" && body.overlap_explanation.trim() !== "");
+          if (!validAction || !explanationOk) return json({ ok: false, error: "overlap_action_required", overlaps: current.plan.overlaps }, 400);
+        }
+
         const built = buildOps(current.ctx, { work: oi.work, education: oi.education, certifications: oi.certifications }, doc.id, resub.base_document_id, trades);
         const rpc = await fetch(`${SUPABASE_URL}/rest/v1/rpc/apply_resume_resubmission`, {
           method: "POST", headers: { ...REST, "Content-Type": "application/json" }, body: JSON.stringify({ p_resubmission_id: resub.id, p_ops: built.ops }),
@@ -902,6 +978,27 @@ export default {
           return json({ ok: false, error: "apply_failed", detail: msg.slice(0, 200) }, 500);
         }
         const result = await rpc.json();
+
+        // Overlapping employment detection (2026-09-27): the apply is already committed, so this can
+        // only add a hold, never lose the resubmission -- same reasoning as confirm-resume-data's own
+        // copy of this step. Item ids in current.plan.overlaps already resolve to real, now-confirmed
+        // work_history_items rows (kept/changed keep the active id, added items' staged id became the
+        // persisting id -- see apply_resume_resubmission), so the RPC's own FK checks will pass.
+        let overlapHoldId: string | null = null;
+        if (current.plan.overlaps.length > 0) {
+          const holdRpc = await fetch(`${SUPABASE_URL}/rest/v1/rpc/create_work_overlap_hold`, {
+            method: "POST", headers: { ...REST, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              p_candidate: cid, p_pairs: current.plan.overlaps, p_source: "resubmission",
+              p_action: body.overlap_action, p_explanation: body.overlap_action === "explained" ? body.overlap_explanation : null,
+            }),
+          });
+          if (!holdRpc.ok) {
+            const detail = (await holdRpc.text().catch(() => "")).slice(0, 200);
+            return json({ ok: false, error: "overlap_hold_failed", detail }, 500);
+          }
+          overlapHoldId = await holdRpc.json();
+        }
 
         // After the commit: real registry checks for every license that is new or whose details changed (the same background pattern, and the
         // same single bundled candidate email, as the first confirmation). Their results land on the license and its queue row as they finish.
@@ -924,6 +1021,7 @@ export default {
         return json({
           ok: true, status: "applied", counts: built.counts, archived: result.archived, queue_created: result.new_queue,
           licenses_verifying: built.verifyIds, contact_needed: built.contactNeeded, document_id: doc.id,
+          overlap_hold: overlapHoldId ? { verification_item_id: overlapHoldId, pairs: current.plan.overlaps.length, action: body.overlap_action } : null,
         });
       }
 

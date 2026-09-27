@@ -218,7 +218,30 @@ export default {
         fetch(`${SUPABASE_URL}/rest/v1/skill_items?${blockedBase}&select=id,skill_text,staff_block_reason_code`, { headers: REST_H }).then((r) => r.ok ? r.json() : []).catch(() => []),
         fetch(`${SUPABASE_URL}/rest/v1/candidate_freeform_sections?${blockedBase}&select=id,heading,content,staff_block_reason_code`, { headers: REST_H }).then((r) => r.ok ? r.json() : []).catch(() => []),
       ]);
+      // Overlapping employment detection (2026-09-27): a work item held by an UNRESOLVED overlap
+      // incident is surfaced through this exact same "held" card -- the spec's own instruction is to
+      // reuse the established "never exclude unverified content, only tag it" mechanism already built
+      // for staff_blocked items, not invent a second one. Independent of blockedWork/etc. above (a
+      // different hold mechanism entirely -- see the migration's own header on why it's a fresh table
+      // pair, not a reuse of staff_blocked_at): an item can in principle carry both, and both would
+      // show, one row each.
+      const unresolvedOverlapHolds: any[] = await fetch(`${SUPABASE_URL}/rest/v1/work_overlap_holds?candidate_id=eq.${encodeURIComponent(candidate_id)}&resolved_at=is.null&select=id,work_overlap_pairs(item_a_id,item_b_id)`, { headers: REST_H }).then((r) => r.ok ? r.json() : []).catch(() => []);
+      const overlapWorkIds = [...new Set(unresolvedOverlapHolds.flatMap((h: any) => (h.work_overlap_pairs || []).flatMap((p: any) => [p.item_a_id, p.item_b_id])))];
+      const overlapWorkRows: any[] = overlapWorkIds.length
+        ? await fetch(`${SUPABASE_URL}/rest/v1/work_history_items?id=in.(${overlapWorkIds.join(",")})&select=id,title,company`, { headers: REST_H }).then((r) => r.ok ? r.json() : []).catch(() => [])
+        : [];
+      const overlapWorkById = new Map(overlapWorkRows.map((w: any) => [w.id, w]));
+      const overlapHeld = overlapWorkIds.map((id) => {
+        const w = overlapWorkById.get(id);
+        return {
+          category: "Job Experience",
+          preview: w ? ([w.title, w.company].filter(Boolean).join(", ") || "(no title)") : "(item)",
+          message: "Held — date conflict pending resolution. This job's dates overlap another job on your profile by more than 30 days. It stays fully visible here, but is left out of your exports and any employer comparison until our team resolves it.",
+        };
+      });
+
       const held = [
+        ...overlapHeld,
         ...blockedWork.map((w: any) => ({ category: "Job Experience", preview: [w.title, w.company].filter(Boolean).join(", ") || "(no title)", message: REASON_SENTENCES[w.staff_block_reason_code] || REASON_SENTENCES.needs_correction })),
         ...blockedEdu.map((e: any) => ({ category: "Education", preview: [e.degree, e.institution].filter(Boolean).join(", ") || "(no degree)", message: REASON_SENTENCES[e.staff_block_reason_code] || REASON_SENTENCES.needs_correction })),
         ...blockedCert.map((c: any) => ({ category: "Certification", preview: [c.name, c.issuing_body].filter(Boolean).join(", ") || "(no name)", message: REASON_SENTENCES[c.staff_block_reason_code] || REASON_SENTENCES.needs_correction })),

@@ -244,7 +244,7 @@ async function assembleResumeSnapshot(candidateId: string): Promise<Assembled> {
   // own header for the full feature; assemble_customized_resume (Customization/Content Manager/PDF) has
   // the identical exclusion added the same way, in its own WHERE clauses.
   const base = `candidate_id=eq.${candidateId}&candidate_confirmed=eq.true&resume_document_id=in.(${docList})&staff_blocked_at=is.null`; // only used when docList is non-empty
-  const [work, edu, certs, vis, lics] = await Promise.all([
+  let [work, edu, certs, vis, lics] = await Promise.all([
     docList ? rows(`work_history_items?${base}&select=id,company,title,location,start_date,start_date_precision,end_date,end_date_precision,position&order=position.asc`) : Promise.resolve([]),
     docList ? rows(`education_items?${base}&select=id,institution,degree,field_of_study,location,start_date,start_date_precision,end_date,end_date_precision,position&order=position.asc`) : Promise.resolve([]),
     docList ? rows(`certification_items?${base}&select=id,name,issuing_body,license_number,issue_date,issue_date_precision,position&order=position.asc`) : Promise.resolve([]),
@@ -253,6 +253,20 @@ async function assembleResumeSnapshot(candidateId: string): Promise<Assembled> {
     rows(`verification_items?candidate_id=eq.${candidateId}&type=in.(Job%20Experience,Education,Certification,License)&select=id,type,source_item_id,status,claim,found_value,status_changed_at`),
     rows(`license_items?candidate_id=eq.${candidateId}&select=id,linked_certification_id,state,queue_item_id,verified_at,verification_outcome`),
   ]);
+
+  // Overlapping employment detection (2026-09-27): an item-level hold, not a whole-record hold -- only
+  // the specific work items in an UNRESOLVED overlap incident are excluded here; everything else on the
+  // same profile (unaffected jobs, education, certifications, etc.) is untouched. Two small lookups
+  // rather than a subquery in the REST filter above, same reasoning as assemble_customized_resume's own
+  // `not exists (...)` clause but expressed the way this PostgREST-based assembler already does every
+  // other exclusion in this function.
+  const unresolvedHolds = await rows(`work_overlap_holds?candidate_id=eq.${candidateId}&resolved_at=is.null&select=id`);
+  let heldWorkIds = new Set<string>();
+  if (unresolvedHolds.length) {
+    const heldPairs = await rows(`work_overlap_pairs?hold_id=in.(${unresolvedHolds.map((h) => h.id).join(",")})&select=item_a_id,item_b_id`);
+    heldWorkIds = new Set(heldPairs.flatMap((p) => [p.item_a_id as string, p.item_b_id as string]));
+  }
+  if (heldWorkIds.size) work = work.filter((w) => !heldWorkIds.has(w.id));
   const bySource = (type: string) => new Map(vis.filter((v) => v.type === type && v.source_item_id).map((v) => [v.source_item_id as string, v]));
   const jobV = bySource("Job Experience");
   const eduV = bySource("Education");

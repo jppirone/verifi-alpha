@@ -2592,11 +2592,22 @@ th.sortable{cursor:pointer;user-select:none}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-4)">
           <div class="field">
             <label for="detail-status">Status</label>
-            <sc-raw-select class="input" id="detail-status" value="{{ detailStatus }}" onChange="{{ setDetailStatus }}">
-              <sc-for list="{{ statusOptions }}" as="st" hint-placeholder-count="6">
-                <option value="{{ st }}">{{ st }}</option>
-              </sc-for>
-            </sc-raw-select>
+            <!-- Overlapping employment detection (2026-09-27): an Overlap-type row's status ('New' ->
+                 'Resolved') is written only by resolve_work_overlap_hold, never by this generic
+                 dropdown/update-verification-item -- 'Resolved' isn't even in STATUS_VALUES there,
+                 and hand-picking one of the normal statuses here would leave the real hold (and the
+                 downstream export/comparison exclusion tied to it) untouched while looking resolved.
+                 Read-only display instead; the real action is the Overlapping employment card below. -->
+            <sc-if value="{{ showGenericStatusEditor }}" hint-placeholder-val="{{ true }}">
+              <sc-raw-select class="input" id="detail-status" value="{{ detailStatus }}" onChange="{{ setDetailStatus }}">
+                <sc-for list="{{ statusOptions }}" as="st" hint-placeholder-count="6">
+                  <option value="{{ st }}">{{ st }}</option>
+                </sc-for>
+              </sc-raw-select>
+            </sc-if>
+            <sc-if value="{{ detailIsOverlap }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:13px;padding-top:8px">{{ detailStatus }} — see Overlapping employment below</div>
+            </sc-if>
           </div>
           <div>
             <div style="font-size:11px;color:var(--color-neutral-500);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px">Assigned to</div>
@@ -2613,6 +2624,7 @@ th.sortable{cursor:pointer;user-select:none}
           </div>
         </div>
 
+        <sc-if value="{{ showGenericStatusEditor }}" hint-placeholder-val="{{ true }}">
         <div class="field">
           <label for="detail-note">Note to candidate</label>
           <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.5;margin-bottom:2px">Visible to the candidate on their Verification Status tab whenever this item's status is Discrepancy. Write it assuming they will read it.</div>
@@ -2630,6 +2642,7 @@ th.sortable{cursor:pointer;user-select:none}
             </sc-if>
           </div>
         </div>
+        </sc-if>
 
         <div class="field">
           <label for="detail-internal-note">Internal note (staff only)</label>
@@ -2774,6 +2787,55 @@ th.sortable{cursor:pointer;user-select:none}
         </sc-if>
         <sc-if value="{{ licShowResult }}" hint-placeholder-val="{{ false }}">
           <div style="border-top:1px solid var(--color-divider);padding-top:var(--space-3);font-size:13px;color:var(--color-neutral-300);line-height:1.6;white-space:pre-wrap">{{ licResultText }}</div>
+        </sc-if>
+      </div>
+      </sc-if>
+
+      <!-- Overlapping employment detection (2026-09-27): Design_Principles.docx P142 / Business_Model_
+           Decision_Log.docx Decision 40. Every flagged pair from the whole incident, the candidate's
+           own response (explanation text, or that they chose to ignore), and the one real action this
+           card offers: resolving the hold -- neither the candidate's explanation nor their choice to
+           ignore clears it on its own, only this does. -->
+      <sc-if value="{{ detailIsOverlap }}" hint-placeholder-val="{{ false }}">
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3);margin-bottom:var(--space-4)">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-3)">
+          <div class="card-kicker">Overlapping employment</div>
+          <sc-if value="{{ overlapIsUrgent }}" hint-placeholder-val="{{ false }}">
+            <span class="tag tag-outline" style="color:#b00020;border-color:#b00020">Urgent — candidate ignored</span>
+          </sc-if>
+        </div>
+        <div style="font-size:11px;color:var(--color-neutral-500)">{{ overlapSource }}</div>
+
+        <sc-for list="{{ overlapPairRows }}" as="row" hint-placeholder-count="1">
+          <div style="border:1px solid var(--color-divider);border-radius:8px;padding:var(--space-2);font-size:13px;display:flex;flex-direction:column;gap:2px">
+            <div><b>{{ row.labelA }}</b> ({{ row.rangeA }})</div>
+            <div><b>{{ row.labelB }}</b> ({{ row.rangeB }})</div>
+            <div style="font-size:12px;color:var(--color-neutral-500)">Overlap: {{ row.days }} days</div>
+          </div>
+        </sc-for>
+
+        <div>
+          <div style="font-size:11px;color:var(--color-neutral-500);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:2px">Candidate's response</div>
+          <div style="font-size:13px;color:var(--color-neutral-300)">{{ overlapActionLabel }}</div>
+          <sc-if value="{{ overlapHasExplanation }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.5;white-space:pre-wrap;margin-top:4px">{{ overlapExplanationText }}</div>
+          </sc-if>
+        </div>
+
+        <sc-if value="{{ overlapIsResolved }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:var(--color-accent-300)">{{ overlapResolvedSummary }}</div>
+        </sc-if>
+        <sc-if value="{{ overlapCanResolve }}" hint-placeholder-val="{{ true }}">
+          <div class="field">
+            <label for="overlap-resolve-note">Resolution note (optional)</label>
+            <textarea class="input" id="overlap-resolve-note" rows="2" value="{{ overlapResolveNoteValue }}" onChange="{{ setOverlapResolveNote }}"></textarea>
+          </div>
+          <div style="display:flex;align-items:center;gap:var(--space-3)">
+            <button type="button" class="btn btn-primary" disabled="{{ overlapResolvePending }}" onClick="{{ resolveOverlapHold }}">{{ overlapResolveLabel }}</button>
+            <sc-if value="{{ hasOverlapResolveError }}" hint-placeholder-val="{{ false }}">
+              <span style="font-size:12px;color:#b00020">{{ overlapResolveError }}</span>
+            </sc-if>
+          </div>
         </sc-if>
       </div>
       </sc-if>
@@ -3257,7 +3319,12 @@ class Component extends DCLogic {
   // a sub-reason of 'Unable to Verify' (which stays what it always was: a channel existed, outreach
   // happened, but no conclusive answer came back). Requires the same resolution evidence as every
   // other status in this list.
-  RESOLUTION_STATUSES = ['Confirmed', 'Discrepancy', 'Verification Not Possible', 'Unable to Verify'];
+  // 'Resolved' added 2026-09-27 (overlapping employment detection): never offered in, or settable
+  // through, the generic status dropdown (see STATUS_OPTIONS/showGenericStatusEditor) -- only
+  // resolve_work_overlap_hold ever writes it. Included here purely so the Open/Resolved queue filter
+  // and "next unresolved item" navigation treat a resolved overlap hold as resolved, same as every
+  // other terminal status in this list.
+  RESOLUTION_STATUSES = ['Confirmed', 'Discrepancy', 'Verification Not Possible', 'Unable to Verify', 'Resolved'];
 
   // Staff content-block (2026-09-26): the exact closed set staff-block-item validates server-side
   // (REASON_CODES) and the exact sentence each maps to, kept in sync with
@@ -3291,7 +3358,10 @@ class Component extends DCLogic {
   }
 
   statusTagClass(status) {
-    if (status === 'Confirmed') return 'tag tag-accent';
+    // 'Resolved' (2026-09-27): the terminal status resolve_work_overlap_hold writes on an Overlap
+    // item's own queue row -- never written by, or offered in, the generic status dropdown (see
+    // STATUS_VALUES in update-verification-item and showGenericStatusEditor above).
+    if (status === 'Confirmed' || status === 'Resolved') return 'tag tag-accent';
     if (status === 'Discrepancy' || status === 'Unable to Verify' || status === 'Needs Reconciliation') return 'tag tag-outline';
     return 'tag tag-neutral';
   }
@@ -3331,6 +3401,8 @@ class Component extends DCLogic {
     noteSaveState: 'idle', noteFading: false,
     internalNoteSaveState: 'idle', internalNoteFading: false,
     statusConfirmOpen: false, pendingStatus: null, resolutionEvidenceDraft: '',
+    // Overlapping employment detection (2026-09-27): see resolveOverlapHold below.
+    overlapResolveNoteDraft: '', overlapResolvePending: false, overlapResolveError: null,
     correctionFilter: false, correctionMode: null, correctionDraft: '', declineDraft: '',
     // Item-flagging (2026-09-23): a second, independent boolean-flag toggle, same pattern as
     // correctionFilter above — composes with it and the text/dropdown filters rather than replacing them.
@@ -3644,6 +3716,29 @@ class Component extends DCLogic {
       text: 'Entity found: "' + data.matchedName + '", status ' + data.entityStatus + ', doc #' + data.documentNumber + (data.filingType ? (' (' + data.filingType + ')') : '') + '.' + (exact ? '' : ' Name match is approximate, not exact.'),
       needsReview: !exact,
     };
+  }
+
+  // Overlapping employment detection (2026-09-27): the ONLY way an overlap hold clears -- see
+  // resolve-work-overlap-hold's own header. Reloads the queue afterward (same as runLicenseRecheck)
+  // rather than hand-patching local state, so the linked verification_items row's now-'Resolved'
+  // status and the hold's resolvedAt/resolvedBy both come back from the real source.
+  async resolveOverlapHold(item) {
+    if (!item || !item.overlapData || this.state.overlapResolvePending) return;
+    this.setState({ overlapResolvePending: true, overlapResolveError: null });
+    let data;
+    try {
+      const res = await this.staffFetch('/resolve-work-overlap-hold', { hold_id: item.overlapData.holdId, note: this.state.overlapResolveNoteDraft || '' });
+      data = await res.json().catch(() => ({ ok: false, error: 'invalid_response' }));
+      if (!res.ok || !data.ok) {
+        this.setState({ overlapResolvePending: false, overlapResolveError: data.error === 'already_resolved' ? 'This was already resolved.' : (data.error === 'forbidden' ? 'Not assigned to you.' : "Couldn't resolve this. Please try again.") });
+        return;
+      }
+    } catch (e) {
+      this.setState({ overlapResolvePending: false, overlapResolveError: "Couldn't reach the server. Please try again." });
+      return;
+    }
+    this.setState({ overlapResolvePending: false, overlapResolveNoteDraft: '' });
+    await this.loadItems();
   }
 
   // License items: re-run the shared verify-license module against the stored license record. The
@@ -4428,7 +4523,7 @@ class Component extends DCLogic {
       isAdminEditable: isAdmin,
       isWorkerRow: !isAdmin,
       syncError: !!s.syncFailures[it.id],
-      onOpen: () => this.setState({ selectedId: it.id, correctionMode: null, correctionDraft: '', declineDraft: '', noteSaveState: 'idle', ...this.resetAutomatedCheckState(it.type, it.candidateName, it.employerNameResolved) }),
+      onOpen: () => this.setState({ selectedId: it.id, correctionMode: null, correctionDraft: '', declineDraft: '', noteSaveState: 'idle', overlapResolveNoteDraft: '', overlapResolvePending: false, overlapResolveError: null, ...this.resetAutomatedCheckState(it.type, it.candidateName, it.employerNameResolved) }),
       stopClick: (e) => { if (e && e.stopPropagation) e.stopPropagation(); },
       onReassign: (e) => { if (e.stopPropagation) e.stopPropagation(); this.updateItem(it.id, { assignedTo: e.target.value }); },
       onRetrySync: (e) => { if (e.stopPropagation) e.stopPropagation(); this.retrySync(it.id); },
@@ -4667,6 +4762,9 @@ class Component extends DCLogic {
         // placeholder like 'Personal Info' below.
         { value: 'Needs Review', label: 'Needs Review (flagged resume content)' },
         { value: 'Personal Info', label: 'Personal Info (not routed to the queue yet — always empty today)' },
+        // Overlapping employment detection (2026-09-27): one row per detected incident (never one per
+        // pair) -- see create_work_overlap_hold's own header.
+        { value: 'Overlap', label: 'Overlap (date conflict)' },
       ],
       findingFilter: s.findingFilter,
       setFindingFilter: (e) => this.setState({ findingFilter: e.target.value }),
@@ -4842,7 +4940,7 @@ class Component extends DCLogic {
         if (e && e.preventDefault) e.preventDefault();
         if (!nextUnresolved) return;
         const it = nextUnresolved;
-        this.setState({ selectedId: it.id, correctionMode: null, correctionDraft: '', declineDraft: '', noteSaveState: 'idle', statusConfirmOpen: false, pendingStatus: null, resolutionEvidenceDraft: '', ...this.resetAutomatedCheckState(it.type, it.candidateName, it.employerNameResolved) });
+        this.setState({ selectedId: it.id, correctionMode: null, correctionDraft: '', declineDraft: '', noteSaveState: 'idle', statusConfirmOpen: false, pendingStatus: null, resolutionEvidenceDraft: '', overlapResolveNoteDraft: '', overlapResolvePending: false, overlapResolveError: null, ...this.resetAutomatedCheckState(it.type, it.candidateName, it.employerNameResolved) });
       },
       detailSyncError: !!(selected && s.syncFailures[selected.id]),
       retryDetailSync: () => { if (selected) this.retrySync(selected.id); },
@@ -4900,8 +4998,40 @@ class Component extends DCLogic {
       detailContactVerificationLink: selected ? (selected.verificationLink || '') : '',
 
       // No automated check applies to unstructured needs_review content (no credly/dbpr/sunbiz
-      // lookup makes sense against free text) — same reasoning as excluding Education.
-      showAutomatedCheckSection: !!(selected && selected.type !== 'Education' && selected.type !== 'Needs Review' && selected.type !== 'License'),
+      // lookup makes sense against free text) — same reasoning as excluding Education. Overlap added
+      // 2026-09-27: an incident spanning multiple items has no single subject to run a registry/entity
+      // lookup against either.
+      showAutomatedCheckSection: !!(selected && selected.type !== 'Education' && selected.type !== 'Needs Review' && selected.type !== 'License' && selected.type !== 'Overlap'),
+      // Overlapping employment detection (2026-09-27): see the Status field's own comment just above
+      // for why the generic status editor is hidden for this type.
+      detailIsOverlap: !!(selected && selected.type === 'Overlap'),
+      showGenericStatusEditor: !!(selected && selected.type !== 'Overlap'),
+      // Overlapping employment detection (2026-09-27): the bespoke detail-panel section, driven
+      // entirely by list-verification-items' own overlapData (see that function's header). Never the
+      // generic status/note controls above -- resolving is its own dedicated action
+      // (resolveOverlapHold -> resolve-work-overlap-hold), since "resolved" doesn't fit the
+      // Confirmed/Discrepancy vocabulary those controls enforce.
+      overlapPairRows: (selected && selected.overlapData ? selected.overlapData.pairs : []).map(p => ({
+        labelA: p.a.label, rangeA: p.a.range || '—', labelB: p.b.label, rangeB: p.b.range || '—', days: p.days,
+      })),
+      overlapSource: selected && selected.overlapData ? (selected.overlapData.source === 'resubmission' ? 'Detected on a resubmission' : 'Detected at resume confirmation') : '',
+      overlapQueuePriority: selected && selected.overlapData ? selected.overlapData.queuePriority : '',
+      overlapIsUrgent: !!(selected && selected.overlapData && selected.overlapData.queuePriority === 'urgent'),
+      overlapActionLabel: selected && selected.overlapData ? (selected.overlapData.action === 'explained' ? 'Candidate submitted an explanation' : selected.overlapData.action === 'ignored' ? 'Candidate chose to ignore this without an explanation' : 'Pending — no candidate action recorded yet') : '',
+      overlapExplanationText: selected && selected.overlapData ? (selected.overlapData.explanation || '') : '',
+      overlapHasExplanation: !!(selected && selected.overlapData && selected.overlapData.explanation),
+      overlapIsResolved: !!(selected && selected.overlapData && selected.overlapData.resolvedAt),
+      overlapCanResolve: !!(selected && selected.overlapData && !selected.overlapData.resolvedAt),
+      overlapResolvedSummary: selected && selected.overlapData && selected.overlapData.resolvedAt
+        ? ('Resolved ' + this.fmtDateTime(selected.overlapData.resolvedAt) + (selected.overlapData.resolvedBy ? (' by ' + selected.overlapData.resolvedBy) : '') + (selected.overlapData.resolutionNote ? (' — ' + selected.overlapData.resolutionNote) : ''))
+        : '',
+      overlapResolveNoteValue: s.overlapResolveNoteDraft,
+      setOverlapResolveNote: (e) => this.setState({ overlapResolveNoteDraft: e.target.value }),
+      overlapResolvePending: s.overlapResolvePending,
+      overlapResolveLabel: s.overlapResolvePending ? 'Resolving…' : 'Resolve hold',
+      hasOverlapResolveError: !!s.overlapResolveError,
+      overlapResolveError: s.overlapResolveError,
+      resolveOverlapHold: () => this.resolveOverlapHold(selected),
       // License items get their own card instead (stored data + a re-run that goes through the shared
       // verify-license module) — the generic hand-typed check above is deliberately not offered.
       showLicenseCheckSection: !!(selected && selected.type === 'License'),

@@ -116,6 +116,39 @@ function dateOrNull(v: unknown): string | null {
   return typeof v === "string" && v.trim() !== "" ? v : null;
 }
 
+// Overlapping employment detection (2026-09-27): Design_Principles.docx P142 / Business_Model_Decision_
+// Log.docx Decision 40. Pure, deterministic, and shared verbatim with resume-resubmission's own copy
+// (this codebase has no shared-lib folder for edge functions -- confirmed before duplicating rather than
+// assumed) so both entry points agree on what counts as an overlap.
+//
+// "Present" is never a real end date to compare against (see date-precision's own header) -- treated as
+// today, matching every other place effective-end-of-job is computed in this codebase.
+function effectiveWorkEnd(endDate: string | null, endPrecision: unknown): string | null {
+  if (endPrecision === "present") return new Date().toISOString().slice(0, 10);
+  return endDate;
+}
+type OverlapItem = { id: string; start: string | null; end: string | null };
+// A pair is flagged when the overlapping span exceeds 30 days -- exactly 30 does not trigger (spec's own
+// test case), 31+ does. Every pair in the set is returned in one pass; nothing here decides how many
+// pairs constitute one "incident" -- that's the caller's job (one hold per detection run, however many
+// pairs it finds).
+function detectWorkOverlaps(items: OverlapItem[]): Array<{ a: string; b: string; days: number }> {
+  const out: Array<{ a: string; b: string; days: number }> = [];
+  for (let i = 0; i < items.length; i++) {
+    for (let j = i + 1; j < items.length; j++) {
+      const a = items[i], b = items[j];
+      if (!a.start || !a.end || !b.start || !b.end) continue;
+      const aS = Date.parse(a.start), aE = Date.parse(a.end), bS = Date.parse(b.start), bE = Date.parse(b.end);
+      if (!Number.isFinite(aS) || !Number.isFinite(aE) || !Number.isFinite(bS) || !Number.isFinite(bE)) continue;
+      const overlapStart = Math.max(aS, bS), overlapEnd = Math.min(aE, bE);
+      if (overlapEnd <= overlapStart) continue;
+      const days = Math.round((overlapEnd - overlapStart) / 86400000);
+      if (days > 30) out.push({ a: a.id, b: b.id, days });
+    }
+  }
+  return out;
+}
+
 // Same rule the employer-contact-details screen already applies to this exact column: http(s) only, capped at
 // 500 chars, blank clears it.
 function isBadVerificationLink(v: unknown): boolean {
@@ -300,6 +333,11 @@ export default {
         // ignored by every action except "start".
         acknowledged = false,
         ack_text_version = null,
+        // Overlapping employment detection (2026-09-27): the candidate's chosen response to a
+        // blocking overlap modal, echoed back the same way overlap_action_required's own response
+        // told the client what it needed. Ignored entirely when no overlap was detected.
+        overlap_action = null,
+        overlap_explanation = null,
       }: {
         candidate_id: string;
         resume_document_id?: string | null;
@@ -313,6 +351,8 @@ export default {
         opt_in: { work_history: boolean; education: boolean; certifications: boolean };
         acknowledged?: boolean;
         ack_text_version?: string | null;
+        overlap_action?: "explained" | "ignored" | null;
+        overlap_explanation?: string | null;
       } = body;
 
       if (!candidate_id) {
@@ -349,6 +389,32 @@ export default {
         return new Response(JSON.stringify({ ok: false, error: "edit_ack_required", ack_text_version: EDIT_ACK_TEXT_VERSION }), {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
+      }
+
+      // Overlapping employment detection (2026-09-27): whole-profile, not just this batch -- a
+      // candidate whose FIRST document already contains two overlapping jobs must be caught here,
+      // same as one that only appears once an already-confirmed item is joined by a newly-confirmed
+      // one. Read-only, so safe to run before anything is claimed: this batch's own (possibly edited)
+      // dates plus every other already-confirmed work_history_items row for this candidate.
+      const priorConfirmedRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/work_history_items?candidate_id=eq.${candidate_id}&candidate_confirmed=is.true&select=id,start_date,start_date_precision,end_date,end_date_precision`,
+        { headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } },
+      );
+      const priorConfirmed: any[] = priorConfirmedRes.ok ? await priorConfirmedRes.json() : [];
+      const batchIds = new Set(work_history.map((w) => w.id));
+      const overlapUniverse: OverlapItem[] = [
+        ...priorConfirmed.filter((r) => !batchIds.has(r.id)).map((r) => ({ id: r.id as string, start: dateOrNull(r.start_date), end: effectiveWorkEnd(dateOrNull(r.end_date), r.end_date_precision) })),
+        ...work_history.map((w) => ({ id: w.id, start: dateOrNull(w.start_date), end: effectiveWorkEnd(dateOrNull(w.end_date), w.end_date_precision) })),
+      ];
+      const overlapPairs = detectWorkOverlaps(overlapUniverse);
+      if (overlapPairs.length > 0) {
+        const validAction = overlap_action === "explained" || overlap_action === "ignored";
+        const explanationOk = overlap_action !== "explained" || (typeof overlap_explanation === "string" && overlap_explanation.trim() !== "");
+        if (!validAction || !explanationOk) {
+          return new Response(JSON.stringify({ ok: false, error: "overlap_action_required", overlaps: overlapPairs }), {
+            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
       }
 
       // Cross-tab session awareness (2026-09-11 status-check session): the real, atomic guard
@@ -798,6 +864,26 @@ export default {
       }
 
       queueDone = true; // (also when there was nothing to queue) from here nothing can fail the request
+
+      // Overlapping employment detection (2026-09-27): every item above is already committed, so
+      // this can only add a hold, never lose the candidate's confirmation. create_work_overlap_hold
+      // both inserts the hold+pairs and creates the linked verification_items row (type 'Overlap')
+      // that plugs it into the same staff queue as everything else -- see the migration's own header
+      // for why this is a fresh table pair rather than a reuse of edit_ack or staff_blocked_at.
+      let overlapHoldId: string | null = null;
+      if (overlapPairs.length > 0) {
+        const { data: holdQid, error: holdErr } = await supabase.rpc("create_work_overlap_hold", {
+          p_candidate: candidate_id, p_pairs: overlapPairs, p_source: "resumeConfirm",
+          p_action: overlap_action, p_explanation: overlap_action === "explained" ? overlap_explanation : null,
+        });
+        if (holdErr) {
+          return await failReleasing(JSON.stringify({ ok: false, error: "overlap_hold_failed", detail: holdErr.message }), {
+            status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        overlapHoldId = holdQid;
+      }
+
       // Automatic license verification: everything above is committed, so a slow or failing registry lookup can
       // never lose the candidate's confirmation. It also no longer holds the candidate's response: state registry
       // lookups are slow and outside our control (DBPR alone is three sequential requests), and the confirm used to
@@ -865,6 +951,7 @@ export default {
         queued_for_verification: queueInserts.length,
         license_verification: licenseVerification,
         license_verification_mode: licenseVerification.some((v) => v.status === "queued") ? "background" : "inline",
+        overlap_hold: overlapHoldId ? { verification_item_id: overlapHoldId, pairs: overlapPairs.length, action: overlap_action } : null,
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     } catch (e) {
       await releaseClaim();

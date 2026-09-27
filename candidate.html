@@ -3406,6 +3406,58 @@ a:hover{color:var(--color-accent)}
     </div>
   </sc-if>
 
+  <!-- Overlapping employment detection (2026-09-27): Design_Principles.docx P142 / Business_Model_
+       Decision_Log.docx Decision 40. Blocking -- no dismiss/close action other than the two spec'd
+       ones (submit an explanation, or Ignore), matching "the candidate cannot proceed past
+       confirmation without acting on it." See confirmResumeData/detectWorkOverlaps for when this
+       opens. -->
+  <sc-if value="{{ overlapModalOpen }}" hint-placeholder-val="{{ false }}">
+    <div class="dialog-backdrop">
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="overlap-modal-title" style="width:min(560px,100%);max-height:90vh;overflow-y:auto">
+        <div class="dialog-title" id="overlap-modal-title">Overlapping employment dates</div>
+        <div class="dialog-body" style="display:flex;flex-direction:column;gap:var(--space-3);line-height:1.6">
+          <div>We found dates that overlap by more than 30 days between two or more jobs on your profile:</div>
+          <sc-for list="{{ overlapPairRows }}" as="row" hint-placeholder-count="1">
+            <div style="border:1px solid var(--color-divider);border-radius:8px;padding:var(--space-2);font-size:13px;display:flex;flex-direction:column;gap:2px">
+              <div><b>{{ row.label }}</b></div>
+              <div><b>{{ row.labelB }}</b></div>
+              <div style="font-size:12px;color:var(--color-neutral-500)">Overlap: {{ row.days }} days</div>
+            </div>
+          </sc-for>
+          <div>This explanation applies to all periods listed above — you don't need to address them one at a time.</div>
+          <div class="field">
+            <label class="field-label" for="overlap-explanation">Explain the overlap</label>
+            <textarea class="input" id="overlap-explanation" rows="4" maxlength="1000" value="{{ overlapExplanationValue }}" sc-camel-on-change="{{ setOverlapExplanation }}" placeholder="For example: one was a part-time or advisory role held alongside the other."></textarea>
+          </div>
+          <div style="font-size:12px;color:var(--color-neutral-500)">Neither submitting an explanation nor choosing to ignore this clears it automatically — our team reviews it either way. Submitting an explanation goes to our normal review queue; choosing to ignore it is reviewed with elevated priority instead.</div>
+        </div>
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ openOverlapIgnoreConfirm }}">Ignore</button>
+          <button type="button" class="btn btn-primary" disabled="{{ overlapExplanationEmpty }}" sc-camel-on-click="{{ submitOverlapExplanation }}">Submit explanation</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- Overlapping employment detection: the second, honest confirmation for choosing Ignore -- a
+       real possibility phrased as a possibility, not a guarantee, same wording convention as every
+       other disclosure built this session (see e.g. resubAckOpen's own copy). -->
+  <sc-if value="{{ overlapIgnoreConfirmOpen }}" hint-placeholder-val="{{ false }}">
+    <div class="dialog-backdrop">
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="overlap-ignore-modal-title" style="width:min(480px,100%)">
+        <div class="dialog-title" id="overlap-ignore-modal-title">Ignore without an explanation?</div>
+        <div class="dialog-body" style="display:flex;flex-direction:column;gap:var(--space-3);line-height:1.6">
+          <div>Ignoring this means our team reviews it under elevated scrutiny, without any context from you about why the dates overlap.</div>
+          <div>This may cause your review to take longer than our standard 10-business-day window — it's a real possibility, not a guarantee either way.</div>
+        </div>
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ closeOverlapIgnoreConfirm }}">Go back</button>
+          <button type="button" class="btn btn-primary" sc-camel-on-click="{{ confirmOverlapIgnore }}">Yes, ignore and continue</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
   <!-- Candidate item-flagging (2026-09-23): one shared modal for every item card above (work
        history/education/certifications/skills/freeform, incl. Summary/Hobbies) — see
        flagItemProps/openFlagModal. Purely local until Confirm; see submitResumeConfirmation for
@@ -8054,6 +8106,13 @@ class Component extends DCLogic {
     // Item F (2026-09-26): the recorded-acknowledgment gate for submitting with edited fields present
     // — see submitResumeConfirmation/EDIT_ACK_VERSION and the editAckOpen modal in the template.
     editAckOpen: false,
+    // Overlapping employment detection (2026-09-27): see confirmResumeData/detectWorkOverlaps below.
+    // overlapPairs is the current detected set (each {a,b,days}, a/b full work_history items, for
+    // rendering); overlapResolvedSignature records which exact set the candidate already chose an
+    // action for, so a later edit that changes the overlap set re-opens the modal instead of silently
+    // reusing a stale choice. overlapAction/overlapExplanationText are what actually gets submitted.
+    overlapPairs: [], overlapModalOpen: false, overlapIgnoreConfirmOpen: false, overlapExplanationDraft: '',
+    overlapAction: null, overlapExplanationText: null, overlapResolvedSignature: null, overlapOnResolved: null,
     // Candidate item-flagging, pre-confirm modal (2026-09-23): see flagItemProps/openFlagModal.
     flagModalOpen: false, flagModalCategory: null, flagModalItemId: null, flagModalNote: '',
     // Item C (2026-09-08 regression session): the new employer/certification contact-details
@@ -11227,6 +11286,83 @@ class Component extends DCLogic {
     return out;
   }
 
+  // ---------------------------------------------------------------------------------------------
+  // OVERLAPPING EMPLOYMENT DETECTION (2026-09-27). Design_Principles.docx P142 / Business_Model_
+  // Decision_Log.docx Decision 40. Pure client-side mirror of confirm-resume-data's own
+  // detectWorkOverlaps -- this is what drives the blocking modal on THIS screen (before the real
+  // server-side gate ever runs); the server re-detects and re-enforces independently, so a
+  // mismatched or bypassed client can never skip the real gate, only fail to warn early.
+  // ---------------------------------------------------------------------------------------------
+  effectiveWorkEndForOverlap(endDate, endPrecision) {
+    if (endPrecision === 'present') return new Date().toISOString().slice(0, 10);
+    return endDate || null;
+  }
+  // Returns [{ a: item, b: item, days }], a/b the full work_history draft rows (title/company/dates
+  // for the modal's own labels) -- never just ids, unlike the server's own wire format, since this
+  // never leaves the browser. A pair is flagged only when the overlap exceeds 30 days (exactly 30
+  // does not trigger, 31+ does -- same threshold the server enforces).
+  detectWorkOverlaps(workHistory) {
+    const items = (workHistory || []).map(w => ({ item: w, start: w.start_date || null, end: this.effectiveWorkEndForOverlap(w.end_date, w.end_date_precision) }));
+    const pairs = [];
+    for (let i = 0; i < items.length; i++) {
+      for (let j = i + 1; j < items.length; j++) {
+        const a = items[i], b = items[j];
+        if (!a.start || !a.end || !b.start || !b.end) continue;
+        const aS = Date.parse(a.start), aE = Date.parse(a.end), bS = Date.parse(b.start), bE = Date.parse(b.end);
+        if (![aS, aE, bS, bE].every(Number.isFinite)) continue;
+        const overlapStart = Math.max(aS, bS), overlapEnd = Math.min(aE, bE);
+        if (overlapEnd <= overlapStart) continue;
+        const days = Math.round((overlapEnd - overlapStart) / 86400000);
+        if (days > 30) pairs.push({ a: a.item, b: b.item, days });
+      }
+    }
+    return pairs;
+  }
+  // Identifies exactly WHICH set of overlapping pairs the candidate has (or hasn't) already chosen
+  // an action for -- order-independent, so re-detecting the identical set after an unrelated edit
+  // (a title fix, a flag) never re-opens the modal for nothing.
+  overlapSignature(pairs) {
+    // a/b are full item objects for this screen's own client-detected/hydrated pairs, but plain ids
+    // for a resubmission plan's own plan.overlaps (see resubApplyGated) -- normalized here so one
+    // signature format covers both.
+    const idOf = (x) => (x && typeof x === 'object') ? x.id : x;
+    return JSON.stringify((pairs || []).map(p => [idOf(p.a), idOf(p.b), p.days]).sort((x, y) => x[0].localeCompare(y[0]) || x[1].localeCompare(y[1])));
+  }
+  // Maps the server's own {a,b,days} wire-format overlaps (plain ids -- see confirm-resume-data's
+  // response on overlap_action_required) onto this screen's current draft rows, so the modal can show
+  // real labels even for a mismatch the server caught that this screen's own detector missed.
+  hydrateOverlapPairs(rawPairs) {
+    const ex = this.state.resumeExtraction;
+    const byId = new Map(((ex && ex.work_history) || []).map(w => [w.id, w]));
+    return (rawPairs || []).map(p => ({ a: byId.get(p.a) || { id: p.a, title: null, company: null }, b: byId.get(p.b) || { id: p.b, title: null, company: null }, days: p.days }));
+  }
+  // Whatever gate opened the overlap modal was about to do once no unresolved overlap stands in the
+  // way -- resumeConfirm's own edit-acknowledgment gate/submit, or a resubmission's real apply.
+  // overlapOnResolved records which one, set by confirmResumeData/resubApplyGated when they open it.
+  proceedPastOverlapGate() {
+    if (this.state.overlapOnResolved === 'resubApply') { this.resubApply(); return; }
+    if (this.resumeTotalEditedFieldCount() > 0) { this.setState({ editAckOpen: true }); return; }
+    this.submitResumeConfirmation();
+  }
+  submitOverlapExplanation() {
+    const text = (this.state.overlapExplanationDraft || '').trim();
+    if (!text) return;
+    const pairs = this.state.overlapPairs || [];
+    this.setState({ overlapModalOpen: false, overlapAction: 'explained', overlapExplanationText: text, overlapResolvedSignature: this.overlapSignature(pairs) });
+    this.proceedPastOverlapGate();
+  }
+  openOverlapIgnoreConfirm() {
+    this.setState({ overlapModalOpen: false, overlapIgnoreConfirmOpen: true });
+  }
+  closeOverlapIgnoreConfirm() {
+    this.setState({ overlapIgnoreConfirmOpen: false, overlapModalOpen: true });
+  }
+  confirmOverlapIgnore() {
+    const pairs = this.state.overlapPairs || [];
+    this.setState({ overlapIgnoreConfirmOpen: false, overlapAction: 'ignored', overlapExplanationText: null, overlapResolvedSignature: this.overlapSignature(pairs) });
+    this.proceedPastOverlapGate();
+  }
+
   // Item F (2026-09-26): version string for the submit-time edited-field acknowledgment -- same
   // dated-version convention as RESUB_ACK_VERSION below, its own independent value since this gates a
   // different action. confirm-resume-data refuses the submit without a matching value whenever any
@@ -11286,6 +11422,14 @@ class Component extends DCLogic {
       // requirement server-side regardless (see its own header) -- this client-side gate is what makes
       // the modal meaningful, not what makes the submission safe.
       ...(editedCount > 0 ? { acknowledged: true, ack_text_version: this.EDIT_ACK_VERSION } : {}),
+      // Overlapping employment detection (2026-09-27): only present when confirmResumeData's own
+      // gate actually found (and the candidate actually resolved) an overlap -- confirm-resume-data
+      // re-detects independently regardless, so an absent/stale value here just gets caught by the
+      // server's own overlap_action_required refusal, never silently accepted.
+      ...(this.state.overlapPairs && this.state.overlapPairs.length > 0 && this.state.overlapAction ? {
+        overlap_action: this.state.overlapAction,
+        overlap_explanation: this.state.overlapAction === 'explained' ? this.state.overlapExplanationText : null,
+      } : {}),
     };
     let res, data;
     try {
@@ -11311,6 +11455,15 @@ class Component extends DCLogic {
       this.stopResumePolling();
       const hasContactAskables = ex.work_history.length > 0 || ex.certifications.length > 0;
       this.setState({ resumeConfirmPending: false, resumeConfirmError: null, screen: hasContactAskables ? 'employerContact' : 'tiers' });
+      return;
+    }
+    // Overlapping employment detection (2026-09-27): the server's own gate caught something this
+    // screen's client-side detector either missed or was never given a chance to resolve (a race, or
+    // a stale overlapResolvedSignature) -- reopen the modal with the server's own pairs (hydrated to
+    // this screen's current draft rows for real labels) rather than a generic error.
+    if (!res.ok && data.error === 'overlap_action_required') {
+      const pairs = this.hydrateOverlapPairs(data.overlaps);
+      this.setState({ resumeConfirmPending: false, resumeConfirmError: null, overlapPairs: pairs, overlapModalOpen: true, overlapExplanationDraft: '', overlapResolvedSignature: null });
       return;
     }
     if (!res.ok || !data.ok) {
@@ -11842,6 +11995,21 @@ class Component extends DCLogic {
     this.pollResub(false);
   }
 
+  // Overlapping employment detection (2026-09-27): the review screen's own gate, mirroring
+  // confirmResumeData's shape -- opens the same blocking modal (overlapOnResolved: 'resubApply' so
+  // proceedPastOverlapGate calls back into resubApply, not submitResumeConfirmation) whenever the
+  // CURRENT plan's own overlaps (computed server-side, post-apply -- see computePlan's own
+  // postApplyWorkItems) differ from whatever set was already resolved. This is the button
+  // "Confirm and update" actually calls now.
+  resubApplyGated() {
+    const plan = this.state.resubPlan;
+    const pairs = (plan && plan.overlaps) || [];
+    if (pairs.length > 0 && this.overlapSignature(pairs) !== this.state.overlapResolvedSignature) {
+      this.setState({ overlapPairs: pairs, overlapModalOpen: true, overlapExplanationDraft: '', overlapOnResolved: 'resubApply' });
+      return;
+    }
+    this.resubApply();
+  }
   async resubApply() {
     const s = this.state;
     if (s.resubBusy || !s.resubPlan || !s.resub.attempt) return;
@@ -11850,9 +12018,16 @@ class Component extends DCLogic {
     // Trades are sent only for certifications this plan adds or changes, and only when certifications are being sent for verification.
     const cert_trades = {};
     if (oi.certifications) for (const r of this.resubTradeRows(s.resubPlan)) if (s.resubTrades[r.id]) cert_trades[r.id] = s.resubTrades[r.id];
+    const overlapPairs = (s.resubPlan && s.resubPlan.overlaps) || [];
     const { res, data } = await this.resubCall('apply', {
       resubmission_id: s.resub.attempt.id, plan_hash: s.resubPlanHash,
       opt_in: { work: !!oi.work, education: !!oi.education, certifications: !!oi.certifications }, cert_trades,
+      // Overlapping employment detection: only present when this plan actually carries overlaps and
+      // resubApplyGated's own modal was actually resolved for them -- apply_resume_resubmission's own
+      // gate re-detects and re-enforces independently regardless (see resume-resubmission's header).
+      ...(overlapPairs.length > 0 && s.overlapAction ? {
+        overlap_action: s.overlapAction, overlap_explanation: s.overlapAction === 'explained' ? s.overlapExplanationText : null,
+      } : {}),
     });
     if (!res) { this.setState({ resubBusy: false, resubError: "Couldn't reach the server. Nothing was changed. Please try again." }); return; }
     if (res.ok && data.ok) {
@@ -11872,6 +12047,13 @@ class Component extends DCLogic {
       return;
     }
     if (res.status === 409) { this.setState({ resubBusy: false, resubStage: 'idle', accountTab: 'profile', resubNotice: 'That update is no longer open, so nothing was applied.' }); this.loadResubStatus(); return; }
+    // Overlapping employment detection: the server's own gate caught something (a race, or a stale
+    // overlapResolvedSignature) -- reopen the modal with the server's own pairs, same shape as the
+    // plan's own overlaps (plain ids + aLabel/bLabel), nothing was applied.
+    if (!res.ok && data.error === 'overlap_action_required' && Array.isArray(data.overlaps)) {
+      this.setState({ resubBusy: false, resubError: null, overlapPairs: data.overlaps, overlapModalOpen: true, overlapExplanationDraft: '', overlapResolvedSignature: null, overlapOnResolved: 'resubApply' });
+      return;
+    }
     this.setState({ resubBusy: false, resubError: "Couldn't apply the update. Nothing was changed. Please try again." });
   }
 
@@ -11958,7 +12140,7 @@ class Component extends DCLogic {
       resubStageDone: stage === 'done', resubStageContact: stage === 'contact',
       onPickResubFile: (e) => this.onPickResubFile(e), cancelResub: () => this.cancelResub(), resubStartOver: () => this.resubStartOver(),
       resubWorkingText: s.resubWorkingText, resubFailedText: s.resubFailedText,
-      resubApply: () => this.resubApply(), resubConfirmLabel: s.resubBusy ? 'Updating…' : 'Confirm and update',
+      resubApply: () => this.resubApplyGated(), resubConfirmLabel: s.resubBusy ? 'Updating…' : 'Confirm and update',
       resubNoticeInReview: s.resubNoticeInReview,
       openResubContact: () => this.openResubContact(), saveResubContact: () => this.saveResubContact(), skipResubContact: () => this.skipResubContact(),
       resubContactSaveLabel: s.resubBusy ? 'Saving…' : 'Save details',
@@ -13526,8 +13708,18 @@ class Component extends DCLogic {
       // any field edit anywhere routes through the recorded-acknowledgment modal first (editAckOpen)
       // rather than submitting straight through, same gating shape as resubAckOpen's own "start" button.
       confirmResumeData: () => {
-        if (this.resumeTotalEditedFieldCount() > 0) { this.setState({ editAckOpen: true }); return; }
-        this.submitResumeConfirmation();
+        // Overlapping employment detection (2026-09-27): checked before the (pre-existing) edit-
+        // acknowledgment gate -- a profile-level integrity question takes priority over an edited-
+        // field acknowledgment. Only re-opens the modal when the CURRENT overlap set differs from
+        // whatever set the candidate already chose an action for (overlapResolvedSignature) -- an
+        // unrelated edit since resolving it does not force the candidate through it again.
+        const ex = this.state.resumeExtraction;
+        const pairs = this.detectWorkOverlaps(ex.work_history);
+        if (pairs.length > 0 && this.overlapSignature(pairs) !== this.state.overlapResolvedSignature) {
+          this.setState({ overlapPairs: pairs, overlapModalOpen: true, overlapExplanationDraft: '', overlapOnResolved: 'resumeConfirm' });
+          return;
+        }
+        this.proceedPastOverlapGate();
       },
       // Item F (2026-09-26): top-of-screen nudge once 3+ fields have been edited -- a real signal that
       // hand-fixing the OCR reading might be slower than just uploading a cleaner copy, surfaced before
@@ -13543,6 +13735,31 @@ class Component extends DCLogic {
       editAckOpen: s.editAckOpen,
       closeEditAck: () => this.setState({ editAckOpen: false }),
       confirmEditAck: () => { this.setState({ editAckOpen: false }); this.submitResumeConfirmation(); },
+      // Overlapping employment detection (2026-09-27): the blocking modal and its Ignore-path second
+      // confirmation. No dismiss-without-choosing action on either -- "the candidate cannot proceed
+      // past confirmation without acting on it" is a hard requirement, not just a default.
+      overlapModalOpen: s.overlapModalOpen,
+      // Two shapes land here: this screen's own client-detected/hydrated pairs (a/b are full
+      // work_history draft rows), and a resubmission's plan.overlaps (a/b are plain ids, with the
+      // date range already folded into aLabel/bLabel server-side via label.work) -- see resubApplyGated.
+      overlapPairRows: (s.overlapPairs || []).map(p => {
+        if (typeof p.a === 'string') return { label: p.aLabel, labelB: p.bLabel, days: p.days };
+        const dates = [this.dateLabel(p.a.start_date, p.a.start_date_precision), this.dateLabel(p.a.end_date, p.a.end_date_precision)].filter(Boolean).join(' – ');
+        const datesB = [this.dateLabel(p.b.start_date, p.b.start_date_precision), this.dateLabel(p.b.end_date, p.b.end_date_precision)].filter(Boolean).join(' – ');
+        return {
+          label: ([p.a.title, p.a.company].filter(Boolean).join(' at ') || '(untitled job)') + (dates ? ' (' + dates + ')' : ''),
+          labelB: ([p.b.title, p.b.company].filter(Boolean).join(' at ') || '(untitled job)') + (datesB ? ' (' + datesB + ')' : ''),
+          days: p.days,
+        };
+      }),
+      overlapExplanationValue: s.overlapExplanationDraft,
+      setOverlapExplanation: (e) => this.setState({ overlapExplanationDraft: e.target.value }),
+      overlapExplanationEmpty: !(s.overlapExplanationDraft || '').trim(),
+      submitOverlapExplanation: () => this.submitOverlapExplanation(),
+      openOverlapIgnoreConfirm: () => this.openOverlapIgnoreConfirm(),
+      overlapIgnoreConfirmOpen: s.overlapIgnoreConfirmOpen,
+      closeOverlapIgnoreConfirm: () => this.closeOverlapIgnoreConfirm(),
+      confirmOverlapIgnore: () => this.confirmOverlapIgnore(),
       // Item 1 (2026-09-11 status-check session, CRITICAL): see discardResumeDocument's own header.
       rejectResumeModalOpen: s.rejectResumeModalOpen,
       rejectResumePending: s.rejectResumePending,

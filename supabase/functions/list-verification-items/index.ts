@@ -15,6 +15,23 @@ const REST_HEADERS = {
   "Authorization": "Bearer " + SUPABASE_SERVICE_ROLE_KEY,
 };
 
+// Same precision-aware date printing every other surface in this codebase uses (date precision,
+// 2026-09-19): year -> "1990", month -> "Mar 1990", day -> "Mar 15, 1990", "Present" for an ongoing
+// job. Added here (this function never needed one before) so the overlap pair labels below can bake
+// in a real date range without staff.html having to duplicate the precision logic.
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function printDate(date: string | null | undefined, precision: string | null | undefined): string {
+  if (precision === "present") return "Present";
+  if (!date) return "";
+  const m = String(date).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return "";
+  const p = precision === "year" || precision === "month" || precision === "day" ? precision
+    : (m[2] === "01" && m[3] === "01" ? "year" : m[3] === "01" ? "month" : "day");
+  if (p === "year") return m[1];
+  const mon = MONTHS[Number(m[2]) - 1] ?? "";
+  return p === "month" ? `${mon} ${m[1]}` : `${mon} ${Number(m[3])}, ${m[1]}`;
+}
+
 // ---------------------------------------------------------------------------------------------------
 // ---------------------------------------------------------------------------------------------------
 // STAFF ROLE POLICY (2026-09-19). Until now this function only checked that the caller held SOME live staff session; the
@@ -152,6 +169,27 @@ export default {
           ? fetch(`${SUPABASE_URL}/rest/v1/candidate_freeform_sections?id=in.(${freeformIds.join(",")})&select=id,candidate_edited_fields,staff_blocked_at,staff_block_reason_code`, { headers: REST_HEADERS }).then((r) => r.ok ? r.json() : [])
           : Promise.resolve([]),
       ]);
+      // Overlapping employment detection (2026-09-27): an Overlap-type row's source_item_id is never
+      // set (the incident spans multiple items, not one), so its detail lives on work_overlap_holds
+      // via verification_item_id instead -- the same plug-in-to-the-existing-queue design described in
+      // the migration's own header. Batch-fetched the same way every other type-specific enrichment on
+      // this function already is.
+      const overlapIds = [...new Set(rows.filter((r: any) => r.type === "Overlap").map((r: any) => r.id))];
+      const overlapHoldRows: any[] = overlapIds.length
+        ? await fetch(`${SUPABASE_URL}/rest/v1/work_overlap_holds?verification_item_id=in.(${overlapIds.join(",")})&select=id,verification_item_id,source,action,explanation,action_at,queue_priority,resolved_at,resolved_by,resolution_note,work_overlap_pairs(item_a_id,item_b_id,overlap_days)`, { headers: REST_HEADERS }).then((r) => r.ok ? r.json() : [])
+        : [];
+      const overlapHoldByQid = new Map(overlapHoldRows.map((h) => [h.verification_item_id, h]));
+      const overlapWorkIds = [...new Set(overlapHoldRows.flatMap((h) => (h.work_overlap_pairs || []).flatMap((p: any) => [p.item_a_id, p.item_b_id])))];
+      const overlapWorkRows: any[] = overlapWorkIds.length
+        ? await fetch(`${SUPABASE_URL}/rest/v1/work_history_items?id=in.(${overlapWorkIds.join(",")})&select=id,title,company,start_date,start_date_precision,end_date,end_date_precision`, { headers: REST_HEADERS }).then((r) => r.ok ? r.json() : [])
+        : [];
+      const overlapWorkById = new Map(overlapWorkRows.map((w) => [w.id, w]));
+      const overlapResolverIds = [...new Set(overlapHoldRows.filter((h) => h.resolved_by).map((h) => h.resolved_by))];
+      const overlapResolvers: any[] = overlapResolverIds.length
+        ? await fetch(`${SUPABASE_URL}/rest/v1/staff_users?id=in.(${overlapResolverIds.join(",")})&select=id,name`, { headers: REST_HEADERS }).then((r) => r.ok ? r.json() : [])
+        : [];
+      const overlapResolverById = new Map(overlapResolvers.map((s) => [s.id, s.name]));
+
       const workHistoryContactById = new Map((workHistoryContacts as any[]).map((w) => [w.id, w]));
       const certContactById = new Map((certContacts as any[]).map((c) => [c.id, c]));
       const educationById = new Map((educationRows as any[]).map((e) => [e.id, e]));
@@ -228,6 +266,29 @@ export default {
             source: l.verification_source, verifiedAt: l.verified_at,
             registryMatch: mr ? { statusText: mr.statusText ?? null, standing: mr.standing ?? null, licenseType: mr.licenseType ?? null, expiration: mr.expiration ?? null } : null,
           } : null;
+        })() : null,
+        // Overlapping employment detection (2026-09-27): null for every other type. Staff resolves via
+        // the dedicated resolve-work-overlap-hold endpoint (holdId), never the generic status-change
+        // endpoint -- see the migration's own header for why this doesn't fit the Confirmed/Discrepancy
+        // vocabulary. pairs' item labels come straight from work_history_items, not the (possibly
+        // stale) claim text on the queue row itself.
+        overlapData: r.type === "Overlap" && overlapHoldByQid.has(r.id) ? (() => {
+          const h = overlapHoldByQid.get(r.id);
+          return {
+            holdId: h.id, source: h.source, action: h.action, explanation: h.explanation, actionAt: h.action_at,
+            queuePriority: h.queue_priority, resolvedAt: h.resolved_at,
+            resolvedBy: h.resolved_by ? (overlapResolverById.get(h.resolved_by) || null) : null,
+            resolutionNote: h.resolution_note,
+            pairs: (h.work_overlap_pairs || []).map((p: any) => {
+              const lbl = (id: string) => {
+                const w = overlapWorkById.get(id);
+                if (!w) return { id, label: "(item)", range: "" };
+                const range = [printDate(w.start_date, w.start_date_precision), printDate(w.end_date, w.end_date_precision)].filter(Boolean).join(" – ");
+                return { id: w.id, label: [w.title, w.company].filter(Boolean).join(" at ") || "(untitled job)", range };
+              };
+              return { days: p.overlap_days, a: lbl(p.item_a_id), b: lbl(p.item_b_id) };
+            }),
+          };
         })() : null,
         status: r.status,
         assignedTo: r.assigned_to,
