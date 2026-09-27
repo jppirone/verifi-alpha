@@ -949,7 +949,7 @@ export default {
           if (!cur || cur.status !== "ready") return json({ ok: false, error: "not_ready", status: cur?.status ?? null }, 409);
           const fresh = await computePlan(resub, doc); const h = await sha256Hex(canonical(fresh.plan));
           await patch(`resume_resubmissions?id=eq.${resub.id}&status=eq.ready`, { plan: fresh.plan, plan_hash: h, base_fingerprint: fresh.fingerprint, counts: fresh.plan.counts, updated_at: new Date().toISOString() });
-          return json({ ok: false, error: "plan_changed", plan_hash: h, plan: fresh.plan, _debug_current_hash: await sha256Hex(canonical(current.plan)), _debug_current: current.plan }, 409);
+          return json({ ok: false, error: "plan_changed", plan_hash: h, plan: fresh.plan, _debug_current_hash: await sha256Hex(canonical(current.plan)), _debug_body_plan_hash: body.plan_hash, _debug_body_plan_hash_type: typeof body.plan_hash, _debug_body_plan_hash_len: body.plan_hash ? body.plan_hash.length : null }, 409);
         };
         const current = await computePlan(resub, doc);
         if (await sha256Hex(canonical(current.plan)) !== body.plan_hash) return await stale();
