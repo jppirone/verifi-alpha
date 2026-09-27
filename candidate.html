@@ -3406,29 +3406,6 @@ a:hover{color:var(--color-accent)}
     </div>
   </sc-if>
 
-  <!-- Item F/G extension (2026-09-27): Content Manager's own version of the modal just above, for the
-       two things on that screen that introduce or change content beyond what your document extracted —
-       rewriting a job's responsibilities, or adding a skill from nothing. Same weight, same "recorded,
-       not just shown" shape — but asked once (per ack_text_version), the first time either is attempted,
-       not at a submit step this screen doesn't have. Only ever opened by czSave's own ack gate — see
-       that function's header. -->
-  <sc-if value="{{ czEditAckOpen }}" hint-placeholder-val="{{ false }}">
-    <div class="dialog-backdrop">
-      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="cz-edit-ack-modal-title" style="width:min(520px,100%);max-height:90vh;overflow-y:auto">
-        <div class="dialog-title" id="cz-edit-ack-modal-title">Before you continue</div>
-        <div class="dialog-body" style="display:flex;flex-direction:column;gap:var(--space-3);line-height:1.6">
-          <div>Rewriting a job's description, or adding a skill here, goes beyond what your uploaded document said — this content was never part of what was extracted, and it isn't checked the way your verified record is.</div>
-          <div>Once you save it, <b>it's recorded as something you added or changed</b> — separately and permanently from your original document. It appears on your resume exactly as you write it.</div>
-          <div style="font-size:12px;color:var(--color-neutral-500)">You'll only see this once. It doesn't apply to anything you toggle on or off, only to text you write yourself here.</div>
-        </div>
-        <div class="dialog-actions">
-          <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ czCancelEditAck }}">Cancel</button>
-          <button type="button" class="btn btn-primary" sc-camel-on-click="{{ czConfirmEditAck }}">I understand — save it</button>
-        </div>
-      </div>
-    </div>
-  </sc-if>
-
   <!-- Candidate item-flagging (2026-09-23): one shared modal for every item card above (work
        history/education/certifications/skills/freeform, incl. Summary/Hobbies) — see
        flagItemProps/openFlagModal. Purely local until Confirm; see submitResumeConfirmation for
@@ -6170,6 +6147,34 @@ a:hover{color:var(--color-accent)}
         <div class="dialog-actions">
           <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ closeConnectModal }}">Cancel</button>
           <button type="button" class="btn btn-primary" sc-camel-on-click="{{ confirmConnectModal }}">Authorize</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- Item F/G extension (2026-09-27): Content Manager's own version of resumeConfirm's editAckOpen
+       modal, for the two things on that screen that introduce or change content beyond what your
+       document extracted — rewriting a job's responsibilities, or adding a skill from nothing. Same
+       weight, same "recorded, not just shown" shape — but asked once (per ack_text_version), the first
+       time either is attempted, not at a submit step this screen doesn't have. Only ever opened by
+       czSave's own ack gate — see that function's header. Deliberately placed here, inside isAccount
+       directly (not back where resumeConfirm's own modals live, inside isResumeConfirm) — a real bug
+       caught live-verifying this build: the whole isResumeConfirm subtree is unmounted while
+       screen === 'account', so a modal placed there can never open from Content Manager regardless of
+       its own flag's value, confirmed by reproducing the identical failure on the pre-existing,
+       unmodified editAckOpen modal itself before moving this one. -->
+  <sc-if value="{{ czEditAckOpen }}" hint-placeholder-val="{{ false }}">
+    <div class="dialog-backdrop">
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="cz-edit-ack-modal-title" style="width:min(520px,100%);max-height:90vh;overflow-y:auto">
+        <div class="dialog-title" id="cz-edit-ack-modal-title">Before you continue</div>
+        <div class="dialog-body" style="display:flex;flex-direction:column;gap:var(--space-3);line-height:1.6">
+          <div>Rewriting a job's description, or adding a skill here, goes beyond what your uploaded document said — this content was never part of what was extracted, and it isn't checked the way your verified record is.</div>
+          <div>Once you save it, <b>it's recorded as something you added or changed</b> — separately and permanently from your original document. It appears on your resume exactly as you write it.</div>
+          <div style="font-size:12px;color:var(--color-neutral-500)">You'll only see this once. It doesn't apply to anything you toggle on or off, only to text you write yourself here.</div>
+        </div>
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-secondary" sc-camel-on-click="{{ czCancelEditAck }}">Cancel</button>
+          <button type="button" class="btn btn-primary" sc-camel-on-click="{{ czConfirmEditAck }}">I understand — save it</button>
         </div>
       </div>
     </div>
