@@ -8409,7 +8409,7 @@ class Component extends DCLogic {
         text: 'Approve ' + who + '? They will see a report of the licenses on your account, as checked against the state registry just now. This is exactly what they will see:',
         lines: ls.map(l => this.licenseLineText(l)),
         foot: 'A license that is not verified is shown as not verified, with the reason. Nothing else about you is shown. ' + (e.access_method === 'guest'
-          ? 'They have no account: they can open it once, and only after paying for it. Once they open it they can read it for 30 minutes, and then it is gone and cannot be reopened. If they never open it, it is discarded after 7 days.'
+          ? 'They have no account: they can open it once, and only after paying for it. Once they open it, it stays reopenable free for 21 days. If they never open it, it is discarded after 7 days.'
           : 'If they never open it, it is discarded after 7 days; once opened it stays available to them for 30 days.') + ' You cannot undo an approval.',
         canApprove: true,
       };
@@ -8423,7 +8423,7 @@ class Component extends DCLogic {
     if (!w || !w.total) return { text: "You don't have anything on your record yet, so there is nothing to share with " + who + '. You can decline, or wait until you do.', lines: [], foot: '', canApprove: false };
     return {
       text: 'Approve ' + who + '? They will see every job, education entry and certification you have submitted (' + this.empItemSummaryText(w) + '), each with its current status: verified, in progress, verification not possible, unable to verify, or discrepancy (shown with both what you stated and what was found). Nothing is held back or excluded — this shows your whole record as it stands right now, and will keep reflecting your current record for as long as they have access. ' + (e.access_method === 'guest'
-        ? 'They have no account: they can open it once, and only after paying for it. Once they open it they can read it for 30 minutes, and then it is gone and cannot be reopened. If they never open it, it is discarded after 7 days.'
+        ? 'They have no account: they can open it once, and only after paying for it. Once they open it, it stays reopenable free for 21 days. If they never open it, it is discarded after 7 days.'
         : 'If they never open it, it is discarded after 7 days; once opened it stays available to them for up to 90 days.') + ' You cannot undo an approval.',
       lines: [], foot: '', canApprove: true,
     };
