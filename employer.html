@@ -2386,6 +2386,34 @@ const __ds_scope = {};
       </sc-for>
     </div>
 
+    <!-- Gap #21/#22 unification (2026-09-27): activity visibility for a signed-in employer with no organization
+         -- an org member already sees this same list (list_lookups, now access "any") inside their own richer
+         "Verified record requests" card further down; this is that same visibility for everyone else, so a free
+         lookup is never a dead end that leaves no trace in the account it now persists a session for. -->
+    <sc-if value="{{ acctNoOrg }}" hint-placeholder-val="{{ true }}">
+      <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
+        <div class="card-kicker">Your lookups</div>
+        <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Every existence check you've run, signed in with {{ acctEmail }}, whether or not it found a match. A match stays reachable to request here for 30 days.</div>
+        <div style="display:flex;flex-direction:column;gap:var(--space-2);align-items:flex-start">
+          <button type="button" id="acct-check-candidate-noorg" class="btn btn-secondary" sc-camel-on-click="{{ checkCandidateFromAccount }}">Check a candidate</button>
+        </div>
+        <sc-if value="{{ noLookupRows }}" hint-placeholder-val="{{ true }}">
+          <div style="font-size:13px;color:var(--color-neutral-400);line-height:1.6">None yet. Use Check a candidate above.</div>
+        </sc-if>
+        <sc-for list="{{ lookupRows }}" as="row" hint-placeholder-count="2">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap;font-size:13px">
+            <span>{{ row.label }} <span style="color:var(--color-neutral-500)">&middot; looked up {{ row.dateLabel }}</span></span>
+            <sc-if value="{{ row.canRequest }}" hint-placeholder-val="{{ true }}">
+              <button type="button" class="btn btn-secondary" style="font-size:12px" sc-camel-on-click="{{ row.onRequest }}">Request verified record</button>
+            </sc-if>
+            <sc-if value="{{ row.inProgress }}" hint-placeholder-val="{{ false }}">
+              <span style="font-size:12px;color:var(--color-neutral-500)">Request in progress</span>
+            </sc-if>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+
     <sc-if value="{{ hasOrgInvites }}" hint-placeholder-val="{{ false }}">
       <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
         <div class="card-kicker">Invitations</div>
@@ -3625,13 +3653,24 @@ class Component extends DCLogic {
       : !res.ok || !data || !data.ok ? "We couldn't run that check. Please try again." : null;
     if (msg) { this.setState({ lookupSending: false, lookupFormError: msg }); return; }
     this.setState({ lookupSending: false });
-    this.applyExistenceResult(data);
+    await this.applyExistenceResult(data);
   }
 
   // Shared by the anonymous email-link path (runTokenLookup) and the signed-in path just above: the same
   // {exists, lookup_id, claim_token, ...} shape either way, so this is the ONE place that turns it into
   // screen state.
-  applyExistenceResult(data) {
+  //
+  // Unification (2026-09-27): check-existence's anonymous path now also returns a session_token (see that
+  // function's own header) -- applied here exactly the way confirmEmployerLogin applies its own, so the
+  // free-lookup entry point ends up with the same persistent, signed-in-equivalent session a person who
+  // clicked "Sign in" first already gets. async now (it wasn't before) so this can finish loading the
+  // account (My Comparisons, Payment History, everything loadReal populates) before the caller moves on.
+  async applyExistenceResult(data) {
+    if (data.session_token && !this.state.real) {
+      try { localStorage.setItem(this.EMP_TOKEN_KEY, data.session_token); } catch (e) { /* session then lasts this page only */ }
+      await new Promise((resolve) => this.setState({ realToken: data.session_token }, resolve));
+      await this.loadReal();
+    }
     if (!data.exists) { this.setState({ screen: 'noMatch', lookupResult: 'none', lookup: null, request: null }); return; }
     const reqEmail = data.requester_email || '';
     this.setState({
@@ -3758,17 +3797,22 @@ class Component extends DCLogic {
     if (!me.data.ok) return false;
     // Independent of org status (Gap #21 finding 8): a pay-per-use request always carries this employer_user's own
     // id, whether or not they belong to an organization, so this is fetched unconditionally, in parallel with the
-    // organization-only calls below.
+    // organization-only calls below. list_lookups joins it here (2026-09-27, unified activity visibility): it is
+    // now access "any" server-side (see that action's own header) and was only ever fetched inside the org branch
+    // before -- a signed-in employer with no organization had no visibility into their own past lookups at all.
     const myPaidCall = call('list_my_paid_comparisons');
-    let members = [], invites = [], billing = null;
-    let cmp = { lookups: [], comparisons: [], cmpLoaded: false, cmpLoadErr: null };
+    const lookupsCall = call('list_lookups');
+    let members = [], invites = [], billing = null, comparisonsData = null;
     if (me.data.org) {
-      const got = await Promise.all([call('list_members'), call('billing_status'), call('list_lookups'), call('list_comparisons')]);
+      const got = await Promise.all([call('list_members'), call('billing_status'), call('list_comparisons')]);
       sup = await superseded(); if (sup !== null) return sup;
       if (got[0].data.ok) { members = got[0].data.members || []; invites = got[0].data.pending_invites || []; }
       if (got[1].data.ok) billing = got[1].data;
-      cmp = this.cmpPatch(got[2].data, got[3].data);
+      comparisonsData = got[2].data;
     }
+    const lookupsRes = await lookupsCall;
+    sup = await superseded(); if (sup !== null) return sup;
+    const cmp = this.cmpPatch(lookupsRes.data, comparisonsData);
     const myPaidRes = await myPaidCall;
     sup = await superseded(); if (sup !== null) return sup;
     const myPaid = myPaidRes.data && myPaidRes.data.ok ? { myPaidComparisons: myPaidRes.data.comparisons || [], myPaidLoaded: true } : { myPaidLoaded: true };
@@ -4031,15 +4075,17 @@ class Component extends DCLogic {
     if (!res.ok || !data || !data.ok) { this.setState({ screen: 'lookupError' }); return; }
     // check-existence never returns candidate details; the name shown back is what the requester
     // typed, which the server has just matched against the record.
-    this.applyExistenceResult(data);
+    await this.applyExistenceResult(data);
   }
 
 
   // ===== Comparisons (Stage 2 of the comparison delivery): real, server-enforced requests from a signed-in organization member =====
   cmpPatch(lk, cm) {
+    // cm === null means list_comparisons was never called at all (no organization -- see runLoad), which is
+    // not a failure to report; cm as a real (possibly !ok) response object is the org path's actual result.
     return {
       lookups: lk && lk.ok ? (lk.lookups || []) : [], comparisons: cm && cm.ok ? (cm.comparisons || []) : [], cmpLoaded: true,
-      cmpLoadErr: (lk && lk.ok && cm && cm.ok) ? null : "We couldn't load your requests. Please try again.",
+      cmpLoadErr: (lk && lk.ok) && (cm === null || (cm && cm.ok)) ? null : "We couldn't load your requests. Please try again.",
     };
   }
 
@@ -4128,35 +4174,51 @@ class Component extends DCLogic {
 
   async sendGuestRequest() {
     const s = this.state;
-    if (s.reqBusy || !s.reqLookupId || !s.reqClaimToken) return;
+    // reqClaimToken is only required to prove ownership of the lookup while still anonymous (the gcall
+    // branch below); once signed in, the session itself proves it (request_comparison_paid checks the
+    // lookup's own requester_email against the caller) -- see accessPaidForm's own 2026-09-27 comment.
+    if (s.reqBusy || !s.reqLookupId || (!s.real && !s.reqClaimToken)) return;
     this.setState({ reqBusy: true, reqErr: null });
-    const up = await this.uploadRequestDocument('guest');
-    if (up.error) { this.setState({ reqBusy: false, reqErr: up.error }); return; }
-    // Gap #21 (2026-09-26): signed in -> the pay-per-use path (request_comparison_paid, employer-api.ts).
-    // reqClaimToken was only ever needed for the document upload just above; identity for the request
-    // itself comes from the session. Not signed in -> the original fully-anonymous path, unchanged below.
+    // Unification (2026-09-27): once the free lookup itself established a real session (see check-
+    // existence's own header), this screen's own attestation+document fields are submitted through the
+    // SAME session used everywhere else on the page -- request_comparison_paid, over the authenticated
+    // gateway -- rather than the old fully-anonymous claim-token round trip (this.gcall). It cannot
+    // simply delegate to sendDirectRequest(): that submits freshly-typed candidate name/email/phone from
+    // a DIFFERENT screen's fields, which are never collected here (this screen already has a matched
+    // candidate, from reqLookupId). The document upload mode follows the same split: 'employer' (session-
+    // based) once signed in, 'guest' (lookup_id/claim_token-based) for the still-fully-anonymous case.
+    // request_comparison_paid itself was fixed server-side the same day (see its own header) to resolve
+    // the candidate from the lookup and call create_comparison_request_direct, not the discoverable-gated
+    // create_comparison_request -- the actual gap-22 fix for this path.
     if (s.real) {
+      const up = await this.uploadRequestDocument('employer');
+      if (up.error) { this.setState({ reqBusy: false, reqErr: up.error }); return; }
       const r = await this.empCall('request_comparison_paid', { lookup_id: s.reqLookupId, attestation: s.reqAttestation, document_id: up.id });
       if (r.status === 401) { this.setState({ reqBusy: false }); return; }
       if (r.data && r.data.ok) {
         this._reqDoc = null; this._reqDocUp = null;
+        const requestId = r.data.request_id;
+        const notified = !!r.data.candidate_notified;
         this.setState({ reqLookupId: null, reqClaimToken: '', reqAttestation: '', reqDocName: '', reqConsent: false });
-        await this.startCardSetupNow(r.data.request_id, !!r.data.candidate_notified);
+        // Same card-at-request-time flow as sendDirectRequest's own guest/paid outcome (Gap #21 finding 7)
+        // -- this screen's own copy already promises "saves your card now", so it must follow through the
+        // same way, not stop short at an acknowledgment the copy never offered.
+        await this.startCardSetupNow(requestId, notified);
         return;
       }
       const code = r.data && r.data.error;
-      // Gap #22: this candidate WAS just found by the lookup that got us here, so an honest, distinguishable
-      // answer is safe here specifically -- see create_comparison_request's own header.
       this.setState({
         reqBusy: false,
         reqErr: this.reqDocErrorFor(code) || (code === 'attestation_invalid' ? 'Please say how you obtained the candidate\u2019s information (10 to 500 characters).'
           : code === 'rate_limited' ? 'You have sent several requests today. Please try again tomorrow.'
-          : code === 'already_requested' ? 'You already have a request open for this candidate. Check your email for the link if it was approved.'
+          : code === 'already_requested' ? 'You already have a request open for this candidate. It is listed in your account.'
           : code === 'not_accepting' ? "This candidate has an account, but isn't accepting comparison requests right now. Nothing was charged and nothing was sent to them."
           : "This request can't be made right now."),
       });
       return;
     }
+    const up = await this.uploadRequestDocument('guest');
+    if (up.error) { this.setState({ reqBusy: false, reqErr: up.error }); return; }
     const r = await this.gcall({ action: 'request', lookup_id: s.reqLookupId, claim_token: s.reqClaimToken, attestation: s.reqAttestation, document_id: up.id });
     if (r.data && r.data.ok) {
       this._reqDoc = null; this._reqDocUp = null;
@@ -4794,6 +4856,12 @@ class Component extends DCLogic {
       onOpen: () => this.openComparison(c.id, from),
     }));
     const subLive = !!(s.billing && s.billing.subscription && s.billing.subscription.live);
+    // The 'access' screen's four mutually-exclusive forms (2026-09-27 unification: paidForm no longer needs
+    // a fresh reqClaimToken -- see accessPaidForm's own comment below).
+    const orgOk = this.orgFormOk();
+    const accessEmailMismatchVal = !!s.real && !!s.real.org && !!s.reqLookupRequesterEmail && s.reqLookupRequesterEmail.trim().toLowerCase() !== (s.real.user.email || '').toLowerCase() && !s.reqClaimToken;
+    const accessGuestFormVal = !orgOk && !s.real && !!s.reqClaimToken;
+    const accessPaidFormVal = !orgOk && !!s.real && !s.real.org && !!s.reqLookupId;
     return {
       isCardSetupReturn: s.screen === 'cardSetupReturn',
       isBillingReturn: s.screen === 'billingReturn',
@@ -5021,12 +5089,17 @@ class Component extends DCLogic {
         ? (s.real.org ? 'Signed in as ' + s.real.user.email + '.' : 'You are signed in but not part of an organization yet.')
         : 'You can request as a guest (pay per request, reopenable free for 21 days once you open it) or sign in with an organization account, whose plan covers these requests.',
       accessCandidateLabel: s.reqLookupLabel || 'the candidate',
-      accessEmailMismatch: !!s.real && !!s.real.org && !!s.reqLookupRequesterEmail && s.reqLookupRequesterEmail.trim().toLowerCase() !== (s.real.user.email || '').toLowerCase() && !s.reqClaimToken,
+      accessEmailMismatch: accessEmailMismatchVal,
       accessEmailNote: 'This lookup was confirmed with ' + (s.reqLookupRequesterEmail || 'another address') + ', so it can only be requested from an account signed in with that address. You are signed in as ' + (s.real && s.real.user ? s.real.user.email : '') + '.',
-      accessCanRequest: this.orgFormOk(),
-      accessGuestForm: !this.orgFormOk() && !!s.reqClaimToken && !s.real,
-      accessPaidForm: !this.orgFormOk() && !!s.reqClaimToken && !!s.real,
-      accessNoOption: !this.orgFormOk() && !s.reqClaimToken && !(!!s.real && !!s.real.org),
+      accessCanRequest: orgOk,
+      accessGuestForm: accessGuestFormVal,
+      // (2026-09-27 unification) reqLookupId alone is enough once signed in -- the session itself is now
+      // the proof of ownership (request_comparison_paid checks the lookup's requester_email against the
+      // caller's own), not a freshly-minted reqClaimToken. Without this, reopening an OLDER lookup from the
+      // account's own "Your lookups" history (which never carries a claim token) dead-ended at
+      // accessNoOption for exactly the signed-in-without-org caller this unification was meant to cover.
+      accessPaidForm: accessPaidFormVal,
+      accessNoOption: !orgOk && !accessEmailMismatchVal && !accessGuestFormVal && !accessPaidFormVal,
       guestEmailLine: s.reqLookupRequesterEmail || 'the address you confirmed this lookup with',
       guestPriceLabel: this.money(s.guestPrice),
       attestationDraft: s.reqAttestation,

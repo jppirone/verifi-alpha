@@ -39,10 +39,14 @@ const corsHeaders = {
 // verified webhook (employer-stripe-events) is what updates the database. Owner handover and the owner leaving are
 // still deliberately not built: the owner cannot be removed and cannot leave.
 //
-// Comparisons (added 2026-09-20, Stage 2 of the comparison delivery; see migrations 20260920020000 and 20260920040000): list_lookups,
-// request_comparison, list_comparisons and open_comparison are all access "member" (they need an organization, whose live subscription
-// pays for them). Members run and open THEIR OWN requests; the owner can additionally LIST every request in the organization (who asked
-// and what state it is in) but cannot open someone else's: opening is bound to the person who asked.
+// Comparisons (added 2026-09-20, Stage 2 of the comparison delivery; see migrations 20260920020000 and 20260920040000): request_comparison,
+// list_comparisons and open_comparison are all access "member" (they need an organization, whose live subscription pays for them).
+// Members run and open THEIR OWN requests; the owner can additionally LIST every request in the organization (who asked and what state
+// it is in) but cannot open someone else's: opening is bound to the person who asked.
+//   * list_lookups is access "any" (2026-09-27, unified activity visibility): list_employer_lookups (SQL) is already scoped purely by the
+//     caller's own email, with no org join at all, so the "member" gate on it was only ever incidental (everyone who could reach the
+//     screen that showed it happened to be an org member) -- not a real ownership boundary. A signed-in employer with no organization
+//     couldn't see their own past lookups at all before this; they now can, the same way an org member always could.
 //   * The candidate is never named in a request: the caller picks one of their OWN matched Tier 1 lookups (their sign-in address is the
 //     address the lookup link went to), and create_comparison_request (SQL) applies every rule, returning one coarse "unavailable" for
 //     anything about the candidate's state.
@@ -620,7 +624,7 @@ const ACTIONS: Record<string, Action> = {
 
   // ---- comparisons (Stage 2) ----
   list_lookups: {
-    access: "member",
+    access: "any",
     run: async ({ user }) => {
       const r = await rest("rpc/list_employer_lookups", { method: "POST", body: JSON.stringify({ p_email: user.email }) });
       if (!r.ok) return fail(500, "list_failed");
@@ -628,7 +632,7 @@ const ACTIONS: Record<string, Action> = {
       return ok({
         lookups: (Array.isArray(list) ? list : []).map((l: any) => ({
           lookup_id: l.lookup_id, candidate_label: l.candidate_label || "Candidate", completed_at: l.completed_at,
-          open_request_id: l.open_request_id || null,
+          open_request_id: l.open_request_id || null, open_request_status: l.open_request_status || null,
         })),
       });
     },
@@ -790,13 +794,46 @@ const ACTIONS: Record<string, Action> = {
   // first open (open_paid_comparison, SQL) instead of a 30-minute single view, reachable here AND from Payment
   // History (list_payments above) by request id -- the same identity the whole way through is what makes that
   // possible, where the old fully-anonymous guest token never could be.
+  // (2026-09-27 fix, gap #22 unification): used to call create_comparison_request (p_method:"guest"),
+  // the same RPC request_comparison(org) uses -- which re-checks candidates.discoverable at SUBMIT time,
+  // not just the earlier lookup's own match. That re-check is redundant with (and strictly narrower than)
+  // the lookup that already got the caller to this screen, and can only ever make a real request fail: if
+  // discoverable flipped false between lookup and submit, a candidate who still has allow_comparison_requests
+  // on would be wrongly refused here even though the caller already holds a valid, matched lookup. Resolving
+  // the candidate from the lookup row directly and calling create_comparison_request_direct (gap-22-correct;
+  // gates on allow_comparison_requests only, matching what this SAME screen's copy already promises) removes
+  // that stale re-check. This does not, and structurally cannot, make an ALWAYS-non-discoverable candidate
+  // reachable from this lookup-first screen -- check-existence's own matching never surfaces one to begin
+  // with, so there is never a lookup_id to submit here for one. That case is the separate "Request a
+  // comparison" screen's job (sendDirectRequest / request_comparison_direct), reachable from the header nav
+  // regardless of sign-in or org state, independent of any lookup ever succeeding.
   request_comparison_paid: {
     access: "any",
     run: async ({ user, p }) => {
       if (typeof p.lookup_id !== "string" || !UUID.test(p.lookup_id)) return fail(400, "lookup_id_invalid");
       const attestation = typeof p.attestation === "string" ? p.attestation : "";
       const documentId = typeof p.document_id === "string" && UUID.test(p.document_id) ? p.document_id : null;
-      const r = await rest("rpc/create_comparison_request", { method: "POST", body: JSON.stringify({ p_lookup_id: p.lookup_id, p_method: "guest", p_employer_user: user.id, p_attestation: attestation, p_document_id: documentId }) });
+      const since30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const lk = (await rows(`employer_lookup_requests?id=eq.${p.lookup_id}&result_exists=eq.true&used_at=not.is.null&matched_candidate_id=not.is.null&used_at=gte.${encodeURIComponent(since30)}&select=matched_candidate_id,requester_email,requester_company`))?.[0];
+      if (!lk) return fail(409, "unavailable");
+      // Same ownership check create_comparison_request itself used to enforce (lookup_not_yours): this
+      // employer_user's own signed-in email must be the one the lookup was actually run for.
+      if (String(lk.requester_email || "").toLowerCase() !== user.email.toLowerCase()) return fail(409, "unavailable");
+      // create_comparison_request_direct folds "found but not accepting" into the same generic
+      // unavailable+detail bucket as several other cases (by design, for its own no-prior-existence-check
+      // caller, which must never say why). On THIS path existence is already known, so check the one flag
+      // this screen can still honestly tell apart -- comparison_not_allowed, same distinction request_comparison
+      // (org) makes -- before calling the RPC, rather than losing that specificity.
+      const cand = (await rows(`candidates?id=eq.${lk.matched_candidate_id}&select=allow_comparison_requests`))?.[0];
+      if (!cand) return fail(409, "unavailable");
+      if (cand.allow_comparison_requests !== true) return fail(409, "not_accepting");
+      const r = await rest("rpc/create_comparison_request_direct", {
+        method: "POST",
+        body: JSON.stringify({
+          p_candidate_id: lk.matched_candidate_id, p_method: "guest", p_employer_user: user.id, p_attestation: attestation,
+          p_document_id: documentId, p_lookup_id: p.lookup_id, p_requester_company: lk.requester_company || null,
+        }),
+      });
       if (!r.ok) return fail(500, "request_failed");
       const res = (await r.json())?.[0];
       if (!res) return fail(500, "request_failed");
@@ -807,9 +844,9 @@ const ACTIONS: Record<string, Action> = {
         if (res.reason === "document_invalid") return fail(400, "document_invalid");
         if (res.reason === "rate_limited") return fail(429, "rate_limited");
         if (res.reason === "already_open") return fail(409, "already_requested", { request_id: res.request_id });
-        // Gap #22: existence is already known on this lookup-first path, so this is told apart from the
-        // generic "unavailable" below -- see create_comparison_request's own header.
-        if (res.reason === "comparison_not_allowed") return fail(409, "not_accepting");
+        // not_accepting was already told apart above, before this RPC was ever called -- everything else
+        // (subscription_required only applies to p_method:"org", so is unreachable here; a race where the
+        // candidate's own row changed between the check above and this insert) is the generic bucket.
         return fail(409, "unavailable");
       }
       let notified = false;

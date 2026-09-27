@@ -24,6 +24,14 @@ const corsHeaders = {
 //   already used  -> 409 already_used      expired -> 410 expired      bad/expired session -> 401 invalid_session
 //   genuine error -> 500 lookup_failed (a REAL error, distinguishable server-side; nothing is burned)
 //
+// UNIFICATION (2026-09-27): path (a) above now ALSO establishes a real employer_sessions session (see
+// establishSessionFor's own header) the moment the lookup completes -- the response carries a
+// `session_token` the client applies exactly the way it applies employer-confirm-login's own. This is
+// what makes "one verification" actually mean one, for the free-lookup entry point too, not only for
+// someone who separately clicked "Sign in" first: found live, real regression, re-testing this exact
+// flow with a real candidate -- the free lookup used to be a dead end with no persistent session and
+// no account visibility of any kind once it completed.
+//
 // BURN RULE: the token is marked used only by a completed lookup, via one conditional UPDATE
 // (used_at is null AND not expired), performed AFTER the lookup succeeded and BEFORE the result is
 // returned. A failed lookup never burns it; two concurrent uses can't both get a result.
@@ -163,6 +171,68 @@ function clip(v: unknown, n: number): string {
   return typeof v === "string" ? v.trim().slice(0, n) : "";
 }
 
+// Unification (2026-09-27): the free-lookup ("Check for account") path used to be a dead end for
+// everything downstream -- a real, confirmed regression found live re-testing this exact flow with
+// John Hybrid: the employer verified their email here, then got asked to verify it AGAIN (a fully
+// separate employer-request-login/employer-confirm-login round trip) just to reach the same
+// persistent-session/one-verification/gap-22-correct machinery that a person who clicked "Sign in"
+// FIRST already had -- and if they never separately signed in at all, there was no account view of
+// any kind to come back to (not My Comparisons, not Payment History), only a future emailed link that
+// only ever arrives once the candidate answers. The anonymous confirmation-email click that gates
+// this whole function is already the exact same proof of email control employer-confirm-login's own
+// magic-link click is (see that function's own header) -- there is no real reason to treat them as
+// different trust levels. This establishes a real, persistent employer_sessions session here, at the
+// SAME moment the lookup itself completes, so the rest of the browsing session (a comparison request,
+// checking status, anything else) never needs a second round trip. Deliberately mirrors employer-
+// confirm-login's own session-creation code exactly (find-or-create employer_users by email, 32
+// random bytes hashed into employer_sessions, 30-day fixed expiry) rather than inventing a second
+// implementation of the same thing. Only for the ANONYMOUS token path below -- the session-
+// authenticated path above already has a session by definition. Best-effort: a failure here still
+// lets the lookup itself succeed: it just doesn't get the one-verification upgrade for that one call.
+function randomToken(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+const SESSION_DAYS = 30;
+async function establishSessionFor(email: string, name: string | null): Promise<string | null> {
+  try {
+    const readUser = async () => {
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/employer_users?email=eq.${encodeURIComponent(email)}&select=id,email,name`, { headers: REST });
+      return r.ok ? ((await r.json())[0] || null) : null;
+    };
+    let user = await readUser();
+    if (!user) {
+      await fetch(`${SUPABASE_URL}/rest/v1/employer_users?on_conflict=email`, {
+        method: "POST",
+        headers: { ...REST, "Content-Type": "application/json", "Prefer": "resolution=ignore-duplicates,return=minimal" },
+        body: JSON.stringify({ email, name: name || null }),
+      });
+      user = await readUser();
+    }
+    if (!user) return null;
+    if (!user.name && name) {
+      await fetch(`${SUPABASE_URL}/rest/v1/employer_users?id=eq.${user.id}&name=is.null`, {
+        method: "PATCH", headers: { ...REST, "Content-Type": "application/json", "Prefer": "return=minimal" }, body: JSON.stringify({ name }),
+      }).catch(() => {});
+    }
+    const sessionToken = randomToken();
+    const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    const sessRes = await fetch(`${SUPABASE_URL}/rest/v1/employer_sessions`, {
+      method: "POST",
+      headers: { ...REST, "Content-Type": "application/json", "Prefer": "return=minimal" },
+      body: JSON.stringify({ employer_user_id: user.id, token_hash: await sha256Hex(sessionToken), expires_at: expiresAt }),
+    });
+    if (!sessRes.ok) return null;
+    fetch(`${SUPABASE_URL}/rest/v1/employer_users?id=eq.${user.id}`, {
+      method: "PATCH", headers: { ...REST, "Content-Type": "application/json", "Prefer": "return=minimal" }, body: JSON.stringify({ last_login_at: new Date().toISOString() }),
+    }).catch(() => {});
+    return sessionToken;
+  } catch (_e) {
+    return null;
+  }
+}
+
 export default {
   fetch: withSupabase({ auth: "none" }, async (req, _ctx) => {
     if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -174,8 +244,12 @@ export default {
       const token = typeof body.token === "string" ? body.token.trim() : "";
       const sessionToken = typeof body.session_token === "string" ? body.session_token : "";
       let row: any;
+      // Unification: only the anonymous branch below ever needs a NEW session established -- the
+      // session-authenticated branch above already has one by definition.
+      let isAnonymousPath = true;
 
       if (!token && sessionToken) {
+        isAnonymousPath = false;
         // ---- session-authenticated path (Gap #21): stage-and-burn in one step, no separate email ----
         const employer = await employerFromSession(sessionToken);
         if (!employer) return json({ ok: false, error: "invalid_session" }, 401);
@@ -290,10 +364,18 @@ export default {
         return r2 && r2.used_at ? json({ ok: false, error: "already_used" }, 409) : json({ ok: false, error: "expired" }, 410);
       }
 
-      if (!exists) return json({ ok: true, exists: false });
+      // Unification: establish a real, persistent session for the anonymous path here, at the same
+      // moment the lookup completes -- see establishSessionFor's own header. Regardless of match: the
+      // trust signal (a real confirmation-email click) is identical either way, and a "not found"
+      // lookup is exactly when someone is most likely to want to try a different candidate next,
+      // which should not cost them a second verification either.
+      const newSessionToken = isAnonymousPath ? await establishSessionFor(row.requester_email, row.requester_name || null) : null;
+
+      if (!exists) return json({ ok: true, exists: false, session_token: newSessionToken || undefined });
       return json({
         ok: true, exists: true,
         lookup_id: row.id, completed_at: completedAt, claim_token: claimToken,
+        session_token: newSessionToken || undefined,
         // Echo of what the requester themselves typed (the new page load has no other copy of it).
         candidate_name: row.candidate_name, contact_used: row.candidate_email || row.candidate_phone || "",
         requester_name: row.requester_name, requester_company: row.requester_company, requester_email: row.requester_email,

@@ -10,7 +10,12 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "content-type",
 };
 
-// Employer login, step 2 of 2 (2026-09-19): the ONLY place an employer session is ever created.
+// Employer login, step 2 of 2 (2026-09-19): the ONE place an explicit "Sign in" ever creates an employer
+// session. (2026-09-27 update: no longer the only place a session is ever created at all -- check-
+// existence's own anonymous-lookup path now establishes one too, at the moment a free lookup's
+// confirmation-email click completes, so that entry point gets the same persistent session without a
+// separate sign-in round trip. See that function's own header for why; this file's own session-creation
+// code is what it deliberately mirrors, not a second, divergent implementation.)
 //
 // Single-use is enforced by one conditional UPDATE (confirmed_at is null AND not expired) whose returned
 // rows decide who won, the same guarantee as confirm-login / staff-confirm-login, not a look-then-write race:
