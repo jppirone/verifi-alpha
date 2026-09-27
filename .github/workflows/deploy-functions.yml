@@ -1,0 +1,68 @@
+name: Deploy Edge Functions
+
+# Auto-deploy every Supabase Edge Function on push to master, scoped to changes that could actually
+# affect a function's deployed code or its verify_jwt setting (supabase/config.toml -- see that file's
+# own header for why it exists and why it has to be included here too: a config.toml-only change, e.g.
+# flipping one function's verify_jwt, touches nothing under supabase/functions/** and would silently
+# never redeploy without this). Unrelated commits (candidate.html/staff.html edits, docs, anything
+# outside these two paths) never trigger a run.
+#
+# Built specifically to replace the manual "paste into the Supabase dashboard's Code tab" workaround
+# (see this repo's own history -- upload-resume alone is ~211KB/2836 lines, well past what's practical
+# to move through an assistant's own context window on every edit). The Supabase CLI reads every
+# function's file straight off this runner's checkout and uploads it directly -- no function's content
+# ever needs to pass through any other tool or context window again once this is set up.
+#
+# Simple version deliberately: `supabase functions deploy` with no function name deploys every function
+# under supabase/functions/ in one command (CLI >= 1.62). With 76 functions in this repo that's slower
+# than a scoped, changed-files-only deploy would be -- not optimized here on purpose (see the commit
+# this file was added in); revisit only if full-deploy time becomes a real problem.
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - "supabase/functions/**"
+      - "supabase/config.toml"
+  workflow_dispatch: {} # manual re-run from the Actions tab, e.g. to force a redeploy with no code change
+
+# Never let two pushes deploy at the same time and race each other -- queue them, don't cancel a
+# running deploy out from under itself (cancel-in-progress: false), since a cancelled mid-deploy run
+# could leave some functions updated and others not.
+concurrency:
+  group: deploy-edge-functions
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      # Not a secret -- this project ref is already public in this repo (candidate.html/staff.html's
+      # own SUPABASE_FN_URL constant), so there's no reason to also manage it as a GitHub secret.
+      PROJECT_ID: ihmypoduvrzymasgactc
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Deploy all Edge Functions
+        run: |
+          echo "::group::Deploying every function under supabase/functions/ to project ${PROJECT_ID}"
+          supabase functions deploy --project-ref "${PROJECT_ID}"
+          echo "::endgroup::"
+
+      # Runs even if the deploy step above failed (a partial failure still leaves SOME functions
+      # updated) -- gives one clean, always-present final snapshot of what's actually live, separate
+      # from the deploy step's own per-function transcript, so "did function X actually go out" never
+      # requires re-reading the whole log above it.
+      - name: List current function versions
+        if: always()
+        run: |
+          echo "::group::Function versions currently live on ${PROJECT_ID}"
+          supabase functions list --project-ref "${PROJECT_ID}"
+          echo "::endgroup::"

@@ -1,0 +1,247 @@
+# Supabase CLI project config (2026-09-27, added alongside the GitHub Actions auto-deploy workflow --
+# see .github/workflows/deploy-functions.yml). This file did not exist before: every edge function
+# deploy up to this point went through the Supabase MCP tool's own deploy_edge_function call, which
+# takes verify_jwt as an explicit per-call argument -- so no config.toml was ever needed for that path.
+# A CLI-driven deploy (`supabase functions deploy`, what the new CI workflow runs) is different: with
+# no config.toml at all, the CLI defaults EVERY function to verify_jwt = true, silently overriding
+# whichever functions currently have it OFF. Confirmed live before writing this file: pulled every
+# function's actual deployed verify_jwt via the Supabase MCP's list_edge_functions and cross-checked
+# 1:1 against every directory under supabase/functions/ (76 local, 76 deployed, exact match, zero
+# gaps either direction) -- 17 of the 76 are currently false (custom body-token/session auth, Stripe
+# webhook signature verification, or internal service-role-gated endpoints that were never meant to
+# require a Supabase platform JWT). Every entry below is that function's REAL, CURRENT, already-live
+# setting, not a guess -- this file's only job is to make the CLI preserve exactly what's already
+# deployed, not change anything. A function with no entry below falls back to the CLI's own default
+# (verify_jwt = true), which is correct for every function omitted here since true is already
+# everyone's default and only the 17 false exceptions strictly need to be listed -- every function is
+# still listed explicitly anyway, so the intended state is self-documenting and a future change shows
+# up as a real, reviewable diff instead of a silent gap.
+project_id = "ihmypoduvrzymasgactc"
+
+[functions.add-verification-timeline-entry]
+verify_jwt = true
+
+[functions.candidate-comparison-requests]
+verify_jwt = false
+
+[functions.candidate-feed-pause]
+verify_jwt = true
+
+[functions.cancel-stripe-subscription]
+verify_jwt = true
+
+[functions.check-duplicate-account]
+verify_jwt = true
+
+[functions.check-existence]
+verify_jwt = false
+
+[functions.check-login-status]
+verify_jwt = true
+
+[functions.check-verification-status]
+verify_jwt = true
+
+[functions.confirm-login]
+verify_jwt = true
+
+[functions.confirm-resume-data]
+verify_jwt = false
+
+[functions.confirm-verification]
+verify_jwt = true
+
+[functions.create-candidate-summary]
+verify_jwt = true
+
+[functions.deactivate-account]
+verify_jwt = true
+
+[functions.delete-candidate-summary]
+verify_jwt = true
+
+[functions.delete-expired-accounts]
+verify_jwt = true
+
+[functions.detect-license-mentions]
+verify_jwt = true
+
+[functions.discard-resume-document]
+verify_jwt = true
+
+[functions.employer-api]
+verify_jwt = false
+
+[functions.employer-comparison]
+verify_jwt = false
+
+[functions.employer-confirm-login]
+verify_jwt = true
+
+[functions.employer-document]
+verify_jwt = false
+
+[functions.employer-guest-payment]
+verify_jwt = true
+
+[functions.employer-request-login]
+verify_jwt = true
+
+[functions.employer-stripe-events]
+verify_jwt = false
+
+[functions.extract-resume-fields]
+verify_jwt = false
+
+[functions.get-candidate-tier]
+verify_jwt = true
+
+[functions.get-customization]
+verify_jwt = true
+
+[functions.get-discoverable]
+verify_jwt = false
+
+[functions.get-resume-extraction]
+verify_jwt = true
+
+[functions.list-candidate-activity]
+verify_jwt = true
+
+[functions.list-candidate-licenses]
+verify_jwt = true
+
+[functions.list-candidate-summaries]
+verify_jwt = true
+
+[functions.list-candidate-verification-items]
+verify_jwt = false
+
+[functions.list-resume-extraction-failures]
+verify_jwt = true
+
+[functions.list-staff-users]
+verify_jwt = true
+
+[functions.list-unqueued-edited-items]
+verify_jwt = false
+
+[functions.list-verification-items]
+verify_jwt = false
+
+[functions.logout]
+verify_jwt = true
+
+[functions.mark-tour-complete]
+verify_jwt = true
+
+[functions.ocr-page-strip]
+verify_jwt = true
+
+[functions.purge-resume-storage]
+verify_jwt = true
+
+[functions.rasterize-pdf-page]
+verify_jwt = true
+
+[functions.reactivate-account]
+verify_jwt = true
+
+[functions.recheck-licenses]
+verify_jwt = true
+
+[functions.record-verification-event]
+verify_jwt = true
+
+[functions.request-login]
+verify_jwt = true
+
+[functions.resolve-employer-contact-details]
+verify_jwt = true
+
+[functions.resolve-session]
+verify_jwt = true
+
+[functions.resume-resubmission]
+verify_jwt = false
+
+[functions.save-customization]
+verify_jwt = true
+
+[functions.save-header-preferences]
+verify_jwt = true
+
+[functions.send-lookup-confirmation]
+verify_jwt = true
+
+[functions.send-verification]
+verify_jwt = true
+
+[functions.set-candidate-tier]
+verify_jwt = true
+
+[functions.set-discoverable]
+verify_jwt = false
+
+[functions.skip-resume-extraction]
+verify_jwt = true
+
+[functions.staff-block-item]
+verify_jwt = false
+
+[functions.staff-confirm-login]
+verify_jwt = true
+
+[functions.staff-employer-documents]
+verify_jwt = true
+
+[functions.staff-logout]
+verify_jwt = true
+
+[functions.staff-request-login]
+verify_jwt = true
+
+[functions.staff-resolve-session]
+verify_jwt = true
+
+[functions.submit-candidate-correction-response]
+verify_jwt = true
+
+[functions.test-stripe-checkout]
+verify_jwt = true
+
+[functions.test-stripe-webhook]
+verify_jwt = false
+
+[functions.update-candidate-summary]
+verify_jwt = true
+
+[functions.update-license-details]
+verify_jwt = true
+
+[functions.update-profile-name]
+verify_jwt = true
+
+[functions.update-verification-item]
+verify_jwt = true
+
+[functions.upload-resume]
+verify_jwt = false
+
+[functions.verify-co-dora-license]
+verify_jwt = true
+
+[functions.verify-co-sos-entity]
+verify_jwt = true
+
+[functions.verify-credly-badge]
+verify_jwt = true
+
+[functions.verify-dbpr-license]
+verify_jwt = true
+
+[functions.verify-fl-sos-entity]
+verify_jwt = true
+
+[functions.verify-license]
+verify_jwt = true
