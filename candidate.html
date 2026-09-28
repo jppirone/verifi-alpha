@@ -9014,19 +9014,49 @@ class Component extends DCLogic {
     };
   }
 
-  candidateSessionRejected(url) {
+  // Resilience fix (2026-09-28, live-reported/live-confirmed): get-customization returned a spurious
+  // 401 "unauthorized" for one of two concurrent (Promise.all) requests using a freshly minted, valid,
+  // unexpired session -- the identical concurrent request, same token, same instant, succeeded. This
+  // guard used to force a full logout on ANY single 401 anywhere, turning a one-off edge-function/
+  // PostgREST hiccup into a false "your session has ended" -- confirmed live: an immediate rerun of the
+  // same two calls came back clean, so the session itself was never actually dead. Before acting on a
+  // 401, double-check with the session's own source of truth (resolve-session, already exempt from
+  // re-triggering this same guard below) -- only log out if THAT says the session is really gone. A
+  // network failure on the recheck itself fails open (stays signed in): a client-side nav decision
+  // isn't worth a false logout, since every real endpoint still authenticates independently regardless
+  // of what this file believes about its own session state. Deduped so a burst of 401s (e.g. several
+  // concurrent calls failing together) only triggers one recheck.
+  async candidateSessionRejected(url) {
     const s = this.state;
     // Only when this device believed it was signed in and is on a signed-in screen. The post-deactivation cancel call and the
     // returning/deactivated screens carry no live session by design.
     if (!s.sessionToken || !s.resumeCandidateId || s.screen === 'returning' || s.screen === 'deactivated') return;
     if (/\/(cancel-stripe-subscription|logout|resolve-session)$/.test(url)) return;
-    try { localStorage.removeItem('verifi_session_token'); } catch (e) {}
-    this.stopLoginPolling();
-    this.setState({
-      screen: 'returning', sessionToken: null,
-      loginEmail: '', loginRequestPending: false, loginRequestError: 'Your session has ended. Please log in again.',
-      loginLinkSent: false, loginTokenId: null, loginPollExpired: false,
-    });
+    if (this._sessionRecheckInFlight) return this._sessionRecheckInFlight;
+    const token = this.candidateSessionToken();
+    this._sessionRecheckInFlight = (async () => {
+      try {
+        const res = await fetch(this.SUPABASE_FN_URL + '/resolve-session', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_token: token }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data && data.ok) return; // confirmed still valid -- the 401 was transient, not a dead session
+      } catch (e) {
+        return; // couldn't confirm either way -- fail open, stay signed in
+      } finally {
+        this._sessionRecheckInFlight = null;
+      }
+      try { localStorage.removeItem('verifi_session_token'); } catch (e) {}
+      this.stopLoginPolling();
+      this.setState({
+        screen: 'returning', sessionToken: null,
+        loginEmail: '', loginRequestPending: false, loginRequestError: 'Your session has ended. Please log in again.',
+        loginLinkSent: false, loginTokenId: null, loginPollExpired: false,
+      });
+    })();
+    return this._sessionRecheckInFlight;
   }
 
   componentDidMount() {
