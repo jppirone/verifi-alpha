@@ -1109,18 +1109,75 @@ type ExtractionResult = {
 // investigation notes (this path — extract-resume-fields, single-shot OCR-text extraction — has no
 // per-page merge step to run before it, so unlike upload-resume's PDF branch this can run directly
 // on the parsed result).
-function dedupePositions(extraction: ExtractionResult): ExtractionResult {
-  type PosRef = { get: () => number | undefined; set: (n: number) => void };
-  const refs: PosRef[] = [];
-  for (const w of extraction.work_history) refs.push({ get: () => w.position, set: (n) => { w.position = n; } });
-  for (const e of extraction.education) refs.push({ get: () => e.position, set: (n) => { e.position = n; } });
-  for (const c of extraction.certifications) refs.push({ get: () => c.position, set: (n) => { c.position = n; } });
-  for (const f of extraction.freeform) refs.push({ get: () => f.position, set: (n) => { f.position = n; } });
-  if (typeof extraction.skills_position === "number") {
-    refs.push({ get: () => extraction.skills_position ?? undefined, set: (n) => { extraction.skills_position = n; } });
+//
+// Cross-category misordering (2026-09-28, live-reported and reproduced): a clean, single-column,
+// two-page resume (Aurora Clark's) with an unambiguous "RECENT TECHNICAL SKILLS" section printed
+// directly above "PROFESSIONAL EXPERIENCE" came back with that section's freeform entry positioned
+// BETWEEN two Professional Experience jobs instead of before all of them. Root cause: the tie-fix
+// above only ever repairs DUPLICATE position values — it has no way to catch a position value that
+// is merely WRONG (unique, but out of order) among items in different categories, because it trusts
+// the model's own per-item "position" integer as ground truth. That integer is bookkeeping the model
+// has to keep up by itself while juggling five separate JSON arrays in parallel (work_history,
+// education, certifications, freeform, plus the single skills block) with no code-level check —
+// unlike each entry's CATEGORY, which the already-reliable, separate section-boundary-detection pass
+// (Decision 38, `sectionBoundaries` — see its own header) gets right and hands to the extraction
+// step as a pre-solved, correctly-ordered list. This reconciles the two: every entry's own "heading"
+// is matched (case/whitespace-insensitive) back to the boundary step's section list — which IS in
+// true top-to-bottom document order — and that section's index becomes the PRIMARY sort key whenever
+// both sides of a comparison resolve to a real boundary section. This only overrides the model's raw
+// position when there is independent, already-verified evidence it's wrong; a comparison where either
+// side has no heading match (e.g. a headerless continuation entry) falls back to the exact old
+// behavior, so nothing that already worked can regress.
+function sectionHeadingKey(h: unknown): string {
+  return typeof h === "string" ? h.replace(/\s+/g, " ").trim().toLowerCase() : "";
+}
+function boundaryIndexMap(boundaries: BoundaryResult | null | undefined): Map<string, number> {
+  const map = new Map<string, number>();
+  (boundaries?.sections || []).forEach((s, i) => {
+    const key = sectionHeadingKey(s.heading);
+    if (key && !map.has(key)) map.set(key, i);
+  });
+  return map;
+}
+// Resolves a boundary section index per entry in an array, in the array's own (original emission)
+// order: a direct heading match resolves immediately; an entry with no heading (or no match) inherits
+// the nearest PRECEDING entry's resolved index in this same array, since a headerless item is always a
+// continuation of whichever section came before it, never a boundary-detected section of its own. A
+// run of unresolved entries with nothing earlier in the array to inherit from is left unresolved
+// (undefined) — there is no reliable anchor for them, so they fall back to the pre-existing behavior.
+function forwardFilledBoundaryIndices(headings: Array<string | undefined>, map: Map<string, number>): Array<number | undefined> {
+  const out: Array<number | undefined> = [];
+  let last: number | undefined;
+  for (const h of headings) {
+    const key = sectionHeadingKey(h);
+    if (key && map.has(key)) last = map.get(key);
+    out.push(last);
   }
-  const indexed = refs.map((r, i) => ({ r, i, pos: r.get() }));
+  return out;
+}
+function dedupePositions(extraction: ExtractionResult, boundaries?: BoundaryResult | null): ExtractionResult {
+  type PosRef = { get: () => number | undefined; set: (n: number) => void; boundaryIdx?: number };
+  const refs: PosRef[] = [];
+  const map = boundaryIndexMap(boundaries);
+  const withBoundary = <T extends { heading?: string; position?: number }>(items: T[], set: (item: T, n: number) => void) => {
+    const idxs = forwardFilledBoundaryIndices(items.map((it) => it.heading), map);
+    items.forEach((it, i) => refs.push({ get: () => it.position, set: (n) => set(it, n), boundaryIdx: idxs[i] }));
+  };
+  withBoundary(extraction.work_history, (it, n) => { it.position = n; });
+  withBoundary(extraction.education, (it, n) => { it.position = n; });
+  withBoundary(extraction.certifications, (it, n) => { it.position = n; });
+  withBoundary(extraction.freeform, (it, n) => { it.position = n; });
+  if (typeof extraction.skills_position === "number") {
+    const skillsSectionIdx = (boundaries?.sections || []).findIndex((s) => s.category === "skills");
+    refs.push({
+      get: () => extraction.skills_position ?? undefined,
+      set: (n) => { extraction.skills_position = n; },
+      boundaryIdx: skillsSectionIdx >= 0 ? skillsSectionIdx : undefined,
+    });
+  }
+  const indexed = refs.map((r, i) => ({ r, i, pos: r.get(), b: r.boundaryIdx }));
   indexed.sort((a, b) => {
+    if (typeof a.b === "number" && typeof b.b === "number" && a.b !== b.b) return a.b - b.b;
     const aHas = typeof a.pos === "number", bHas = typeof b.pos === "number";
     if (aHas && bHas) return (a.pos! - b.pos!) || (a.i - b.i);
     if (aHas) return -1;
@@ -1266,7 +1323,7 @@ export default {
         .from("resume_documents").select("candidate_id").eq("id", resume_document_id).maybeSingle();
       const currentCandidateId = freshDoc?.candidate_id ?? doc.candidate_id;
 
-      dedupePositions(parsed);
+      dedupePositions(parsed, sectionBoundaries);
       parsed.skills_heading = resolveSkillsHeading(sectionBoundaries, parsed);
       const { error: rpcErr } = await supabase.rpc("insert_resume_extraction", {
         p_resume_document_id: resume_document_id,

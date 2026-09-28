@@ -1421,7 +1421,7 @@ const RASTERIZE_RETRY_DPI = 110;
 
 type RasterizePageResult = {
   ok: boolean;
-  data: { ok?: boolean; page_count?: number; extraction?: unknown; ocr_raw_text?: string; routing?: { method?: string }; render?: unknown; timing_ms?: unknown; model_calls?: unknown; ocr_strips?: unknown; code?: string; error?: string; message?: string };
+  data: { ok?: boolean; page_count?: number; extraction?: unknown; ocr_raw_text?: string; section_boundaries?: BoundaryResult | null; routing?: { method?: string }; render?: unknown; timing_ms?: unknown; model_calls?: unknown; ocr_strips?: unknown; code?: string; error?: string; message?: string };
   status: number;
 };
 
@@ -2051,20 +2051,80 @@ function dedupeCertifications(certifications: ExtractionResult["certifications"]
 // those still need the original page-encoded position values (see pageOf() above) to find
 // cross-page adjacency; once that's done, nothing downstream needs the page-encoded magnitude, only
 // the relative order, which this preserves exactly.
-function dedupePositions(extraction: ExtractionResult): ExtractionResult {
-  type PosRef = { get: () => number | undefined; set: (n: number) => void };
-  const refs: PosRef[] = [];
-  for (const w of extraction.work_history) refs.push({ get: () => w.position, set: (n) => { w.position = n; } });
-  for (const e of extraction.education) refs.push({ get: () => e.position, set: (n) => { e.position = n; } });
-  for (const c of extraction.certifications) refs.push({ get: () => c.position, set: (n) => { c.position = n; } });
-  for (const f of extraction.freeform) refs.push({ get: () => f.position, set: (n) => { f.position = n; } });
-  if (typeof extraction.skills_position === "number") {
-    refs.push({ get: () => extraction.skills_position ?? undefined, set: (n) => { extraction.skills_position = n; } });
+// Cross-category misordering (2026-09-28, live-reported and reproduced): a clean, single-column,
+// two-page resume (Aurora Clark's) with an unambiguous "RECENT TECHNICAL SKILLS" section printed
+// directly above "PROFESSIONAL EXPERIENCE" came back with that section's freeform entry positioned
+// BETWEEN two Professional Experience jobs instead of before all of them, on the PDF path (this file
+// — rasterize-pdf-page per page, merged here). Root cause: the tie-fix below only ever repairs
+// DUPLICATE position values — it has no way to catch a position value that is merely WRONG (unique,
+// but out of order) among items in different categories, because it trusts the model's own per-item
+// "position" integer as ground truth. That integer is bookkeeping the model has to keep up by itself
+// while juggling five separate JSON arrays in parallel, with no code-level check — unlike each entry's
+// CATEGORY, which the already-reliable, separate section-boundary-detection pass (rasterize-pdf-page's
+// own copy of Decision 38, run once per page and now checkpointed — see the
+// resume_extraction_pages_section_boundaries migration) gets right and hands to extraction as a
+// pre-solved, correctly-ordered list. This reconciles the two: every entry's own "heading" is matched
+// (case/whitespace-insensitive) back to the (possibly multi-page, concatenated in page order) boundary
+// section list — which IS in true top-to-bottom document order — and that section's index becomes the
+// PRIMARY sort key whenever both sides of a comparison resolve to a real boundary section. This only
+// overrides the model's raw position when there is independent, already-verified evidence it's wrong;
+// a comparison where either side has no heading match (e.g. a headerless continuation entry) falls
+// back to the exact old behavior, so nothing that already worked can regress. See
+// extract-resume-fields/index.ts's own copy of this same fix for the fuller investigation notes (that
+// path — single-call, whole-document OCR-text extraction — has no per-page boundary list to
+// concatenate, just the one call's own already-ordered list).
+function sectionHeadingKey(h: unknown): string {
+  return typeof h === "string" ? h.replace(/\s+/g, " ").trim().toLowerCase() : "";
+}
+function boundaryIndexMap(boundaries: BoundaryResult | null | undefined): Map<string, number> {
+  const map = new Map<string, number>();
+  (boundaries?.sections || []).forEach((s, i) => {
+    const key = sectionHeadingKey(s.heading);
+    if (key && !map.has(key)) map.set(key, i);
+  });
+  return map;
+}
+// Resolves a boundary section index per entry in an array, in the array's own (original emission)
+// order: a direct heading match resolves immediately; an entry with no heading (or no match) inherits
+// the nearest PRECEDING entry's resolved index in this same array, since a headerless item is always a
+// continuation of whichever section came before it, never a boundary-detected section of its own. A
+// run of unresolved entries with nothing earlier in the array to inherit from is left unresolved
+// (undefined) — there is no reliable anchor for them, so they fall back to the pre-existing behavior.
+function forwardFilledBoundaryIndices(headings: Array<string | undefined>, map: Map<string, number>): Array<number | undefined> {
+  const out: Array<number | undefined> = [];
+  let last: number | undefined;
+  for (const h of headings) {
+    const key = sectionHeadingKey(h);
+    if (key && map.has(key)) last = map.get(key);
+    out.push(last);
   }
-  const indexed = refs.map((r, i) => ({ r, i, pos: r.get() }));
+  return out;
+}
+function dedupePositions(extraction: ExtractionResult, boundaries?: BoundaryResult | null): ExtractionResult {
+  type PosRef = { get: () => number | undefined; set: (n: number) => void; boundaryIdx?: number };
+  const refs: PosRef[] = [];
+  const map = boundaryIndexMap(boundaries);
+  const withBoundary = <T extends { heading?: string; position?: number }>(items: T[], set: (item: T, n: number) => void) => {
+    const idxs = forwardFilledBoundaryIndices(items.map((it) => it.heading), map);
+    items.forEach((it, i) => refs.push({ get: () => it.position, set: (n) => set(it, n), boundaryIdx: idxs[i] }));
+  };
+  withBoundary(extraction.work_history, (it, n) => { it.position = n; });
+  withBoundary(extraction.education, (it, n) => { it.position = n; });
+  withBoundary(extraction.certifications, (it, n) => { it.position = n; });
+  withBoundary(extraction.freeform, (it, n) => { it.position = n; });
+  if (typeof extraction.skills_position === "number") {
+    const skillsSectionIdx = (boundaries?.sections || []).findIndex((s) => s.category === "skills");
+    refs.push({
+      get: () => extraction.skills_position ?? undefined,
+      set: (n) => { extraction.skills_position = n; },
+      boundaryIdx: skillsSectionIdx >= 0 ? skillsSectionIdx : undefined,
+    });
+  }
+  const indexed = refs.map((r, i) => ({ r, i, pos: r.get(), b: r.boundaryIdx }));
   // Items with no numeric position at all (shouldn't normally happen, but not asserted-on) sort
   // after every real position, keeping their own relative order rather than colliding at 0.
   indexed.sort((a, b) => {
+    if (typeof a.b === "number" && typeof b.b === "number" && a.b !== b.b) return a.b - b.b;
     const aHas = typeof a.pos === "number", bHas = typeof b.pos === "number";
     if (aHas && bHas) return (a.pos! - b.pos!) || (a.i - b.i);
     if (aHas) return -1;
@@ -2315,9 +2375,14 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
   const { data: docMeta } = await supabase.from("resume_documents").select("extraction_page_count, candidate_id").eq("id", docId).maybeSingle();
   let pageCount: number | null = docMeta?.extraction_page_count ?? null;
   const { data: rowsData } = await supabase.from("resume_extraction_pages")
-    .select("page_number, extraction, ocr_text, qa_retry, timing").eq("resume_document_id", docId).order("page_number", { ascending: true });
-  const rows = new Map<number, { page_number: number; extraction: ExtractionResult; ocr_text: string | null; qa_retry: string; timing: PageTiming | null }>();
-  for (const r of rowsData ?? []) rows.set(r.page_number, r);
+    .select("page_number, extraction, ocr_text, qa_retry, timing, section_boundaries").eq("resume_document_id", docId).order("page_number", { ascending: true });
+  const rows = new Map<number, { page_number: number; extraction: ExtractionResult; ocr_text: string | null; qa_retry: string; timing: PageTiming | null; sectionBoundaries: BoundaryResult | null }>();
+  for (const r of rowsData ?? []) {
+    rows.set(r.page_number, {
+      page_number: r.page_number, extraction: r.extraction, ocr_text: r.ocr_text, qa_retry: r.qa_retry, timing: r.timing,
+      sectionBoundaries: r.section_boundaries ?? null,
+    });
+  }
 
   const pageCosts: number[] = [];
   let relayCalls = 0;                      // nested function calls this invocation has spent (see RELAY BUDGET above)
@@ -2354,6 +2419,7 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
       }
       const extraction = d.extraction as ExtractionResult;
       const ocrText: string | null = (d.ocr_raw_text as string | undefined) ?? null;
+      const pageBoundaries: BoundaryResult | null = d.section_boundaries ?? null;
       const usedVisionFallback = outcome.attempts.length > 0 && outcome.attempts[outcome.attempts.length - 1].force_vision;
       const timing: PageTiming = {
         page_ms: pageMs,
@@ -2380,9 +2446,9 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
       }
 
       const { error: ckErr } = await supabase.from("resume_extraction_pages")
-        .upsert({ resume_document_id: docId, page_number: pn, extraction, ocr_text: ocrText, qa_retry: "not_needed", timing }, { onConflict: "resume_document_id,page_number" });
+        .upsert({ resume_document_id: docId, page_number: pn, extraction, ocr_text: ocrText, qa_retry: "not_needed", timing, section_boundaries: pageBoundaries }, { onConflict: "resume_document_id,page_number" });
       if (ckErr) return await fail(500, { error: "checkpoint_failed", detail: ckErr.message, page: pn });
-      rows.set(pn, { page_number: pn, extraction, ocr_text: ocrText, qa_retry: "not_needed", timing });
+      rows.set(pn, { page_number: pn, extraction, ocr_text: ocrText, qa_retry: "not_needed", timing, sectionBoundaries: pageBoundaries });
       if (pn === 1 && typeof d.page_count === "number" && d.page_count > 0) pageCount = d.page_count;
       await supabase.from("resume_documents").update({
         extraction_progress_at: new Date().toISOString(), extraction_stalls: 0,
@@ -2403,7 +2469,13 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
   const ordered = [...rows.values()].sort((a, b) => a.page_number - b.page_number);
   if (ordered.length < total) return await continueResponse();
 
-  const merged = dedupePositions(mergeExtractions(ordered.map((r) => ({ pageNumber: r.page_number, extraction: r.extraction }))));
+  // Cross-page section-boundary list (2026-09-28 fix — see dedupePositions' own header): each page's
+  // own already-checkpointed section_boundaries, concatenated in page order, is a true, reading-order
+  // list of every section on the whole document — the same shape and role sectionBoundaries plays for
+  // the single-call/single-image paths, just assembled from several pages' worth of per-page results
+  // instead of one call's own list.
+  const mergedBoundaries: BoundaryResult = { sections: ordered.flatMap((r) => r.sectionBoundaries?.sections || []) };
+  const merged = dedupePositions(mergeExtractions(ordered.map((r) => ({ pageNumber: r.page_number, extraction: r.extraction }))), mergedBoundaries);
   // OCR text per page, in page order, with a marker so a person or a future tool can tell where a stretch came
   // from. A vision-routed page contributes no OCR text by architecture; its marker still shows the gap.
   const combinedOcrText = ordered.map((r) => `--- page ${r.page_number} ---\n` + (r.ocr_text ?? "(vision-routed page, no OCR text)")).join("\n\n");
@@ -2730,7 +2802,7 @@ export default {
           // unrelated section wedge between them) is structurally possible here too, so this stays
           // consistent rather than only covering the PDF path — same reasoning Item 7's own
           // certifications de-dup below already applies to this path.
-          extraction = dedupePositions(anchorSameHeadingFreeform(await runVisionExtraction(sanitized_base64, sectionBoundaries)));
+          extraction = dedupePositions(anchorSameHeadingFreeform(await runVisionExtraction(sanitized_base64, sectionBoundaries)), sectionBoundaries);
           // Item 7 (2026-09-25/26 batch): same deterministic certifications de-dup as the PDF path's
           // mergeBoundaryContinuations — see that function's own comment for the full root-cause
           // story. A single-page image call can't have a CROSS-page duplicate, but the identical
