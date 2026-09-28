@@ -13249,17 +13249,38 @@ class Component extends DCLogic {
       toggleMobileNav: () => this.setState(st => ({ mobileNavOpen: !st.mobileNavOpen })),
       closeMobileNav: () => this.setState({ mobileNavOpen: false }),
       currentTabLabel: (this.getAccountTabsForType().find(t => t.key === s.accountTab) || {}).label || 'Menu',
+      // Bug fix (2026-09-28, live-reported): this handler is a hand-duplicated copy of the desktop tab
+      // bar's individual selectTabX handlers (see tab-views/tab-customization/tab-contentManager/
+      // tab-activity above), not a call-through to them -- object-literal keys can't reference their own
+      // siblings, so there was no way to share the closures directly. It had drifted out of sync with
+      // three of them: 'views' never called renderPdfPreview(), so the Views tab's PDF container stayed
+      // permanently empty (no error, no loading state) for anyone using this mobile/narrow-layout
+      // dropdown instead of the desktop tab bar -- confirmed live, reproduced with a fresh real session
+      // and an instrumented fetch log showing zero network calls at all on 'views' select. 'customization'
+      // and 'contentManager' never called loadCz()/ensureSummariesLoaded(), so both showed stale (or
+      // pre-load-placeholder) data instead of a fresh server read. 'activity' called
+      // ensureLicenseActivityLoaded() for license-only accounts but never called ensureComparisonLoaded()
+      // for ANY account type, matching selectTabActivity's own gap. Fixed by mirroring each selectTabX
+      // body exactly instead of only the 'verification' case.
       mobileTabRows: this.getAccountTabsForType().map(t => ({
         label: t.label,
         activeStyle: s.accountTab === t.key ? 'color:var(--color-accent)' : '',
         onSelect: () => {
           this.setState({ mobileNavOpen: false });
           this.guardedTabNav(t.key, () => {
-            this.setState({ accountTab: t.key });
+            this.setState({ accountTab: t.key, ...(t.key === 'customization' ? { czResetConfirm: false } : {}) });
             if (t.key === 'verification') {
               if (s.accountType === 'license_only') this.ensureLicenseItemsLoaded(); else this.ensureVerificationItemsLoaded();
+            } else if (t.key === 'contentManager') {
+              this.ensureSummariesLoaded(); this.loadCz();
+            } else if (t.key === 'customization') {
+              this.ensureSummariesLoaded(); this.loadCz();
+            } else if (t.key === 'views') {
+              this.renderPdfPreview();
+            } else if (t.key === 'activity') {
+              this.ensureComparisonLoaded(true);
+              if (s.accountType === 'license_only') this.ensureLicenseActivityLoaded(true);
             }
-            if (t.key === 'activity' && s.accountType === 'license_only') this.ensureLicenseActivityLoaded(true);
           });
         },
       })),
