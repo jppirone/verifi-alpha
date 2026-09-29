@@ -6456,7 +6456,16 @@ class Component extends DCLogic {
   // correctly parsed, stored, and (per the license case) even driving other live UI. Pure render-side
   // gap -- no extraction, assembly, or storage change needed. license_state prints ahead of "Lic #",
   // matching how it naturally reads on the source document ("FL Lic #CFC1425829").
-  czWorkLabel(w) { return [w.title, w.employer].filter(Boolean).join(' at ') + (w.location ? ', ' + w.location : '') + this.czRange(w.start, w.end, w.current); }
+  // User-reported (2026-09-28): this used to read "{title} at {company}, {location}" -- the only one of
+  // the three czXLabel functions built as a grammatical phrase instead of comma-separated fields (compare
+  // czEduLabel/czCertLabel just below, both already plain comma joins). Real, confirmed consequence: an
+  // employer comparing this PDF against the candidate's own original resume sees "Sourcing Recruiter at
+  // CONTRACT ENGAGEMENTS, Remote (Nov 2020-May 2023)" where the source prints company, location, and
+  // title as separate lines/fields -- confusing to read against the original, and pointless besides: this
+  // data is also handed over as fielded JSON, so there was never an ATS-parsing reason to prose-ify it.
+  // Company leads (matches the source document's own convention of leading with the employer), title and
+  // location follow, same comma-separated shape as every other label here.
+  czWorkLabel(w) { return [w.employer, w.title, w.location].filter(Boolean).join(', ') + this.czRange(w.start, w.end, w.current); }
   czEduLabel(e) { return [e.degree, e.field_of_study, [e.institution, e.location].filter(Boolean).join(', ')].filter(Boolean).join(', ') + this.czRange(e.start, e.end, false); }
   czCertLabel(c) { const lic = c.license_number ? [c.license_state, 'Lic #' + c.license_number].filter(Boolean).join(' ') : (c.license_state || ''); return [c.name, c.issuer, lic].filter(Boolean).join(', ') + (c.issued ? ' (' + this.czPartialLabel(c.issued) + ')' : ''); }
 
