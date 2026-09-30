@@ -245,3 +245,9 @@ verify_jwt = true
 
 [functions.verify-license]
 verify_jwt = true
+
+[functions.registry-lookup]
+verify_jwt = true
+
+[functions.registry-ingest]
+verify_jwt = true
