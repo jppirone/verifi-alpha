@@ -4815,6 +4815,10 @@ class Component extends DCLogic {
       myPaidBusy: false, screen: 'compare', compareFrom: 'acct',
       compare: { id: id, label: (row && row.candidate_label) || labelHint || 'Candidate', content: d.content, assembledAt: d.assembled_at, guest: false, paid: true, windowEnds: d.window_ends_at, firstOpen: !!d.first_open, document: d.document || null, generatedDocument: d.generated_document || null },
     });
+    // 2026-09-30, user-reported: this was the one opener (Payment history / paid-guest "Open") that switched to the compare
+    // screen without filling the two document containers -- showGuestDelivered, guestOpenNow and openComparison all call it.
+    // Both panels stayed blank, with no error and no "could not be rendered" note, because neither renderer ever ran.
+    this.renderComparisonDocuments();
     this.startGuestTimer();
   }
 
