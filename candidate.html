@@ -6423,6 +6423,35 @@ class Component extends DCLogic {
     return this.ACCOUNT_TABS;
   }
 
+  // What entering an account tab does (2026-09-30): the ONE place that knows which loaders each tab needs and which of them
+  // differ for a license-only account. Before this, that rule was hand-copied into the nine desktop selectTabX handlers, the
+  // mobile dropdown's onSelect, and tourExit, and the copies drifted: the mobile dropdown skipped the Views/Customization/
+  // Content Manager loaders (fixed 10354ce), and tourExit hardcoded the full-resume Verification loader, so a license-only
+  // candidate finishing the tour landed on an unloaded Validation tab. Anything that puts a tab up should go through
+  // enterTab (or, if it sets accountTab itself for a good reason, call runTabLoaders right after).
+  runTabLoaders(key) {
+    const licenseOnly = this.state.accountType === 'license_only';
+    if (key === 'verification') {
+      if (licenseOnly) this.ensureLicenseItemsLoaded(); else this.ensureVerificationItemsLoaded();
+    } else if (key === 'contentManager' || key === 'customization') {
+      this.ensureSummariesLoaded(); this.loadCz();
+    } else if (key === 'activity') {
+      if (licenseOnly) this.ensureLicenseActivityLoaded(true);
+      this.ensureComparisonLoaded(true);
+    }
+    // 'views' is not here: its PDF must be built after accountTab has actually landed, so enterTab runs it as setState's callback.
+  }
+
+  enterTab(key) {
+    this.guardedTabNav(key, () => {
+      this.setState(
+        { accountTab: key, ...(key === 'customization' ? { czResetConfirm: false } : {}) },
+        key === 'views' ? () => this.renderPdfPreview() : undefined,
+      );
+      this.runTabLoaders(key);
+    });
+  }
+
   // ===================================================================================================================================
   // Candidate customization (Stage 2, 2026-09-21): REAL and server-persisted. What used to live here was client-only React state (a per-partner
   // checkbox set, role-description and skill edits) that vanished on reload while the tab said every change "saves the instant you make it".
@@ -12409,7 +12438,7 @@ class Component extends DCLogic {
       showKycNotCompletedBanner: !s.kycVerifiedAt,
       tabIsProfile: s.accountTab === 'profile',
       tabProfileClass: s.accountTab === 'profile' ? 'btn-secondary' : 'btn-ghost',
-      selectTabProfile: () => this.guardedTabNav('profile', () => this.setState({ accountTab: 'profile' })),
+      selectTabProfile: () => this.enterTab('profile'),
       accountEmail: s.email || 'you@email.com',
       profileFirst: s.profileFirst,
       profileLast: s.profileLast,
@@ -12769,7 +12798,7 @@ class Component extends DCLogic {
       // seedCzSummaryDefaults fix above, to whatever the summaryId placeholder happened to
       // resolve to). Same real-dead-end pattern already fixed for resumeExtraction via
       // ensureResumeExtractionLoaded, applied here.
-      selectTabViews: () => this.guardedTabNav('views', () => { this.setState({ accountTab: 'views' }, () => this.renderPdfPreview()); }),
+      selectTabViews: () => this.enterTab('views'),
       downloadPdf: () => {
         if (!this._pdfBlobUrl) return;
         const a = document.createElement('a');
@@ -12782,7 +12811,7 @@ class Component extends DCLogic {
       socTradeOptions: this.SOC_TRADE_OPTIONS,
       tabIsCustomization: s.accountTab === 'customization',
       tabCustomizationClass: s.accountTab === 'customization' ? 'btn-secondary' : 'btn-ghost',
-      selectTabCustomization: () => this.guardedTabNav('customization', () => { this.ensureSummariesLoaded(); this.setState({ accountTab: 'customization', czResetConfirm: false }); this.loadCz(); }),
+      selectTabCustomization: () => this.enterTab('customization'),
       // shared by Customization, Content Manager and Views: the real state of the server-persisted customization (see czSave)
       czReady,
       czLoading: s.czLoading,
@@ -12831,7 +12860,7 @@ class Component extends DCLogic {
       alwaysIncludedPrivateNote: (s.czData && s.czData.contact ? [s.czData.contact.phone.state === 'private' ? 'Valid phone on file: yes, private' : '', s.czData.contact.email.state === 'private' ? 'Valid email on file: yes, private' : ''].filter(Boolean).join('. ') : ''),
       tabIsContentManager: s.accountTab === 'contentManager',
       tabContentManagerClass: s.accountTab === 'contentManager' ? 'btn-secondary' : 'btn-ghost',
-      selectTabContentManager: () => this.guardedTabNav('contentManager', () => { this.setState({ accountTab: 'contentManager' }); this.ensureSummariesLoaded(); this.loadCz(); }),
+      selectTabContentManager: () => this.enterTab('contentManager'),
       cmRoles: ((czReady && s.czData.work) || []).map(w => {
         const draft = s.czDrafts[w.id];
         return {
@@ -13275,52 +13304,24 @@ class Component extends DCLogic {
       tabSubscriptionClass: s.accountTab === 'subscription' ? 'btn-secondary' : 'btn-ghost',
       tabActivityClass: s.accountTab === 'activity' ? 'btn-secondary' : 'btn-ghost',
       tabDeactivationClass: s.accountTab === 'deactivation' ? 'btn-secondary' : 'btn-ghost',
-      selectTabVerification: () => this.guardedTabNav('verification', () => {
-        this.setState({ accountTab: 'verification' });
-        if (s.accountType === 'license_only') this.ensureLicenseItemsLoaded(); else this.ensureVerificationItemsLoaded();
-      }),
-      selectTabSharing: () => this.guardedTabNav('sharing', () => this.setState({ accountTab: 'sharing' })),
-      selectTabSubscription: () => this.guardedTabNav('subscription', () => this.setState({ accountTab: 'subscription' })),
-      selectTabActivity: () => this.guardedTabNav('activity', () => { this.setState({ accountTab: 'activity' }); if (s.accountType === 'license_only') { this.ensureLicenseActivityLoaded(true); this.ensureComparisonLoaded(true); } else this.ensureComparisonLoaded(true); }),
-      selectTabDeactivation: () => this.guardedTabNav('deactivation', () => this.setState({ accountTab: 'deactivation' })),
+      selectTabVerification: () => this.enterTab('verification'),
+      selectTabSharing: () => this.enterTab('sharing'),
+      selectTabSubscription: () => this.enterTab('subscription'),
+      selectTabActivity: () => this.enterTab('activity'),
+      selectTabDeactivation: () => this.enterTab('deactivation'),
       mobileNavOpen: s.mobileNavOpen,
       mobileNavOpenStr: s.mobileNavOpen ? 'true' : 'false',
       toggleMobileNav: () => this.setState(st => ({ mobileNavOpen: !st.mobileNavOpen })),
       closeMobileNav: () => this.setState({ mobileNavOpen: false }),
       currentTabLabel: (this.getAccountTabsForType().find(t => t.key === s.accountTab) || {}).label || 'Menu',
-      // Bug fix (2026-09-28, live-reported): this handler is a hand-duplicated copy of the desktop tab
-      // bar's individual selectTabX handlers (see tab-views/tab-customization/tab-contentManager/
-      // tab-activity above), not a call-through to them -- object-literal keys can't reference their own
-      // siblings, so there was no way to share the closures directly. It had drifted out of sync with
-      // three of them: 'views' never called renderPdfPreview(), so the Views tab's PDF container stayed
-      // permanently empty (no error, no loading state) for anyone using this mobile/narrow-layout
-      // dropdown instead of the desktop tab bar -- confirmed live, reproduced with a fresh real session
-      // and an instrumented fetch log showing zero network calls at all on 'views' select. 'customization'
-      // and 'contentManager' never called loadCz()/ensureSummariesLoaded(), so both showed stale (or
-      // pre-load-placeholder) data instead of a fresh server read. 'activity' called
-      // ensureLicenseActivityLoaded() for license-only accounts but never called ensureComparisonLoaded()
-      // for ANY account type, matching selectTabActivity's own gap. Fixed by mirroring each selectTabX
-      // body exactly instead of only the 'verification' case.
+      // This used to be a hand-copied duplicate of the desktop selectTabX handlers and had drifted (2026-09-28: 'views' never
+      // built its PDF, Customization/Content Manager never loaded). Now it and the desktop handlers share enterTab.
       mobileTabRows: this.getAccountTabsForType().map(t => ({
         label: t.label,
         activeStyle: s.accountTab === t.key ? 'color:var(--color-accent)' : '',
         onSelect: () => {
           this.setState({ mobileNavOpen: false });
-          this.guardedTabNav(t.key, () => {
-            this.setState({ accountTab: t.key, ...(t.key === 'customization' ? { czResetConfirm: false } : {}) });
-            if (t.key === 'verification') {
-              if (s.accountType === 'license_only') this.ensureLicenseItemsLoaded(); else this.ensureVerificationItemsLoaded();
-            } else if (t.key === 'contentManager') {
-              this.ensureSummariesLoaded(); this.loadCz();
-            } else if (t.key === 'customization') {
-              this.ensureSummariesLoaded(); this.loadCz();
-            } else if (t.key === 'views') {
-              this.renderPdfPreview();
-            } else if (t.key === 'activity') {
-              this.ensureComparisonLoaded(true);
-              if (s.accountType === 'license_only') this.ensureLicenseActivityLoaded(true);
-            }
-          });
+          this.enterTab(t.key);
         },
       })),
       isSignupDetails: s.screen === 'signupDetails',
@@ -13973,7 +13974,10 @@ class Component extends DCLogic {
       tourRectHeight: s.tourRect.height,
       tourNext: () => this.setState(st => { const steps = this.getTourSteps(); const step = Math.min(st.tourStep + 1, steps.length - 1); return { tourStep: step, accountTab: steps[step].tab }; }, () => this.measureTourTarget()),
       tourBack: () => this.setState(st => { const steps = this.getTourSteps(); const step = Math.max(st.tourStep - 1, 0); return { tourStep: step, accountTab: steps[step].tab }; }, () => this.measureTourTarget()),
-      tourExit: () => { this.setState({ tourActive: false, tourEverShown: true, accountTab: 'verification' }); this.ensureVerificationItemsLoaded(); this.markTourComplete(); },
+      // Not enterTab: leaving the tour must not be blocked by guardedTabNav's unsaved-changes prompt. But it must use the same
+      // loader rule -- this used to call the full-resume ensureVerificationItemsLoaded() unconditionally, so a license-only
+      // candidate finishing their (own, shorter) tour landed on an unloaded Validation tab.
+      tourExit: () => { this.setState({ tourActive: false, tourEverShown: true, accountTab: 'verification' }); this.runTabLoaders('verification'); this.markTourComplete(); },
       overlayOpen: s.overlayOpen,
       tabWhat: s.overlayTab === 0,
       tabWhy: s.overlayTab === 1,
