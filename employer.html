@@ -4349,15 +4349,31 @@ class Component extends DCLogic {
     this.setState({ guest: r.data, guestPrice: r.data.price ? { cents: r.data.price.amount_cents, currency: r.data.price.currency } : this.state.guestPrice });
   }
 
+  // The ONLY way onto the comparison screen (2026-09-30). Four openers used to each hand-copy "setState screen:'compare' +
+  // build the compare object + fill the two document panels", and one of them (the paid "Open" on Payment history) left out
+  // the last step, so both panels stayed blank with no error. `state` = the caller's own extra state (busy flags, compareFrom,
+  // guest...); `d` = the server payload carrying the record (content, assembled_at, first_open, document, generated_document);
+  // `fields` = what differs per opener (id, label, guest/paid, windowEnds, metered, quota). Anything that puts the compare
+  // screen up must go through here, so the panels can never be forgotten again.
+  showCompare(state, d, fields) {
+    this.setState(Object.assign({}, state, {
+      screen: 'compare',
+      compare: Object.assign({
+        content: d.content, assembledAt: d.assembled_at, firstOpen: !!d.first_open,
+        document: d.document || null, generatedDocument: d.generated_document || null,
+      }, fields),
+    }));
+    this.renderComparisonDocuments();
+  }
+
   // The result, shown the moment the server has redeemed the payment (or is serving an already-open window again).
   showGuestDelivered(d) {
     const x = d.delivered;
-    this.setState({
-      guest: d, guestBusy: false, guestErr: null, screen: 'compare',
-      guestPrice: d.price ? { cents: d.price.amount_cents, currency: d.price.currency } : this.state.guestPrice,
-      compare: { id: 'guest', label: d.candidate_label || 'Candidate', content: x.content, assembledAt: x.assembled_at, guest: true, windowEnds: x.window_ends_at, firstOpen: !!x.first_open, document: x.document || null, generatedDocument: x.generated_document || null },
-    });
-    this.renderComparisonDocuments();
+    this.showCompare(
+      { guest: d, guestBusy: false, guestErr: null, guestPrice: d.price ? { cents: d.price.amount_cents, currency: d.price.currency } : this.state.guestPrice },
+      x,
+      { id: 'guest', label: d.candidate_label || 'Candidate', guest: true, windowEnds: x.window_ends_at },
+    );
     this.startGuestTimer();
   }
 
@@ -4380,8 +4396,7 @@ class Component extends DCLogic {
     const r = await this.gcall({ action: 'open', token: s.guestToken });
     const d = r.data || {};
     if (d.ok) {
-      this.setState({ guestBusy: false, screen: 'compare', compare: { id: 'guest', label: (s.guest && s.guest.candidate_label) || 'Candidate', content: d.content, assembledAt: d.assembled_at, guest: true, windowEnds: d.window_ends_at, firstOpen: !!d.first_open, document: d.document || null, generatedDocument: d.generated_document || null } });
-      this.renderComparisonDocuments();
+      this.showCompare({ guestBusy: false }, d, { id: 'guest', label: (s.guest && s.guest.candidate_label) || 'Candidate', guest: true, windowEnds: d.window_ends_at });
       this.startGuestTimer();
       return;
     }
@@ -4457,8 +4472,7 @@ class Component extends DCLogic {
     const d = r.data || {};
     if (d.ok) {
       const c = (this.state.comparisons || []).find(x => x.id === id) || {};
-      this.setState({ cmpBusy: false, screen: 'compare', compareFrom: from === 'request' ? 'request' : 'acct', compare: { id: id, label: c.candidate_label || 'Candidate', content: d.content, assembledAt: d.assembled_at, metered: !!d.metered, firstOpen: !!d.first_open, quota: d.quota || null, document: d.document || null, generatedDocument: d.generated_document || null } });
-      this.renderComparisonDocuments();
+      this.showCompare({ cmpBusy: false, compareFrom: from === 'request' ? 'request' : 'acct' }, d, { id: id, label: c.candidate_label || 'Candidate', metered: !!d.metered, quota: d.quota || null });
       this.loadReal(); // the plan's usage line now includes this open
       return;
     }
@@ -4811,14 +4825,8 @@ class Component extends DCLogic {
     }
     const d = r.data;
     const row = (this.state.myPaidComparisons || []).find(c => c.id === id);
-    this.setState({
-      myPaidBusy: false, screen: 'compare', compareFrom: 'acct',
-      compare: { id: id, label: (row && row.candidate_label) || labelHint || 'Candidate', content: d.content, assembledAt: d.assembled_at, guest: false, paid: true, windowEnds: d.window_ends_at, firstOpen: !!d.first_open, document: d.document || null, generatedDocument: d.generated_document || null },
-    });
-    // 2026-09-30, user-reported: this was the one opener (Payment history / paid-guest "Open") that switched to the compare
-    // screen without filling the two document containers -- showGuestDelivered, guestOpenNow and openComparison all call it.
-    // Both panels stayed blank, with no error and no "could not be rendered" note, because neither renderer ever ran.
-    this.renderComparisonDocuments();
+    // (2026-09-30: this opener alone used to skip filling the document panels -- see showCompare.)
+    this.showCompare({ myPaidBusy: false, compareFrom: 'acct' }, d, { id: id, label: (row && row.candidate_label) || labelHint || 'Candidate', guest: false, paid: true, windowEnds: d.window_ends_at });
     this.startGuestTimer();
   }
 
