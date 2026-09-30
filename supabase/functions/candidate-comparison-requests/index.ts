@@ -669,7 +669,7 @@ export default {
 
       if (action === "list") {
         const [reqs, snaps, tier1, share] = await Promise.all([
-          rows(`comparison_requests?candidate_id=eq.${candidateId}&select=id,requester_email,requester_name,requester_company,requester_domain_type,attestation,status,created_at,expires_at,responded_at,approved_at,first_delivered_at,snapshot_expires_at,kind,access_method,document_required&order=created_at.desc&limit=100`),
+          rows(`comparison_requests?candidate_id=eq.${candidateId}&select=id,requester_email,requester_name,requester_company,requester_domain_type,attestation,status,created_at,expires_at,responded_at,approved_at,first_delivered_at,snapshot_expires_at,kind,access_method,document_required,lookup_id&order=created_at.desc&limit=100`),
           rows(`comparison_snapshots?candidate_id=eq.${candidateId}&select=request_id`),
           rows(`employer_lookup_requests?matched_candidate_id=eq.${candidateId}&result_exists=eq.true&select=id,requester_email,requester_company,used_at&order=used_at.desc&limit=100`),
           assembleSnapshot(candidateId),
@@ -700,7 +700,11 @@ export default {
           ok: true,
           pending: shaped.filter((r) => r.status === "pending"),
           history: shaped.filter((r) => r.status !== "pending"),
-          tier1: tier1.map((t) => ({ id: t.id, domain: String(t.requester_email).split("@")[1] || "", company: t.requester_company, date: t.used_at })),
+          // A lookup that a comparison request was created from is the first step of that request, not a separate
+          // event (2026-09-29, user-reported: the same employer, same day, showed as both a "Comparison request" and a
+          // detail-less "Existence lookup"). Only lookups that never became a request are listed on their own.
+          tier1: tier1.filter((t) => !reqs.some((r) => r.lookup_id === t.id))
+            .map((t) => ({ id: t.id, domain: String(t.requester_email).split("@")[1] || "", company: t.requester_company, date: t.used_at })),
           would_share: wouldShare(share, "stored"),
         });
       }

@@ -120,11 +120,16 @@ export default {
       if (cands.length === 0) return json({ ok: false, error: "candidate_not_found" }, 404);
       const c = cands[0];
 
-      const [licenses, nameChanges, lookups] = await Promise.all([
+      const [licenses, nameChanges, allLookups, linkedReqs] = await Promise.all([
         rest(`license_items?candidate_id=eq.${cid}&candidate_confirmed=eq.true&select=id,linked_certification_id,state,verified_at,queue_item_id,correction_status,correction_requested_at,correction_notified_at,created_at`),
         rest(`candidate_name_changes?candidate_id=eq.${cid}&select=old_first_name,old_last_name,new_first_name,new_last_name,changed_at&order=changed_at.desc&limit=100`),
-        rest(`employer_lookup_requests?matched_candidate_id=eq.${cid}&result_exists=eq.true&used_at=not.is.null&select=used_at,requester_email,requester_company&order=used_at.desc&limit=200`),
+        rest(`employer_lookup_requests?matched_candidate_id=eq.${cid}&result_exists=eq.true&used_at=not.is.null&select=id,used_at,requester_email,requester_company&order=used_at.desc&limit=200`),
+        rest(`comparison_requests?candidate_id=eq.${cid}&lookup_id=not.is.null&select=lookup_id&limit=500`),
       ]);
+      // A lookup a comparison request was created from is that request's first step, not a separate event
+      // (2026-09-29): only lookups that never became a request are listed on their own.
+      const linkedLookupIds = new Set(linkedReqs.map((r) => r.lookup_id));
+      const lookups = allLookups.filter((l) => !linkedLookupIds.has(l.id));
 
       const certIds = licenses.map((l) => l.linked_certification_id).filter(Boolean);
       const queueIds = licenses.map((l) => l.queue_item_id).filter(Boolean);
