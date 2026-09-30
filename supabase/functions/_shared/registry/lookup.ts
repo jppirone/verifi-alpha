@@ -21,6 +21,7 @@ export interface SourceReport {
   entities?: number; //  ... and the distinct entities they collapse to
   error?: string;
   detail?: string;
+  skipped?: string; // source cannot answer this kind of query (e.g. a business-name search on an individuals-only roster): not an error, not a miss
 }
 export interface Hit<T> { source_id: string; match_type: MatchType; name_match?: boolean; record: T }
 
@@ -85,6 +86,7 @@ export async function lookupLicense(all: LicenseSource[], req: LicenseLookupReq)
         PER_SOURCE_TIMEOUT_MS, () => ({ ok: false as const, source: s.source_dataset, error: "source_timeout" }));
     let match: MatchType = hasNumber && !hasName ? "number" : "exact";
     let out = await run("exact");
+    if (!out.ok && out.error === "empty_or_invalid_query") return { hits: [] as Hit<LicenseRecord>[], report: { ...base, ok: true, count: 0, ms: Date.now() - t0, skipped: "this source cannot be searched by the kind of criteria given" } as SourceReport };
     if (!out.ok) return failed(out);
     if (out.records.length === 0 && hasName && !hasNumber) {
       const p = await run("prefix");
