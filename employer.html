@@ -4363,7 +4363,10 @@ class Component extends DCLogic {
         document: d.document || null, generatedDocument: d.generated_document || null,
       }, fields),
     }));
-    this.renderComparisonDocuments();
+    // A license status report has no document panels on its screen (isLicenseReport, not isCompare), so there is no
+    // container for the renderers to find -- and each renderer re-tries on every animation frame until its container exists,
+    // which for a license report is never: a permanent ~60/s loop for the life of the tab.
+    if (!(d.content && d.content.kind === 'license_report')) this.renderComparisonDocuments();
   }
 
   // The result, shown the moment the server has redeemed the payment (or is serving an already-open window again).
