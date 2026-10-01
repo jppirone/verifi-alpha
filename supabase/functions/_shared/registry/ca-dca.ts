@@ -14,7 +14,7 @@
 // these lists; disciplinary status is only on DCA's gated search.
 
 import type { LicenseRecord } from "./schema.ts";
-import { cleanStr, isoDate, joinName, normalizeLicenseStatus } from "./normalize.ts";
+import { cleanStr, isoDate, joinName, normalizeLicenseStatus, placeOrNull } from "./normalize.ts";
 
 export interface IngestLicense { record_key: string; last_name: string | null; first_name: string | null; record: LicenseRecord }
 export interface ParseStats { lines: number; parsed: number; rejected: number; rejectedSamples: Array<{ line: number; reason: string }> }
@@ -72,7 +72,7 @@ export function parseCaDcaTsv(text: string, opts: { sourceLabel?: string } = {})
       state: "CA", board_agency: agency, source,
       details: {
         agency_code: g("agencycode"), license_type_code: g("lictypecode") ?? g("specialitycode"),
-        city: g("city"), county: g("county"), holder_state: g("state"),
+        city: placeOrNull(g("city")), county: placeOrNull(g("county")), holder_state: g("state"),
         ...(g("degree") ? { degree: g("degree") } : {}), ...(g("school") ? { school: g("school") } : {}),
         ...(g("yeargraduated") ? { year_graduated: g("yeargraduated") } : {}), ...(g("statuseffectivedate") ? { status_effective_date: isoDate(g("statuseffectivedate")) } : {}),
       },

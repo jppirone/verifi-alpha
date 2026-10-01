@@ -4,6 +4,14 @@ import { authenticateRegistryCaller, isRegistryAdmin } from "../_shared/registry
 import { DB_BUSINESS_META, DB_LICENSE_META } from "../_shared/registry/db-registry.ts";
 import { businessProblems, licenseProblems } from "../_shared/registry/schema.ts";
 import { nameKey } from "../_shared/registry/normalize.ts";
+import { REGISTRY_BUCKET, isValidShardPath } from "../_shared/registry/shard.ts";
+
+// STORAGE MODE (2026-10-01): bulk file-based license sources (CA DCA, MI LARA) live as sharded Parquet in the private `registry-data`
+// bucket, not in Postgres. A storage load is: begin -> put_shard x N -> finish. put_shard takes {run_id, path, content_b64, rows?}; the path
+// must match the shard layout for the run's source (shard.ts), the bytes must be a real Parquet file (PAR1 magic at both ends) or the
+// manifest JSON, and the object is written with the service key (bucket has no RLS policies, so nothing else can read or write it).
+// finish may carry {prune_storage:true, shard_paths:[...]}: any object under <source>/ not in shard_paths is deleted (a refresh must not
+// leave stale shards behind).
 
 // Bulk-load endpoint for the FILE-BASED registry / license sources (FL Sunbiz, CA DCA, MI, DE, FL DOH).
 // Files are downloaded and PARSED outside the function (tools/registry/ingest.ts, or a scheduled job) into the common
@@ -61,6 +69,28 @@ export default {
       if (!run) return json({ ok: false, error: "run_not_found" }, 404);
       if (run.status !== "running") return json({ ok: false, error: "run_not_running" }, 409);
 
+      if (body.action === "put_shard") {
+        if (run.kind !== "license") return json({ ok: false, error: "storage_mode_is_license_only" }, 400);
+        const path = String(body.path ?? "");
+        if (!isValidShardPath(run.source_id, path)) return json({ ok: false, error: "invalid_shard_path" }, 400);
+        const b64 = typeof body.content_b64 === "string" ? body.content_b64 : "";
+        if (!b64 || b64.length > 22_000_000) return json({ ok: false, error: "content_missing_or_too_large" }, 400);
+        let bytes: Uint8Array;
+        try { bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)); } catch { return json({ ok: false, error: "content_not_base64" }, 400); }
+        const isParquet = path.endsWith(".parquet");
+        if (isParquet) {
+          const magic = (o: number) => String.fromCharCode(...bytes.subarray(o, o + 4));
+          if (bytes.length < 12 || magic(0) !== "PAR1" || magic(bytes.length - 4) !== "PAR1") return json({ ok: false, error: "not_a_parquet_file" }, 400);
+        } else {
+          try { JSON.parse(new TextDecoder().decode(bytes)); } catch { return json({ ok: false, error: "manifest_not_json" }, 400); }
+        }
+        const up = await fetch(`${SUPABASE_URL}/storage/v1/object/${REGISTRY_BUCKET}/${path}`, {
+          method: "POST", headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, "x-upsert": "true", "Content-Type": isParquet ? "application/octet-stream" : "application/json" }, body: bytes,
+        });
+        if (!up.ok) return json({ ok: false, error: "storage_upload_failed", status: up.status, detail: (await up.text()).slice(0, 300) }, 502);
+        return json({ ok: true, path, bytes: bytes.length });
+      }
+
       if (body.action === "batch") {
         const rows = Array.isArray(body.rows) ? body.rows : null;
         if (!rows || rows.length === 0 || rows.length > MAX_BATCH) return json({ ok: false, error: `rows_must_be_1_to_${MAX_BATCH}` }, 400);
@@ -97,6 +127,32 @@ export default {
         }
         await pg(`registry_ingest_runs?id=eq.${runId}`, { method: "PATCH", body: JSON.stringify({ rows_upserted: run.rows_upserted + uniq.length, rows_rejected: run.rows_rejected + rejected }) });
         return json({ ok: true, upserted: uniq.length, duplicates_in_batch: out.length - uniq.length, rejected, rejected_samples: samples });
+      }
+
+      if (body.action === "finish" && body.prune_storage === true) {
+        // Storage-mode finish: delete every object under <source>/ that this run did not write, then record the run's row total.
+        const keep = new Set(Array.isArray(body.shard_paths) ? body.shard_paths.filter((p: unknown) => typeof p === "string") : []);
+        if (keep.size === 0) return json({ ok: false, error: "shard_paths_required_for_prune" }, 400);
+        const stale: string[] = [];
+        for (const sub of ["name", "num", ""]) {
+          const prefix = sub ? `${run.source_id}/${sub}` : run.source_id;
+          for (let offset = 0; ; offset += 1000) {
+            const r = await fetch(`${SUPABASE_URL}/storage/v1/object/list/${REGISTRY_BUCKET}`, {
+              method: "POST", headers: H, body: JSON.stringify({ prefix, limit: 1000, offset }),
+            });
+            if (!r.ok) return json({ ok: false, error: "storage_list_failed", detail: (await r.text()).slice(0, 300) }, 502);
+            const items = await r.json() as Array<{ name: string; id: string | null }>;
+            for (const it of items) { if (it.id === null) continue; const full = `${prefix}/${it.name}`; if (!keep.has(full) && isValidShardPath(run.source_id, full)) stale.push(full); }
+            if (items.length < 1000) break;
+          }
+        }
+        if (stale.length) {
+          const d = await fetch(`${SUPABASE_URL}/storage/v1/object/${REGISTRY_BUCKET}`, { method: "DELETE", headers: H, body: JSON.stringify({ prefixes: stale }) });
+          if (!d.ok) return json({ ok: false, error: "storage_prune_failed", detail: (await d.text()).slice(0, 300) }, 502);
+        }
+        const rowsTotal = Number.isInteger(body.rows_total) && body.rows_total >= 0 ? body.rows_total : run.rows_upserted;
+        await pg(`registry_ingest_runs?id=eq.${runId}`, { method: "PATCH", body: JSON.stringify({ status: "complete", finished_at: new Date().toISOString(), rows_upserted: rowsTotal, rows_pruned: stale.length, note: "storage" }) });
+        return json({ ok: true, run_id: runId, mode: "storage", rows_total: rowsTotal, stale_objects_deleted: stale.length });
       }
 
       if (body.action === "finish") {

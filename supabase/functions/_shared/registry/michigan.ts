@@ -13,7 +13,7 @@
 // header-driven like the California parser.
 
 import type { LicenseRecord } from "./schema.ts";
-import { cleanStr, isoDate, joinName, normalizeLicenseStatus } from "./normalize.ts";
+import { cleanStr, isoDate, joinName, normalizeLicenseStatus, placeOrNull } from "./normalize.ts";
 import type { IngestLicense, ParseStats } from "./ca-dca.ts";
 
 const norm = (h: string) => h.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -58,7 +58,7 @@ export function parseMichiganTsv(text: string, opts: { sourceLabel?: string } = 
       details: {
         profession, ...(g("specialities") ? { specialities: g("specialities") } : {}),
         // facility a person is licensed at is not carried; only the holder's own location (city / county / state), never street address or email
-        city: g("addrcity"), county: g("county"), holder_state: g("state"),
+        city: placeOrNull(g("addrcity")), county: placeOrNull(g("county")), holder_state: g("state"),
       },
     };
     out.push({ record_key: `${profession ?? ""}|${number}`, last_name: individual ? last : null, first_name: individual ? first : null, record });

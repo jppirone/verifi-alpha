@@ -38,7 +38,7 @@ export interface BusinessSource {
   label: string;
   state: string;
   source_dataset: string;
-  kind: "socrata" | "database";
+  kind: "socrata" | "database" | "storage";
   search(q: BusinessQuery, mode: MatchMode): Promise<Outcome<BusinessEntity>>;
   // Optional: adds related data (e.g. Connecticut's agents / principals) into record.details for the records it is given.
   enrich?(records: BusinessEntity[]): Promise<void>;
@@ -52,6 +52,6 @@ export interface LicenseSource {
   state: string;
   board_agency: string;
   source_dataset: string;
-  kind: "socrata" | "database";
+  kind: "socrata" | "database" | "storage";
   search(q: LicenseQuery, mode: MatchMode): Promise<Outcome<LicenseRecord>>;
 }

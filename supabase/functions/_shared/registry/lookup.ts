@@ -11,7 +11,7 @@ export interface SourceReport {
   source_id: string;
   label: string;
   state: string;
-  kind: "socrata" | "database";
+  kind: "socrata" | "database" | "storage";
   source_dataset: string;
   ok: boolean;
   count: number;

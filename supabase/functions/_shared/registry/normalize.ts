@@ -96,3 +96,13 @@ export function normalizeLicenseStatus(raw: string | null, reason?: string | nul
   if (/^(inactive|deactivated|retired|closed|cancel|terminat|surrender|voluntary surrender|relinquish|deceased|passed away|out of business|superseded|supercede|transferred|grad to higher|refuse to renew|licensee not renewing|agreed not to renew|beyond|withdrawn|permanent inactive|re-licensed|change of ownership|inoperable|inoperative|non sufficient)/.test(s)) return "inactive";
   return "other";
 }
+
+// Personal-contact guards. Sources occasionally put a street address into a field that should hold a city (found live: a California
+// Acupuncture row whose city is '500 Westover Dr #11037'). Such a value is blanked (the licence record is kept); an e-mail address
+// anywhere in a text field means the record must not be stored at all.
+const STREET_RE = /^\d{1,6}\s+\S+.*\b(st|street|rd|road|ave|avenue|blvd|dr|drive|ln|lane|ct|court|way|hwy|pkwy|pl|place|apt|unit|ste|suite)\b\.?/i;
+const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
+export const looksLikeStreetAddress = (s: string | null): boolean => !!s && (STREET_RE.test(s) || /#\s*\d/.test(s));
+export const containsEmail = (s: unknown): boolean => typeof s === 'string' && EMAIL_RE.test(s);
+// A place-name field (city / county): null when it holds an address or e-mail instead.
+export const placeOrNull = (s: string | null): string | null => (s && !looksLikeStreetAddress(s) && !containsEmail(s) ? s : null);
