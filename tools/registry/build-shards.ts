@@ -17,6 +17,7 @@ import path from "node:path";
 import zlib from "node:zlib";
 import { parquetWriteBuffer } from "hyparquet-writer";
 import { parseCaDcaTsv } from "../../supabase/functions/_shared/registry/ca-dca.ts";
+import { parseDporFile } from "../../supabase/functions/_shared/registry/dpor.ts";
 import { parseDre } from "../../supabase/functions/_shared/registry/dre.ts";
 import { parseCslb } from "../../supabase/functions/_shared/registry/cslb.ts";
 import { parseMichiganTsv } from "../../supabase/functions/_shared/registry/michigan.ts";
@@ -32,6 +33,7 @@ if (!sourceId || !outDir || !inDir || files.length === 0) { console.error("usage
 
 const CSLB = sourceId === "ca-cslb";
 const DRE = sourceId === "ca-dre";
+const DPOR = sourceId === "va-dpor";
 const parseText = (text: string): { rows: IngestLicense[]; stats: ParseStats } =>
   sourceId === "ca-dca" ? parseCaDcaTsv(text) : sourceId === "mi-lara" ? parseMichiganTsv(text) : (() => { throw new Error("unknown source " + sourceId); })();
 const encodingFor = (f: string): BufferEncoding => (sourceId === "mi-lara" || f.endsWith(".tsv") ? "utf8" : "latin1");
@@ -98,7 +100,23 @@ if (DRE) {
   inputs.push({ file: df, sha256: crypto.createHash("sha256").update(draw).digest("hex"), bytes: draw.length, parsed: stats.rows, dre_stats: stats });
   console.log(`  parsed DRE: ${stats.rows} rows (${stats.individuals} individuals, ${stats.businesses} corporations), ${stats.rejected} rejected`);
 }
-for (const f of CSLB || DRE ? [] : files) {
+if (DPOR) {
+  // every .txt regulant list in the input directory (pass ALL as the file argument), parsed one file at a time with the page's code -> occupation labels
+  const labels: Record<string, string> = fs.existsSync(path.join(inDir, "labels.json")) ? JSON.parse(fs.readFileSync(path.join(inDir, "labels.json"), "utf8")) : {};
+  const list = files[0] === "ALL" ? fs.readdirSync(inDir).filter((f) => f.endsWith(".txt")).sort() : files;
+  const agg = { files: 0, rows: 0, individuals: 0, businesses: 0, rejected: 0 };
+  for (const f of list) {
+    const draw = fs.readFileSync(path.join(inDir, f));
+    const { rows, stats } = parseDporFile(draw.toString("latin1"), f, labels);
+    consume(rows);
+    parsedTotal += rows.length;
+    agg.files++; agg.rows += stats.rows; agg.individuals += stats.individuals; agg.businesses += stats.businesses; agg.rejected += stats.rejected;
+    inputs.push({ file: f, sha256: crypto.createHash("sha256").update(draw).digest("hex"), bytes: draw.length, parsed: stats.rows, rejected: stats.rejected });
+  }
+  flush();
+  console.log(`  parsed DPOR: ${agg.files} files -> ${agg.rows} rows (${agg.individuals} individuals, ${agg.businesses} businesses), ${agg.rejected} rejected`);
+}
+for (const f of CSLB || DRE || DPOR ? [] : files) {
   const raw = fs.readFileSync(path.join(inDir, f));
   const sha256 = crypto.createHash("sha256").update(raw).digest("hex");
   const lines = raw.toString(encodingFor(f)).split(/\r?\n/);
