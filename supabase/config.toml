@@ -251,3 +251,6 @@ verify_jwt = true
 
 [functions.registry-ingest]
 verify_jwt = true
+
+[functions.kb-verify-business]
+verify_jwt = true
