@@ -80,3 +80,23 @@ if (phase === "c") {
   console.log("\n== C6. stats");
   console.log(JSON.stringify((await kb({ action: "stats" })).stats));
 }
+
+if (phase === "d") {
+  console.log("== D1. New York (active_only): real employers; first lookup = miss -> live registry -> written back tagged active_only; repeat = hit");
+  for (const n of ["International Business Machines Corporation", "INTERNATIONAL BUSINESS MACHINES CORP", "Pfizer Inc.", "pfizer inc", "The Goldman Sachs Group, Inc.", "Corning Incorporated", "Lehman Brothers Inc."]) { const r = await kb({ name: n, state: "NY" }); line(JSON.stringify(n), r); }
+  console.log("\n== D2. Oregon (active_only)");
+  for (const n of ["Nike, Inc.", "NIKE INC", "Columbia Sportswear Company", "Intel Corporation", "Precision Castparts Corp."]) line(JSON.stringify(n), await kb({ name: n, state: "OR" }));
+  console.log("\n== D3. what a MISS means in an active-only registry (the wording differs from Colorado / Connecticut)");
+  for (const [n, st] of [["Zzqxv Nonexistent Holdings LLC", "NY"], ["Zzqxv Nonexistent Holdings LLC", "CO"]]) { const r = await kb({ name: n, state: st }); line(`${n} (${st})`, r); console.log(`        completeness=${r.registry.completeness}\n        ${r.message}`); }
+  console.log("\n== D4. Pennsylvania is NOT enabled");
+  const pa = await kb({ name: "Sears Holdings Llc", state: "PA" }); line("Sears Holdings Llc (PA)", pa); console.log(`        ${pa.message}`);
+  console.log("\n== D5. completeness on Colorado / Connecticut stays full_history");
+  for (const [n, st] of [["Ball Corporation", "CO"], ["Aetna Inc.", "CT"]]) { const r = await kb({ name: n, state: st }); line(`${n} (${st})`, r); console.log(`        completeness=${r.registry.completeness}  entity.source_completeness=${r.entity.source_completeness}`); }
+}
+if (phase === "e") {
+  console.log("== E. an entity the KB verified as active earlier (100 days ago) that is no longer on New York's active list");
+  const r = await kb({ name: "Zzqx Former Holdings Corp", state: "NY" });
+  line("Zzqx Former Holdings Corp (NY)", r);
+  console.log(`        disappeared_from_active_register=${r.disappeared_from_active_register}  completeness=${r.registry.completeness}\n        ${r.message}`);
+  console.log("\n== stats"); console.log(JSON.stringify((await kb({ action: "stats" })).stats));
+}
