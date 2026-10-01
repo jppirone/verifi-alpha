@@ -99,9 +99,37 @@ const registry = fakeSource((q, mode) => {
   const none = await verifyBusiness(deps, { name: "Zzqx Nonexistent LLC", state: "CO", caller: "t" });
   assert.equal(none.status, "not_found");
 
-  const dup = fakeSource((q, mode) => mode === "exact" ? [ent("1", "TWIN CO"), ent("2", "TWIN CO", "dissolved")] : []);
+  // two ACTIVE entities with the same name: still ambiguous (a human decides)
+  const dup = fakeSource((q, mode) => mode === "exact" ? [ent("1", "TWIN CO"), ent("2", "TWIN CO")] : []);
   const amb = await verifyBusiness({ store, registryFor: () => dup }, { name: "Twin Co", state: "CO", caller: "t" });
-  assert.equal(amb.status, "ambiguous"); assert.equal(amb.candidates?.length, 2); assert.equal(store.entities.size, 0);
+  assert.equal(amb.status, "ambiguous"); assert.equal(amb.candidates?.length, 2); assert.equal(store.entities.size, 0); assert.match(amb.message, /more than one is active/);
+  // zero active (two dissolved predecessors): still ambiguous
+  const dead = fakeSource((q, mode) => mode === "exact" ? [ent("1", "OLD CO", "dissolved"), ent("2", "OLD CO", "dissolved")] : []);
+  const amb0 = await verifyBusiness({ store, registryFor: () => dead }, { name: "Old Co", state: "CO", caller: "t" });
+  assert.equal(amb0.status, "ambiguous"); assert.match(amb0.message, /none is active/); assert.equal(store.entities.size, 0);
+  // delinquent is NOT active: one delinquent + one merged is ambiguous
+  const delinq = fakeSource((q, mode) => mode === "exact" ? [ent("1", "SLOW CO", "delinquent"), ent("2", "SLOW CO", "merged")] : []);
+  assert.equal((await verifyBusiness({ store, registryFor: () => delinq }, { name: "Slow Co", state: "CO", caller: "t" })).status, "ambiguous");
+  // RULE: exactly one active among same-name entities resolves automatically, is cached, and the passed-over entities are returned
+  const wu = fakeSource((q, mode) => mode === "exact" ? [ent("19891097161", "WESTERN UNION FINANCIAL SERVICES, INC.", "merged"), ent("19991130081", "WESTERN UNION FINANCIAL SERVICES, INC.", "active")] : []);
+  const res = await verifyBusiness({ store, registryFor: () => wu, now: () => store.clock }, { name: "Western Union Financial Services, Inc.", state: "CO", caller: "t" });
+  assert.equal(res.status, "verified"); assert.equal(res.entity?.registry_entity_id, "19991130081"); assert.equal(res.manual_verification_required, false);
+  assert.equal(res.resolution?.rule, "single_active_among_same_name"); assert.equal(res.resolution?.considered, 2); assert.deepEqual(res.resolution?.others.map((o) => o.registry_entity_id), ["19891097161"]);
+  assert.match(res.message, /the one active entity was chosen/);
+  assert.equal(store.entities.size, 1, "the resolved entity is cached"); assert.ok((store.entities.values().next().value as KbEntity).details.resolution, "the resolution is stored with the entity");
+  assert.equal(store.logs[store.logs.length - 1].detail.resolved_by, "single_active_among_same_name", "the log records that the rule fired");
+  assert.equal((await verifyBusiness({ store, registryFor: () => wu, now: () => store.clock }, { name: "WESTERN UNION FINANCIAL SERVICES INC", state: "CO", caller: "t" })).cache_result, "hit", "and the next spelling is a cache hit");
+  store.entities.clear(); store.aliases.clear(); store.logs.length = 0;
+
+  // name reservations / rejected filings are NOT entities (Connecticut lists them): an exact name that only exists as one is not found
+  const resv = fakeSource((q, mode) => mode === "exact" ? [{ ...ent("7", "FUTURE CO LLC"), status: "other", status_raw: "Reserved" }, { ...ent("8", "FUTURE CO LLC"), status: "other", status_raw: "Rejected" }] : []);
+  const rr = await verifyBusiness({ store, registryFor: () => resv }, { name: "Future Co LLC", state: "CO", caller: "t" });
+  assert.equal(rr.status, "not_found", "a reserved / rejected name is not a registered business"); assert.equal(store.entities.size, 0);
+  // ...and a reservation next to ONE real entity does not make it ambiguous
+  const mix = fakeSource((q, mode) => mode === "exact" ? [{ ...ent("7", "MIX CO LLC"), status: "other", status_raw: "Expired Reservation" }, ent("8", "MIX CO LLC")] : []);
+  const mx = await verifyBusiness({ store, registryFor: () => mix }, { name: "Mix Co LLC", state: "CO", caller: "t" });
+  assert.equal(mx.status, "verified"); assert.equal(mx.entity?.registry_entity_id, "8"); assert.equal(mx.resolution, undefined, "no rule needed when only one real entity remains");
+  store.entities.clear(); store.aliases.clear(); store.logs.length = 0;
 
   const down = fakeSource(() => "error");
   const inc = await verifyBusiness({ store, registryFor: () => down }, { name: "Anything Inc", state: "CO", caller: "t" });
@@ -114,7 +142,7 @@ const registry = fakeSource((q, mode) => {
   const tx = await verifyBusiness({ store, registryFor: () => registry }, { name: "ABC Inc", state: "TX", caller: "t" });
   assert.equal(tx.status, "no_automated_source"); assert.equal(tx.registry.queried, false); assert.equal(tx.manual_verification_required, true);
   // every one of these was logged with the right outcome
-  assert.deepEqual(store.logs.map((l) => l.final_outcome), ["not_found", "not_found", "ambiguous", "inconclusive", "inconclusive", "no_automated_source"]);
+  assert.deepEqual(store.logs.map((l) => l.final_outcome), ["inconclusive", "inconclusive", "no_automated_source"], "every lookup after the last reset was logged with its outcome");
 }
 
 // ---- conflict: cache says A, registry now says B -> nothing overwritten
@@ -130,3 +158,15 @@ const registry = fakeSource((q, mode) => {
 }
 console.log("knowledge base: all offline scenarios passed (normalization, 1 registry lookup then hits, stale/bypass, punctuation step, rejects, conflict, logging)");
 void findInRegistry;
+
+// ---- Connecticut spec: placeholder / missing account numbers fall back to the unique Salesforce id; real ones are untouched
+{
+  const { SOCRATA_BUSINESS_SPECS } = await import("../../supabase/functions/_shared/registry/business-sources.ts");
+  const ct = SOCRATA_BUSINESS_SPECS.find((s) => s.id === "ct-sots")!;
+  const row = (acct: unknown, id: string, name = "X LLC") => ct.map({ id, accountnumber: acct, name, status: "Active", business_type: "LLC", date_registration: "2020-01-01T00:00:00.000" }, "data.ct.gov/n7gp-d28j")!;
+  assert.equal(row("0527385", "001a").entity_id, "0527385");
+  assert.equal(row("0000000", "001t000000sa77LAAQ", "WEBSTER BANK NATIONAL ASSOCIATION").entity_id, "SF-001t000000sa77LAAQ");
+  assert.equal(row(undefined, "0018y000009oIojAAE").entity_id, "SF-0018y000009oIojAAE");
+  assert.notEqual(row("0000000", "001a").entity_id, row("0000000", "001b").entity_id, "26 placeholder rows are 26 distinct entities, not one");
+  console.log("connecticut spec: placeholder account numbers no longer collapse distinct entities");
+}

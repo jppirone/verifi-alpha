@@ -51,3 +51,32 @@ if (phase === "b") {
   console.log("\n== 6. stats from kb_lookup_log");
   console.log(JSON.stringify((await kb({ action: "stats" })).stats, null, 1));
 }
+
+if (phase === "c") {
+  console.log("== C1. Connecticut (second registry): real employers, first lookup = miss -> live CT registry -> written back; repeat = hit");
+  for (const n of ["Aetna Inc.", "AETNA INC", "The Travelers Companies, Inc.", "Stanley Black & Decker, Inc.", "STANLEY BLACK AND DECKER INC", "Xerox Corporation", "Hartford Fire Insurance Company", "Yale University", "Frontier Communications Corporation"]) line(JSON.stringify(n), await kb({ name: n, state: "CT" }));
+
+  console.log("\n== C2. one employer listed by 25 candidates in Connecticut");
+  const sp = ["Stanley Black & Decker, Inc.", "STANLEY BLACK & DECKER INC.", "Stanley Black and Decker, Inc", "stanley black & decker inc"];
+  let hits = 0, calls = 0;
+  for (let i = 0; i < 25; i++) { const r = await kb({ name: sp[i % sp.length], state: "CT" }); if (r.cache_result === "hit") hits++; calls += r.registry?.calls ?? 0; }
+  console.log(`  -> 25 lookups: ${hits} cache hits, ${calls} registry call(s) in total`);
+
+  console.log("\n== C3. state scoping: the cache is keyed on state + name, so the same name in another state is its own lookup");
+  line("Xerox Corporation (CT)", await kb({ name: "Xerox Corporation", state: "CT" }));
+  line("Xerox Corporation (CO)", await kb({ name: "Xerox Corporation", state: "CO" }));
+  line("Xerox Corporation (TX, no source)", await kb({ name: "Xerox Corporation", state: "TX" }));
+
+  console.log("\n== C4. THE NEW RULE: several registered entities share the exact name, exactly ONE is active -> resolves automatically");
+  const w = await kb({ name: "Western Union Financial Services, Inc.", state: "CO" });
+  line("Western Union Financial Services, Inc. (CO)", w);
+  console.log(`     resolution: ${JSON.stringify(w.resolution)}`);
+  console.log(`     message: ${w.message}`);
+  line("WESTERN UNION FINANCIAL SERVICES INC (CO) again", await kb({ name: "WESTERN UNION FINANCIAL SERVICES INC", state: "CO" }));
+
+  console.log("\n== C5. what still needs a human");
+  for (const [n, st] of [["Cigna Corporation", "CT"], ["Webster Bank", "CT"], ["Zzqxv Nonexistent Holdings LLC", "CT"]]) { const r = await kb({ name: n, state: st }); line(`${n} (${st})`, r); if (r.manual_verification_required) console.log(`        ${r.message.slice(0, 190)}`); }
+
+  console.log("\n== C6. stats");
+  console.log(JSON.stringify((await kb({ action: "stats" })).stats));
+}

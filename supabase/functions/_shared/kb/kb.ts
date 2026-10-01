@@ -14,9 +14,15 @@
 import type { BusinessSource } from "../registry/adapter.ts";
 import type { BusinessEntity, BusinessStatus } from "../registry/schema.ts";
 
-// Which registries are switched ON for the KB. One state first (Colorado); the other Socrata registries exist as sources but are not
-// enabled here, so a lookup for them says "no automated source" instead of quietly widening scope.
-export const KB_ENABLED_SOURCES: Record<string, string> = { CO: "co-sos" };
+// Which registries are switched ON for the KB. Colorado first, Connecticut second (2026-10-01); the other Socrata registries (NY, OR, PA) exist
+// as sources but are not enabled here, so a lookup for them says "no automated source" instead of quietly widening scope.
+export const KB_ENABLED_SOURCES: Record<string, string> = { CO: "co-sos", CT: "ct-sots" };
+
+// A registry row is only evidence that a BUSINESS EXISTS if it is a registered entity. Connecticut's Business Master also lists name reservations
+// ("Reserved", "Expired Reservation", "Reserved Cancel"), rejected filings ("Rejected"), removed records ("Removed") and filings not yet accepted
+// ("Pending Filing"). A name that only ever appears as one of those is not a real employer, so such rows never count as a match.
+const NOT_AN_ENTITY = /reserv|reject|removed|pending filing/i;
+export const isRealEntity = (e: { status_raw: string | null }): boolean => !NOT_AN_ENTITY.test(e.status_raw ?? "");
 
 // Normalization used for BOTH the cache key and the comparison with the registry's name, so "equal" means the same thing on both sides:
 // accents removed; upper-case; "&" -> "AND"; apostrophes, periods, commas and other punctuation removed; hyphens, slashes and similar
@@ -67,10 +73,28 @@ export interface KbStore {
 
 // ---------------------------------------------------------------------------------------------------------------- registry find
 export type RegistryFind =
-  | { kind: "match"; entity: BusinessEntity; calls: number; ms: number }
+  | { kind: "match"; entity: BusinessEntity; resolution?: Resolution; calls: number; ms: number }
   | { kind: "ambiguous"; matches: BusinessEntity[]; calls: number; ms: number }
   | { kind: "none"; calls: number; ms: number }
   | { kind: "inconclusive"; reason: "registry_error" | "result_cap_hit"; detail?: string; calls: number; ms: number };
+
+// When several REAL registry entities carry exactly the same (normalized) name but exactly ONE of them is active, that one is the answer: the
+// others are dissolved / merged / forfeited / delinquent predecessors or namesakes. Registries do not allow two live entities with an
+// indistinguishable name, so "exactly one active" is a deterministic rule, not a guess. Zero active, or two or more, stays ambiguous (a human decides).
+// The other entities are kept with the answer so staff can see what the rule passed over.
+export interface Resolution { rule: "single_active_among_same_name"; considered: number; others: Array<{ registry_entity_id: string; status: string; status_raw: string | null; entity_type: string | null; registration_date: string | null }> }
+export function resolveSameName(matches: BusinessEntity[]): { entity: BusinessEntity; resolution: Resolution } | null {
+  const active = matches.filter((m) => m.status === "active");
+  if (active.length !== 1) return null;
+  const chosen = active[0];
+  return {
+    entity: chosen,
+    resolution: {
+      rule: "single_active_among_same_name", considered: matches.length,
+      others: matches.filter((m) => m !== chosen).map((m) => ({ registry_entity_id: m.entity_id, status: m.status, status_raw: m.status_raw, entity_type: m.entity_type, registration_date: m.registration_date })),
+    },
+  };
+}
 
 const CAP = 100;
 
@@ -91,10 +115,14 @@ export async function findInRegistry(source: BusinessSource, name: string): Prom
     const out = await source.search({ name: s.q, limit: CAP }, s.mode);
     if (!out.ok) return { kind: "inconclusive", reason: "registry_error", detail: `${out.error}${out.detail ? ": " + out.detail : ""}`.slice(0, 200), calls, ms: Date.now() - t0 };
     if (out.records.length >= CAP) capped = true;
-    const matches = out.records.filter((r) => kbNameKey(r.entity_name) === key && !seen.has(r.entity_id));
+    const matches = out.records.filter((r) => kbNameKey(r.entity_name) === key && isRealEntity(r) && !seen.has(r.entity_id));
     for (const m of out.records) seen.add(m.entity_id);
     if (matches.length === 1) return { kind: "match", entity: matches[0], calls, ms: Date.now() - t0 };
-    if (matches.length > 1) return { kind: "ambiguous", matches, calls, ms: Date.now() - t0 };
+    if (matches.length > 1) {
+      const r = resolveSameName(matches);
+      if (r) return { kind: "match", entity: r.entity, resolution: r.resolution, calls, ms: Date.now() - t0 };
+      return { kind: "ambiguous", matches, calls, ms: Date.now() - t0 };
+    }
   }
   // nothing matched; if any step was cut off by the result cap the missing entity may be beyond it, so a miss proves nothing
   if (capped) return { kind: "inconclusive", reason: "result_cap_hit", calls, ms: Date.now() - t0 };
@@ -108,7 +136,7 @@ export type VerifyStatus = FinalOutcome;
 export interface VerifyResponse {
   status: VerifyStatus; manual_verification_required: boolean; message: string; from_cache: boolean; cache_result: CacheResult;
   query: { name: string; name_key: string; state: string };
-  entity?: KbEntity; stale_entity?: KbEntity; candidates?: Array<{ registry_entity_id: string; name: string; status: string; status_raw: string | null; entity_type: string | null; registration_date: string | null }>;
+  entity?: KbEntity; stale_entity?: KbEntity; resolution?: Resolution; candidates?: Array<{ registry_entity_id: string; name: string; status: string; status_raw: string | null; entity_type: string | null; registration_date: string | null }>;
   registry: { queried: boolean; source_id: string | null; calls: number; ms: number | null };
   log_id: number | null;
 }
@@ -165,7 +193,8 @@ export async function verifyBusiness(deps: VerifyDeps, req: VerifyRequest): Prom
     if (officialKey !== key) alias_keys.push({ key: officialKey, seen: m.entity_name });
     const { entity, alias_conflicts } = await deps.store.record({
       state, registry_source_id: sourceId, registry_entity_id: m.entity_id, name: m.entity_name, status: m.status, status_raw: m.status_raw, entity_type: m.entity_type,
-      registration_date: m.registration_date, source_dataset: m.source_dataset, details: m.details, stale_after_days: staleAfterDays(m.status), alias_keys,
+      registration_date: m.registration_date, source_dataset: m.source_dataset, details: found.resolution ? { ...m.details, resolution: found.resolution } : m.details,
+      stale_after_days: staleAfterDays(m.status), alias_keys,
     });
     if (alias_conflicts.length) {
       return finish({
@@ -173,18 +202,19 @@ export async function verifyBusiness(deps: VerifyDeps, req: VerifyRequest): Prom
         message: `Verified in the ${state} registry, but the name key ${alias_conflicts.join(", ")} already points at a different knowledge-base entity. Needs manual verification.`,
       }, { ...base, entity_id: entity.id, final_outcome: "conflict", status_seen: m.status, detail: { alias_conflicts } });
     }
+    const resNote = found.resolution ? ` ${found.resolution.considered} registered entities carry exactly this name; the one active entity was chosen and the others (${found.resolution.others.map((o) => o.status_raw ?? o.status).join(", ")}) are listed under resolution.` : "";
     return finish({
-      status: "verified", manual_verification_required: false, from_cache: false, cache_result, entity, registry,
-      message: `Verified against the ${state} registry (${m.status_raw ?? m.status}) and written to the knowledge base${cached ? " (re-verified)" : ""}.`,
-    }, { ...base, entity_id: entity.id, final_outcome: "verified", status_seen: m.status, detail: {} });
+      status: "verified", manual_verification_required: false, from_cache: false, cache_result, entity, registry, ...(found.resolution ? { resolution: found.resolution } : {}),
+      message: `Verified against the ${state} registry (${m.status_raw ?? m.status}) and written to the knowledge base${cached ? " (re-verified)" : ""}.${resNote}`,
+    }, { ...base, entity_id: entity.id, final_outcome: "verified", status_seen: m.status, detail: found.resolution ? { resolved_by: found.resolution.rule, same_name_entities: found.resolution.considered } : {} });
   }
 
   if (found.kind === "ambiguous") {
     return finish({
       status: "ambiguous", manual_verification_required: true, from_cache: false, cache_result, registry, ...(cached ? { stale_entity: cached } : {}),
       candidates: found.matches.slice(0, 10).map((x) => ({ registry_entity_id: x.entity_id, name: x.entity_name, status: x.status, status_raw: x.status_raw, entity_type: x.entity_type, registration_date: x.registration_date })),
-      message: `${found.matches.length} registered ${state} entities carry exactly this name; which one this employer is cannot be decided automatically. Needs manual verification. Nothing was cached.`,
-    }, { ...base, final_outcome: "ambiguous", detail: { matches: found.matches.length } });
+      message: `${found.matches.length} registered ${state} entities carry exactly this name and ${found.matches.filter((x) => x.status === "active").length === 0 ? "none is active" : "more than one is active"}, so which one this employer is cannot be decided automatically. Needs manual verification. Nothing was cached.`,
+    }, { ...base, final_outcome: "ambiguous", detail: { matches: found.matches.length, active: found.matches.filter((x) => x.status === "active").length } });
   }
 
   if (found.kind === "none") {

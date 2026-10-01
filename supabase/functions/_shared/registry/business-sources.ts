@@ -168,7 +168,10 @@ const CT: SocrataBusinessSpec = {
   nameField: "name", idField: "accountnumber", orderBy: "name",
   fields: ["id", "accountnumber", "name", "business_type", "status", "sub_status", "date_registration", "dissolution_date", "formation_place", "state_or_territory_formation", "annual_report_due_date"],
   map: (r, src) => mkEntity(src, "CT", {
-    name: r.name, id: r.accountnumber, statusRaw: r.status, regDate: r.date_registration, type: r.business_type,
+    // accountnumber is the registry's own id, EXCEPT that Connecticut stamps the placeholder "0000000" on 26 unrelated records (stub entries such as
+    // "WEBSTER BANK NATIONAL ASSOCIATION", "Unauthorized" type) and leaves it empty on 3 more (found 2026-10-01: 1,300,463 rows, 1,300,435 distinct
+    // numbers). Keyed on that, 26 different businesses would be one entity. For those rows the entity id is the row's unique Salesforce id: "SF-<id>".
+    name: r.name, id: (() => { const a = cleanStr(r.accountnumber); return a && a !== "0000000" ? a : cleanStr(r.id) ? `SF-${cleanStr(r.id)}` : null; })(), statusRaw: r.status, regDate: r.date_registration, type: r.business_type,
     details: {
       salesforce_id: cleanStr(r.id), sub_status: cleanStr(r.sub_status), dissolution_date: isoDate(r.dissolution_date),
       formation_place: cleanStr(r.formation_place), jurisdiction: cleanStr(r.state_or_territory_formation),
