@@ -8,7 +8,7 @@ import { parseCaDcaTsv } from "../../supabase/functions/_shared/registry/ca-dca.
 import { BUSINESS_SHAPE, LICENSE_SHAPE, businessProblems, licenseProblems } from "../../supabase/functions/_shared/registry/schema.ts";
 
 const probe: Record<string, any> = {
-  "co-sos": { name: "Google" }, "ny-dos": { name: "Google" }, "ct-sots": { name: "Yale" }, "or-sos": { name: "Nike" }, "pa-dos": { name: "Hershey" },
+  "co-sos": { name: "Google" }, "ny-dos": { name: "Google" }, "ct-sots": { name: "Yale" }, "or-sos": { name: "Nike" }, "pa-dos": { name: "Hershey" }, "tx-cpa": { name: "Dell" },
   "co-dora": { name: "Hilliary Lucido" }, "ct-dcp": { name: "Samantha Wilson" }, "il-idfpr": { business_name: "NATIONAL UNIVERSITY OF HEALTH SCIENCES" },
   "wa-doh": { name: "Rocky Buckham" }, "de-dpr": { first_name: "Mark", last_name: "Schlangel" }, "wa-lni": { business_name: "!ECO STAR C G CONSTRUCTION LLC" },
 };

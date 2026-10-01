@@ -1,5 +1,5 @@
 // Business-registry sources built on the shared Socrata client (Stage 1, 2026-09-30): Colorado, New York, Connecticut, Oregon,
-// Pennsylvania. One factory, one config per dataset. Every field name below was taken from the dataset's own metadata
+// Pennsylvania; Texas added 2026-10-01 (the Comptroller's franchise-taxpayer list, not a Secretary of State register: see TX below). One factory, one config per dataset. Every field name below was taken from the dataset's own metadata
 // (GET https://<domain>/api/views/<id>.json) and confirmed against real rows on 2026-09-30 -- none is assumed.
 //
 // Two of the datasets (Oregon tckn-sxa6, Pennsylvania xvd7-5r2c) are ONE ROW PER ASSOCIATED PARTY, not one row per entity
@@ -12,6 +12,7 @@ import { SocrataClient, soqlString, soqlUpperEquals, soqlUpperPrefix } from "./s
 import type { AdapterMeta, BusinessSource, BusinessQuery, MatchMode, Outcome } from "./adapter.ts";
 import type { BusinessEntity } from "./schema.ts";
 import { cleanStr, isoDate, joinName, normalizeBusinessStatus, stripWildcards } from "./normalize.ts";
+import { TX_ORG_TYPES, txStatus } from "./tx-codes.ts";
 
 type Row = Record<string, unknown>;
 
@@ -212,7 +213,40 @@ const PA: SocrataBusinessSpec = {
   }),
 };
 
-export const SOCRATA_BUSINESS_SPECS = [CO, NY, CT, OR, PA];
+// Texas: the Comptroller of Public Accounts' "Active Franchise Taxpayers" (data.texas.gov 9cir-efmm, 3.47M rows, one per taxpayer, updated by the
+// Comptroller about monthly). This is NOT the Secretary of State's register (Texas sells that); it is the list of entities with an open franchise-tax
+// account, and each row carries the SOS charter / certificate-of-authority number and the SOS status. Evidence it behaves as an "active" list: the
+// SOS statuses present are overwhelmingly active/reinstated, only 8 dissolved and 18 terminated rows exist in 3.47M, and RadioShack Corporation, Enron
+// Corp., Compaq Computer Corporation, Blockbuster LLC and Stanford Financial Group Company (all long defunct) are absent while Texas Instruments, Dell,
+// Valero, Exxon Mobil, AT&T, Halliburton and others are present. It is not purely active though: ~2% of rows are forfeited (they still hold an open
+// account), so every row gets a real status from txStatus() instead of being forced to "active".
+const TX: SocrataBusinessSpec = {
+  id: "tx-cpa", label: "Texas Comptroller — Franchise Tax Accounts (Active Franchise Taxpayers)", state: "TX",
+  domain: "data.texas.gov", datasetId: "9cir-efmm",
+  nameField: "taxpayer_name", idField: "taxpayer_number", orderBy: "taxpayer_name",
+  fields: ["taxpayer_number", "taxpayer_name", "taxpayer_city", "taxpayer_state", "taxpayer_organizational_type", "record_type_code", "sos_charter_date",
+    "sos_status_code", "sos_status_date", "right_to_transact_business_code", "secretary_of_state_sos_or_coa_file_number", "current_exempt_reason_code"],
+  map: (r, src) => {
+    const st = txStatus(r.sos_status_code, r.right_to_transact_business_code, r.record_type_code);
+    const orgCode = cleanStr(r.taxpayer_organizational_type);
+    const rec = cleanStr(r.record_type_code);
+    return mkEntity(src, "TX", {
+      name: r.taxpayer_name, id: r.taxpayer_number, statusRaw: st.status_raw, statusOverride: st.status, regDate: r.sos_charter_date,
+      type: orgCode ? (TX_ORG_TYPES[orgCode] ?? orgCode) : null,
+      details: {
+        status_basis: st.basis === "sos_status"
+          ? "Secretary of State status carried on the Comptroller's franchise-tax record (made worse, never better, by the right-to-transact code)"
+          : "no SOS file number on this record: status comes only from the Comptroller's right-to-transact code",
+        sos_file_number: cleanStr(r.secretary_of_state_sos_or_coa_file_number), record_type_code: rec,
+        sos_status_code: cleanStr(r.sos_status_code), sos_status_date: isoDate(r.sos_status_date),
+        right_to_transact_code: cleanStr(r.right_to_transact_business_code), exempt_reason_code: cleanStr(r.current_exempt_reason_code),
+        taxpayer_city: cleanStr(r.taxpayer_city), taxpayer_state: cleanStr(r.taxpayer_state),
+      },
+    });
+  },
+};
+
+export const SOCRATA_BUSINESS_SPECS = [CO, NY, CT, OR, PA, TX];
 export function socrataBusinessSources(appToken?: string): BusinessSource[] {
   return SOCRATA_BUSINESS_SPECS.map((s) => makeSocrataBusinessSource(s, appToken));
 }

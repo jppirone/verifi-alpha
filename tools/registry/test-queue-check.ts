@@ -42,14 +42,15 @@ assert.match(pa.p.automated_check_line, /OPERATING STATUS NEEDS STAFF CONFIRMATI
 
 // every OTHER registry / status: NOT routed (Colorado, Connecticut, New York, Oregon behave exactly as before)
 for (const [st, status, raw, label] of [["CO", "active", "Good Standing", "CO good standing"], ["CO", "delinquent", "Delinquent", "CO delinquent"], ["CO", "dissolved", "Voluntarily Dissolved", "CO dissolved"], ["CO", "pending", "Pending", "pending"], ["CO", "other", "Exists?", "other"],
-  ["CT", "active", "Active", "CT active"], ["CT", "delinquent", "Noncompliant", "CT noncompliant"], ["CT", "merged", "Merged", "CT merged"], ["NY", "active", null, "NY (active-only)"], ["OR", "active", null, "OR (active-only)"]] as const) {
+  ["CT", "active", "Active", "CT active"], ["CT", "delinquent", "Noncompliant", "CT noncompliant"], ["CT", "merged", "Merged", "CT merged"], ["NY", "active", null, "NY (active-only)"], ["OR", "active", null, "OR (active-only)"],
+  ["TX", "active", "SOS: Active; right to transact: Active", "TX active"], ["TX", "delinquent", "SOS: Forfeited franchise tax; right to transact: Forfeited", "TX forfeited"], ["TX", "dissolved", "SOS: Withdrawn; right to transact: Active", "TX withdrawn"]] as const) {
   const x = await route(st, [ent("1", "Acme Inc", status as BusinessEntity["status"], raw)], "Acme Inc");
   assert.equal(x.p.operating_confirmation_required, false, label); assert.equal(x.r.operating_status_confirmation_required, false, label + " (KB response)");
 }
 assert.equal(operatingStatus("delinquent"), "unknown", "the informational value is unchanged; only the routing flag was narrowed");
 
 // not found / ambiguous / no source: nothing to route, existence not claimed
-for (const [state, rows] of [["PA", []], ["TX", [ent("1", "Acme Inc", "unknown")]]] as const) { const x = await route(state, rows as BusinessEntity[], "Acme Inc"); assert.equal(x.p.operating_confirmation_required, false); assert.equal(x.p.operating_status, null); assert.notEqual((x.p.employer_check as { status: string }).status, "verified"); }
+for (const [state, rows] of [["PA", []], ["FL", [ent("1", "Acme Inc", "unknown")]]] as const) { const x = await route(state, rows as BusinessEntity[], "Acme Inc"); assert.equal(x.p.operating_confirmation_required, false); assert.equal(x.p.operating_status, null); assert.notEqual((x.p.employer_check as { status: string }).status, "verified"); }
 
 // ---- automated_check text merging is idempotent and preserves other text
 assert.equal(mergeAutomatedCheck(null, "Employer check A"), "Employer check A");

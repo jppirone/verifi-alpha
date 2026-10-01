@@ -139,7 +139,7 @@ const registry = fakeSource((q, mode) => {
   const capped = await verifyBusiness({ store, registryFor: () => big }, { name: "Common Name Inc", state: "CO", caller: "t" });
   assert.equal(capped.status, "inconclusive"); assert.match(capped.message, /maximum number of results/);
 
-  const tx = await verifyBusiness({ store, registryFor: () => registry }, { name: "ABC Inc", state: "TX", caller: "t" });
+  const tx = await verifyBusiness({ store, registryFor: () => registry }, { name: "ABC Inc", state: "FL", caller: "t" });
   assert.equal(tx.status, "no_automated_source"); assert.equal(tx.registry.queried, false); assert.equal(tx.manual_verification_required, true);
   // every one of these was logged with the right outcome
   assert.deepEqual(store.logs.map((l) => l.final_outcome), ["inconclusive", "inconclusive", "no_automated_source"], "every lookup after the last reset was logged with its outcome");
@@ -174,7 +174,7 @@ void findInRegistry;
 // ---- source completeness: full_history (CO, CT) vs active_only (NY, OR); Pennsylvania stays off
 {
   const { KB_SOURCE_PROFILES } = await import("../../supabase/functions/_shared/kb/kb.ts");
-  assert.deepEqual(Object.fromEntries(Object.entries(KB_SOURCE_PROFILES).map(([k, v]) => [k, v.completeness])), { CO: "full_history", CT: "full_history", NY: "active_only", OR: "active_only", PA: "registrations_unflagged" });
+  assert.deepEqual(Object.fromEntries(Object.entries(KB_SOURCE_PROFILES).map(([k, v]) => [k, v.completeness])), { CO: "full_history", CT: "full_history", NY: "active_only", OR: "active_only", PA: "registrations_unflagged", TX: "active_only" });
 
   const mk = (stateCode: string, srcId: string, handler: Parameters<typeof fakeSource>[0]) => { const s = fakeSource(handler); (s as { id: string }).id = srcId; return s; };
   const nyReg = mk("NY", "ny-dos", (q, mode) => (mode === "exact" ? q.toUpperCase() === "ACME WIDGETS INC" : "ACME WIDGETS INC".startsWith(q.toUpperCase())) ? [{ ...ent("N1", "ACME WIDGETS INC"), state: "NY", status_raw: null }] : []);
@@ -209,7 +209,7 @@ void findInRegistry;
 
   // a state with no source at all still says so (Texas)
   const txReg = fakeSource(() => [ent("T1", "ANY CO INC")]);
-  const tx = await verifyBusiness({ store: new MemStore(), registryFor: () => txReg }, { name: "Any Co Inc", state: "TX", caller: "t" });
+  const tx = await verifyBusiness({ store: new MemStore(), registryFor: () => txReg }, { name: "Any Co Inc", state: "FL", caller: "t" });
   assert.equal(tx.status, "no_automated_source"); assert.equal(txReg.calls, 0);
   console.log("source completeness: tagged on entity + log, active-only wording, disappeared-from-active-list signal");
 }
@@ -271,4 +271,52 @@ void findInRegistry;
   assert.equal(isoDate("1753-01-01T00:00:00.000"), null); assert.equal(isoDate("0001-01-01T00:00:00.000"), null);
   assert.equal(isoDate("1753-01-02T00:00:00.000"), "1753-01-02"); assert.equal(isoDate("1800-02-16T00:00:00.000"), "1800-02-16");
   console.log("dates: 1753-01-01 placeholder -> null; real old dates kept");
+}
+
+// ---- Texas (2026-10-01): the Comptroller's franchise-tax list. Active-only in COVERAGE, but every row carries its own real status.
+{
+  const { txStatus, TX_ORG_TYPES } = await import("../../supabase/functions/_shared/registry/tx-codes.ts");
+  const { SOCRATA_BUSINESS_SPECS } = await import("../../supabase/functions/_shared/registry/business-sources.ts");
+  const { KB_SOURCE_PROFILES } = await import("../../supabase/functions/_shared/kb/kb.ts");
+  // status rule: SOS status leads, right-to-transact can only make it worse, no SOS number + no standing info = unknown (never active)
+  assert.equal(txStatus("A", "A", "U").status, "active"); assert.equal(txStatus("R", "D", "U").status, "active");
+  assert.equal(txStatus("F", "N", "V").status, "delinquent", "forfeited = exists but out of good standing, not an ended existence");
+  assert.equal(txStatus("A", "N", "U").status, "delinquent", "SOS-active but right to transact forfeited is NOT active");
+  assert.equal(txStatus("D", "A", "U").status, "dissolved", "right-to-transact can never improve a dissolved SOS status");
+  assert.equal(txStatus("C", "A", "U").status, "merged"); assert.equal(txStatus("W", "N", "V").status, "dissolved");
+  assert.equal(txStatus("", "A", "X").status, "active"); assert.equal(txStatus("", "N", "X").status, "delinquent");
+  assert.equal(txStatus("", "U", "X").status, "unknown"); assert.equal(txStatus("", "", "X").status, "unknown");
+  assert.equal(txStatus("Q", "A", "U").status, "other", "an SOS code we do not recognise is never guessed");
+  assert.equal(txStatus("A ", "A ", "U ").status, "active", "the dataset pads some codes with a trailing space");
+  assert.equal(TX_ORG_TYPES.CL, "TEXAS LIMITED LIABILITY COMPANY");
+  // the adapter's own mapping of real-shaped rows
+  const spec = SOCRATA_BUSINESS_SPECS.find((s) => s.id === "tx-cpa")!;
+  assert.equal(KB_SOURCE_PROFILES.TX.source_id, "tx-cpa"); assert.equal(KB_SOURCE_PROFILES.TX.completeness, "active_only");
+  const row = (o: Record<string, string>) => ({ taxpayer_number: "17502899705", taxpayer_name: "TEXAS INSTRUMENTS INCORPORATED", taxpayer_organizational_type: "CF", record_type_code: "V", sos_charter_date: "1938-12-23T00:00:00.000", sos_status_code: "A", right_to_transact_business_code: "A", secretary_of_state_sos_or_coa_file_number: "0010055001", ...o });
+  const a = spec.map(row({}), "data.texas.gov/9cir-efmm")!;
+  assert.equal(a.status, "active"); assert.equal(a.entity_id, "17502899705"); assert.equal(a.entity_type, "FOREIGN PROFIT CORPORATION"); assert.equal(a.registration_date, "1938-12-23");
+  assert.equal(a.details.sos_file_number, "0010055001"); assert.match(String(a.status_raw), /SOS: Active/);
+  const f = spec.map(row({ sos_status_code: "F", right_to_transact_business_code: "N" }), "x")!; assert.equal(f.status, "delinquent");
+  // honest wording through the whole flow: a forfeited hit must NOT say "active today"; an active one must not claim history either
+  const mk = (e: BusinessEntity) => { const r = fakeSource((q, mode) => (mode === "exact" ? q.toUpperCase() === e.entity_name.toUpperCase() : e.entity_name.toUpperCase().startsWith(q.toUpperCase())) ? [e] : []); return r; };
+  for (const [e, label] of [[{ ...a, state: "TX" }, "active"], [{ ...f, state: "TX" }, "forfeited"]] as const) {
+    const store = new MemStore(); const reg = mk(e as BusinessEntity);
+    const fresh = await verifyBusiness({ store, registryFor: () => reg, now: () => store.clock }, { name: e.entity_name, state: "TX", caller: "t" });
+    assert.equal(fresh.status, "verified", label); assert.equal(fresh.entity!.source_completeness, "active_only"); assert.equal(fresh.entity!.registry_source_id, "tx-cpa");
+    assert.doesNotMatch(fresh.message, /active entities only|is active today/, `${label}: the shared active-only wording must not be used for a status-bearing account list`);
+    assert.match(fresh.message, /open Texas franchise-tax account/); assert.match(fresh.message, /nothing about its earlier history/);
+    const hit = await verifyBusiness({ store, registryFor: () => reg, now: () => store.clock }, { name: e.entity_name, state: "TX", caller: "t" });
+    assert.equal(hit.cache_result, "hit"); assert.match(hit.message, /open Texas franchise-tax account/); assert.doesNotMatch(hit.message, /is active today/);
+    // status-bearing source: operating status follows the row, and nothing is routed to staff for it (only status-less registries are)
+    assert.equal(fresh.operating_status_confirmation_required, false, label);
+    assert.equal(fresh.operating_status, label === "active" ? "active_per_registry" : "unknown");
+  }
+  // a miss uses the account-list wording and never the "ACTIVE ... entity" register wording
+  const miss = await verifyBusiness({ store: new MemStore(), registryFor: () => fakeSource(() => []) }, { name: "Radioshack Corporation", state: "TX", caller: "t" });
+  assert.equal(miss.status, "not_found"); assert.match(miss.message, /No TX franchise-tax account lists exactly this name/); assert.match(miss.message, /may have existed and since dissolved/);
+  // an entity with NO status information routes to staff exactly like Pennsylvania (record type X with franchise tax not established)
+  const u = spec.map(row({ record_type_code: "X", sos_status_code: "", right_to_transact_business_code: "U", secretary_of_state_sos_or_coa_file_number: "" }), "x")!; assert.equal(u.status, "unknown");
+  const sx = new MemStore(); const ur = await verifyBusiness({ store: sx, registryFor: () => mk({ ...u, state: "TX" } as BusinessEntity), now: () => sx.clock }, { name: u.entity_name, state: "TX", caller: "t" });
+  assert.equal(ur.operating_status_confirmation_required, true, "status 'unknown' still routes to staff, whichever state it comes from");
+  console.log("texas: status rule (SOS leads, right-to-transact only worsens, no-SOS-number is unknown), adapter mapping, account-list wording on hit/cache/miss, routing only when status is unknown");
 }

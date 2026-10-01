@@ -33,7 +33,7 @@ if (phase === "a") {
   console.log(`  -> 25 candidates: ${hits} cache hits, ${25 - hits} registry verification, ${regCalls} registry call(s) in total (one lookup per candidate would have been 25+)`);
 
   console.log("\n== 4. what the cache will NOT guess (these are the misses the log exists to study)");
-  for (const [n, st] of [["Ball Corp", "CO"], ["Arrow Electronics", "CO"], ["DaVita Incorporated", "CO"], ["Western Union Financial Services, Inc.", "CO"], ["Zzqxv Nonexistent Holdings LLC", "CO"], ["Ball Corporation", "TX"]]) {
+  for (const [n, st] of [["Ball Corp", "CO"], ["Arrow Electronics", "CO"], ["DaVita Incorporated", "CO"], ["Western Union Financial Services, Inc.", "CO"], ["Zzqxv Nonexistent Holdings LLC", "CO"], ["Ball Corporation", "FL"]]) {
     const r = await kb({ name: n, state: st }); line(`${n} (${st})`, r);
     if (r.manual_verification_required) console.log(`        manual verification: ${r.message.slice(0, 200)}`);
     if (r.candidates) console.log(`        candidates: ${r.candidates.map((c) => `${c.registry_entity_id} ${c.status_raw}`).join(" | ")}`);
@@ -65,7 +65,7 @@ if (phase === "c") {
   console.log("\n== C3. state scoping: the cache is keyed on state + name, so the same name in another state is its own lookup");
   line("Xerox Corporation (CT)", await kb({ name: "Xerox Corporation", state: "CT" }));
   line("Xerox Corporation (CO)", await kb({ name: "Xerox Corporation", state: "CO" }));
-  line("Xerox Corporation (TX, no source)", await kb({ name: "Xerox Corporation", state: "TX" }));
+  line("Xerox Corporation (FL, no source)", await kb({ name: "Xerox Corporation", state: "FL" }));
 
   console.log("\n== C4. THE NEW RULE: several registered entities share the exact name, exactly ONE is active -> resolves automatically");
   const w = await kb({ name: "Western Union Financial Services, Inc.", state: "CO" });

@@ -1,6 +1,6 @@
 import { socrataBusinessSources } from "../../supabase/functions/_shared/registry/business-sources.ts";
 import { businessProblems } from "../../supabase/functions/_shared/registry/schema.ts";
-const names: Record<string, string> = { "co-sos": "CROCS, INC.", "ny-dos": "BUTCHY'S WINE & SPIRITS, INC.", "ct-sots": "YALE & TOWNE SPE, LLC", "or-sos": "UNITED METHODIST CHURCH, OREGON CITY, OREGON", "pa-dos": "Macro, Inc." };
+const names: Record<string, string> = { "co-sos": "CROCS, INC.", "ny-dos": "BUTCHY'S WINE & SPIRITS, INC.", "ct-sots": "YALE & TOWNE SPE, LLC", "or-sos": "UNITED METHODIST CHURCH, OREGON CITY, OREGON", "pa-dos": "Macro, Inc.", "tx-cpa": "TEXAS INSTRUMENTS INCORPORATED" };
 for (const s of socrataBusinessSources()) {
   const t = Date.now();
   const r = await s.search({ name: names[s.id], limit: 5 }, "exact");

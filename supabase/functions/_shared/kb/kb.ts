@@ -27,12 +27,15 @@ export type Completeness = "full_history" | "active_only" | "registrations_unfla
 // the Oct 1 decision) is the third kind: its dataset lists registrations with NO status and, by the state's own statement, keeps businesses that
 // are no longer in operation, so a hit shows the business WAS registered, never that it operates; its status is "unknown", it is re-checked every
 // 30 days, and operating status stays a staff confirmation. A state not listed answers "no automated source" instead of quietly widening scope.
-export const KB_SOURCE_PROFILES: Record<string, { source_id: string; completeness: Completeness }> = {
+// account_list: the source is a tax-account list, not a register of every entity: it is "active_only" in coverage (an entity whose account has ended is
+// absent) BUT every row carries its own real status, so a hit can be forfeited/delinquent and the "active today" wording must not be used for it.
+export const KB_SOURCE_PROFILES: Record<string, { source_id: string; completeness: Completeness; account_list?: boolean }> = {
   CO: { source_id: "co-sos", completeness: "full_history" },
   CT: { source_id: "ct-sots", completeness: "full_history" },
   NY: { source_id: "ny-dos", completeness: "active_only" },
   OR: { source_id: "or-sos", completeness: "active_only" },
   PA: { source_id: "pa-dos", completeness: "registrations_unflagged" },
+  TX: { source_id: "tx-cpa", completeness: "active_only", account_list: true },
 };
 export const KB_ENABLED_SOURCES: Record<string, string> = Object.fromEntries(Object.entries(KB_SOURCE_PROFILES).map(([st, p]) => [st, p.source_id]));
 
@@ -202,6 +205,11 @@ export async function verifyBusiness(deps: VerifyDeps, req: VerifyRequest): Prom
   const sourceId = profile?.source_id;
   const completeness: Completeness | null = profile?.completeness ?? null;
   const activeOnlyNote = " This registry lists active entities only, so this says the employer is active today and nothing about its earlier history.";
+  // Texas (account_list): every row has its own status, and the list also holds some forfeited entities, so the note never claims "active today" for a hit.
+  const accountListNote = " This list holds entities that currently have an open Texas franchise-tax account: it can include entities that have forfeited their right to transact business and it omits most that have dissolved, merged or withdrawn, so a hit says the entity is registered with a live tax account (read its status above) and nothing about its earlier history.";
+  const noteFor = (completeness: Completeness, sourceId: string | null | undefined): string =>
+    completeness === "active_only" ? (Object.values(KB_SOURCE_PROFILES).some((p) => p.account_list && p.source_id === sourceId) ? accountListNote : activeOnlyNote)
+    : completeness === "registrations_unflagged" ? unflaggedNote : "";
   const unflaggedNote = " Operating status is UNKNOWN: this registry list publishes no status and keeps businesses that are no longer in operation (the state cannot remove them), so a listing shows the business was registered, not that it operates today. Staff must confirm operating status wherever it matters.";
   const source = sourceId ? deps.registryFor(state) : null;
   if (!source) {
@@ -216,7 +224,7 @@ export async function verifyBusiness(deps: VerifyDeps, req: VerifyRequest): Prom
   if (cached && !req.force_refresh && isFresh(cached, now())) {
     return finish({
       status: "verified", manual_verification_required: false, from_cache: true, cache_result: "hit", entity: cached, ...opFields(cached),
-      message: `Verified as registered, from the knowledge base (last confirmed against the ${state} registry ${cached.last_verified_at.slice(0, 10)}).${cached.source_completeness === "active_only" ? activeOnlyNote : cached.source_completeness === "registrations_unflagged" ? unflaggedNote : ""}`,
+      message: `Verified as registered, from the knowledge base (last confirmed against the ${state} registry ${cached.last_verified_at.slice(0, 10)}).${noteFor(cached.source_completeness, cached.registry_source_id)}`,
       registry: { queried: false, source_id: cached.registry_source_id, completeness: cached.source_completeness, calls: 0, ms: null },
     }, { cache_result: "hit", final_outcome: "verified", entity_id: cached.id, registry_queried: false, registry_source_id: cached.registry_source_id, registry_calls: 0, registry_ms: null, status_seen: cached.status, source_completeness: cached.source_completeness, detail: {} });
   }
@@ -253,7 +261,7 @@ export async function verifyBusiness(deps: VerifyDeps, req: VerifyRequest): Prom
     const resNote = found.resolution ? ` ${found.resolution.considered} registered entities carry exactly this name; the one active entity was chosen and the others (${found.resolution.others.map((o) => o.status_raw ?? o.status).join(", ")}) are listed under resolution.` : "";
     return finish({
       status: "verified", manual_verification_required: false, from_cache: false, cache_result, entity, ...opFields(entity), registry, ...(found.resolution ? { resolution: found.resolution } : {}),
-      message: `Verified as registered against the ${state} registry (${m.status_raw ?? (m.status === "unknown" ? "status not published" : m.status)}) and written to the knowledge base${cached ? " (re-verified)" : ""}.${resNote}${completeness === "active_only" ? activeOnlyNote : completeness === "registrations_unflagged" ? unflaggedNote : ""}`,
+      message: `Verified as registered against the ${state} registry (${m.status_raw ?? (m.status === "unknown" ? "status not published" : m.status)}) and written to the knowledge base${cached ? " (re-verified)" : ""}.${resNote}${noteFor(completeness!, sourceId)}`,
     }, { ...base, entity_id: entity.id, final_outcome: "verified", status_seen: m.status, detail: found.resolution ? { resolved_by: found.resolution.rule, same_name_entities: found.resolution.considered } : {} });
   }
 
@@ -270,7 +278,9 @@ export async function verifyBusiness(deps: VerifyDeps, req: VerifyRequest): Prom
     const disappeared = activeOnly && !!cached;
     return finish({
       status: "not_found", manual_verification_required: true, from_cache: false, cache_result, registry, ...(cached ? { stale_entity: cached } : {}), ...(disappeared ? { disappeared_from_active_register: true } : {}),
-      message: activeOnly
+      message: activeOnly && profile?.account_list
+        ? `No ${state} franchise-tax account lists exactly this name. This list holds only entities with an open account, so the employer may have existed and since dissolved, merged or been withdrawn (or be registered under a different legal name, or in another state, or not be subject to franchise tax). Needs manual verification.${disappeared ? " The knowledge base had verified it earlier and it is no longer on the list, so its account has most likely ended since." : ""}`
+        : activeOnly
         ? `No ACTIVE ${state} registry entity has exactly this name. This registry lists active entities only, so the employer may have existed and since dissolved, merged or been withdrawn (or be registered under a different legal name, or in another state). Needs manual verification.${disappeared ? " The knowledge base had verified it as active earlier and it is no longer on the active list, so it has most likely closed since." : ""}`
         : completeness === "registrations_unflagged"
         ? `No ${state} registry entry has exactly this name. This list keeps defunct businesses, so the absence is a fairly strong sign that nothing was registered in ${state} under this name, but it is published monthly (a business registered in the last month may not be listed yet) and the employer may use a different legal name or another state. Needs manual verification.${cached ? " It was previously verified in the knowledge base, so check whether it was renamed." : ""}`
