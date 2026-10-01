@@ -8,7 +8,9 @@
 //
 // Dates are ISO `YYYY-MM-DD` strings or null -- never a source-specific format, never a placeholder like 0001-01-01.
 
-export const BUSINESS_STATUSES = ["active", "delinquent", "inactive", "dissolved", "merged", "pending", "other"] as const;
+// "unknown": the registry lists the entity but publishes no status for it AND does not remove defunct entities (Pennsylvania), so nothing the
+// source says supports "active". It is never to be read as "active"; callers treat it as "registered, operating status unconfirmed".
+export const BUSINESS_STATUSES = ["active", "delinquent", "inactive", "dissolved", "merged", "pending", "unknown", "other"] as const;
 export type BusinessStatus = (typeof BUSINESS_STATUSES)[number];
 
 export const LICENSE_STATUSES = ["active", "expired", "revoked", "suspended", "inactive", "pending", "other"] as const;

@@ -174,8 +174,7 @@ void findInRegistry;
 // ---- source completeness: full_history (CO, CT) vs active_only (NY, OR); Pennsylvania stays off
 {
   const { KB_SOURCE_PROFILES } = await import("../../supabase/functions/_shared/kb/kb.ts");
-  assert.deepEqual(Object.fromEntries(Object.entries(KB_SOURCE_PROFILES).map(([k, v]) => [k, v.completeness])), { CO: "full_history", CT: "full_history", NY: "active_only", OR: "active_only" });
-  assert.ok(!("PA" in KB_SOURCE_PROFILES), "Pennsylvania is not enabled");
+  assert.deepEqual(Object.fromEntries(Object.entries(KB_SOURCE_PROFILES).map(([k, v]) => [k, v.completeness])), { CO: "full_history", CT: "full_history", NY: "active_only", OR: "active_only", PA: "registrations_unflagged" });
 
   const mk = (stateCode: string, srcId: string, handler: Parameters<typeof fakeSource>[0]) => { const s = fakeSource(handler); (s as { id: string }).id = srcId; return s; };
   const nyReg = mk("NY", "ny-dos", (q, mode) => (mode === "exact" ? q.toUpperCase() === "ACME WIDGETS INC" : "ACME WIDGETS INC".startsWith(q.toUpperCase())) ? [{ ...ent("N1", "ACME WIDGETS INC"), state: "NY", status_raw: null }] : []);
@@ -208,11 +207,62 @@ void findInRegistry;
   assert.equal(coMiss.status, "not_found"); assert.doesNotMatch(coMiss.message, /active entities only/); assert.equal(coMiss.registry.completeness, "full_history");
   assert.equal(coMiss.disappeared_from_active_register, undefined);
 
-  // Pennsylvania: not enabled -> explicit "no automated source", registry never called
-  const paReg = fakeSource(() => [ent("P1", "ANY CO INC")]);
-  const pa = await verifyBusiness({ store: new MemStore(), registryFor: () => paReg }, { name: "Any Co Inc", state: "PA", caller: "t" });
-  assert.equal(pa.status, "no_automated_source"); assert.equal(paReg.calls, 0);
-  console.log("source completeness: tagged on entity + log, active-only wording, disappeared-from-active-list signal, PA stays off");
+  // a state with no source at all still says so (Texas)
+  const txReg = fakeSource(() => [ent("T1", "ANY CO INC")]);
+  const tx = await verifyBusiness({ store: new MemStore(), registryFor: () => txReg }, { name: "Any Co Inc", state: "TX", caller: "t" });
+  assert.equal(tx.status, "no_automated_source"); assert.equal(txReg.calls, 0);
+  console.log("source completeness: tagged on entity + log, active-only wording, disappeared-from-active-list signal");
+}
+
+// ---- Pennsylvania (registrations_unflagged): a hit is "registered", status UNKNOWN (never active), 30-day re-check, operating status stays a staff call
+{
+  const { BUSINESS_STATUSES, businessProblems } = await import("../../supabase/functions/_shared/registry/schema.ts");
+  const { SOCRATA_BUSINESS_SPECS } = await import("../../supabase/functions/_shared/registry/business-sources.ts");
+  assert.ok(BUSINESS_STATUSES.includes("unknown"));
+
+  // the ADAPTER: every Pennsylvania row maps to status "unknown", never "active", and the entity still passes the common schema
+  const paSpec = SOCRATA_BUSINESS_SPECS.find((s) => s.id === "pa-dos")!;
+  const row = paSpec.map({ filing_number: "0003810600", business_name: "Smith 2 Twist Llc", typeofbusinessregistration: "Domestic Limited Liability Company", creationdate: "2008-05-09T00:00:00.000" }, "data.pa.gov/xvd7-5r2c")!;
+  assert.equal(row.status, "unknown"); assert.equal(row.status_raw, null); assert.deepEqual(businessProblems(row), []);
+  assert.match(String(row.details.status_basis), /no longer in operation/); assert.equal(row.details.source_completeness, "registrations_unflagged");
+  assert.equal(paSpec.map({ filing_number: "1", business_name: "X", creationdate: "1753-01-01T00:00:00.000" }, "s")!.registration_date, null, "the 1753-01-01 placeholder is not a registration date");
+  // the other two status-less registries are unchanged: NY and OR genuinely list active entities only
+  for (const id of ["ny-dos", "or-sos"]) { const sp = SOCRATA_BUSINESS_SPECS.find((s) => s.id === id)!; assert.equal(sp.map({ dos_id: "1", current_entity_name: "X", registry_number: "1", business_name: "X" }, "s")!.status, "active", id); }
+
+  const paReg = fakeSource((q, mode) => (mode === "exact" ? q.toUpperCase() === "DEAD STORES, INC." : "DEAD STORES, INC.".startsWith(q.toUpperCase())) ? [{ ...ent("P1", "The Dead Stores, Inc."), name: "x", state: "PA", status: "unknown", status_raw: null }] : []);
+  paReg.search = async (q: { name?: string }, mode: "exact" | "prefix") => ({ ok: true as const, records: (mode === "exact" ? (q.name ?? "").toUpperCase() === "THE DEAD STORES, INC." : "THE DEAD STORES, INC.".startsWith((q.name ?? "").toUpperCase())) ? [{ ...ent("0001234567", "The Dead Stores, Inc."), state: "PA", status: "unknown" as const, status_raw: null }] : [], meta: { source: "pa", attempts: 1, ms: 1 } });
+  const store = new MemStore(); const deps = { store, registryFor: () => paReg, now: () => store.clock };
+  const hit1 = await verifyBusiness(deps, { name: "The Dead Stores Inc", state: "PA", caller: "t" });
+  assert.equal(hit1.status, "verified"); assert.equal(hit1.manual_verification_required, false, "existence is verified");
+  assert.equal(hit1.entity?.status, "unknown", "never active"); assert.notEqual(hit1.entity?.status, "active");
+  assert.equal(hit1.entity?.stale_after_days, 30); assert.equal(hit1.entity?.source_completeness, "registrations_unflagged");
+  assert.equal(hit1.operating_status, "unknown"); assert.equal(hit1.operating_status_confirmation_required, true, "operating status stays a staff confirmation");
+  assert.match(hit1.message, /registered/); assert.match(hit1.message, /UNKNOWN/); assert.match(hit1.message, /no longer in operation/); assert.match(hit1.message, /status not published/);
+  assert.equal(store.logs[0].source_completeness, "registrations_unflagged");
+  // the cached answer says the same thing
+  const hit2 = await verifyBusiness(deps, { name: "THE DEAD STORES, INC.", state: "PA", caller: "t" });
+  assert.equal(hit2.cache_result, "hit"); assert.equal(hit2.operating_status, "unknown"); assert.equal(hit2.operating_status_confirmation_required, true); assert.match(hit2.message, /no longer in operation/);
+  // 30-day window: still a hit at 29 days, re-checked at 31
+  store.clock += 29 * 86_400_000; assert.equal((await verifyBusiness(deps, { name: "The Dead Stores Inc", state: "PA", caller: "t" })).cache_result, "hit");
+  store.clock += 2 * 86_400_000; const re = await verifyBusiness(deps, { name: "The Dead Stores Inc", state: "PA", caller: "t" });
+  assert.equal(re.cache_result, "stale"); assert.equal(re.registry.queried, true); assert.equal(re.entity?.verification_count, 2);
+
+  // a miss: monthly-publication + defunct-kept wording, never the "no longer active" wording of an active-only registry
+  const miss = await verifyBusiness({ store: new MemStore(), registryFor: () => fakeSource(() => []) }, { name: "Nobody Co", state: "PA", caller: "t" });
+  assert.equal(miss.status, "not_found"); assert.match(miss.message, /keeps defunct businesses/); assert.match(miss.message, /monthly/); assert.doesNotMatch(miss.message, /ACTIVE/);
+
+  // same-name entities: PA rows are all "unknown", so the single-active rule can never fire; the message does not claim "none is active"
+  const dup = fakeSource((q, mode) => mode === "exact" ? [{ ...ent("1", "TWIN CO"), state: "PA", status: "unknown" as const, status_raw: null }, { ...ent("2", "TWIN CO"), state: "PA", status: "unknown" as const, status_raw: null }] : []);
+  const amb = await verifyBusiness({ store: new MemStore(), registryFor: () => dup }, { name: "Twin Co", state: "PA", caller: "t" });
+  assert.equal(amb.status, "ambiguous"); assert.match(amb.message, /publishes no status/); assert.doesNotMatch(amb.message, /none is active/);
+
+  // operating status elsewhere: the registry's own status maps honestly
+  const { operatingStatus } = await import("../../supabase/functions/_shared/kb/kb.ts");
+  assert.equal(operatingStatus("active"), "active_per_registry"); assert.equal(operatingStatus("dissolved"), "not_active"); assert.equal(operatingStatus("merged"), "not_active");
+  assert.equal(operatingStatus("delinquent"), "unknown"); assert.equal(operatingStatus("unknown"), "unknown");
+  const co = await verifyBusiness({ store: new MemStore(), registryFor: () => fakeSource((q, mode) => mode === "exact" ? [ent("9", "LIVE CO INC")] : []) }, { name: "Live Co Inc", state: "CO", caller: "t" });
+  assert.equal(co.operating_status, "active_per_registry"); assert.equal(co.operating_status_confirmation_required, false);
+  console.log("pennsylvania: status unknown (never active), 30-day window, operating status stays staff-confirmed, honest wording, adapter fixed");
 }
 
 // ---- placeholder date: SQL Server's minimum date is "no date", never a real registration date

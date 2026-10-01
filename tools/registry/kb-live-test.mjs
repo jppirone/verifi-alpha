@@ -100,3 +100,29 @@ if (phase === "e") {
   console.log(`        disappeared_from_active_register=${r.disappeared_from_active_register}  completeness=${r.registry.completeness}\n        ${r.message}`);
   console.log("\n== stats"); console.log(JSON.stringify((await kb({ action: "stats" })).stats));
 }
+
+if (phase === "f") {
+  const show = (r) => console.log(`        status=${r.entity?.status} source_completeness=${r.entity?.source_completeness} stale_after_days=${r.entity?.stale_after_days} operating_status=${r.operating_status} confirmation_required=${r.operating_status_confirmation_required} manual_verification_required=${r.manual_verification_required}`);
+  console.log("== F1. Pennsylvania, employers that really operate: a hit = REGISTERED, status UNKNOWN, 30-day re-check, operating status stays a staff call");
+  for (const n of ["Comcast Corporation", "PPL Corporation", "Crown Holdings, Inc.", "Sheetz, Inc.", "Giant Eagle, Inc.", "UPMC", "Highmark Inc."]) { const r = await kb({ name: n, state: "PA" }); line(JSON.stringify(n), r); }
+  const one = await kb({ name: "Sheetz, Inc.", state: "PA" }); console.log("   the cached answer for Sheetz:"); line("Sheetz, Inc. (repeat)", one); show(one); console.log(`        message: ${one.message}`);
+
+  console.log("\n== F2. CONFIRMED-DEFUNCT employers (Bon-Ton: bankrupt Feb 2018, every store closed by 31 Aug 2018; Bethlehem Steel: Chapter 11 in 2001, dissolved after the 2003 asset sale)");
+  for (const n of ["The Bon-ton Stores, Inc.", "Bethlehem Steel Corporation"]) { const r = await kb({ name: n, state: "PA" }); line(JSON.stringify(n), r); show(r); console.log(`        message: ${r.message}`); }
+
+  console.log("\n== F3. a miss in Pennsylvania");
+  const m = await kb({ name: "Zzqxv Nonexistent Holdings LLC", state: "PA" }); line("Zzqxv Nonexistent Holdings LLC (PA)", m); console.log(`        ${m.message}`);
+
+  console.log("\n== F4. other registries are unaffected (Colorado active entity -> active_per_registry)");
+  const co = await kb({ name: "Ball Corporation", state: "CO" }); line("Ball Corporation (CO)", co); show(co);
+
+  console.log("\n== F5. stats"); console.log(JSON.stringify((await kb({ action: "stats" })).stats));
+}
+if (phase === "g") {
+  // the Pennsylvania ADAPTER inside registry-lookup (kind=business): status must no longer say "active"
+  const res = await fetch(`${base}/functions/v1/registry-lookup`, { method: "POST", headers: { "Content-Type": "application/json", apikey: anon, Authorization: `Bearer ${anon}` }, body: JSON.stringify({ kind: "business", name: "The Bon-ton Stores, Inc.", states: ["PA"], limit: 3, staff_session_token: token }) });
+  const j = await res.json();
+  console.log(`registry-lookup business PA: HTTP ${res.status}, hits ${j.hits.length}`);
+  for (const h of j.hits.slice(0, 2)) console.log(`   ${h.record.entity_name} [${h.record.entity_id}] status=${h.record.status} status_raw=${h.record.status_raw} registered=${h.record.registration_date}\n   details=${JSON.stringify(h.record.details)}`);
+  const r2 = j.reports.find((x) => x.source_id === "pa-dos"); console.log(`   dedup evidence: raw_rows=${r2.raw_rows} entities=${r2.entities} (one row per officer collapsed to one entity)`);
+}

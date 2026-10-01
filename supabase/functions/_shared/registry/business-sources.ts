@@ -194,16 +194,21 @@ const OR: SocrataBusinessSpec = {
   }),
 };
 
-// Pennsylvania: ONE ROW PER OFFICER/PARTY. Grouped on the entity-level columns. "Registered Businesses in PA Current": current
-// registrations only, no status column (status implied, recorded in details). Updated monthly, not daily.
+// Pennsylvania: ONE ROW PER OFFICER/PARTY. Grouped on the entity-level columns. "Registered Businesses in PA Current": registrations with NO status
+// column, updated monthly. The state's own description says: "Due to statutory limitations in removing businesses no longer in operation from our
+// database, this data shows a larger number of active businesses than currently exist" (e.g. The Bon-ton Stores, liquidated 2018, and Bethlehem Steel
+// Corporation are still listed). So nothing in a row supports "active": the status is "unknown" (fixed 2026-10-01; the adapter used to force "active").
 const PA: SocrataBusinessSpec = {
   id: "pa-dos", label: "Pennsylvania Department of State — Registered Businesses", state: "PA",
   domain: "data.pa.gov", datasetId: "xvd7-5r2c",
   nameField: "business_name", idField: "filing_number", orderBy: "business_name", groupBy: true,
   fields: ["filing_number", "business_name", "typeofbusinessregistration", "creationdate"],
   map: (r, src) => mkEntity(src, "PA", {
-    name: r.business_name, id: r.filing_number, statusRaw: null, statusOverride: "active", regDate: r.creationdate, type: r.typeofbusinessregistration,
-    details: { status_basis: "dataset lists current registrations only; it has no status column" },
+    name: r.business_name, id: r.filing_number, statusRaw: null, statusOverride: "unknown", regDate: r.creationdate, type: r.typeofbusinessregistration,
+    details: {
+      status_basis: "dataset has no status column and, per the Department of State, keeps businesses that are no longer in operation; a listing shows the business was registered, not that it operates",
+      source_completeness: "registrations_unflagged",
+    },
   }),
 };
 
