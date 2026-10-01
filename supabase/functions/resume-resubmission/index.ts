@@ -1018,6 +1018,28 @@ export default {
           const er = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime;
           if (er && typeof er.waitUntil === "function") er.waitUntil(runChecks().catch(() => {})); else await runChecks();
         }
+        // Employer check (2026-10-01, Knowledge Base wiring): every work-history entry that was ADDED or CHANGED by this resubmission has its employer
+        // (re)checked against the KB and the result written onto its queue row (see check-item-employer); kept entries keep the result they have.
+        // After the commit, in the background, never able to fail the resubmission. Same routing as the first confirmation.
+        {
+          const workIds: string[] = [
+            ...built.ops.added.filter((a: any) => a.kind === "work" && a.queue).map((a: any) => a.staged_id),
+            ...built.ops.changed.filter((x: any) => x.kind === "work" && x.queue).map((x: any) => x.id),
+          ];
+          if (workIds.length) {
+            const runEmployerChecks = async () => {
+              const qr = await fetch(`${SUPABASE_URL}/rest/v1/verification_items?type=eq.Job%20Experience&source_item_id=in.(${workIds.map(encodeURIComponent).join(",")})&select=id`, { headers: REST });
+              const ids: string[] = qr.ok ? (await qr.json()).map((r: any) => r.id) : [];
+              await Promise.all(ids.map(async (verification_item_id) => {
+                try {
+                  await fetch(`${SUPABASE_URL}/functions/v1/check-item-employer`, { method: "POST", headers: { ...REST, "Content-Type": "application/json" }, body: JSON.stringify({ verification_item_id }), signal: AbortSignal.timeout(60000) });
+                } catch (_e) { /* best-effort: an unchecked item simply has no employer_check */ }
+              }));
+            };
+            const er2 = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime;
+            if (er2 && typeof er2.waitUntil === "function") er2.waitUntil(runEmployerChecks().catch(() => {})); else await runEmployerChecks();
+          }
+        }
         return json({
           ok: true, status: "applied", counts: built.counts, archived: result.archived, queue_created: result.new_queue,
           licenses_verifying: built.verifyIds, contact_needed: built.contactNeeded, document_id: doc.id,

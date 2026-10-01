@@ -80,7 +80,11 @@ export function operatingStatus(status: BusinessStatus): OperatingStatus {
     default: return "unknown"; // delinquent, pending, other, unknown: the registry does not say it is operating
   }
 }
-const opFields = (e: { status: BusinessStatus }) => { const o = operatingStatus(e.status); return { operating_status: o, operating_status_confirmation_required: o === "unknown" }; };
+// operating_status is what the registry lets us say; operating_status_confirmation_required is the ROUTING signal and is deliberately narrower: it is true
+// ONLY when the registry publishes no status at all for the entity (status "unknown": Pennsylvania). A registry that DOES publish a status -- including
+// "delinquent" or "pending" -- is read by staff as it always was, so Colorado, Connecticut, New York and Oregon never trigger the extra confirmation
+// (corrected 2026-10-01: it had also been true for delinquent / pending / other, which would have sent over a million Colorado entities to staff).
+const opFields = (e: { status: BusinessStatus }) => ({ operating_status: operatingStatus(e.status), operating_status_confirmation_required: e.status === "unknown" });
 
 export interface KbEntity {
   id: string; entity_kind: string; state: string; registry_source_id: string; registry_entity_id: string; name: string;

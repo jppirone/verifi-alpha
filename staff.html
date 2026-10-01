@@ -2434,6 +2434,9 @@ th.sortable{cursor:pointer;user-select:none}
                 <sc-if value="{{ row.registryFlag }}" hint-placeholder-val="{{ false }}">
                   <div style="margin-bottom:4px"><span class="tag tag-outline" style="color:#b26a00;border-color:#b26a00;white-space:nowrap">{{ row.registryFlagText }}</span></div>
                 </sc-if>
+                <sc-if value="{{ row.needsOperatingConfirm }}" hint-placeholder-val="{{ false }}">
+                  <div style="margin-bottom:4px"><span class="tag tag-outline" style="color:#b26a00;border-color:#b26a00;white-space:nowrap">Confirm operating status</span></div>
+                </sc-if>
                 <sc-if value="{{ row.hasCandidateNote }}" hint-placeholder-val="{{ false }}">
                   <div style="margin-bottom:4px"><span class="tag tag-outline" style="white-space:nowrap">Candidate note</span></div>
                 </sc-if>
@@ -2562,6 +2565,34 @@ th.sortable{cursor:pointer;user-select:none}
           <div style="font-size:11px;color:var(--color-neutral-500);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:2px">Automated-check result</div>
           <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.5">{{ detailAutomatedCheck }}</div>
         </div>
+
+        <!-- Employer check (Knowledge Base wiring, 2026-10-01): what the registry said about this item's employer, shown on the item so staff never
+             re-query the KB to see why it is flagged. EXISTENCE and OPERATING STATUS are separate lines on purpose: a registry that publishes no status
+             (Pennsylvania) still resolves existence automatically, but cannot say the business operates, so only that second line asks a human. -->
+        <sc-if value="{{ detailHasEmployerCheck }}" hint-placeholder-val="{{ false }}">
+          <div id="employer-check-card" style="padding:10px 12px;border:1px solid var(--color-divider);border-radius:6px;background:var(--color-neutral-900);display:flex;flex-direction:column;gap:6px">
+            <div style="font-size:11px;color:var(--color-accent-300);text-transform:uppercase;letter-spacing:0.04em">Employer check (state registry)</div>
+            <div style="font-size:13px" id="employer-existence">Existence: {{ detailEmployerExistence }}</div>
+            <div style="font-size:13px" id="employer-operating-status">Operating status: <strong>{{ detailOperatingStatusLabel }}</strong></div>
+            <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.5">{{ detailEmployerMessage }}</div>
+            <sc-if value="{{ detailOperatingNeedsConfirm }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:8px 10px;border:1px solid #b26a00;border-radius:6px;display:flex;flex-direction:column;gap:6px" id="operating-confirm-box">
+                <div style="font-size:12px;color:#d98c1f;line-height:1.5">Staff confirmation required: this registry does not say whether the business operates. Record what you found before this item can be Confirmed.</div>
+                <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+                  <button type="button" class="btn btn-secondary" id="op-operating" disabled="{{ operatingSaving }}" onClick="{{ resolveOperatingOperating }}">Operating</button>
+                  <button type="button" class="btn btn-secondary" id="op-not-operating" disabled="{{ operatingSaving }}" onClick="{{ resolveOperatingNot }}">Not operating</button>
+                  <button type="button" class="btn btn-secondary" id="op-undetermined" disabled="{{ operatingSaving }}" onClick="{{ resolveOperatingUndetermined }}">Could not determine</button>
+                </div>
+              </div>
+            </sc-if>
+            <sc-if value="{{ detailOperatingResolved }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:12px;color:var(--color-neutral-300)" id="operating-resolved">Operating status confirmed by staff: <strong>{{ detailOperatingResolutionLabel }}</strong> — {{ detailOperatingResolvedBy }}, {{ detailOperatingResolvedAtDisp }}</div>
+            </sc-if>
+            <sc-if value="{{ operatingSaveError }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:12px;color:var(--color-danger-300,#e5736b)" id="operating-save-error">{{ operatingSaveError }}</div>
+            </sc-if>
+          </div>
+        </sc-if>
 
         <!-- Item C (2026-09-08 regression session): candidate-stated employer/certification
              contact details, from the new interim screen after resumeConfirm — visible here so a
@@ -3242,6 +3273,9 @@ th.sortable{cursor:pointer;user-select:none}
     <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="status-confirm-title">
       <div class="dialog-title" id="status-confirm-title">Confirm status change</div>
       <div class="dialog-body">Change this item's status from {{ currentStatusLabel }} to {{ pendingStatus }}?</div>
+      <sc-if value="{{ pendingBlockedByOperating }}" hint-placeholder-val="{{ false }}">
+        <div id="status-blocked-operating" style="font-size:12px;color:#d98c1f;line-height:1.5;margin-top:var(--space-2)">This item cannot be Confirmed yet: the employer's registry does not say whether the business operates. Close this, record what you found under "Employer check" (Operating / Not operating / Could not determine), then confirm.</div>
+      </sc-if>
       <sc-if value="{{ pendingStatusIsResolution }}" hint-placeholder-val="{{ false }}">
         <div class="field" style="margin-top:var(--space-2)">
           <label for="resolution-evidence">Evidence / reasoning (required to resolve this item)</label>
@@ -3347,6 +3381,56 @@ class Component extends DCLogic {
 
   // True for a License queue item whose last automatic check found the license in the registry with a correct name match, but the
   // registry lists it as not currently valid (verify-license reason code exact_match_not_active). Read from stored data only.
+  // ---- Knowledge Base wiring (2026-10-01): employer check shown on the queue item -------------------------------------------------------------
+  employerExistenceLabel(it) {
+    const ec = it.employerCheck;
+    if (!ec) return '';
+    const e = ec.entity;
+    switch (ec.status) {
+      case 'verified': return 'Found — registered in ' + (ec.state || '') + (e && e.name ? ' as "' + e.name + '"' : '') + (e && e.registry_entity_id ? ' (' + e.registry_entity_id + ')' : '') + (e && e.status_raw ? ', registry status: ' + e.status_raw : '');
+      case 'not_found': return 'Not found by exact name in the ' + (ec.state || '') + ' registry';
+      case 'ambiguous': return 'Several registered entities share this name — needs a human';
+      case 'inconclusive': return 'Could not be settled by the registry search';
+      case 'conflict': return 'Conflicts with an earlier knowledge-base record';
+      case 'no_automated_source': return 'No automated registry for ' + (ec.state || 'this state');
+      case 'not_checked': return 'Not checked';
+      default: return String(ec.status || '');
+    }
+  }
+  operatingStatusLabel(it) {
+    const os = it.operatingStatus;
+    if (!it.employerCheck || it.employerCheck.status !== 'verified') return 'Not determined (employer not found automatically)';
+    if (it.operatingConfirmationRequired) return 'UNKNOWN — the registry publishes no status and keeps businesses that have closed';
+    if (os === 'active_per_registry') return 'Active per the registry';
+    if (os === 'not_active') return 'Not active per the registry';
+    return 'Unknown (see the registry status above)';
+  }
+  operatingResolutionLabel(r) {
+    return r === 'operating' ? 'Operating' : r === 'not_operating' ? 'Not operating' : r === 'undetermined' ? 'Could not determine' : '';
+  }
+  async resolveOperating(value) {
+    const id = this.state.selectedId;
+    if (!id || this.state.operatingSaving) return;
+    this.setState({ operatingSaving: true, operatingSaveError: '' });
+    let ok = false, msg = '';
+    try {
+      const res = await this.staffFetch('/update-verification-item', { id, patch: { operatingResolution: value } });
+      const data = await res.json().catch(() => ({}));
+      ok = res.ok && !!data.ok;
+      if (!ok) msg = res.status === 403 ? 'This item is not assigned to you.' : "Couldn't save that. Try again.";
+    } catch (e) { msg = "Couldn't reach the server. Try again."; }
+    if (ok) {
+      const nowIso = new Date().toISOString();
+      this.setState(st => ({
+        operatingSaving: false, operatingSaveError: '',
+        items: st.items.map(it => it.id === id ? { ...it, operatingResolution: value, operatingResolvedAt: nowIso, operatingResolvedBy: st.currentUser } : it),
+      }));
+      this.addTimelineEntry(id, { date: nowIso, actor: this.state.currentUser, action: 'Employer operating status recorded: ' + this.operatingResolutionLabel(value) + '.', note: '' });
+    } else {
+      this.setState({ operatingSaving: false, operatingSaveError: msg });
+    }
+  }
+
   isNotActiveMatch(it) {
     return !!(it && it.type === 'License' && it.licenseData && (it.licenseData.reason === 'exact_match_not_active' || it.licenseData.reason === 'lapsed_since_verified'));
   }
@@ -3401,6 +3485,8 @@ class Component extends DCLogic {
     noteSaveState: 'idle', noteFading: false,
     internalNoteSaveState: 'idle', internalNoteFading: false,
     statusConfirmOpen: false, pendingStatus: null, resolutionEvidenceDraft: '',
+    // Knowledge Base wiring (2026-10-01): staff's operating-status answer for a flagged employer (see resolveOperating below).
+    operatingSaving: false, operatingSaveError: '',
     // Overlapping employment detection (2026-09-27): see resolveOverlapHold below.
     overlapResolveNoteDraft: '', overlapResolvePending: false, overlapResolveError: null,
     correctionFilter: false, correctionMode: null, correctionDraft: '', declineDraft: '',
@@ -4477,6 +4563,7 @@ class Component extends DCLogic {
       if (idQuery && !(it.id || '').toLowerCase().includes(idQuery)) return false;
       if (s.typeFilter && it.type !== s.typeFilter) return false;
       if (s.findingFilter === 'not_active' && !this.isNotActiveMatch(it)) return false;
+      if (s.findingFilter === 'operating_unconfirmed' && !(it.operatingConfirmationRequired && !it.operatingResolution)) return false;
       if (s.statusFilter === 'open' && this.RESOLUTION_STATUSES.includes(it.status)) return false;
       if (s.statusFilter === 'resolved' && !this.RESOLUTION_STATUSES.includes(it.status)) return false;
       return true;
@@ -4518,6 +4605,7 @@ class Component extends DCLogic {
       registryFlag: this.isNotActiveMatch(it),
       registryFlagText: this.isLapsedAfterVerified(it) ? 'Was verified · now not active' : 'License found · not active',
       hasCandidateNote: !!it.candidateNote,
+      needsOperatingConfirm: !!(it.operatingConfirmationRequired && !it.operatingResolution),
       assignedTo: it.assignedTo,
       correctionRequested: !!it.correctionRequested,
       isAdminEditable: isAdmin,
@@ -4773,6 +4861,8 @@ class Component extends DCLogic {
       findingFilterOptions: [
         { value: '', label: 'All' },
         { value: 'not_active', label: 'License found, name matches, not active (incl. lapsed after verification)' },
+        // Knowledge Base wiring: employer found in a registry that publishes no status (Pennsylvania); staff must confirm whether it operates.
+        { value: 'operating_unconfirmed', label: 'Employer operating status needs staff confirmation' },
       ],
       // Status/stage filter: lets staff see what's actually active without wading through already-resolved
       // items, the goal that motivated adding this. 'open'/'resolved' are derived from the SAME
@@ -5172,10 +5262,28 @@ class Component extends DCLogic {
       pendingStatusIsResolution: this.RESOLUTION_STATUSES.includes(s.pendingStatus),
       resolutionEvidenceDraft: s.resolutionEvidenceDraft,
       setResolutionEvidenceDraft: (e) => this.setState({ resolutionEvidenceDraft: e.target.value }),
-      confirmStatusChangeDisabled: this.RESOLUTION_STATUSES.includes(s.pendingStatus) && !s.resolutionEvidenceDraft.trim(),
+      // Knowledge Base wiring (2026-10-01): an item whose employer's registry does not say whether it operates cannot be Confirmed until staff record
+      // an operating-status answer. Mirrors the server gate in update-verification-item (the server is the real rule; this keeps staff from walking into it).
+      pendingBlockedByOperating: !!(selected && s.pendingStatus === 'Confirmed' && selected.operatingConfirmationRequired && !selected.operatingResolution),
+      confirmStatusChangeDisabled: (this.RESOLUTION_STATUSES.includes(s.pendingStatus) && !s.resolutionEvidenceDraft.trim()) || !!(selected && s.pendingStatus === 'Confirmed' && selected.operatingConfirmationRequired && !selected.operatingResolution),
+      detailHasEmployerCheck: !!(selected && selected.employerCheck),
+      detailEmployerExistence: selected ? this.employerExistenceLabel(selected) : '',
+      detailOperatingStatusLabel: selected ? this.operatingStatusLabel(selected) : '',
+      detailEmployerMessage: selected && selected.employerCheck ? (selected.employerCheck.message || selected.employerCheck.reason || '') : '',
+      detailOperatingNeedsConfirm: !!(selected && selected.operatingConfirmationRequired && !selected.operatingResolution),
+      detailOperatingResolved: !!(selected && selected.operatingResolution),
+      detailOperatingResolutionLabel: selected ? this.operatingResolutionLabel(selected.operatingResolution) : '',
+      detailOperatingResolvedBy: selected ? (selected.operatingResolvedBy || '') : '',
+      detailOperatingResolvedAtDisp: selected && selected.operatingResolvedAt ? this.fmtDateTime(selected.operatingResolvedAt) : '',
+      operatingSaving: !!s.operatingSaving,
+      operatingSaveError: s.operatingSaveError || '',
+      resolveOperatingOperating: () => this.resolveOperating('operating'),
+      resolveOperatingNot: () => this.resolveOperating('not_operating'),
+      resolveOperatingUndetermined: () => this.resolveOperating('undetermined'),
       confirmStatusChange: () => {
         if (!selected) return;
         const newStatus = s.pendingStatus;
+        if (newStatus === 'Confirmed' && selected.operatingConfirmationRequired && !selected.operatingResolution) return; // the server refuses this too
         const evidence = s.resolutionEvidenceDraft.trim();
         // Real gate, not just a disabled button: a resolution status change is blocked here too if
         // evidence is blank, so a stale click (or anything else that could reach this handler

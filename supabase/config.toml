@@ -254,3 +254,6 @@ verify_jwt = true
 
 [functions.kb-verify-business]
 verify_jwt = true
+
+[functions.check-item-employer]
+verify_jwt = true

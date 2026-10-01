@@ -1,6 +1,7 @@
 // Setup type definitions for built-in Supabase Runtime APIs
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { withSupabase } from "jsr:@supabase/server@1";
+import { blocksConfirmed, OPERATING_RESOLUTIONS } from "../_shared/kb/queue-check.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -31,13 +32,16 @@ const FIELD_MAP = {
   // write this function makes to flagged_by_candidate; a candidate can only ever SET it true, via
   // submit-candidate-correction-response, never clear it themselves.
   flaggedByCandidate: "flagged_by_candidate",
+  // Knowledge Base wiring (2026-10-01): staff's answer on whether the employer OPERATES (operating | not_operating | undetermined | null to clear).
+  // Required before a flagged item (operating_confirmation_required) can be set to Confirmed; see the gate below.
+  operatingResolution: "operating_resolution",
 };
 const DATE_COLUMNS = new Set(["received", "desired", "follow_up"]);
 // The statuses staff.html offers (STATUS_OPTIONS). Nothing else is ever a valid status, for any role (this used to accept any string).
 const STATUS_VALUES = new Set(["New", "In Progress", "Awaiting Response", "Needs Reconciliation", "Confirmed", "Discrepancy", "Verification Not Possible", "Unable to Verify"]);
 // What a worker may change on an item assigned to them: exactly what staff.html lets a worker do. assignedTo, type, received, desired
 // and the candidate-side correction fields (correctionNote/correctionField, written by submit-candidate-correction-response) are not in it.
-const WORKER_PATCH_FIELDS = new Set(["status", "note", "internalNote", "followUp", "automatedCheck", "claim", "foundValue", "correctionValue", "correctionRequested", "correctionAppliedAt", "flaggedByCandidate"]);
+const WORKER_PATCH_FIELDS = new Set(["status", "note", "internalNote", "followUp", "automatedCheck", "claim", "foundValue", "correctionValue", "correctionRequested", "correctionAppliedAt", "flaggedByCandidate", "operatingResolution"]);
 
 // ---------------------------------------------------------------------------------------------------
 // ---------------------------------------------------------------------------------------------------
@@ -133,11 +137,24 @@ export default {
         });
       }
 
+      if (Object.prototype.hasOwnProperty.call(patch, "operatingResolution")) {
+        const v = (patch as any).operatingResolution;
+        if (v !== null && !(OPERATING_RESOLUTIONS as readonly string[]).includes(v)) {
+          return new Response(JSON.stringify({ ok: false, error: "invalid_operating_resolution" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+      }
+
       const dbPatch = {};
       for (const [k, v] of Object.entries(patch)) {
         const col = FIELD_MAP[k];
         if (!col) continue;
         dbPatch[col] = DATE_COLUMNS.has(col) && v === "" ? null : v;
+      }
+      // who/when answered the operating-status question is recorded by the SERVER (never taken from the request): the signed-in staff member, or "service".
+      if (Object.prototype.hasOwnProperty.call(dbPatch, "operating_resolution")) {
+        const answered = dbPatch["operating_resolution"] !== null;
+        dbPatch["operating_resolved_at"] = answered ? new Date().toISOString() : null;
+        dbPatch["operating_resolved_by"] = answered ? (caller.kind === "staff" ? caller.name : "service") : null;
       }
       if (Object.keys(dbPatch).length === 0) {
         return new Response(JSON.stringify({ ok: false, error: "no valid fields in patch" }), {
@@ -163,6 +180,33 @@ export default {
             return new Response(JSON.stringify({ ok: false, error: "found_value_required" }), {
               status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
             });
+          }
+        }
+      }
+
+      // Operating-status gate (Knowledge Base wiring, 2026-10-01): an item flagged operating_confirmation_required (the employer's registry publishes no status,
+      // e.g. Pennsylvania, whose list keeps businesses that closed years ago) cannot be set to "Confirmed" until staff have recorded an operating_resolution.
+      // Existence is NOT part of this gate and is unaffected. A real server-side check, like found_value_required above: the button state in staff.html is a
+      // convenience, this is the rule. Applies to the transition INTO Confirmed, and to clearing the resolution while the item is Confirmed.
+      // Every other status change, and every item without the flag (all of Colorado / Connecticut / New York / Oregon), passes untouched.
+      {
+        const touchesStatus = dbPatch["status"] === "Confirmed";
+        const clearsResolution = Object.prototype.hasOwnProperty.call(dbPatch, "operating_resolution") && dbPatch["operating_resolution"] === null;
+        if (touchesStatus || clearsResolution) {
+          const cur = await fetch(SUPABASE_URL + "/rest/v1/verification_items?id=eq." + encodeURIComponent(id) + "&select=status,operating_confirmation_required,operating_resolution" + (scopedTo ? "&assigned_to=eq." + encodeURIComponent(scopedTo) : ""), {
+            headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": "Bearer " + SUPABASE_SERVICE_ROLE_KEY },
+          });
+          const row = cur.ok ? (await cur.json())[0] : null;
+          if (row) {
+            const effRes = Object.prototype.hasOwnProperty.call(dbPatch, "operating_resolution") ? dbPatch["operating_resolution"] : row.operating_resolution;
+            const intoConfirmed = touchesStatus && row.status !== "Confirmed" && blocksConfirmed({ operating_confirmation_required: row.operating_confirmation_required, operating_resolution: effRes }, "Confirmed");
+            const clearedWhileConfirmed = clearsResolution && (row.status === "Confirmed" || touchesStatus) && row.operating_confirmation_required === true;
+            if (intoConfirmed || clearedWhileConfirmed) {
+              return new Response(JSON.stringify({
+                ok: false, error: "operating_status_confirmation_required",
+                message: "This employer's registry does not say whether the business operates, so a staff member must record whether it does (operating / not operating / could not determine) before this item can be Confirmed.",
+              }), { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+            }
           }
         }
       }

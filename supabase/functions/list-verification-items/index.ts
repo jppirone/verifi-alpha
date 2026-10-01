@@ -108,7 +108,7 @@ export default {
     if (!caller) return UNAUTHORIZED();
     const onlyAssignedTo = workerName(caller); // null for admin/service: everything
     try {
-      const url = SUPABASE_URL + "/rest/v1/verification_items?select=id,type,claim,found_value,received,desired,follow_up,note,internal_note,automated_check,status,assigned_to,correction_requested,correction_note,correction_field,correction_value,correction_applied_at,source_item_id,candidate_note,candidate_note_at,flagged_by_candidate,verification_item_timeline(event_date,actor,action,note),candidates(id,full_name,first_name,last_name,email,phone)&order=id.asc&verification_item_timeline.order=event_date.asc" + (onlyAssignedTo ? "&assigned_to=eq." + encodeURIComponent(onlyAssignedTo) : "");
+      const url = SUPABASE_URL + "/rest/v1/verification_items?select=id,type,claim,found_value,received,desired,follow_up,note,internal_note,automated_check,employer_check,operating_status,operating_confirmation_required,operating_resolution,operating_resolved_at,operating_resolved_by,status,assigned_to,correction_requested,correction_note,correction_field,correction_value,correction_applied_at,source_item_id,candidate_note,candidate_note_at,flagged_by_candidate,verification_item_timeline(event_date,actor,action,note),candidates(id,full_name,first_name,last_name,email,phone)&order=id.asc&verification_item_timeline.order=event_date.asc" + (onlyAssignedTo ? "&assigned_to=eq." + encodeURIComponent(onlyAssignedTo) : "");
       const res = await fetch(url, { headers: REST_HEADERS });
       if (!res.ok) {
         const errText = await res.text();
@@ -255,6 +255,15 @@ export default {
         note: r.note,
         internalNote: r.internal_note,
         automatedCheck: r.automated_check,
+        // Employer check (Knowledge Base wiring, 2026-10-01): what the KB said about this item's employer, and whether staff must confirm OPERATING status
+        // (a registry that publishes no status, i.e. Pennsylvania). operatingStatus is the registry's own answer, shown on the item so staff never have to
+        // re-query the KB to see why it is flagged. Staff-only: list-candidate-verification-items does not return any of this.
+        employerCheck: r.employer_check ?? null,
+        operatingStatus: r.operating_status ?? null,
+        operatingConfirmationRequired: r.operating_confirmation_required === true,
+        operatingResolution: r.operating_resolution ?? null,
+        operatingResolvedAt: r.operating_resolved_at ?? null,
+        operatingResolvedBy: r.operating_resolved_by ?? null,
         licenseData: r.type === "License" && r.source_item_id ? (() => {
           const l = licenseById.get(r.source_item_id);
           // The one registry row the last check matched by name (verification_detail.matched_record). Only its own status /

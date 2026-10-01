@@ -934,8 +934,31 @@ export default {
       return licenseVerification;
       };
 
+      // Employer check (2026-10-01, Knowledge Base wiring): every "Job Experience" item just queued gets its employer checked against the KB, and the result is
+      // written onto the item (see check-item-employer). Same shape as the license verification above: runs AFTER everything is committed, in the background,
+      // never able to fail or delay the candidate's confirmation. A registry that publishes no status (Pennsylvania) routes the item to staff confirmation of
+      // OPERATING STATUS; existence is unaffected.
+      const employerCheckIds = queueInserts.filter((q) => q.type === "Job Experience").map((q) => String(q.id));
+      const runEmployerChecks = async () => {
+        await Promise.all(employerCheckIds.map(async (verification_item_id) => {
+          try {
+            await fetch(`${SUPABASE_URL}/functions/v1/check-item-employer`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
+              body: JSON.stringify({ verification_item_id }),
+              signal: AbortSignal.timeout(60000),
+            });
+          } catch (_e) { /* best-effort: an unchecked item simply has no employer_check; staff can still verify it by hand */ }
+        }));
+      };
+
       let licenseVerification: Array<{ license_item_id: string; ok: boolean; status: string | null; outcome?: string | null; correction_requested?: boolean }>;
       const edgeRuntime = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime;
+      if (employerCheckIds.length > 0 && edgeRuntime && typeof edgeRuntime.waitUntil === "function") {
+        edgeRuntime.waitUntil(runEmployerChecks().catch((e) => console.log("confirm-resume-data: background employer check failed -", String(e))));
+      } else if (employerCheckIds.length > 0) {
+        await runEmployerChecks(); // no background primitive: awaited (slower, never wrong)
+      }
       if (licenseIdsToVerify.length === 0) {
         licenseVerification = [];
       } else if (edgeRuntime && typeof edgeRuntime.waitUntil === "function") {
