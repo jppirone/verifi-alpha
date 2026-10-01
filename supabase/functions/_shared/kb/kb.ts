@@ -14,9 +14,25 @@
 import type { BusinessSource } from "../registry/adapter.ts";
 import type { BusinessEntity, BusinessStatus } from "../registry/schema.ts";
 
-// Which registries are switched ON for the KB. Colorado first, Connecticut second (2026-10-01); the other Socrata registries (NY, OR, PA) exist
-// as sources but are not enabled here, so a lookup for them says "no automated source" instead of quietly widening scope.
-export const KB_ENABLED_SOURCES: Record<string, string> = { CO: "co-sos", CT: "ct-sots" };
+// How much of a state's business history its registry dataset contains. This decides what a MISS means, so it is stored with every cached
+// entity and every log row, and a later resolution step can tell the kinds of source apart:
+//   full_history             every entity is listed with a status (active, dissolved, merged ...)   -> "not found" = never registered under that name
+//   active_only              only entities that are active today are listed                          -> "not found" may be "registered once, since closed"
+//   registrations_unflagged  registrations with no status, and defunct businesses are not removed   -> a hit does not prove the business still operates
+export type Completeness = "full_history" | "active_only" | "registrations_unflagged";
+
+// Which registries are switched ON for the KB, and how complete each is. Colorado and Connecticut (full history) first; New York and Oregon
+// (active only: verified 2026-10-01 -- 240 of 240 New York entities the state records as dissolved are absent from its active list, and 1.5% of
+// 7,200 recent Oregon registrations have already left its active list) added after. Pennsylvania is deliberately NOT here: its dataset keeps
+// defunct businesses ("registrations_unflagged"), a different limitation that needs a decision first. A state not listed answers
+// "no automated source" instead of quietly widening scope.
+export const KB_SOURCE_PROFILES: Record<string, { source_id: string; completeness: Completeness }> = {
+  CO: { source_id: "co-sos", completeness: "full_history" },
+  CT: { source_id: "ct-sots", completeness: "full_history" },
+  NY: { source_id: "ny-dos", completeness: "active_only" },
+  OR: { source_id: "or-sos", completeness: "active_only" },
+};
+export const KB_ENABLED_SOURCES: Record<string, string> = Object.fromEntries(Object.entries(KB_SOURCE_PROFILES).map(([st, p]) => [st, p.source_id]));
 
 // A registry row is only evidence that a BUSINESS EXISTS if it is a registered entity. Connecticut's Business Master also lists name reservations
 // ("Reserved", "Expired Reservation", "Reserved Cancel"), rejected filings ("Rejected"), removed records ("Removed") and filings not yet accepted
@@ -52,18 +68,18 @@ export function staleAfterDays(status: BusinessStatus): number {
 export interface KbEntity {
   id: string; entity_kind: string; state: string; registry_source_id: string; registry_entity_id: string; name: string;
   status: BusinessStatus; status_raw: string | null; entity_type: string | null; registration_date: string | null; source_dataset: string;
-  details: Record<string, unknown>; first_verified_at: string; last_verified_at: string; verification_count: number; stale_after_days: number; last_outcome: string;
+  details: Record<string, unknown>; first_verified_at: string; last_verified_at: string; verification_count: number; stale_after_days: number; last_outcome: string; source_completeness: Completeness;
 }
 export interface RecordInput {
   state: string; registry_source_id: string; registry_entity_id: string; name: string; status: BusinessStatus; status_raw: string | null; entity_type: string | null;
-  registration_date: string | null; source_dataset: string; details: Record<string, unknown>; stale_after_days: number; alias_keys: Array<{ key: string; seen: string }>;
+  registration_date: string | null; source_dataset: string; details: Record<string, unknown>; stale_after_days: number; source_completeness: Completeness; alias_keys: Array<{ key: string; seen: string }>;
 }
 export type CacheResult = "hit" | "stale" | "miss" | "bypass" | "n/a";
 export type FinalOutcome = "verified" | "not_found" | "ambiguous" | "conflict" | "inconclusive" | "no_automated_source";
 export interface LogEntry {
   query_name: string; query_name_key: string; query_state: string; caller: string | null; cache_result: CacheResult; final_outcome: FinalOutcome;
   entity_id: string | null; registry_queried: boolean; registry_source_id: string | null; registry_calls: number; registry_ms: number | null; total_ms: number;
-  status_seen: string | null; detail: Record<string, unknown>;
+  status_seen: string | null; source_completeness: Completeness | null; detail: Record<string, unknown>;
 }
 export interface KbStore {
   findByName(state: string, key: string): Promise<KbEntity | null>;
@@ -137,7 +153,10 @@ export interface VerifyResponse {
   status: VerifyStatus; manual_verification_required: boolean; message: string; from_cache: boolean; cache_result: CacheResult;
   query: { name: string; name_key: string; state: string };
   entity?: KbEntity; stale_entity?: KbEntity; resolution?: Resolution; candidates?: Array<{ registry_entity_id: string; name: string; status: string; status_raw: string | null; entity_type: string | null; registration_date: string | null }>;
-  registry: { queried: boolean; source_id: string | null; calls: number; ms: number | null };
+  registry: { queried: boolean; source_id: string | null; completeness: Completeness | null; calls: number; ms: number | null };
+  // active_only registries only: an entity this knowledge base HAD verified is no longer on the registry's active list, which means it has most
+  // likely dissolved, merged or been withdrawn since (a deterministic inference from "was active, now absent from an active-only list").
+  disappeared_from_active_register?: boolean;
   log_id: number | null;
 }
 
@@ -154,31 +173,34 @@ export async function verifyBusiness(deps: VerifyDeps, req: VerifyRequest): Prom
     return { ...r, query, log_id };
   };
 
-  const sourceId = KB_ENABLED_SOURCES[state];
+  const profile = KB_SOURCE_PROFILES[state];
+  const sourceId = profile?.source_id;
+  const completeness: Completeness | null = profile?.completeness ?? null;
+  const activeOnlyNote = " This registry lists active entities only, so this says the employer is active today and nothing about its earlier history.";
   const source = sourceId ? deps.registryFor(state) : null;
   if (!source) {
     return finish({
       status: "no_automated_source", manual_verification_required: true, from_cache: false, cache_result: "n/a",
       message: `No automated business registry is enabled for ${state}: look this employer up by hand. Needs manual verification.`,
-      registry: { queried: false, source_id: null, calls: 0, ms: null },
-    }, { cache_result: "n/a", final_outcome: "no_automated_source", entity_id: null, registry_queried: false, registry_source_id: null, registry_calls: 0, registry_ms: null, status_seen: null, detail: {} });
+      registry: { queried: false, source_id: null, completeness: null, calls: 0, ms: null },
+    }, { cache_result: "n/a", final_outcome: "no_automated_source", entity_id: null, registry_queried: false, registry_source_id: null, registry_calls: 0, registry_ms: null, status_seen: null, source_completeness: null, detail: {} });
   }
 
   const cached = await deps.store.findByName(state, key);
   if (cached && !req.force_refresh && isFresh(cached, now())) {
     return finish({
       status: "verified", manual_verification_required: false, from_cache: true, cache_result: "hit", entity: cached,
-      message: `Verified from the knowledge base (last confirmed against the ${state} registry ${cached.last_verified_at.slice(0, 10)}).`,
-      registry: { queried: false, source_id: cached.registry_source_id, calls: 0, ms: null },
-    }, { cache_result: "hit", final_outcome: "verified", entity_id: cached.id, registry_queried: false, registry_source_id: cached.registry_source_id, registry_calls: 0, registry_ms: null, status_seen: cached.status, detail: {} });
+      message: `Verified from the knowledge base (last confirmed against the ${state} registry ${cached.last_verified_at.slice(0, 10)}).${cached.source_completeness === "active_only" ? activeOnlyNote : ""}`,
+      registry: { queried: false, source_id: cached.registry_source_id, completeness: cached.source_completeness, calls: 0, ms: null },
+    }, { cache_result: "hit", final_outcome: "verified", entity_id: cached.id, registry_queried: false, registry_source_id: cached.registry_source_id, registry_calls: 0, registry_ms: null, status_seen: cached.status, source_completeness: cached.source_completeness, detail: {} });
   }
   const cache_result: CacheResult = cached ? (req.force_refresh ? "bypass" : "stale") : "miss";
 
   let found: RegistryFind;
   try { found = await findInRegistry(source, req.name); }
   catch (e) { found = { kind: "inconclusive", reason: "registry_error", detail: String((e as Error)?.message ?? e).slice(0, 200), calls: 0, ms: now() - t0 }; }
-  const registry = { queried: true, source_id: sourceId, calls: found.calls, ms: found.ms };
-  const base = { cache_result, entity_id: cached?.id ?? null, registry_queried: true, registry_source_id: sourceId, registry_calls: found.calls, registry_ms: found.ms, status_seen: null as string | null };
+  const registry = { queried: true, source_id: sourceId, completeness, calls: found.calls, ms: found.ms };
+  const base = { cache_result, entity_id: cached?.id ?? null, registry_queried: true, registry_source_id: sourceId, registry_calls: found.calls, registry_ms: found.ms, status_seen: null as string | null, source_completeness: completeness };
 
   if (found.kind === "match") {
     const m = found.entity;
@@ -194,7 +216,7 @@ export async function verifyBusiness(deps: VerifyDeps, req: VerifyRequest): Prom
     const { entity, alias_conflicts } = await deps.store.record({
       state, registry_source_id: sourceId, registry_entity_id: m.entity_id, name: m.entity_name, status: m.status, status_raw: m.status_raw, entity_type: m.entity_type,
       registration_date: m.registration_date, source_dataset: m.source_dataset, details: found.resolution ? { ...m.details, resolution: found.resolution } : m.details,
-      stale_after_days: staleAfterDays(m.status), alias_keys,
+      stale_after_days: staleAfterDays(m.status), source_completeness: completeness!, alias_keys,
     });
     if (alias_conflicts.length) {
       return finish({
@@ -205,7 +227,7 @@ export async function verifyBusiness(deps: VerifyDeps, req: VerifyRequest): Prom
     const resNote = found.resolution ? ` ${found.resolution.considered} registered entities carry exactly this name; the one active entity was chosen and the others (${found.resolution.others.map((o) => o.status_raw ?? o.status).join(", ")}) are listed under resolution.` : "";
     return finish({
       status: "verified", manual_verification_required: false, from_cache: false, cache_result, entity, registry, ...(found.resolution ? { resolution: found.resolution } : {}),
-      message: `Verified against the ${state} registry (${m.status_raw ?? m.status}) and written to the knowledge base${cached ? " (re-verified)" : ""}.${resNote}`,
+      message: `Verified against the ${state} registry (${m.status_raw ?? m.status}) and written to the knowledge base${cached ? " (re-verified)" : ""}.${resNote}${completeness === "active_only" ? activeOnlyNote : ""}`,
     }, { ...base, entity_id: entity.id, final_outcome: "verified", status_seen: m.status, detail: found.resolution ? { resolved_by: found.resolution.rule, same_name_entities: found.resolution.considered } : {} });
   }
 
@@ -218,10 +240,14 @@ export async function verifyBusiness(deps: VerifyDeps, req: VerifyRequest): Prom
   }
 
   if (found.kind === "none") {
+    const activeOnly = completeness === "active_only";
+    const disappeared = activeOnly && !!cached;
     return finish({
-      status: "not_found", manual_verification_required: true, from_cache: false, cache_result, registry, ...(cached ? { stale_entity: cached } : {}),
-      message: `No ${state} registry entity has exactly this name. That does not prove the employer does not exist (it may be registered under a different legal name, or in another state). Needs manual verification.${cached ? " It was previously verified in the knowledge base, so check whether it was renamed or closed." : ""}`,
-    }, { ...base, final_outcome: "not_found", detail: { previously_verified: !!cached } });
+      status: "not_found", manual_verification_required: true, from_cache: false, cache_result, registry, ...(cached ? { stale_entity: cached } : {}), ...(disappeared ? { disappeared_from_active_register: true } : {}),
+      message: activeOnly
+        ? `No ACTIVE ${state} registry entity has exactly this name. This registry lists active entities only, so the employer may have existed and since dissolved, merged or been withdrawn (or be registered under a different legal name, or in another state). Needs manual verification.${disappeared ? " The knowledge base had verified it as active earlier and it is no longer on the active list, so it has most likely closed since." : ""}`
+        : `No ${state} registry entity has exactly this name. That does not prove the employer does not exist (it may be registered under a different legal name, or in another state). Needs manual verification.${cached ? " It was previously verified in the knowledge base, so check whether it was renamed or closed." : ""}`,
+    }, { ...base, final_outcome: "not_found", detail: { previously_verified: !!cached, ...(activeOnly ? { active_only_registry: true, disappeared_from_active_register: disappeared } : {}) } });
   }
 
   return finish({

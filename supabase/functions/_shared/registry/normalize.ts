@@ -23,6 +23,7 @@ export function isoDate(v: unknown): string | null {
   else if ((mt = /^(\d{4})(\d{2})(\d{2})$/.exec(s))) { y = +mt[1]; m = +mt[2]; d = +mt[3]; }
   else return null;
   if (y < 1700 || m < 1 || m > 12 || d < 1 || d > 31) return null;
+  if (y === 1753 && m === 1 && d === 1) return null; // SQL Server's minimum date, used as a "no date" placeholder (Pennsylvania: 24,785 entities carry it)
   const dt = new Date(Date.UTC(y, m - 1, d));
   if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return null;
   return `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;

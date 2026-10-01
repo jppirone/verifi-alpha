@@ -25,8 +25,8 @@ class MemStore implements KbStore {
     const old = [...this.entities.values()].find((e) => `${e.registry_source_id}|${e.registry_entity_id}` === k);
     const iso = new Date(this.clock).toISOString();
     const e: KbEntity = old
-      ? { ...old, name: i.name, status: i.status, status_raw: i.status_raw, entity_type: i.entity_type, registration_date: i.registration_date, details: i.details, stale_after_days: i.stale_after_days, last_verified_at: iso, verification_count: old.verification_count + 1, last_outcome: "verified" }
-      : { id: `e${++this.n}`, entity_kind: "employer", state: i.state, registry_source_id: i.registry_source_id, registry_entity_id: i.registry_entity_id, name: i.name, status: i.status, status_raw: i.status_raw, entity_type: i.entity_type, registration_date: i.registration_date, source_dataset: i.source_dataset, details: i.details, first_verified_at: iso, last_verified_at: iso, verification_count: 1, stale_after_days: i.stale_after_days, last_outcome: "verified" };
+      ? { ...old, name: i.name, status: i.status, status_raw: i.status_raw, entity_type: i.entity_type, registration_date: i.registration_date, details: i.details, stale_after_days: i.stale_after_days, source_completeness: i.source_completeness, last_verified_at: iso, verification_count: old.verification_count + 1, last_outcome: "verified" }
+      : { id: `e${++this.n}`, entity_kind: "employer", state: i.state, registry_source_id: i.registry_source_id, registry_entity_id: i.registry_entity_id, name: i.name, status: i.status, status_raw: i.status_raw, entity_type: i.entity_type, registration_date: i.registration_date, source_dataset: i.source_dataset, details: i.details, first_verified_at: iso, last_verified_at: iso, verification_count: 1, stale_after_days: i.stale_after_days, last_outcome: "verified", source_completeness: i.source_completeness };
     this.entities.set(e.id, e);
     const conflicts: string[] = [];
     for (const a of i.alias_keys) { const ak = `${i.state}|${a.key}`; const ex = this.aliases.get(ak); if (!ex) this.aliases.set(ak, e.id); else if (ex !== e.id) conflicts.push(a.key); }
@@ -169,4 +169,56 @@ void findInRegistry;
   assert.equal(row(undefined, "0018y000009oIojAAE").entity_id, "SF-0018y000009oIojAAE");
   assert.notEqual(row("0000000", "001a").entity_id, row("0000000", "001b").entity_id, "26 placeholder rows are 26 distinct entities, not one");
   console.log("connecticut spec: placeholder account numbers no longer collapse distinct entities");
+}
+
+// ---- source completeness: full_history (CO, CT) vs active_only (NY, OR); Pennsylvania stays off
+{
+  const { KB_SOURCE_PROFILES } = await import("../../supabase/functions/_shared/kb/kb.ts");
+  assert.deepEqual(Object.fromEntries(Object.entries(KB_SOURCE_PROFILES).map(([k, v]) => [k, v.completeness])), { CO: "full_history", CT: "full_history", NY: "active_only", OR: "active_only" });
+  assert.ok(!("PA" in KB_SOURCE_PROFILES), "Pennsylvania is not enabled");
+
+  const mk = (stateCode: string, srcId: string, handler: Parameters<typeof fakeSource>[0]) => { const s = fakeSource(handler); (s as { id: string }).id = srcId; return s; };
+  const nyReg = mk("NY", "ny-dos", (q, mode) => (mode === "exact" ? q.toUpperCase() === "ACME WIDGETS INC" : "ACME WIDGETS INC".startsWith(q.toUpperCase())) ? [{ ...ent("N1", "ACME WIDGETS INC"), state: "NY", status_raw: null }] : []);
+
+  const store = new MemStore(); const deps = { store, registryFor: () => nyReg, now: () => store.clock };
+  const v = await verifyBusiness(deps, { name: "Acme Widgets, Inc.", state: "NY", caller: "t" });
+  assert.equal(v.status, "verified"); assert.equal(v.entity?.source_completeness, "active_only", "the entity is tagged with its source's completeness");
+  assert.equal(v.registry.completeness, "active_only"); assert.match(v.message, /active entities only/);
+  assert.equal(store.logs[0].source_completeness, "active_only", "and so is the log row");
+  const hit = await verifyBusiness(deps, { name: "ACME WIDGETS INC", state: "NY", caller: "t" });
+  assert.equal(hit.cache_result, "hit"); assert.equal(hit.entity?.source_completeness, "active_only"); assert.match(hit.message, /active entities only/);
+  assert.equal(store.logs[1].source_completeness, "active_only");
+
+  // a miss in an active-only registry means something different: it says so
+  const miss = await verifyBusiness(deps, { name: "Gone Co LLC", state: "NY", caller: "t" });
+  assert.equal(miss.status, "not_found"); assert.match(miss.message, /No ACTIVE NY registry entity/); assert.match(miss.message, /dissolved, merged or been withdrawn/);
+  assert.equal(miss.disappeared_from_active_register, undefined, "never verified before, so nothing to say it disappeared");
+  assert.equal(store.logs[2].detail.active_only_registry, true);
+
+  // previously verified, now absent from the active list -> flagged as most likely closed
+  store.clock += 100 * 86_400_000;
+  const nyGone = mk("NY", "ny-dos", () => []);
+  const gone = await verifyBusiness({ store, registryFor: () => nyGone, now: () => store.clock }, { name: "Acme Widgets Inc", state: "NY", caller: "t" });
+  assert.equal(gone.status, "not_found"); assert.equal(gone.cache_result, "stale"); assert.equal(gone.disappeared_from_active_register, true);
+  assert.match(gone.message, /most likely closed since/); assert.equal(store.logs[3].detail.disappeared_from_active_register, true);
+
+  // the same absence in a FULL-history registry carries no such claim
+  const coReg = fakeSource(() => []); const coStore = new MemStore();
+  const coMiss = await verifyBusiness({ store: coStore, registryFor: () => coReg }, { name: "Nobody Inc", state: "CO", caller: "t" });
+  assert.equal(coMiss.status, "not_found"); assert.doesNotMatch(coMiss.message, /active entities only/); assert.equal(coMiss.registry.completeness, "full_history");
+  assert.equal(coMiss.disappeared_from_active_register, undefined);
+
+  // Pennsylvania: not enabled -> explicit "no automated source", registry never called
+  const paReg = fakeSource(() => [ent("P1", "ANY CO INC")]);
+  const pa = await verifyBusiness({ store: new MemStore(), registryFor: () => paReg }, { name: "Any Co Inc", state: "PA", caller: "t" });
+  assert.equal(pa.status, "no_automated_source"); assert.equal(paReg.calls, 0);
+  console.log("source completeness: tagged on entity + log, active-only wording, disappeared-from-active-list signal, PA stays off");
+}
+
+// ---- placeholder date: SQL Server's minimum date is "no date", never a real registration date
+{
+  const { isoDate } = await import("../../supabase/functions/_shared/registry/normalize.ts");
+  assert.equal(isoDate("1753-01-01T00:00:00.000"), null); assert.equal(isoDate("0001-01-01T00:00:00.000"), null);
+  assert.equal(isoDate("1753-01-02T00:00:00.000"), "1753-01-02"); assert.equal(isoDate("1800-02-16T00:00:00.000"), "1800-02-16");
+  console.log("dates: 1753-01-01 placeholder -> null; real old dates kept");
 }
