@@ -172,6 +172,11 @@ LICENSE_PROFILES["ny-dos-appearance"] = {
   coverage: "ACTIVE cosmetology, nail, esthetics, waxing, natural hair styling and barber licenses issued by the New York Department of State",
   activeText: [], deadText: [], lapsedText: [],
 };
+LICENSE_PROFILES["ny-dos-appraiser"] = {
+  source_id: "ny-dos-appraiser", state: "NY", completeness: "active_only", refresh: "daily", numberScope: "unique", collapseAcrossTypes: false, lapsedIsDefinitive: true, nameOrder: "last_first", implicitActive: true,
+  coverage: "CURRENTLY licensed real estate appraisers (trainee, licensed, certified residential and certified general) issued by the New York Department of State",
+  activeText: [], deadText: [], lapsedText: [],
+};
 LICENSE_PROFILES["or-bcd"] = {
   source_id: "or-bcd", state: "OR", completeness: "active_only", refresh: "monthly", numberScope: "shared", collapseAcrossTypes: false, lapsedIsDefinitive: false,
   coverage: "ACTIVE electrical, plumbing, boiler, elevator, prefabricated and manufactured-dwelling licenses and inspector certifications issued by the Oregon Building Codes Division as of the latest monthly list",
@@ -192,7 +197,7 @@ LICENSE_PROFILES["wa-cpa"] = {
   // indeterminate: ConvertedToCPA (moved to a new credential), the non-CPA firm-owner registration
 };
 
-export const STATE_SOURCES: Record<string, string[]> = { CO: ["co-dora"], CT: ["ct-dcp"], IL: ["il-idfpr"], WA: ["wa-doh", "wa-lni", "wa-cpa"], DE: ["de-dpr"], CA: ["ca-dca"], MI: ["mi-lara"], TX: ["tx-bon-rn", "tx-bon-vn", "tx-trec"], NY: ["ny-dos-re", "ny-dos-appearance"], OR: ["or-bcd", "or-ccb"] };
+export const STATE_SOURCES: Record<string, string[]> = { CO: ["co-dora"], CT: ["ct-dcp"], IL: ["il-idfpr"], WA: ["wa-doh", "wa-lni", "wa-cpa"], DE: ["de-dpr"], CA: ["ca-dca"], MI: ["mi-lara"], TX: ["tx-bon-rn", "tx-bon-vn", "tx-trec"], NY: ["ny-dos-re", "ny-dos-appearance", "ny-dos-appraiser"], OR: ["or-bcd", "or-ccb"] };
 export const STATE_LABELS_SHORT: Record<string, string> = {
   CO: "Colorado DORA", CT: "Connecticut DCP eLicense", IL: "Illinois IDFPR", WA: "Washington DOH / L&I / CPA", DE: "Delaware DPR", CA: "California DCA", MI: "Michigan LARA", TX: "Texas Board of Nursing / TREC", NY: "New York DOS", OR: "Oregon BCD / CCB",
 };

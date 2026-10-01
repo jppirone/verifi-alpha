@@ -11,6 +11,7 @@ const qs: Record<string, any[]> = {
   "tx-trec": [{ name: "John Smith" }, { license_number: "450504-SA" }],
   "ny-dos-re": [{ name: "John Smith" }, { license_number: "10401235308" }],
   "ny-dos-appearance": [{ name: "Maria Garcia" }, { license_number: "AEC-17-03268" }],
+  "ny-dos-appraiser": [{ name: "Rohit Sarin" }, { license_number: "45000047061" }],
   "or-bcd": [{ name: "James Smith" }, { license_number: "24196J" }],
   "or-ccb": [{ name: "Pedro Magallan" }, { license_number: "242649" }],
   "wa-cpa": [{ name: "Mark Ruzicka" }, { license_number: "50762" }],

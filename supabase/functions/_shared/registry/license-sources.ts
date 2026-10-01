@@ -323,6 +323,22 @@ const NY_BARBER: SocrataLicenseSpec = {
   }),
 };
 
+// New York "Currently Licensed Real Estate Appraisers" (3nr4-s9yt, 3.6k, daily): ACTIVE appraisers only, one per individual, name "LAST FIRST [M]"; the firm and
+// its address (prin_bus_*) are not selected.
+const NY_APPRAISER: SocrataLicenseSpec = {
+  id: "ny-dos-appraiser", label: "New York Department of State — Currently Licensed Real Estate Appraisers", state: "NY", boardAgency: "New York State Department of State, Division of Licensing Services",
+  domain: "data.ny.gov", datasetId: "3nr4-s9yt", typeField: "license_type", orderBy: "applicant_name, uid",
+  fields: ["applicant_name", "uid", "license_type", "org_date", "cert_date", "exp_date"],
+  whereFor: (q, _mode) => anyOf([
+    q.person ? nyLastFirst("applicant_name", q.person) : null,
+    q.number ? `uid = ${soqlString(q.number)}` : null,
+  ]),
+  map: (r, src) => mkLicense(src, "NY", "New York State Department of State", {
+    name: r.applicant_name, kind: "individual", number: r.uid, type: r.license_type, statusRaw: null, status: "active", issue: r.org_date, exp: r.exp_date,
+    details: { status_basis: "the file lists currently licensed appraisers only; it has no status column" },
+  }),
+};
+
 // ---- Oregon (2026-10-01). Building Codes Division "Active Contractor/Individual Licenses" (vhbr-cuaq, 48k: electricians, plumbers, boiler, elevator, inspectors; one
 // status, Active; individuals and businesses; names "FIRST M LAST") and the Construction Contractors Board "CCB Active Licenses" (g77e-6bhs, 56k: the licensee is
 // the BUSINESS, the responsible managing individual is rmi_name). Both list ACTIVE licenses only. Bond / insurance / address / phone columns are not selected.
@@ -371,7 +387,7 @@ const WA_CPA: SocrataLicenseSpec = {
   }),
 };
 
-export const SOCRATA_LICENSE_SPECS = [CO_DORA, CT_DCP, IL_IDFPR, WA_DOH, WA_LNI, DE_DPR, TX_BON_RN, TX_BON_VN, TX_TREC, NY_RE, NY_BARBER, OR_BCD, OR_CCB, WA_CPA];
+export const SOCRATA_LICENSE_SPECS = [CO_DORA, CT_DCP, IL_IDFPR, WA_DOH, WA_LNI, DE_DPR, TX_BON_RN, TX_BON_VN, TX_TREC, NY_RE, NY_BARBER, NY_APPRAISER, OR_BCD, OR_CCB, WA_CPA];
 export function socrataLicenseSources(appToken?: string): LicenseSource[] {
   return SOCRATA_LICENSE_SPECS.map((s) => makeSocrataLicenseSource(s, appToken));
 }
