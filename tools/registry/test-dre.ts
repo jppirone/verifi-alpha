@@ -43,6 +43,14 @@ const look = (num: string, f: string, l: string) => registryLookup({ state: "CA"
 { const r = await look("01111111", "Ricky", "Rest"); assert.ok(r.ok && r.records[0].standing === "indeterminate", "restricted is held"); }
 { const r = await look("55592", "Zed", "Stranger"); assert.ok(r.ok && r.records.length === 0, "a stranger under a real number is dropped (shared California numbering)"); }
 
+{ // a manually-loaded snapshot says how old it is (newest storage load wins; older runs and non-storage runs are ignored)
+  const withLoaded: FetchRegistry = async (b) => { const r = await fetchReg(b); return r.ok ? { ...r, loaded: [{ source_id: "ca-dre", finished_at: "2026-09-30T12:00:00Z", note: "storage" }, { source_id: "ca-dre", finished_at: "2026-09-01T12:00:00Z", note: "storage" }, { source_id: "ca-dre", finished_at: "2026-10-01T01:00:00Z", note: "parsed 5" }] } : r; };
+  const r = await registryLookup({ state: "CA", licenseNumber: "00055592", firstName: "Terrence", lastName: "White", today: "2026-10-01" }, withLoaded);
+  assert.ok(r.ok && /\[list loaded 2026-09-30\]$/.test(r.records[0].statusText), `status text names the load date: ${r.ok ? r.records[0].statusText : ""}`);
+  const plain = await registryLookup({ state: "CA", licenseNumber: "00055592", firstName: "Terrence", lastName: "White", today: "2026-10-01" }, fetchReg);
+  assert.ok(plain.ok && !/list loaded/.test(plain.records[0].statusText), "no load date when the response carries none");
+}
+
 const dir = process.argv[2];
 if (dir) {
   const t = parseDre(fs.readFileSync(`${dir}/CurrList.csv`, "latin1"));

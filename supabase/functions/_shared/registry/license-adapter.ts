@@ -20,7 +20,8 @@ export interface LicenseRow {
 }
 export interface RegistryHit { source_id: string; record: LicenseRow }
 export interface RegistryReport { source_id: string; ok: boolean; count: number; truncated?: boolean; error?: string; detail?: string; skipped?: string }
-export type RegistryResponse = { ok: true; hits: RegistryHit[]; reports: RegistryReport[] } | { ok: false; error: string; detail?: string };
+export interface LoadedRun { source_id: string; finished_at: string | null; note: string | null }
+export type RegistryResponse = { ok: true; hits: RegistryHit[]; reports: RegistryReport[]; loaded?: LoadedRun[] } | { ok: false; error: string; detail?: string };
 export type FetchRegistry = (body: Record<string, unknown>) => Promise<RegistryResponse>;
 
 // What verify-license's decide() consumes (identical to its RegistryRecord).
@@ -317,12 +318,14 @@ export function numberVariants(raw: string, profiles: LicenseSourceProfile[]): s
 const LIMIT = 50;
 export interface LookupInput { state: string; licenseNumber: string; firstName: string; lastName: string; today?: string }
 
-function toRecord(row: LicenseRow, source: string, nameOk: boolean, p: LicenseSourceProfile, today: string): AdapterRecord {
+function toRecord(row: LicenseRow, source: string, nameOk: boolean, p: LicenseSourceProfile, today: string, asOf?: string): AdapterRecord {
   const { standing, note } = standingFor(row, p, today);
   const status = row.status_raw ?? row.status ?? "";
+  // a manually-loaded snapshot says how old it is: staff weigh "Active" differently on a list loaded last week than on one loaded three months ago
+  const loaded = asOf && p.refresh === "monthly" ? ` [list loaded ${asOf}]` : "";
   return {
     name: row.license_holder_name, nameMatches: nameOk, standing,
-    statusText: note ? `${status} (${note})` : String(status), licenseType: row.license_type, expiration: row.expiration_date,
+    statusText: (note ? `${status} (${note})` : String(status)) + loaded, licenseType: row.license_type, expiration: row.expiration_date,
   };
 }
 
@@ -363,6 +366,7 @@ export async function registryLookup(input: LookupInput, fetchRegistry: FetchReg
   const isMine = nameOkFor;
   let capped = false;
   let usedNumberSearch = false;
+  const asOf = new Map<string, string>(); // source id -> date (YYYY-MM-DD) of its latest storage load, from the lookup response
   // Try the number in each stored form. STOP only when a row for THIS holder turns up: in a shared-number source (Colorado, California) the bare number
   // also matches strangers on other boards, which must not end the search before the zero-padded form that is really theirs is tried.
   for (const variant of numberVariants(input.licenseNumber, profiles)) {
@@ -371,6 +375,7 @@ export async function registryLookup(input: LookupInput, fetchRegistry: FetchReg
     const failed = r.reports.find((x) => !x.ok);
     if (failed) return { ok: false, error: failed.error || "source_failed", detail: failed.detail };
     usedNumberSearch = true;
+    for (const run of r.loaded ?? []) if (run.note === "storage" && run.finished_at && !asOf.has(run.source_id)) asOf.set(run.source_id, run.finished_at.slice(0, 10)); // newest first
     const rows = r.hits.filter((h) => byId.has(h.source_id) && numbersEqualFor(h.record.license_number, input.licenseNumber, byId.get(h.source_id)));
     const truncated = r.reports.some((x) => x.truncated);
     for (const h of rows) addRow(h);
@@ -394,7 +399,7 @@ export async function registryLookup(input: LookupInput, fetchRegistry: FetchReg
     const nameOk = nameOkFor(hit);
     // shared-number sources: a row with the same number but a different holder is a stranger on another board, not a "name mismatch" -- drop it
     if (!nameOk && p.numberScope === "shared") continue;
-    const rec = toRecord(hit.record, hit.source_id, nameOk, p, today);
+    const rec = toRecord(hit.record, hit.source_id, nameOk, p, today, asOf.get(hit.source_id));
     const key = `${hit.source_id}|${hit.record.board_agency ?? ""}|${alnum(hit.record.license_number)}|${nameTokens(hit.record.license_holder_name).join(" ")}|${p.collapseAcrossTypes ? "" : lc(hit.record.license_type)}|${nameOk}`;
     prepared.push({ rec, key, shared: p.numberScope === "shared" });
   }

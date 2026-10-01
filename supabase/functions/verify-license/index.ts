@@ -224,7 +224,7 @@ const fetchRegistry: FetchRegistry = async (body) => {
   }
   const data = await res.json().catch(() => null);
   if (!data || !data.ok) return { ok: false, error: (data && data.error) || `http_${res.status}`, detail: data && data.message ? String(data.message) : undefined };
-  return { ok: true, hits: Array.isArray(data.hits) ? data.hits : [], reports: Array.isArray(data.reports) ? data.reports : [] };
+  return { ok: true, hits: Array.isArray(data.hits) ? data.hits : [], reports: Array.isArray(data.reports) ? data.reports : [], loaded: Array.isArray(data.loaded) ? data.loaded : [] };
 };
 
 function registryAdapter(state: string): JurisdictionAdapter {
