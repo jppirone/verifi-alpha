@@ -26,6 +26,7 @@ export interface VerificationSummary {
   failed_sources: Array<{ source_id: string; error: string }>;
   skipped_sources: Array<{ source_id: string; reason: string }>;
   not_loaded_sources: string[];
+  truncated_sources: string[];
   states_requested: string[] | null;
   states_without_automated_coverage: string[];
   states_with_automated_coverage: string[];
@@ -47,7 +48,9 @@ export function summarizeVerification(input: {
   const skipped = input.reports.filter((r) => r.ok && r.skipped).map((r) => ({ source_id: r.source_id, reason: r.skipped! }));
   const uncovered = requested ? requested.filter((s) => !covered.includes(s)) : [];
   const notLoaded = input.notLoaded.filter((n) => !requested || requested.includes(n.state.toUpperCase())).map((n) => n.source_id);
-  const base = { searched_sources: searched, failed_sources: failed, skipped_sources: skipped, not_loaded_sources: notLoaded, states_requested: requested, states_without_automated_coverage: uncovered, states_with_automated_coverage: covered };
+  const truncated = input.reports.filter((r) => r.ok && r.truncated).map((r) => r.source_id);
+  const truncNote = truncated.length ? ` ${list(truncated)} returned the maximum number of results, so more matches may exist: add a middle name, license number or state to narrow the search.` : "";
+  const base = { searched_sources: searched, failed_sources: failed, skipped_sources: skipped, not_loaded_sources: notLoaded, truncated_sources: truncated, states_requested: requested, states_without_automated_coverage: uncovered, states_with_automated_coverage: covered };
   const coverageNote = requested ? "" : ` Automated coverage is limited to ${list(covered)}; any other state has no automated source.`;
   const uncoveredNote = uncovered.length ? ` No automated source exists for ${list(uncovered)}: look ${uncovered.length === 1 ? "it" : "those"} up by hand.` : "";
   const notLoadedNote = notLoaded.length ? ` Not yet loaded (so not searched): ${list(notLoaded)}.` : "";
@@ -58,7 +61,7 @@ export function summarizeVerification(input: {
       ...base, status: "found", manual_verification_required: gaps,
       message: gaps
         ? `Match found, but the search was incomplete:${failed.length ? ` ${list(failed.map((f) => f.source_id))} failed or timed out.` : ""}${uncoveredNote} Verify the rest by hand.`
-        : "Match found in an automated source.",
+        : `Match found in an automated source.${truncNote}`,
     };
   }
   if (searched.length === 0 && failed.length === 0) {

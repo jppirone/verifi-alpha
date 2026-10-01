@@ -37,3 +37,8 @@ assert.equal(v.status, "no_automated_source_manual_verification_required"); asse
 v = summarizeVerification({ hitCount: 0, reports: [rep("co-dora")], notLoaded: [], coveredStates: covered });
 assert.match(v.message, /Automated coverage is limited to CA, CO, CT/);
 console.log("verification summary: 7 scenarios passed");
+
+// 8. a source that returned the maximum number of records says so: staff must not read a capped list as the complete list
+v = summarizeVerification({ hitCount: 50, reports: [rep("ca-dca", { count: 50, truncated: true })], notLoaded: [], coveredStates: covered });
+assert.deepEqual(v.truncated_sources, ["ca-dca"]); assert.match(v.message, /maximum number of results/);
+console.log("verification summary: truncation scenario passed");

@@ -21,6 +21,7 @@ export interface SourceReport {
   entities?: number; //  ... and the distinct entities they collapse to
   error?: string;
   detail?: string;
+  truncated?: boolean; // the source returned as many records as the limit allows, so more may exist: narrow the search
   skipped?: string; // source cannot answer this kind of query (e.g. a business-name search on an individuals-only roster): not an error, not a miss
 }
 export interface Hit<T> { source_id: string; match_type: MatchType; name_match?: boolean; record: T }
@@ -64,7 +65,7 @@ export async function lookupBusiness(all: BusinessSource[], req: BusinessLookup)
     if (req.include_people && s.enrich && out.records.length) await withTimeout(s.enrich(out.records), PER_SOURCE_TIMEOUT_MS, () => undefined);
     return {
       hits: out.records.map((record) => ({ source_id: s.id, match_type: match, record })),
-      report: { ...base, ok: true, count: out.records.length, ms: Date.now() - t0, attempts: out.meta.attempts, raw_rows: out.meta.raw_rows, entities: out.meta.entities },
+      report: { ...base, ok: true, count: out.records.length, ms: Date.now() - t0, attempts: out.meta.attempts, raw_rows: out.meta.raw_rows, entities: out.meta.entities, truncated: out.records.length >= (req.limit ?? 25) },
     };
   }));
   return { hits: results.flatMap((r) => r.hits), reports: results.map((r) => r.report) };
@@ -101,7 +102,7 @@ export async function lookupLicense(all: LicenseSource[], req: LicenseLookupReq)
         ...(hasName && hasNumber && wantLast ? { name_match: record.license_holder_name.toUpperCase().includes(wantLast) } : {}),
         record,
       })),
-      report: { ...base, ok: true, count: out.records.length, ms: Date.now() - t0, attempts: out.meta.attempts } as SourceReport,
+      report: { ...base, ok: true, count: out.records.length, ms: Date.now() - t0, attempts: out.meta.attempts, truncated: out.records.length >= (req.limit ?? 25) } as SourceReport,
     };
   }));
   return { hits: results.flatMap((r) => r.hits), reports: results.map((r) => r.report) };
