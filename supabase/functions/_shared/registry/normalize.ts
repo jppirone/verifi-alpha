@@ -93,6 +93,6 @@ export function normalizeLicenseStatus(raw: string | null, reason?: string | nul
   if (/^active/.test(s) || /^(licensed|licensed to practice)/.test(s)) return "active";
   if (/^inactive/.test(s) && /lapse|non-?renew|expired|must reapply/.test(r)) return "expired";
   if (/^pending/.test(s)) return "pending";
-  if (/^(inactive|retired|closed|cancel|terminat|surrender|voluntary surrender|relinquish|deceased|passed away|out of business|superseded|supercede|transferred|grad to higher|refuse to renew|licensee not renewing|agreed not to renew|beyond|withdrawn|permanent inactive|re-licensed|change of ownership|inoperable|inoperative|non sufficient)/.test(s)) return "inactive";
+  if (/^(inactive|deactivated|retired|closed|cancel|terminat|surrender|voluntary surrender|relinquish|deceased|passed away|out of business|superseded|supercede|transferred|grad to higher|refuse to renew|licensee not renewing|agreed not to renew|beyond|withdrawn|permanent inactive|re-licensed|change of ownership|inoperable|inoperative|non sufficient)/.test(s)) return "inactive";
   return "other";
 }

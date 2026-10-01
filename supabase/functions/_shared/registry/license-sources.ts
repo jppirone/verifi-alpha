@@ -201,7 +201,29 @@ const WA_LNI: SocrataLicenseSpec = {
   }),
 };
 
-export const SOCRATA_LICENSE_SPECS = [CO_DORA, CT_DCP, IL_IDFPR, WA_DOH, WA_LNI];
+// Delaware Division of Professional Regulation roster on the Delaware Open Data Portal, pjnv-eaih (daily). NOT what the brief assumed:
+// the brief describes DELPROS CSV rosters emailed on request, but the full roster -- active AND expired/revoked/closed rows,
+// ~354k -- is a public Socrata dataset with no request. Individuals have first_name + last_name; facilities and firms put
+// their whole name in last_name and leave first_name empty. The dataset's own disciplinary_action column is 'N' on every row
+// (even Suspended / Revoked ones), so it is deliberately ignored: use license_status, or the discipline dataset dz6p-akeq.
+const DE_DPR: SocrataLicenseSpec = {
+  id: "de-dpr", label: "Delaware Division of Professional Regulation — Professional & Occupational Licensing", state: "DE",
+  boardAgency: "Delaware Division of Professional Regulation",
+  domain: "data.delaware.gov", datasetId: "pjnv-eaih", orderBy: "last_name, first_name, license_no",
+  fields: ["last_name", "first_name", "license_no", "profession_id", "license_type", "city", "state", "issue_date", "expiration_date", "license_status"],
+  whereFor: (q, mode) => anyOf([
+    q.person ? `${soqlUpperEquals("last_name", q.person.last)} AND ${eqOrPrefix("first_name", q.person.first, mode)}` : null,
+    q.business ? eqOrPrefix("last_name", q.business, mode) : null,
+    q.number ? `license_no = ${soqlString(q.number)}` : null,
+  ]),
+  map: (r, src) => mkLicense(src, "DE", "Delaware Division of Professional Regulation", {
+    name: joinName([r.first_name, r.last_name]), kind: cleanStr(r.first_name) ? "individual" : "business",
+    number: r.license_no, type: r.license_type, statusRaw: r.license_status, issue: r.issue_date, exp: r.expiration_date,
+    details: { profession: cleanStr(r.profession_id), city: cleanStr(r.city), holder_state: cleanStr(r.state) },
+  }),
+};
+
+export const SOCRATA_LICENSE_SPECS = [CO_DORA, CT_DCP, IL_IDFPR, WA_DOH, WA_LNI, DE_DPR];
 export function socrataLicenseSources(appToken?: string): LicenseSource[] {
   return SOCRATA_LICENSE_SPECS.map((s) => makeSocrataLicenseSource(s, appToken));
 }

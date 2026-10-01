@@ -12,7 +12,6 @@ export const DB_BUSINESS_META: DbSourceMeta[] = [
 export const DB_LICENSE_META: DbSourceMeta[] = [
   { id: "ca-dca", label: "California Department of Consumer Affairs — monthly licensee lists", state: "CA", source_dataset: "dca.ca.gov/consumers/public_info (monthly licensee lists)", board_agency: "DCA boards" },
   { id: "mi-lara", label: "Michigan LARA — license roster (manual refresh)", state: "MI", source_dataset: "Michigan LARA FOIA roster", board_agency: "LARA" },
-  { id: "de-dpr", label: "Delaware Division of Professional Regulation — roster (manual refresh)", state: "DE", source_dataset: "Delaware DPR roster", board_agency: "DPR" },
   { id: "fl-doh", label: "Florida Department of Health — MQA bulk data", state: "FL", source_dataset: "Florida DOH MQA bulk data", board_agency: "DOH MQA" },
 ];
 
