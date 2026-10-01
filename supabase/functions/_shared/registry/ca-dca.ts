@@ -20,7 +20,7 @@ import type { LicenseRecord } from "./schema.ts";
 import { cleanStr, isoDate, joinName, nameKey, normalizeLicenseStatus, placeOrNull } from "./normalize.ts";
 
 export interface IngestLicense { record_key: string; last_name: string | null; first_name: string | null; record: LicenseRecord }
-export interface ParseStats { lines: number; parsed: number; rejected: number; rejectedSamples: Array<{ line: number; reason: string }> }
+export interface ParseStats { lines: number; parsed: number; rejected: number; rejectedSamples: Array<{ line: number; reason: string }>; placeBlanked?: number }
 
 const norm = (h: string) => h.toLowerCase().replace(/[^a-z0-9]/g, "");
 const ALIASES: Record<string, string> = {
@@ -47,10 +47,12 @@ export function parseCaDcaTsv(text: string, opts: { sourceLabel?: string } = {})
   header.forEach((h, i) => { idx[canon(h)] = i; });
   const need = ["agencyname", "licensetype", "licensenumber", "indivorg", "orglastname", "licensestatus"];
   const missing = need.filter((k) => !(k in idx));
-  const stats: ParseStats = { lines: Math.max(lines.length - 1, 0), parsed: 0, rejected: 0, rejectedSamples: [] };
+  const stats: ParseStats = { lines: Math.max(lines.length - 1, 0), parsed: 0, rejected: 0, rejectedSamples: [], placeBlanked: 0 };
   if (missing.length) return { rows: [], stats: { ...stats, rejected: stats.lines, rejectedSamples: [{ line: 1, reason: `header missing columns: ${missing.join(", ")}` }] }, header };
   const out: IngestLicense[] = [];
   const reject = (line: number, reason: string) => { stats.rejected++; if (stats.rejectedSamples.length < 5) stats.rejectedSamples.push({ line, reason }); };
+  // city / county values that held a street address or e-mail are blanked (counted so the loss is visible)
+  const place = (v: string | null) => { const r = placeOrNull(v); if (v && r === null) stats.placeBlanked = (stats.placeBlanked ?? 0) + 1; return r; };
   for (let li = 1; li < lines.length; li++) {
     const cols = lines[li].split("\t");
     // Files occasionally contain a row that does not line up (a stray quote / line break in an address). Never guess at those.
@@ -75,7 +77,7 @@ export function parseCaDcaTsv(text: string, opts: { sourceLabel?: string } = {})
       state: "CA", board_agency: agency, source,
       details: {
         agency_code: g("agencycode"), license_type_code: g("lictypecode") ?? g("specialitycode"),
-        city: placeOrNull(g("city")), county: placeOrNull(g("county")), holder_state: g("state"),
+        city: place(g("city")), county: place(g("county")), holder_state: g("state"),
         ...(g("degree") ? { degree: g("degree") } : {}), ...(g("school") ? { school: g("school") } : {}),
         ...(g("yeargraduated") ? { year_graduated: g("yeargraduated") } : {}), ...(g("statuseffectivedate") ? { status_effective_date: isoDate(g("statuseffectivedate")) } : {}),
       },

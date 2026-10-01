@@ -4,7 +4,16 @@ import { authenticateRegistryCaller, isRegistryAdmin } from "../_shared/registry
 import { DB_BUSINESS_META, DB_LICENSE_META } from "../_shared/registry/db-registry.ts";
 import { businessProblems, licenseProblems } from "../_shared/registry/schema.ts";
 import { nameKey } from "../_shared/registry/normalize.ts";
-import { REGISTRY_BUCKET, isValidShardPath } from "../_shared/registry/shard.ts";
+import { REGISTRY_BUCKET, isValidShardPath, rowFingerprint, setSha256 } from "../_shared/registry/shard.ts";
+import { createHash } from "node:crypto";
+import { parquetReadObjects } from "npm:hyparquet@1.31.2";
+import { compressors } from "npm:hyparquet-compressors@1.1.2";
+
+setSha256((s) => createHash("sha256").update(s).digest("hex"));
+
+// shard_stats {path}: reads ONE stored shard back out of the bucket and returns its row count plus per (board, license type, status) counts and
+// order-independent fingerprint sums. tools/registry/verify-shards.ts calls it for every shard and compares the totals with the build manifest,
+// so "the bucket holds exactly what was built" is checked against the stored objects themselves, not the local files.
 
 // STORAGE MODE (2026-10-01): bulk file-based license sources (CA DCA, MI LARA) live as sharded Parquet in the private `registry-data`
 // bucket, not in Postgres. A storage load is: begin -> put_shard x N -> finish. put_shard takes {run_id, path, content_b64, rows?}; the path
@@ -47,6 +56,31 @@ export default {
     if (!isRegistryAdmin(caller)) return json({ ok: false, error: "forbidden" }, 403);
 
     try {
+      if (body.action === "shard_stats") {
+        const path = String(body.path ?? "");
+        const sourceId = path.split("/")[0];
+        if (!isValidShardPath(sourceId, path) || !path.endsWith(".parquet")) return json({ ok: false, error: "invalid_shard_path" }, 400);
+        const r = await fetch(`${SUPABASE_URL}/storage/v1/object/${REGISTRY_BUCKET}/${path}`, { headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` } });
+        if (!r.ok) return json({ ok: false, error: "shard_unreadable", status: r.status }, r.status === 404 || r.status === 400 ? 404 : 502);
+        const file = await r.arrayBuffer();
+        let rows: Array<Record<string, unknown>>;
+        try { rows = await parquetReadObjects({ file, compressors }) as Array<Record<string, unknown>>; }
+        catch (e) { return json({ ok: false, error: "parquet_read_failed", detail: String((e as Error)?.message ?? e).slice(0, 200) }, 500); }
+        const groups: Record<string, { n: number; chk: string }> = {};
+        const sums = new Map<string, bigint>();
+        for (const row of rows) {
+          const k = `${row.board_agency}|${row.license_type ?? ""}|${row.status}`;
+          const g = groups[k] ?? (groups[k] = { n: 0, chk: "0" });
+          g.n++;
+          sums.set(k, (sums.get(k) ?? 0n) + rowFingerprint({
+            license_number: row.license_number as string | null, license_type: row.license_type as string | null, license_holder_name: row.license_holder_name as string | null,
+            issue_date: row.issue_date as string | null, expiration_date: row.expiration_date as string | null,
+          }));
+        }
+        for (const [k, v] of sums) groups[k].chk = v.toString();
+        return json({ ok: true, path, bytes: file.byteLength, n: rows.length, groups });
+      }
+
       if (body.action === "begin") {
         const kind = body.kind === "business" ? "business" : body.kind === "license" ? "license" : null;
         const metas = kind === "business" ? DB_BUSINESS_META : DB_LICENSE_META;

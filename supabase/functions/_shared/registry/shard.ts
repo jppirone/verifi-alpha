@@ -47,3 +47,14 @@ export function isValidShardPath(sourceId: string, path: string): boolean {
 export function nameShardKeyFor(row: { holder_kind: string; last_key: string | null; name_key: string }): string {
   return row.holder_kind === "individual" && row.last_key ? row.last_key : row.name_key;
 }
+
+// Order-independent fingerprint of one stored record: first 60 bits of SHA-256 over the fields a verifier can recompute from either side
+// (the source file or the stored Parquet): number | type | holder name | issue date | expiration date. Per-group SUMS of these are compared
+// between the build, the stored objects, and (for the first batch) the old database rows. Uses Web Crypto-free pure JS via a supplied hasher
+// so it runs in Node (build) and Deno (verify) alike.
+let sha256Hex: ((s: string) => string) | null = null;
+export const setSha256 = (fn: (s: string) => string) => { sha256Hex = fn; };
+export function rowFingerprint(r: { license_number: string | null; license_type: string | null; license_holder_name: string | null; issue_date: string | null; expiration_date: string | null }): bigint {
+  if (!sha256Hex) throw new Error("setSha256() not called");
+  return BigInt("0x" + sha256Hex(`${r.license_number}|${r.license_type ?? ""}|${r.license_holder_name}|${r.issue_date ?? ""}|${r.expiration_date ?? ""}`).slice(0, 15));
+}

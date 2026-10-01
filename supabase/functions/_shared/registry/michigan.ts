@@ -33,12 +33,14 @@ export function parseMichiganTsv(text: string, opts: { sourceLabel?: string } = 
   const header = (lines[0] ?? "").split("\t");
   const idx: Record<string, number> = {};
   header.forEach((h, i) => { idx[norm(h)] = i; });
-  const stats: ParseStats = { lines: Math.max(lines.length - 1, 0), parsed: 0, rejected: 0, rejectedSamples: [] };
+  const stats: ParseStats = { lines: Math.max(lines.length - 1, 0), parsed: 0, rejected: 0, rejectedSamples: [], placeBlanked: 0 };
   const need = ["lastname", "firstname", "facilityname", "profession", "type", "licenseno", "status", "issuedate", "expiration"];
   const missing = need.filter((k) => !(k in idx));
   if (missing.length) return { rows: [], stats: { ...stats, rejected: stats.lines, rejectedSamples: [{ line: 1, reason: `header missing columns: ${missing.join(", ")}` }] }, header };
   const out: IngestLicense[] = [];
   const reject = (line: number, reason: string) => { stats.rejected++; if (stats.rejectedSamples.length < 5) stats.rejectedSamples.push({ line, reason }); };
+  // city / county values that held a street address or e-mail are blanked (counted so the loss is visible)
+  const place = (v: string | null) => { const r = placeOrNull(v); if (v && r === null) stats.placeBlanked = (stats.placeBlanked ?? 0) + 1; return r; };
   for (let li = 1; li < lines.length; li++) {
     const cols = lines[li].split("\t");
     if (cols.length !== header.length) { reject(li + 1, `expected ${header.length} columns, got ${cols.length}`); continue; }
@@ -58,7 +60,7 @@ export function parseMichiganTsv(text: string, opts: { sourceLabel?: string } = 
       details: {
         profession, ...(g("specialities") ? { specialities: g("specialities") } : {}),
         // facility a person is licensed at is not carried; only the holder's own location (city / county / state), never street address or email
-        city: placeOrNull(g("addrcity")), county: placeOrNull(g("county")), holder_state: g("state"),
+        city: place(g("addrcity")), county: place(g("county")), holder_state: g("state"),
       },
     };
     out.push({ record_key: `${profession ?? ""}|${number}`, last_name: individual ? last : null, first_name: individual ? first : null, record });
