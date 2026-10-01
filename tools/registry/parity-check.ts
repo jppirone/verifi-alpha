@@ -39,7 +39,10 @@ if (mode === "record") fs.writeFileSync(outFile, JSON.stringify(answers));
 else {
   const before = JSON.parse(fs.readFileSync(outFile, "utf8"));
   let diff = 0;
-  answers.forEach((a: any, i: number) => { if (JSON.stringify(a.hits) !== JSON.stringify(before[i].hits)) { diff++; if (diff <= 3) console.log("DIFF", JSON.stringify(a.q), "before", before[i].hits.length, "after", a.hits.length); } });
+  // Postgres jsonb re-orders object keys; Parquet keeps insertion order. Same data, different key order, so compare canonically.
+  const canon = (v: any): any => Array.isArray(v) ? v.map(canon) : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v;
+  const norm = (hits: any[]) => hits.map((h) => JSON.stringify(canon(h))).sort();
+  answers.forEach((a: any, i: number) => { if (JSON.stringify(norm(a.hits)) !== JSON.stringify(norm(before[i].hits))) { diff++; if (diff <= 3) console.log("DIFF", JSON.stringify(a.q), "before", before[i].hits.length, "after", a.hits.length); } });
   console.log(diff === 0 ? `PARITY: all ${battery.length} answers identical before and after the move` : `PARITY FAILED: ${diff} of ${battery.length} answers differ`);
   process.exitCode = diff === 0 ? 0 : 1;
 }

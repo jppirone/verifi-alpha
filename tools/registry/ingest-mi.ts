@@ -1,3 +1,4 @@
+// NOTE (2026-10-01): superseded by build-shards.ts + upload-shards.ts (object storage). This database path remains only for small sources.
 // Loads Michigan LARA license lists (TSV from xlsx-to-tsv.py) into license_records through the deployed registry-ingest function.
 //   REGISTRY_URL=https://<ref>.supabase.co STAFF_TOKEN=<admin staff session token> \
 //     node tools/registry/ingest-mi.ts <dir> <file> [file ...] [--prune]

@@ -6,7 +6,10 @@
 // Court Reporters, are real .xlsx); no CSV of licensee data. The DCA Search API exists but is gated behind a request form.
 // Five column layouts exist across boards (some with an Agency Code, some without, renamed columns in Dental, a typo'd
 // "Original Isuue Date" in Court Reporters), so parsing is HEADER-DRIVEN: columns are found by normalized name, never by
-// position. License numbers are unique only within a license type, so the record key is agency + type + number.
+// position. License numbers are unique only within a license type, and NOT even there for some boards (Medical reuses one type code and
+// number for different holders: "Physician and Surgeon A" #12298 and "Physician and Surgeon G" #12298 are two physicians), so the record key is
+// agency + type code + type NAME + number + holder name. Found 2026-10-01 when sizing the unloaded boards: the older agency+type+number key
+// would have collapsed ~25k Medical rows (the six boards loaded so far were unaffected: their row counts match the published counts exactly).
 //
 // Status: Current / Active -> active; Delinquent (renewal overdue, lapsed) -> expired; CurrentInactive / Inactive -> inactive;
 // Expired -> expired; Suspension -> suspended. The source's own word is always kept in status_raw. NOTE: no revoked / surrendered /
@@ -14,7 +17,7 @@
 // these lists; disciplinary status is only on DCA's gated search.
 
 import type { LicenseRecord } from "./schema.ts";
-import { cleanStr, isoDate, joinName, normalizeLicenseStatus, placeOrNull } from "./normalize.ts";
+import { cleanStr, isoDate, joinName, nameKey, normalizeLicenseStatus, placeOrNull } from "./normalize.ts";
 
 export interface IngestLicense { record_key: string; last_name: string | null; first_name: string | null; record: LicenseRecord }
 export interface ParseStats { lines: number; parsed: number; rejected: number; rejectedSamples: Array<{ line: number; reason: string }> }
@@ -77,7 +80,7 @@ export function parseCaDcaTsv(text: string, opts: { sourceLabel?: string } = {})
         ...(g("yeargraduated") ? { year_graduated: g("yeargraduated") } : {}), ...(g("statuseffectivedate") ? { status_effective_date: isoDate(g("statuseffectivedate")) } : {}),
       },
     };
-    out.push({ record_key: `${g("agencycode") ?? agency}|${typeCode}|${number}`, last_name: isOrg ? null : last, first_name: isOrg ? null : first, record });
+    out.push({ record_key: `${g("agencycode") ?? agency}|${typeCode}|${record.license_type ?? ""}|${number}|${nameKey(name)}`, last_name: isOrg ? null : last, first_name: isOrg ? null : first, record });
     stats.parsed++;
   }
   return { rows: out, stats, header };
