@@ -8,7 +8,7 @@ const qs: Record<string, any[]> = {
   "wa-lni": [{ business_name: "!ECO STAR C G CONSTRUCTION LLC" }, { name: "Carlos Guerrero Martinez" }],
 };
 for (const s of socrataLicenseSources()) {
-  for (const q of qs[s.id]) {
+  for (const q of qs[s.id] ?? []) { // sources without an entry here (de-dpr) are covered by smoke-de.ts
     const t = Date.now();
     const r = await s.search({ ...q, limit: 3 }, "exact");
     console.log(`\n== ${s.id} ${JSON.stringify(q)} ${Date.now() - t}ms`);

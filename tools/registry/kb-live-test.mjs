@@ -88,7 +88,7 @@ if (phase === "d") {
   for (const n of ["Nike, Inc.", "NIKE INC", "Columbia Sportswear Company", "Intel Corporation", "Precision Castparts Corp."]) line(JSON.stringify(n), await kb({ name: n, state: "OR" }));
   console.log("\n== D3. what a MISS means in an active-only registry (the wording differs from Colorado / Connecticut)");
   for (const [n, st] of [["Zzqxv Nonexistent Holdings LLC", "NY"], ["Zzqxv Nonexistent Holdings LLC", "CO"]]) { const r = await kb({ name: n, state: st }); line(`${n} (${st})`, r); console.log(`        completeness=${r.registry.completeness}\n        ${r.message}`); }
-  console.log("\n== D4. Pennsylvania is NOT enabled");
+  console.log("\n== D4. Pennsylvania (enabled since 2026-10-01 as registrations_unflagged: status unknown, 30-day window)");
   const pa = await kb({ name: "Sears Holdings Llc", state: "PA" }); line("Sears Holdings Llc (PA)", pa); console.log(`        ${pa.message}`);
   console.log("\n== D5. completeness on Colorado / Connecticut stays full_history");
   for (const [n, st] of [["Ball Corporation", "CO"], ["Aetna Inc.", "CT"]]) { const r = await kb({ name: n, state: st }); line(`${n} (${st})`, r); console.log(`        completeness=${r.registry.completeness}  entity.source_completeness=${r.entity.source_completeness}`); }
