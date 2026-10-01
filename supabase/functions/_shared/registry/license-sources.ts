@@ -288,7 +288,90 @@ const TX_TREC: SocrataLicenseSpec = {
   },
 };
 
-export const SOCRATA_LICENSE_SPECS = [CO_DORA, CT_DCP, IL_IDFPR, WA_DOH, WA_LNI, DE_DPR, TX_BON_RN, TX_BON_VN, TX_TREC];
+// ---- New York Department of State (2026-10-01). Two ACTIVE-ONLY lists, refreshed daily: "Active Real Estate Salespersons and Brokers" (yg7h-zjbf, 147k) and
+// "Active Appearance Enhancement and Barber Individual Licenses" (ucu3-8265, 221k). Neither has a status column: membership means active (a few rows are
+// already past their own expiration date: the adapter treats those as not-a-pass). The holder name is ONE column in "LAST FIRST MIDDLE" order with no
+// delimiter ("ACOCELLA BETH A", "DIAZ ARIAS LUZ MARIA"), so it is searched as a prefix "LAST FIRST" and matched in last-first order (nameOrder in the profile).
+// The brokerage / address columns of the real estate list are not selected.
+const nyLastFirst = (field: string, person: { first: string; last: string }) => soqlUpperPrefix(field, stripWildcards(`${person.last} ${person.first}`));
+const NY_RE: SocrataLicenseSpec = {
+  id: "ny-dos-re", label: "New York Department of State — Active Real Estate Salespersons and Brokers", state: "NY", boardAgency: "New York State Department of State, Division of Licensing Services",
+  domain: "data.ny.gov", datasetId: "yg7h-zjbf", typeField: "license_type", orderBy: "license_holder_name, license_number",
+  fields: ["license_holder_name", "license_number", "license_type", "license_expiration_date"],
+  whereFor: (q, _mode) => anyOf([
+    q.person ? nyLastFirst("license_holder_name", q.person) : null,
+    q.business ? soqlUpperPrefix("license_holder_name", stripWildcards(q.business)) : null,
+    q.number ? `license_number = ${soqlString(q.number)}` : null,
+  ]),
+  map: (r, src) => mkLicense(src, "NY", "New York State Department of State", {
+    name: r.license_holder_name, kind: /SALESPERSON|ASSOCIATE BROKER|INDIVIDUAL BROKER/.test(String(r.license_type ?? "")) ? "individual" : "business",
+    number: r.license_number, type: r.license_type, statusRaw: null, status: "active", issue: null, exp: r.license_expiration_date,
+    details: { status_basis: "the file lists active licenses only; it has no status column" },
+  }),
+};
+const NY_BARBER: SocrataLicenseSpec = {
+  id: "ny-dos-appearance", label: "New York Department of State — Active Appearance Enhancement and Barber Licenses", state: "NY", boardAgency: "New York State Department of State, Division of Licensing Services",
+  domain: "data.ny.gov", datasetId: "ucu3-8265", typeField: "license_type", orderBy: "license_holder_name, license_number",
+  fields: ["license_number", "license_type", "license_holder_name", "license_effective_term", "license_expiration_date"],
+  whereFor: (q, _mode) => anyOf([
+    q.person ? nyLastFirst("license_holder_name", q.person) : null,
+    q.number ? `license_number = ${soqlString(q.number)}` : null,
+  ]),
+  map: (r, src) => mkLicense(src, "NY", "New York State Department of State", {
+    name: r.license_holder_name, kind: "individual", number: r.license_number, type: r.license_type, statusRaw: null, status: "active",
+    issue: r.license_effective_term, exp: r.license_expiration_date, details: { status_basis: "the file lists active licenses only; it has no status column" },
+  }),
+};
+
+// ---- Oregon (2026-10-01). Building Codes Division "Active Contractor/Individual Licenses" (vhbr-cuaq, 48k: electricians, plumbers, boiler, elevator, inspectors; one
+// status, Active; individuals and businesses; names "FIRST M LAST") and the Construction Contractors Board "CCB Active Licenses" (g77e-6bhs, 56k: the licensee is
+// the BUSINESS, the responsible managing individual is rmi_name). Both list ACTIVE licenses only. Bond / insurance / address / phone columns are not selected.
+const OR_BCD: SocrataLicenseSpec = {
+  id: "or-bcd", label: "Oregon Building Codes Division — Active Contractor/Individual Licenses", state: "OR", boardAgency: "Oregon Building Codes Division",
+  domain: "data.oregon.gov", datasetId: "vhbr-cuaq", typeField: "lictype", orderBy: "full_name, licnbr",
+  fields: ["licnbr", "profession", "lictype", "full_name", "lic_status", "expiration_date"],
+  whereFor: (q, mode) => anyOf([
+    q.person ? `${soqlUpperPrefix("full_name", q.person.first + " ")} AND upper(full_name) like ${soqlString("% " + q.person.last)}` : null,
+    q.business ? eqOrPrefix("full_name", q.business, mode) : null,
+    q.number ? `licnbr = ${soqlString(q.number)}` : null,
+  ]),
+  map: (r, src) => mkLicense(src, "OR", "Oregon Building Codes Division", {
+    name: r.full_name, kind: /\b(INC|LLC|CO|COMPANY|CORP|CORPORATION|LTD|LP|BUSINESS)\b/i.test(String(r.full_name ?? "")) || /Business/i.test(String(r.lictype ?? "")) ? "business" : "individual",
+    number: r.licnbr, type: r.lictype, statusRaw: r.lic_status, issue: null, exp: r.expiration_date, details: { profession: cleanStr(r.profession) },
+  }),
+};
+const OR_CCB: SocrataLicenseSpec = {
+  id: "or-ccb", label: "Oregon Construction Contractors Board — Active Licenses", state: "OR", boardAgency: "Oregon Construction Contractors Board",
+  domain: "data.oregon.gov", datasetId: "g77e-6bhs", typeField: "endorsement_text", orderBy: "full_name, license_number",
+  fields: ["license_number", "license_type", "full_name", "rmi_name", "lic_exp_date", "orig_regis_date", "endorsement_text"],
+  whereFor: (q, mode) => anyOf([
+    q.person ? `${soqlUpperPrefix("rmi_name", q.person.first + " ")} AND upper(rmi_name) like ${soqlString("% " + q.person.last)}` : null,
+    q.business ? eqOrPrefix("full_name", q.business, mode) : null,
+    q.number ? `license_number = ${soqlString(q.number)}` : null,
+  ]),
+  map: (r, src) => mkLicense(src, "OR", "Oregon Construction Contractors Board", {
+    name: r.full_name, kind: "business", number: r.license_number, type: cleanStr(r.endorsement_text) ?? cleanStr(r.license_type), statusRaw: null, status: "active",
+    issue: r.orig_regis_date, exp: r.lic_exp_date, details: { principal: cleanStr(r.rmi_name), status_basis: "the file lists active licenses only; it has no status column" },
+  }),
+};
+
+// ---- Washington Board of Accountancy "Certified Public Accountants" (6du3-3h9e, 52k, updated daily): individuals who hold OR HAVE HELD a credential, so every
+// status is present. board_order carries a Board order on record. City / state / country are not selected.
+const WA_CPA: SocrataLicenseSpec = {
+  id: "wa-cpa", label: "Washington State Board of Accountancy — Certified Public Accountants", state: "WA", boardAgency: "Washington State Board of Accountancy",
+  domain: "data.wa.gov", datasetId: "6du3-3h9e", fixedType: "Certified Public Accountant", orderBy: "lastname, firstname, number",
+  fields: ["firstname", "middlename", "lastname", "suffix", "number", "status", "originalissue", "expires", "board_order"],
+  whereFor: (q, mode) => anyOf([
+    q.person ? `${soqlUpperEquals("lastname", q.person.last)} AND ${eqOrPrefix("firstname", q.person.first, mode)}` : null,
+    q.number ? `number = ${soqlString(q.number)}` : null,
+  ]),
+  map: (r, src) => mkLicense(src, "WA", "Washington State Board of Accountancy", {
+    name: joinName([r.firstname, r.middlename, r.lastname, r.suffix]), kind: "individual", number: r.number, type: "Certified Public Accountant", statusRaw: r.status,
+    issue: r.originalissue, exp: r.expires, details: { board_order: cleanStr(r.board_order) },
+  }),
+};
+
+export const SOCRATA_LICENSE_SPECS = [CO_DORA, CT_DCP, IL_IDFPR, WA_DOH, WA_LNI, DE_DPR, TX_BON_RN, TX_BON_VN, TX_TREC, NY_RE, NY_BARBER, OR_BCD, OR_CCB, WA_CPA];
 export function socrataLicenseSources(appToken?: string): LicenseSource[] {
   return SOCRATA_LICENSE_SPECS.map((s) => makeSocrataLicenseSource(s, appToken));
 }

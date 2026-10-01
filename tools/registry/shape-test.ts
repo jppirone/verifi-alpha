@@ -11,6 +11,8 @@ const probe: Record<string, any> = {
   "co-sos": { name: "Google" }, "ny-dos": { name: "Google" }, "ct-sots": { name: "Yale" }, "or-sos": { name: "Nike" }, "pa-dos": { name: "Hershey" }, "tx-cpa": { name: "Dell" },
   "co-dora": { name: "Hilliary Lucido" }, "ct-dcp": { name: "Samantha Wilson" }, "il-idfpr": { business_name: "NATIONAL UNIVERSITY OF HEALTH SCIENCES" },
   "wa-doh": { name: "Rocky Buckham" }, "de-dpr": { first_name: "Mark", last_name: "Schlangel" }, "wa-lni": { business_name: "!ECO STAR C G CONSTRUCTION LLC" },
+  "tx-bon-rn": { name: "Maria Garcia" }, "tx-bon-vn": { name: "John Smith" }, "tx-trec": { name: "John Smith" }, "ny-dos-re": { name: "John Smith" }, "ny-dos-appearance": { name: "Maria Garcia" },
+  "or-bcd": { name: "James Smith" }, "or-ccb": { name: "Pedro Magallan" }, "wa-cpa": { name: "Mark Ruzicka" },
 };
 const rows: Array<{ id: string; kind: "business" | "license"; rec: Record<string, unknown>; problems: string[] }> = [];
 for (const s of socrataBusinessSources()) {

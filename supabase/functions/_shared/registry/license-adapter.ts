@@ -41,6 +41,8 @@ export interface LicenseSourceProfile {
   collapseAcrossTypes: boolean;       // same number + same holder under different type rows (CA "Nurse Practitioner" + "... Furnishing") is ONE license
   lapsedIsDefinitive: boolean;        // is an expired/inactive row proof the license is not valid today? false for monthly snapshots (can be a month stale)
   padNumbersTo?: number[];            // zero-padded forms the source stores
+  nameOrder?: "last_first";           // the holder name is stored "LAST FIRST MIDDLE" (New York) instead of "First [Middle] Last"
+  implicitActive?: boolean;           // an active-only list with no status column: membership means active (an expired date still blocks a pass)
   numberSuffixes?: string[];          // type suffixes the source appends to the stored number ("763827-SA"): a bare number from a resume still matches
   activeHold?: (row: LicenseRow) => string | null; // a row that is clean-active but carries a discipline marker: held for a human, never an automatic pass
   activeText: string[];               // the source's own CLEAN active status text (lowercase)
@@ -159,9 +161,40 @@ LICENSE_PROFILES["tx-trec"] = {
   // indeterminate: Closed - Upgraded (the holder moved to a broker license), Probation - Active / Inactive, Probated Suspension - Active, Military
 };
 
-export const STATE_SOURCES: Record<string, string[]> = { CO: ["co-dora"], CT: ["ct-dcp"], IL: ["il-idfpr"], WA: ["wa-doh", "wa-lni"], DE: ["de-dpr"], CA: ["ca-dca"], MI: ["mi-lara"], TX: ["tx-bon-rn", "tx-bon-vn", "tx-trec"] };
+// ---- New York (active-only lists, no status column), Oregon (active-only lists), Washington CPAs (every status). 2026-10-01.
+LICENSE_PROFILES["ny-dos-re"] = {
+  source_id: "ny-dos-re", state: "NY", completeness: "active_only", refresh: "daily", numberScope: "unique", collapseAcrossTypes: false, lapsedIsDefinitive: true, nameOrder: "last_first", implicitActive: true,
+  coverage: "ACTIVE real estate salesperson and broker licenses issued by the New York Department of State (not nurses, teachers, engineers or other licenses issued by the State Education Department)",
+  activeText: [], deadText: [], lapsedText: [],
+};
+LICENSE_PROFILES["ny-dos-appearance"] = {
+  source_id: "ny-dos-appearance", state: "NY", completeness: "active_only", refresh: "daily", numberScope: "unique", collapseAcrossTypes: false, lapsedIsDefinitive: true, nameOrder: "last_first", implicitActive: true,
+  coverage: "ACTIVE cosmetology, nail, esthetics, waxing, natural hair styling and barber licenses issued by the New York Department of State",
+  activeText: [], deadText: [], lapsedText: [],
+};
+LICENSE_PROFILES["or-bcd"] = {
+  source_id: "or-bcd", state: "OR", completeness: "active_only", refresh: "monthly", numberScope: "shared", collapseAcrossTypes: false, lapsedIsDefinitive: false,
+  coverage: "ACTIVE electrical, plumbing, boiler, elevator, prefabricated and manufactured-dwelling licenses and inspector certifications issued by the Oregon Building Codes Division as of the latest monthly list",
+  activeText: ["active"], deadText: [], lapsedText: [],
+};
+LICENSE_PROFILES["or-ccb"] = {
+  source_id: "or-ccb", state: "OR", completeness: "active_only", refresh: "daily", numberScope: "shared", collapseAcrossTypes: false, lapsedIsDefinitive: true, implicitActive: true,
+  coverage: "ACTIVE contractor licenses issued by the Oregon Construction Contractors Board (the licensee is the business; its responsible managing individual is matched by name)",
+  activeText: [], deadText: [], lapsedText: [],
+};
+LICENSE_PROFILES["wa-cpa"] = {
+  source_id: "wa-cpa", state: "WA", completeness: "full_history", refresh: "daily", numberScope: "unique", collapseAcrossTypes: false, lapsedIsDefinitive: true,
+  coverage: "certified public accountant credentials issued by the Washington State Board of Accountancy (individuals who hold or have held one); CPA licenses issued by other states are not in it",
+  activeHold: (r) => ((r.details as Record<string, unknown> | undefined)?.board_order ? "a Board of Accountancy order is on record" : null),
+  activeText: ["licensed to practice public accounting"],
+  deadText: ["suspended per board order", "licensed to practice revoked per board order", "deceased", "retired licensee", "retired certificate holder"],
+  lapsedText: ["lapsed licensee", "lapsed certificateholder", "lapsed registration", "holds a cpa license in an inactive status (not licensed to practice as a cpa)"],
+  // indeterminate: ConvertedToCPA (moved to a new credential), the non-CPA firm-owner registration
+};
+
+export const STATE_SOURCES: Record<string, string[]> = { CO: ["co-dora"], CT: ["ct-dcp"], IL: ["il-idfpr"], WA: ["wa-doh", "wa-lni", "wa-cpa"], DE: ["de-dpr"], CA: ["ca-dca"], MI: ["mi-lara"], TX: ["tx-bon-rn", "tx-bon-vn", "tx-trec"], NY: ["ny-dos-re", "ny-dos-appearance"], OR: ["or-bcd", "or-ccb"] };
 export const STATE_LABELS_SHORT: Record<string, string> = {
-  CO: "Colorado DORA", CT: "Connecticut DCP eLicense", IL: "Illinois IDFPR", WA: "Washington DOH / L&I", DE: "Delaware DPR", CA: "California DCA", MI: "Michigan LARA", TX: "Texas Board of Nursing / TREC",
+  CO: "Colorado DORA", CT: "Connecticut DCP eLicense", IL: "Illinois IDFPR", WA: "Washington DOH / L&I / CPA", DE: "Delaware DPR", CA: "California DCA", MI: "Michigan LARA", TX: "Texas Board of Nursing / TREC", NY: "New York DOS", OR: "Oregon BCD / CCB",
 };
 
 // ---- standing
@@ -169,7 +202,8 @@ export function standingFor(row: LicenseRow, profile: LicenseSourceProfile, toda
   let s: Standing | null = profile.classify ? profile.classify(row) : null;
   if (s === null) {
     const t = lc(row.status_raw);
-    if (!t) s = "indeterminate";
+    if (!t && profile.implicitActive) s = "active";
+    else if (!t) s = "indeterminate";
     else if (profile.activeText.includes(t)) s = "active";
     else if (profile.deadText.includes(t)) s = "inactive";
     else if (profile.lapsedText.includes(t)) s = profile.lapsedIsDefinitive ? "inactive" : "indeterminate";
@@ -200,6 +234,14 @@ export function nameMatches(first: string, last: string, holder: string): boolea
   if (!f.length || !l.length || h.length < f.length + l.length) return false;
   for (let i = 0; i < f.length; i++) if (h[i] !== f[i]) return false;
   for (let i = 0; i < l.length; i++) if (h[h.length - l.length + i] !== l[i]) return false;
+  return true;
+}
+// "LAST FIRST [MIDDLE]" (New York): the last-name tokens first, then the first-name tokens, anything after is a middle name / suffix.
+export function nameMatchesLastFirst(first: string, last: string, holder: string): boolean {
+  const f = nameTokens(first), l = stripSuffix(nameTokens(last)), h = nameTokens(holder);
+  if (!f.length || !l.length || h.length < f.length + l.length) return false;
+  for (let i = 0; i < l.length; i++) if (h[i] !== l[i]) return false;
+  for (let i = 0; i < f.length; i++) if (h[l.length + i] !== f[i]) return false;
   return true;
 }
 // Washington L&I names the BUSINESS; the person is the principal, stored "LAST, FIRST M.".
@@ -283,7 +325,8 @@ export async function registryLookup(input: LookupInput, fetchRegistry: FetchReg
     const k = `${h.source_id}|${h.record.license_number}|${h.record.license_holder_name}|${h.record.license_type}|${h.record.status_raw}|${h.record.board_agency ?? ""}`;
     if (seenRows.has(k)) return; seenRows.add(k); rowsWithNumber.push({ hit: h, p: byId.get(h.source_id)! });
   };
-  const isMine = (h: RegistryHit) => holderNames(h.record).some((hn) => nameMatches(input.firstName, input.lastName, hn));
+  const nameOkFor = (h: RegistryHit) => { const p = byId.get(h.source_id); return holderNames(h.record).some((hn) => p?.nameOrder === "last_first" ? nameMatchesLastFirst(input.firstName, input.lastName, hn) : nameMatches(input.firstName, input.lastName, hn)); };
+  const isMine = nameOkFor;
   let capped = false;
   let usedNumberSearch = false;
   // Try the number in each stored form. STOP only when a row for THIS holder turns up: in a shared-number source (Colorado, California) the bare number
@@ -314,7 +357,7 @@ export async function registryLookup(input: LookupInput, fetchRegistry: FetchReg
 
   const prepared: Array<{ rec: AdapterRecord; key: string; shared: boolean }> = [];
   for (const { hit, p } of rowsWithNumber) {
-    const nameOk = holderNames(hit.record).some((hn) => nameMatches(input.firstName, input.lastName, hn));
+    const nameOk = nameOkFor(hit);
     // shared-number sources: a row with the same number but a different holder is a stranger on another board, not a "name mismatch" -- drop it
     if (!nameOk && p.numberScope === "shared") continue;
     const rec = toRecord(hit.record, hit.source_id, nameOk, p, today);

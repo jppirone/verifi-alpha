@@ -9,6 +9,11 @@ const qs: Record<string, any[]> = {
   "tx-bon-rn": [{ name: "Maria Garcia" }, { license_number: "681109" }],
   "tx-bon-vn": [{ name: "John Smith" }, { license_number: "11080" }],
   "tx-trec": [{ name: "John Smith" }, { license_number: "450504-SA" }],
+  "ny-dos-re": [{ name: "John Smith" }, { license_number: "10401235308" }],
+  "ny-dos-appearance": [{ name: "Maria Garcia" }, { license_number: "AEC-17-03268" }],
+  "or-bcd": [{ name: "James Smith" }, { license_number: "24196J" }],
+  "or-ccb": [{ name: "Pedro Magallan" }, { license_number: "242649" }],
+  "wa-cpa": [{ name: "Mark Ruzicka" }, { license_number: "50762" }],
 };
 for (const s of socrataLicenseSources()) {
   for (const q of qs[s.id] ?? []) { // sources without an entry here (de-dpr) are covered by smoke-de.ts

@@ -2,7 +2,7 @@
 // on a live row on 2026-10-01; the fake registry mimics registry-lookup (exact number match, 50-row cap + truncated flag, name search).
 import assert from "node:assert/strict";
 import {
-  LICENSE_PROFILES, STATE_SOURCES, standingFor, nameMatches, numbersEqual, numbersEqualFor, numberVariants, registryLookup, notFoundNote,
+  LICENSE_PROFILES, STATE_SOURCES, standingFor, nameMatches, numbersEqual, numbersEqualFor, numberVariants, registryLookup, notFoundNote, nameMatchesLastFirst,
   type LicenseRow, type FetchRegistry, type RegistryHit,
 } from "../../supabase/functions/_shared/registry/license-adapter.ts";
 
@@ -208,6 +208,39 @@ assert.ok(numberVariants("763827SA", pro("tx-trec")).includes("763827-SA"));
   assert.equal(((await look("TX", "460453", "John", "Smith", mk({ status_raw: "DELINQUENT (D)" }))) as any).records[0].standing, "indeterminate");
 }
 assert.match(notFoundNote("TX"), /Texas Board of Nursing/); assert.match(notFoundNote("TX"), /Real Estate Commission/);
+
+// ---------------------------------------------------------------- 6. New York (last-first names, active-only lists), Oregon, Washington CPA
+assert.ok(nameMatchesLastFirst("Beth", "Acocella", "ACOCELLA BETH A"), "NY stores LAST FIRST MIDDLE"); assert.ok(nameMatchesLastFirst("Luz Maria", "Diaz Arias", "DIAZ ARIAS LUZ MARIA"), "multi-word last name and first name");
+assert.ok(nameMatchesLastFirst("Beth", "Acocella", "ACOCELLA BETH")); assert.ok(nameMatchesLastFirst("John", "Smith", "SMITH JOHN A JR"));
+assert.ok(!nameMatchesLastFirst("John", "Smith", "JOHN SMITH"), "a first-last name is NOT a last-first match: order matters"); assert.ok(!nameMatchesLastFirst("John", "Smith", "SMITH JOHNSON"), "a longer first name is another person");
+assert.ok(!nameMatchesLastFirst("Beth", "Acocella", "ACOCELLA"), "one token never matches"); assert.ok(!nameMatchesLastFirst("Beth", "Acocella", "ACOCELLO BETH"));
+// an active-only list with no status column: membership = active, but an expiration date that has already passed is never a pass
+const imp = (src: string, exp: string | null, extra: Partial<LicenseRow> = {}) => standingFor(row({ license_holder_name: "A B", license_number: "1", status_raw: null, expiration_date: exp, ...extra }), LICENSE_PROFILES[src], TODAY);
+for (const src of ["ny-dos-re", "ny-dos-appearance", "or-ccb"]) { assert.equal(imp(src, "2027-01-01").standing, "active", `${src} implicit active`); assert.equal(imp(src, "2026-09-30").standing, "indeterminate", `${src} past its own expiration`); assert.equal(imp(src, null).standing, "active", `${src} no date on file`); }
+assert.equal(imp("or-bcd", "2027-01-01", { status_raw: "Active" }).standing, "active"); assert.equal(imp("or-bcd", "2027-01-01", { status_raw: "Something New" }).standing, "indeterminate"); assert.equal(imp("or-bcd", "2027-01-01").standing, "indeterminate", "OR BCD has a status column: no text is not a pass");
+// Washington CPA: every real status
+assert.equal(st("wa-cpa", "Licensed to practice public accounting"), "active");
+for (const s of ["Suspended per Board Order", "Licensed to practice Revoked per Board Order", "Deceased", "Retired Licensee", "Retired Certificate holder"]) assert.equal(st("wa-cpa", s), "inactive", `WA CPA ${s}`);
+for (const s of ["Lapsed Licensee", "Lapsed Certificateholder", "Lapsed Registration", "Holds a CPA License in an Inactive status (not licensed to practice as a CPA)"]) assert.equal(st("wa-cpa", s), "inactive", `WA CPA ${s}`);
+for (const s of ["ConvertedToCPA", "A non-CPA who is registered as an owner in a Washington CPA firm; may not use the title CPA"]) assert.equal(st("wa-cpa", s), "indeterminate", `WA CPA ${s}`);
+assert.equal(held("wa-cpa", { board_order: "https://example/order.pdf" }, "Licensed to practice public accounting").standing, "indeterminate", "a Board order on record holds an otherwise active CPA");
+assert.equal(held("wa-cpa", { board_order: null }, "Licensed to practice public accounting").standing, "active");
+{ // New York: found through the last-first name; strangers with another name under the same number are mismatches (unique numbering)
+  const reg = fakeRegistry([R("ny-dos-re", { license_holder_name: "ACOCELLA BETH A", license_number: "30AC0961210", license_type: "ASSOCIATE BROKER", status: "active", status_raw: null, expiration_date: "2028-02-24" })]);
+  const ok = await look("NY", "30AC0961210", "Beth", "Acocella", reg); assert.ok(ok.ok && ok.records.length === 1 && ok.records[0].nameMatches && ok.records[0].standing === "active" && ok.records[0].licenseType === "ASSOCIATE BROKER");
+  const wrongOrder = await look("NY", "30AC0961210", "Acocella", "Beth", reg); assert.ok(wrongOrder.ok && wrongOrder.records[0].nameMatches === false, "swapping first and last is not a match");
+  const mismatch = await look("NY", "30AC0961210", "Mary", "Jones", reg); assert.ok(mismatch.ok && mismatch.records.length === 1 && !mismatch.records[0].nameMatches);
+}
+{ // Oregon CCB: the licensee is the business; the responsible managing individual's name matches
+  const reg = fakeRegistry([R("or-ccb", { license_holder_name: "SOTOS CONCRETE LLC", license_number: "242649", license_type: "Residential General Contractor", status: "active", status_raw: null, expiration_date: "2026-10-25", details: { principal: "PEDRO SOTO MAGALLAN" } })]);
+  const r = await look("OR", "242649", "Pedro", "Magallan", reg); assert.ok(r.ok && r.records.length === 1 && r.records[0].nameMatches && r.records[0].standing === "active", "matched through the RMI's name");
+  const biz = await look("OR", "242649", "Sotos", "Concrete", reg); assert.ok(biz.ok && !biz.records[0]?.nameMatches, "a person's name does not match a business name");
+}
+{ // Washington has three sources now; a CPA number is found alongside DOH/L&I ones
+  const reg = fakeRegistry([R("wa-cpa", { license_holder_name: "Mark A Ruzicka", license_number: "50762", license_type: "Certified Public Accountant", status_raw: "Licensed to practice public accounting", details: { board_order: null } })]);
+  const r = await look("WA", "50762", "Mark", "Ruzicka", reg); assert.ok(r.ok && r.records.length === 1 && r.records[0].standing === "active");
+}
+assert.match(notFoundNote("NY"), /ACTIVE real estate/); assert.match(notFoundNote("NY"), /currently licensed holders only/); assert.match(notFoundNote("OR"), /Building Codes Division/); assert.match(notFoundNote("WA"), /Board of Accountancy/);
 
 // honest not-found wording
 assert.match(notFoundNote("MI"), /currently licensed holders only/); assert.match(notFoundNote("WA"), /health care provider[\s\S]*contractor licenses/); assert.match(notFoundNote("CA"), /Revoked and cancelled licenses do not appear/); assert.match(notFoundNote("CO"), /attorneys/); assert.doesNotMatch(notFoundNote("CO"), /currently licensed holders only/);
