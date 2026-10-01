@@ -41,6 +41,8 @@ export interface LicenseSourceProfile {
   collapseAcrossTypes: boolean;       // same number + same holder under different type rows (CA "Nurse Practitioner" + "... Furnishing") is ONE license
   lapsedIsDefinitive: boolean;        // is an expired/inactive row proof the license is not valid today? false for monthly snapshots (can be a month stale)
   padNumbersTo?: number[];            // zero-padded forms the source stores
+  numberSuffixes?: string[];          // type suffixes the source appends to the stored number ("763827-SA"): a bare number from a resume still matches
+  activeHold?: (row: LicenseRow) => string | null; // a row that is clean-active but carries a discipline marker: held for a human, never an automatic pass
   activeText: string[];               // the source's own CLEAN active status text (lowercase)
   deadText: string[];                 // definitely ended: revoked, suspended, surrendered, cancelled, deceased, ...
   lapsedText: string[];               // lapsed: expired, not renewed, inactive, ...
@@ -55,6 +57,7 @@ export const LICENSE_PROFILES: Record<string, LicenseSourceProfile> = {
   "co-dora": {
     source_id: "co-dora", state: "CO", completeness: "full_history", refresh: "nightly", numberScope: "shared", collapseAcrossTypes: false, lapsedIsDefinitive: true, padNumbersTo: [9],
     coverage: "licenses issued by Colorado's Department of Regulatory Agencies (nurses, physicians, cosmetologists, engineers, accountants, real estate and the other DORA boards); licenses issued elsewhere (attorneys, teachers) are not in it",
+    activeHold: (r) => ((r.details as Record<string, unknown> | undefined)?.program_action ? "a Department program action (discipline) is on record" : null),
     activeText: ["active"],
     deadText: ["revoked", "surrendered", "voluntary surrender", "cancelled", "suspended", "suspended due to child support", "summary suspension", "retired", "expired - dissolved"],
     lapsedText: ["expired", "beyond 6 years expired", "inactive", "expired - telehealth only"],
@@ -76,6 +79,7 @@ export const LICENSE_PROFILES: Record<string, LicenseSourceProfile> = {
   "il-idfpr": {
     source_id: "il-idfpr", state: "IL", completeness: "full_history", refresh: "daily", numberScope: "unique", collapseAcrossTypes: false, lapsedIsDefinitive: true, padNumbersTo: [9],
     coverage: "licenses issued by the Illinois Department of Financial and Professional Regulation (nurses, physicians, cosmetologists, real estate and the other IDFPR professions); licenses issued elsewhere are not in it",
+    activeHold: (r) => ((r.details as Record<string, unknown> | undefined)?.ever_disciplined === "Y" ? "the registry flags prior discipline" : null),
     activeText: ["active"],
     deadText: ["revoked", "suspended", "cancelled", "terminated", "terminated card returned", "terminated without card", "terminated valid reason", "deceased", "relinquish",
       "voluntary surrender", "permanent inactive", "inoperative", "closed", "change of ownership", "refuse to renew", "revoked chaperone required", "suspended chaperone required",
@@ -86,6 +90,7 @@ export const LICENSE_PROFILES: Record<string, LicenseSourceProfile> = {
   "wa-doh": {
     source_id: "wa-doh", state: "WA", completeness: "full_history", refresh: "daily", numberScope: "unique", collapseAcrossTypes: false, lapsedIsDefinitive: true,
     coverage: "health care provider credentials issued by Washington's Department of Health; contractor and other licenses are separate",
+    activeHold: (r) => { const a = (r.details as Record<string, unknown> | undefined)?.action_taken; return a === "Yes" || a === "Pending" ? "a disciplinary action is recorded or pending" : null; },
     activeText: ["active"],
     deadText: ["suspended", "revoked", "terminated", "surrender", "voluntary surrender", "summary suspension", "retired"],
     lapsedText: ["expired", "inactive"],
@@ -126,9 +131,37 @@ export const LICENSE_PROFILES: Record<string, LicenseSourceProfile> = {
   },
 };
 
-export const STATE_SOURCES: Record<string, string[]> = { CO: ["co-dora"], CT: ["ct-dcp"], IL: ["il-idfpr"], WA: ["wa-doh", "wa-lni"], DE: ["de-dpr"], CA: ["ca-dca"], MI: ["mi-lara"] };
+// ---- Texas (2026-10-01). Number scope is "shared" for ALL Texas sources: RN, VN and TREC numbers are different numberings that collide freely (6-digit
+// numbers in each), so a same-number row held by someone else is a stranger from another dataset, never a "name mismatch".
+const TX_BON_COMMON = {
+  state: "TX", completeness: "full_history" as LicenseCompleteness, refresh: "monthly" as const, numberScope: "shared" as const, collapseAcrossTypes: false, lapsedIsDefinitive: false,
+  activeText: ["current (c)"],
+  deadText: ["revoked (r)", "suspended (s)", "vol.surrender (v)", "deceased (e)", "retired - inactive (z)"],
+  lapsedText: ["inactive (i)"],
+  // indeterminate: DELINQUENT (D, renewal overdue), VOLUNTEER RETIRED (W), NLC LICENSE - TX INVALID(Y), Current RENEWAL DENIED (K), NOT CURRENT - SEE ENF (X)
+};
+LICENSE_PROFILES["tx-bon-rn"] = {
+  ...TX_BON_COMMON, source_id: "tx-bon-rn",
+  coverage: "registered nurse (RN) licenses issued by the Texas Board of Nursing, current and expired; licenses issued by other agencies (and nurses licensed only in another state) are not in it",
+  activeHold: (r) => ((r.details as Record<string, unknown> | undefined)?.board_action === true ? "a Board of Nursing action is on record" : null),
+};
+LICENSE_PROFILES["tx-bon-vn"] = {
+  ...TX_BON_COMMON, source_id: "tx-bon-vn",
+  coverage: "vocational nurse (LVN) licenses issued by the Texas Board of Nursing, current and expired",
+};
+LICENSE_PROFILES["tx-trec"] = {
+  source_id: "tx-trec", state: "TX", completeness: "full_history", refresh: "daily", numberScope: "shared", collapseAcrossTypes: false, lapsedIsDefinitive: true,
+  numberSuffixes: ["-SA", "-B", "-BB"],
+  coverage: "real estate sales agent and broker licenses issued by the Texas Real Estate Commission (not inspectors, appraisers or other TREC licenses)",
+  activeText: ["active"],
+  deadText: ["revoked", "suspended", "surrendered", "deceased"],
+  lapsedText: ["expired less than 6 months", "expired more than 6 months", "inactive"],
+  // indeterminate: Closed - Upgraded (the holder moved to a broker license), Probation - Active / Inactive, Probated Suspension - Active, Military
+};
+
+export const STATE_SOURCES: Record<string, string[]> = { CO: ["co-dora"], CT: ["ct-dcp"], IL: ["il-idfpr"], WA: ["wa-doh", "wa-lni"], DE: ["de-dpr"], CA: ["ca-dca"], MI: ["mi-lara"], TX: ["tx-bon-rn", "tx-bon-vn", "tx-trec"] };
 export const STATE_LABELS_SHORT: Record<string, string> = {
-  CO: "Colorado DORA", CT: "Connecticut DCP eLicense", IL: "Illinois IDFPR", WA: "Washington DOH / L&I", DE: "Delaware DPR", CA: "California DCA", MI: "Michigan LARA",
+  CO: "Colorado DORA", CT: "Connecticut DCP eLicense", IL: "Illinois IDFPR", WA: "Washington DOH / L&I", DE: "Delaware DPR", CA: "California DCA", MI: "Michigan LARA", TX: "Texas Board of Nursing / TREC",
 };
 
 // ---- standing
@@ -146,6 +179,8 @@ export function standingFor(row: LicenseRow, profile: LicenseSourceProfile, toda
     const t = lc(row.status_raw);
     if (!profile.deadText.includes(t)) s = "indeterminate";
   }
+  // A clean active row that carries a discipline marker is a real license with something a human should read before it is confirmed.
+  if (s === "active" && profile.activeHold) { const why = profile.activeHold(row); if (why) return { standing: "indeterminate", note: why }; }
   // A "clean active" row whose own expiration date has passed is stale or mid-renewal: never an automatic pass.
   if (s === "active" && row.expiration_date && /^\d{4}-\d{2}-\d{2}$/.test(row.expiration_date) && row.expiration_date < today) {
     return { standing: "indeterminate", note: "the registry lists it as active but its expiration date has already passed" };
@@ -182,13 +217,24 @@ export function numbersEqual(a: unknown, b: unknown): boolean {
   const x = alnum(a), y = alnum(b);
   return !!x && !!y && (x === y || noLeadingZeros(x) === noLeadingZeros(y));
 }
+// Equality for a row of a given source: also accepts the source's type suffix on the stored number ("763827-SA" == "763827").
+export function numbersEqualFor(stored: unknown, typed: unknown, p?: LicenseSourceProfile): boolean {
+  if (numbersEqual(stored, typed)) return true;
+  for (const sfx of p?.numberSuffixes ?? []) if (numbersEqual(stored, `${alnum(typed)}${alnum(sfx)}`)) return true;
+  return false;
+}
 export function numberVariants(raw: string, profiles: LicenseSourceProfile[]): string[] {
   const t = String(raw ?? "").trim().toUpperCase().replace(/\s+/g, "");
   const a = alnum(raw), z = noLeadingZeros(a);
   const v: string[] = [t, a, z];
   for (const p of profiles) for (const n of p.padNumbersTo ?? []) if (/^\d+$/.test(z) && z.length <= n) v.push(z.padStart(n, "0"));
   const de = a.match(/^([A-Z][A-Z0-9])(\d{7})$/); if (de && profiles.some((p) => p.source_id === "de-dpr")) v.push(`${de[1]}-${de[2]}`);
-  return [...new Set(v.filter(Boolean))].slice(0, 5);
+  for (const p of profiles) for (const sfx of p.numberSuffixes ?? []) {
+    const sa = alnum(sfx);
+    if (a && !a.endsWith(sa)) v.push(`${a}${sfx}`);          // "763827"   -> "763827-SA", "763827-B", "763827-BB"
+    else if (a.length > sa.length) v.push(`${a.slice(0, -sa.length)}${sfx}`); // "763827SA" -> "763827-SA"
+  }
+  return [...new Set(v.filter(Boolean))].slice(0, 8);
 }
 
 // ---- the lookup
@@ -248,7 +294,7 @@ export async function registryLookup(input: LookupInput, fetchRegistry: FetchReg
     const failed = r.reports.find((x) => !x.ok);
     if (failed) return { ok: false, error: failed.error || "source_failed", detail: failed.detail };
     usedNumberSearch = true;
-    const rows = r.hits.filter((h) => byId.has(h.source_id) && numbersEqual(h.record.license_number, input.licenseNumber));
+    const rows = r.hits.filter((h) => byId.has(h.source_id) && numbersEqualFor(h.record.license_number, input.licenseNumber, byId.get(h.source_id)));
     const truncated = r.reports.some((x) => x.truncated);
     for (const h of rows) addRow(h);
     if (rows.some(isMine)) break;
@@ -257,7 +303,7 @@ export async function registryLookup(input: LookupInput, fetchRegistry: FetchReg
       const n = await fetchRegistry({ kind: "license", states: [state], first_name: input.firstName, last_name: input.lastName, limit: LIMIT });
       if (!n.ok) return { ok: false, error: n.error, detail: n.detail };
       const nf = n.reports.find((x) => !x.ok); if (nf) return { ok: false, error: nf.error || "source_failed", detail: nf.detail };
-      const mine = n.hits.filter((h) => byId.has(h.source_id) && numbersEqual(h.record.license_number, input.licenseNumber) && isMine(h));
+      const mine = n.hits.filter((h) => byId.has(h.source_id) && numbersEqualFor(h.record.license_number, input.licenseNumber, byId.get(h.source_id)) && isMine(h));
       if (mine.length) { for (const h of mine) addRow(h); break; }
       if (n.reports.some((x) => x.truncated)) capped = true;
       continue;

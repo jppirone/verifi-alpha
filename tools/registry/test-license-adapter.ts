@@ -2,7 +2,7 @@
 // on a live row on 2026-10-01; the fake registry mimics registry-lookup (exact number match, 50-row cap + truncated flag, name search).
 import assert from "node:assert/strict";
 import {
-  LICENSE_PROFILES, STATE_SOURCES, standingFor, nameMatches, numbersEqual, numberVariants, registryLookup, notFoundNote,
+  LICENSE_PROFILES, STATE_SOURCES, standingFor, nameMatches, numbersEqual, numbersEqualFor, numberVariants, registryLookup, notFoundNote,
   type LicenseRow, type FetchRegistry, type RegistryHit,
 } from "../../supabase/functions/_shared/registry/license-adapter.ts";
 
@@ -167,9 +167,48 @@ const look = (state: string, num: string, first: string, last: string, reg: Fetc
 { // registry failures are never "not found"
   const r = await look("DE", "L1-1", "John", "Smith", fakeRegistry([], { failSource: "de-dpr" })); assert.ok(!r.ok && r.error === "http_503");
   const r2 = await look("WA", "X", "A", "B", fakeRegistry([], { failSource: "wa-lni" })); assert.ok(!r2.ok, "one failed WA source is a failure, not a hit on the other");
-  const r3 = await registryLookup({ state: "TX", licenseNumber: "1", firstName: "A", lastName: "B" }, fakeRegistry([])); assert.ok(!r3.ok && r3.error === "no_registry_profile_for_state");
+  const r3 = await registryLookup({ state: "FL", licenseNumber: "1", firstName: "A", lastName: "B" }, fakeRegistry([])); assert.ok(!r3.ok && r3.error === "no_registry_profile_for_state");
   const throws: FetchRegistry = async () => ({ ok: false, error: "network_error", detail: "boom" }); const r4 = await look("CO", "1", "A", "B", throws); assert.ok(!r4.ok && r4.error === "network_error");
 }
+
+// ---------------------------------------------------------------- 5. Texas (Board of Nursing RN + VN, TREC) and the discipline hold
+for (const [src, clean] of [["tx-bon-rn", "CURRENT (C)"], ["tx-bon-vn", "CURRENT (C)"], ["tx-trec", "Active"]] as const) assert.equal(st(src, clean), "active", `${src}`);
+// every real Texas Board of Nursing status (counts from 2026-10-01): only CURRENT passes
+for (const s of ["DELINQUENT (D)", "VOLUNTEER RETIRED (W)", "NLC LICENSE - TX INVALID(Y)", "Current RENEWAL DENIED (K)", "NOT CURRENT - SEE ENF (X)"]) assert.equal(st("tx-bon-rn", s), "indeterminate", `TX BON ${s}`);
+for (const s of ["REVOKED (R)", "SUSPENDED (S)", "VOL.SURRENDER (V)", "DECEASED (E)", "RETIRED - INACTIVE (Z)"]) assert.equal(st("tx-bon-rn", s), "inactive", `TX BON ${s}`);
+assert.equal(st("tx-bon-rn", "INACTIVE (I)"), "indeterminate", "monthly list: a lapse is not proof");
+// every real TREC status
+for (const s of ["Closed - Upgraded", "Probation - Active", "Probation - Inactive", "Probated Suspension - Active", "Military"]) assert.equal(st("tx-trec", s), "indeterminate", `TREC ${s}`);
+for (const s of ["Revoked", "Suspended", "Surrendered", "Deceased", "Expired less than 6 months", "Expired more than 6 months", "Inactive"]) assert.equal(st("tx-trec", s), "inactive", `TREC ${s}`);
+// discipline marker on an otherwise clean active row: held, with the reason in the status text staff read
+const held = (src: string, details: Record<string, unknown>, status_raw: string) => standingFor(row({ license_holder_name: "A B", license_number: "1", status_raw, details }), LICENSE_PROFILES[src], TODAY);
+assert.equal(held("tx-bon-rn", { board_action: true }, "CURRENT (C)").standing, "indeterminate"); assert.match(held("tx-bon-rn", { board_action: true }, "CURRENT (C)").note ?? "", /Board of Nursing action/);
+assert.equal(held("tx-bon-rn", { board_action: false }, "CURRENT (C)").standing, "active");
+assert.equal(held("il-idfpr", { ever_disciplined: "Y" }, "ACTIVE").standing, "indeterminate"); assert.equal(held("il-idfpr", { ever_disciplined: "N" }, "ACTIVE").standing, "active");
+assert.equal(held("wa-doh", { action_taken: "Yes" }, "Active").standing, "indeterminate"); assert.equal(held("wa-doh", { action_taken: "Pending" }, "Active").standing, "indeterminate"); assert.equal(held("wa-doh", { action_taken: "No" }, "Active").standing, "active");
+assert.equal(held("co-dora", { program_action: "CLS Letter of Admonition" }, "Active").standing, "indeterminate"); assert.equal(held("co-dora", { program_action: null }, "Active").standing, "active");
+assert.equal(held("wa-doh", { action_taken: "Yes" }, "Expired").standing, "inactive", "a hold only changes an otherwise-clean ACTIVE row; a lapsed one stays lapsed");
+// TREC number suffixes
+assert.ok(numbersEqualFor("763827-SA", "763827", LICENSE_PROFILES["tx-trec"]), "a bare number from a resume matches the suffixed stored number"); assert.ok(!numbersEqualFor("763827-SA", "763827"), "...only for a source that declares suffixes");
+assert.ok(numbersEqualFor("100097-B", "100097B", LICENSE_PROFILES["tx-trec"])); assert.ok(!numbersEqualFor("763827-SA", "763828", LICENSE_PROFILES["tx-trec"]));
+const vs = numberVariants("763827", pro("tx-bon-rn", "tx-bon-vn", "tx-trec")); for (const w of ["763827", "763827-SA", "763827-B", "763827-BB"]) assert.ok(vs.includes(w), `variant ${w}`);
+assert.ok(numberVariants("763827SA", pro("tx-trec")).includes("763827-SA"));
+{ // TX: a real-estate agent's bare number is found through the suffix variant; the RN and VN datasets hold strangers under the same number -> dropped
+  const reg = fakeRegistry([
+    R("tx-trec", { license_holder_name: "JOHN YI SMITH", license_number: "763827-SA", license_type: "Sales Agent", status_raw: "Active" }),
+    R("tx-bon-rn", { license_holder_name: "ZED STRANGER", license_number: "763827", license_type: "Registered Nurse", status_raw: "CURRENT (C)" }),
+    R("tx-bon-vn", { license_holder_name: "ALICE OTHER", license_number: "763827", license_type: "Vocational Nurse", status_raw: "CURRENT (C)" }),
+  ]);
+  const r = await look("TX", "763827", "John", "Smith", reg); assert.ok(r.ok && r.records.length === 1 && r.records[0].nameMatches && r.records[0].standing === "active" && r.records[0].licenseType === "Sales Agent", "found as the sales agent; the same-number nurses are strangers");
+}
+{ // TX RN: current + board action -> held; current clean -> active; delinquent -> held
+  const mk = (extra: Partial<LicenseRow>) => fakeRegistry([R("tx-bon-rn", { license_holder_name: "JOHN LEE SMITH", license_number: "460453", license_type: "Registered Nurse", status_raw: "CURRENT (C)", ...extra })]);
+  assert.equal(((await look("TX", "460453", "John", "Smith", mk({}))) as any).records[0].standing, "active");
+  assert.equal(((await look("TX", "460453", "John", "Smith", mk({ details: { board_action: true } }))) as any).records[0].standing, "indeterminate");
+  assert.equal(((await look("TX", "460453", "John", "Smith", mk({ status_raw: "DELINQUENT (D)" }))) as any).records[0].standing, "indeterminate");
+}
+assert.match(notFoundNote("TX"), /Texas Board of Nursing/); assert.match(notFoundNote("TX"), /Real Estate Commission/);
+
 // honest not-found wording
 assert.match(notFoundNote("MI"), /currently licensed holders only/); assert.match(notFoundNote("WA"), /health care provider[\s\S]*contractor licenses/); assert.match(notFoundNote("CA"), /Revoked and cancelled licenses do not appear/); assert.match(notFoundNote("CO"), /attorneys/); assert.doesNotMatch(notFoundNote("CO"), /currently licensed holders only/);
 for (const [state, ids] of Object.entries(STATE_SOURCES)) for (const i of ids) { const p = LICENSE_PROFILES[i]; assert.equal(p.state, state); assert.ok(p.coverage.length > 20, `${i} has coverage wording`); }

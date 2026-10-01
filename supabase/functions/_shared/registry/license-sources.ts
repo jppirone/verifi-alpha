@@ -27,7 +27,8 @@ export interface SocrataLicenseSpec {
   domain: string;
   datasetId: string;
   fields: string[];
-  typeField: string; // the dataset column that holds the licence type text (used by the optional license_type narrowing filter)
+  typeField?: string; // the dataset column that holds the licence type text (used by the optional license_type narrowing filter)
+  fixedType?: string; // a dataset that holds ONE licence type and has no type column (Texas Board of Nursing RN / VN): the filter then matches this text instead
   orderBy: string;
   // Returns the WHERE for a query in the given match mode, or null when the query has nothing this source can search on.
   whereFor: (q: { person: { first: string; last: string } | null; business: string | null; number: string | null }, mode: MatchMode) => string | null;
@@ -36,6 +37,7 @@ export interface SocrataLicenseSpec {
 
 function mkLicense(src: string, state: string, board: string, o: {
   name: unknown; kind: HolderKind; number: unknown; type: unknown; statusRaw: unknown; reason?: unknown; issue: unknown; exp: unknown; details?: Record<string, unknown>;
+  status?: LicenseRecord["status"]; // the source's own vocabulary needs a source-specific mapping (Texas "CURRENT (C)")
 }): LicenseRecord | null {
   const license_holder_name = cleanStr(o.name);
   const license_number = cleanStr(o.number);
@@ -44,7 +46,7 @@ function mkLicense(src: string, state: string, board: string, o: {
   return {
     license_holder_name, holder_kind: o.kind, license_number,
     license_type: cleanStr(o.type),
-    status: normalizeLicenseStatus(status_raw, cleanStr(o.reason)), status_raw,
+    status: o.status ?? normalizeLicenseStatus(status_raw, cleanStr(o.reason)), status_raw,
     issue_date: isoDate(o.issue), expiration_date: isoDate(o.exp),
     state, board_agency: board, source: src,
     details: o.details ?? {},
@@ -72,7 +74,9 @@ export function makeSocrataLicenseSource(spec: SocrataLicenseSpec, appToken?: st
       // The licence-type filter is part of the WHERE (not applied after the fact) so it narrows BEFORE the result cap: a capped common-name search
       // can be narrowed to the one licence type that matters instead of the cap hiding it.
       const typeFilter = cleanStr(q.license_type);
-      const where = typeFilter ? `(${base}) AND ${soqlUpperContains(spec.typeField, typeFilter)}` : base;
+      // a one-type dataset has no type column: a filter that does not match its type text means "none of this source's licences", not "no filter"
+      if (typeFilter && spec.fixedType && !spec.fixedType.toUpperCase().includes(typeFilter.toUpperCase())) return { ok: true, records: [], meta: { source: source_dataset, attempts: 0, ms: 0 } };
+      const where = typeFilter && spec.typeField ? `(${base}) AND ${soqlUpperContains(spec.typeField, typeFilter)}` : base;
       const r = await client.query<Row>({ select: spec.fields.join(","), where, order: spec.orderBy, limit: Math.min(Math.max(q.limit ?? 25, 1), 100) });
       if (!r.ok) return { ok: false, source: source_dataset, error: r.error, status: r.status, detail: r.detail };
       const records = r.rows.map((row) => spec.map(row, source_dataset)).filter((x): x is LicenseRecord => !!x);
@@ -97,7 +101,7 @@ const CO_DORA: SocrataLicenseSpec = {
   boardAgency: "Colorado Department of Regulatory Agencies (DORA)",
   domain: "data.colorado.gov", datasetId: "7s5z-vewr", typeField: "licensetype", orderBy: "lastname, firstname, licensenumber",
   fields: ["lastname", "firstname", "middlename", "suffix", "entityname", "city", "state", "licensetype", "subcategory", "licensenumber",
-    "licensefirstissuedate", "licenseexpirationdate", "licensestatusdescription", "specialty", "linktoverifylicense"],
+    "licensefirstissuedate", "licenseexpirationdate", "licensestatusdescription", "specialty", "linktoverifylicense", "programaction"],
   whereFor: (q, mode) => anyOf([
     q.person ? `${soqlUpperEquals("lastname", q.person.last)} AND ${eqOrPrefix("firstname", q.person.first, mode)}` : null,
     q.business ? eqOrPrefix("entityname", q.business, mode) : null,
@@ -109,7 +113,7 @@ const CO_DORA: SocrataLicenseSpec = {
       name: isBiz ? r.entityname : joinName([r.firstname, r.middlename, r.lastname, r.suffix]) || r.entityname,
       kind: isBiz ? "business" : "individual", number: r.licensenumber, type: r.licensetype, statusRaw: r.licensestatusdescription,
       issue: r.licensefirstissuedate, exp: r.licenseexpirationdate,
-      details: { subcategory: cleanStr(r.subcategory), specialty: cleanStr(r.specialty), city: cleanStr(r.city), holder_state: cleanStr(r.state), verify_link: (r.linktoverifylicense as Row | undefined)?.url ?? null },
+      details: { program_action: cleanStr(r.programaction), subcategory: cleanStr(r.subcategory), specialty: cleanStr(r.specialty), city: cleanStr(r.city), holder_state: cleanStr(r.state), verify_link: (r.linktoverifylicense as Row | undefined)?.url ?? null },
     });
   },
 };
@@ -228,7 +232,63 @@ const DE_DPR: SocrataLicenseSpec = {
   }),
 };
 
-export const SOCRATA_LICENSE_SPECS = [CO_DORA, CT_DCP, IL_IDFPR, WA_DOH, WA_LNI, DE_DPR];
+// Texas Board of Nursing: "RN-All" (tgb2-j935, 796k rows: current AND expired/revoked/..., updated by the Board) and "VN-All" (yjie-tuwv, 318k, Vocational/LVN).
+// One row per license; the number is the Board's own (RN and VN are separate numberings). The Board's file also carries gender, ethnicity, county of
+// residence, employer, practice setting and school: NONE of that is selected here (not needed to verify a license, and avoidable personal data).
+// license_status is "<WORD> (<code>)": CURRENT (C), DELINQUENT (D), INACTIVE (I), DECEASED (E), RETIRED - INACTIVE (Z), REVOKED (R), VOL.SURRENDER (V),
+// VOLUNTEER RETIRED (W), NLC LICENSE - TX INVALID(Y), SUSPENDED (S), Current RENEWAL DENIED (K), NOT CURRENT - SEE ENF (X). Dates are YYYYMMDD. The
+// column names carry the Board's own typo "lincense". current_board_action (boolean) says a board action is on record for the licensee.
+export function txBonStatus(raw: unknown): LicenseRecord["status"] {
+  const m = /\(([A-Z])\)\s*$/.exec(String(raw ?? "").trim());
+  switch (m?.[1]) {
+    case "C": return "active";
+    case "D": return "expired";                         // delinquent: renewal overdue
+    case "I": case "Z": case "W": case "E": case "V": return "inactive"; // inactive, retired, volunteer-retired, deceased, voluntarily surrendered
+    case "R": return "revoked";
+    case "S": return "suspended";
+    default: return "other";                            // NLC invalid, renewal denied, see enforcement: status_raw carries the truth
+  }
+}
+const txBon = (id: "tx-bon-rn" | "tx-bon-vn", datasetId: string, label: string, type: string): SocrataLicenseSpec => ({
+  id, label, state: "TX", boardAgency: "Texas Board of Nursing", domain: "data.texas.gov", datasetId, fixedType: type, orderBy: "last_name, first_name, license_number",
+  fields: ["license_number", "last_name", "first_name", "middle_name", "license_status", "lincense_status_date", "lincense_expiration_date", "texas_license_issuance_date",
+    ...(id === "tx-bon-rn" ? ["current_board_action", "date_of_board_action_imposed"] : [])],
+  whereFor: (q, mode) => anyOf([
+    q.person ? `${soqlUpperEquals("last_name", q.person.last)} AND ${eqOrPrefix("first_name", q.person.first, mode)}` : null,
+    // the Board's license_number column is NUMERIC: a non-numeric search form (the TREC "763827-SA" variants a combined Texas lookup also tries) is a bad query, not a miss
+    q.number && /^\d{1,12}$/.test(q.number) ? `license_number = ${soqlString(q.number)}` : null,
+  ]),
+  map: (r, src) => mkLicense(src, "TX", "Texas Board of Nursing", {
+    name: joinName([r.first_name, r.middle_name, r.last_name]), kind: "individual", number: r.license_number, type, statusRaw: r.license_status,
+    status: txBonStatus(r.license_status), issue: r.texas_license_issuance_date, exp: r.lincense_expiration_date,
+    details: { status_date: isoDate(r.lincense_status_date), ...(id === "tx-bon-rn" ? { board_action: r.current_board_action === true || String(r.current_board_action).toLowerCase() === "true", board_action_date: isoDate(r.date_of_board_action_imposed) } : {}) },
+  }),
+});
+const TX_BON_RN = txBon("tx-bon-rn", "tgb2-j935", "Texas Board of Nursing — Registered Nurses (RN-All)", "Registered Nurse");
+const TX_BON_VN = txBon("tx-bon-vn", "yjie-tuwv", "Texas Board of Nursing — Vocational Nurses (VN-All)", "Vocational Nurse");
+
+// Texas Real Estate Commission "Broker and Sales Agent License Holder Information" (s7ft-44qi, 326k rows, updated daily): sales agents, individual brokers and
+// broker companies with their status. license_number carries a type suffix ("763827-SA" sales agent, "-B" broker, "-BB" broker company). The file also carries
+// county and the supervising broker; neither is selected.
+const TX_TREC: SocrataLicenseSpec = {
+  id: "tx-trec", label: "Texas Real Estate Commission — Broker and Sales Agent Licenses", state: "TX", boardAgency: "Texas Real Estate Commission",
+  domain: "data.texas.gov", datasetId: "s7ft-44qi", typeField: "license_type", orderBy: "last_name, first_name, license_number",
+  fields: ["license_type", "license_number", "full_name", "suffix", "status", "original_license_date", "license_expiration_date", "first_name", "middle_name", "last_name"],
+  whereFor: (q, mode) => anyOf([
+    q.person ? `${soqlUpperEquals("last_name", q.person.last)} AND ${eqOrPrefix("first_name", q.person.first, mode)}` : null,
+    q.business ? `license_type = 'Broker Company' AND ${eqOrPrefix("full_name", q.business, mode)}` : null,
+    q.number ? `license_number = ${soqlString(q.number)}` : null,
+  ]),
+  map: (r, src) => {
+    const isBiz = String(r.license_type ?? "") === "Broker Company";
+    return mkLicense(src, "TX", "Texas Real Estate Commission", {
+      name: isBiz ? r.full_name : joinName([r.first_name, r.middle_name, r.last_name, r.suffix]) || r.full_name, kind: isBiz ? "business" : "individual",
+      number: r.license_number, type: r.license_type, statusRaw: r.status, issue: r.original_license_date, exp: r.license_expiration_date,
+    });
+  },
+};
+
+export const SOCRATA_LICENSE_SPECS = [CO_DORA, CT_DCP, IL_IDFPR, WA_DOH, WA_LNI, DE_DPR, TX_BON_RN, TX_BON_VN, TX_TREC];
 export function socrataLicenseSources(appToken?: string): LicenseSource[] {
   return SOCRATA_LICENSE_SPECS.map((s) => makeSocrataLicenseSource(s, appToken));
 }

@@ -6,6 +6,9 @@ const qs: Record<string, any[]> = {
   "il-idfpr": [{ business_name: "NATIONAL UNIVERSITY OF HEALTH SCIENCES" }, { license_number: "225000001" }],
   "wa-doh": [{ name: "Rocky Buckham" }, { license_number: "RN.RN.61687583.MSL" }],
   "wa-lni": [{ business_name: "!ECO STAR C G CONSTRUCTION LLC" }, { name: "Carlos Guerrero Martinez" }],
+  "tx-bon-rn": [{ name: "Maria Garcia" }, { license_number: "681109" }],
+  "tx-bon-vn": [{ name: "John Smith" }, { license_number: "11080" }],
+  "tx-trec": [{ name: "John Smith" }, { license_number: "450504-SA" }],
 };
 for (const s of socrataLicenseSources()) {
   for (const q of qs[s.id] ?? []) { // sources without an entry here (de-dpr) are covered by smoke-de.ts
