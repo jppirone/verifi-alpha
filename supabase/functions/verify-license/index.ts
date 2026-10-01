@@ -2,6 +2,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { withSupabase } from "jsr:@supabase/server@1";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { registryLookup, STATE_SOURCES, STATE_LABELS_SHORT, notFoundNote, type FetchRegistry } from "../_shared/registry/license-adapter.ts";
 
 // verify-license: the shared, state-agnostic license-verification module. Automatic (not a
 // staff-triggered button): called after a candidate confirms resume data (confirm-resume-data),
@@ -78,6 +79,7 @@ interface JurisdictionAdapter {
   registryLabel: string; // human-readable, used in timeline/claim/candidate text
   requiredFields: RequiredField[];
   normalizeLicenseNumber(raw: string): string;
+  coverageNote?: string; // what this registry's dataset covers (honest "not found" wording); registry-backed adapters only
   lookup(input: { licenseNumber: string; firstName: string; lastName: string }): Promise<Lookup>;
 }
 
@@ -200,8 +202,46 @@ const floridaDbpr: JurisdictionAdapter = {
   },
 };
 
+// ---------------------------------------------------------------------------------------------
+// Registry-backed adapters (2026-10-01): Colorado DORA, Connecticut DCP, Illinois IDFPR, Washington DOH + L&I, Delaware DPR, California DCA,
+// Michigan LARA. All of them go through the deployed registry-lookup (the same sources a staff lookup uses) and the pure rules in
+// _shared/registry/license-adapter.ts: the number must match, the name must match exactly, and ONLY a source's own clean "active" text is a
+// pass. Qualified actives ("Active - With Conditions", "ACTIVE CHAPERONE REQUIRED", "Active - In Late Renewal", ...) and anything unrecognised
+// are "indeterminate" -> Needs Reconciliation for a human, exactly like Florida's classifier. A monthly-snapshot source (California, Michigan)
+// never produces a definitive "expired", because its list can be a month stale.
+// ---------------------------------------------------------------------------------------------
+const fetchRegistry: FetchRegistry = async (body) => {
+  let res: Response;
+  try {
+    res = await fetch(`${SUPABASE_URL}/functions/v1/registry-lookup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(55_000), // registry-lookup bounds each source at 45 s
+    });
+  } catch (e) {
+    return { ok: false, error: "network_error", detail: String(e) };
+  }
+  const data = await res.json().catch(() => null);
+  if (!data || !data.ok) return { ok: false, error: (data && data.error) || `http_${res.status}`, detail: data && data.message ? String(data.message) : undefined };
+  return { ok: true, hits: Array.isArray(data.hits) ? data.hits : [], reports: Array.isArray(data.reports) ? data.reports : [] };
+};
+
+function registryAdapter(state: string): JurisdictionAdapter {
+  return {
+    state,
+    source: `${state.toLowerCase()}_registry`,
+    registryLabel: STATE_LABELS_SHORT[state] ?? state,
+    requiredFields: ["license_number", "first_name", "last_name"],
+    normalizeLicenseNumber: (raw) => raw.trim(), // the search forms (zero-padded, punctuation-free, ...) are tried inside registryLookup
+    coverageNote: notFoundNote(state),
+    lookup: ({ licenseNumber, firstName, lastName }) => registryLookup({ state, licenseNumber, firstName, lastName }, fetchRegistry),
+  };
+}
+
 const ADAPTERS: Record<string, JurisdictionAdapter> = {
   FL: floridaDbpr,
+  ...Object.fromEntries(Object.keys(STATE_SOURCES).map((st) => [st, registryAdapter(st)])),
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -240,7 +280,7 @@ function outcomeText(adapter: JurisdictionAdapter, d: { outcome: Outcome; reason
   }
   const head: Record<string, string> = {
     verified: `${adapter.registryLabel}: one exact name match with active status.`,
-    not_found: `${adapter.registryLabel}: no record found for this license number.`,
+    not_found: `${adapter.registryLabel}: no record found for this license number.${adapter.coverageNote ? " " + adapter.coverageNote : ""}`,
     ambiguous: `${adapter.registryLabel}: could not be resolved automatically (${d.reason}).`,
   };
   return [head[d.outcome] || d.outcome, ...lines].join("\n");
@@ -653,7 +693,7 @@ export default {
           status: "requested",
           reason: outcome,
           message: outcome === "not_found"
-            ? `We couldn't verify this license under ${stateLabel} (${label}). Please confirm the license number and details, or update the state if it was entered incorrectly.`
+            ? `We couldn't verify this license under ${stateLabel} (${label}). Please confirm the license number and details, or update the state if it was entered incorrectly.${adapter?.coverageNote ? " " + adapter.coverageNote + " If your license was issued by a different agency, it may simply not be in this registry." : ""}`
             : `We can't check licenses issued in ${stateLabel} automatically yet, so this license is shown as candidate-stated. If ${stateLabel} isn't the state that issued it, update the state and we'll check it again.`,
         };
       }
