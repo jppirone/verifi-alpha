@@ -7,6 +7,7 @@ them as "held for staff", never as a definitive expiry. Reload at least monthly;
 |---|---|---|---|
 | `ca-cslb` | California contractors (business + associated people) | CSLB Data Portal: License Master + Personnel CSV | daily |
 | `ca-dre` | California real estate salespeople, brokers, corporations | DRE `CurrList.zip` (Licensee List) | daily |
+| `va-dpor` | Virginia DPOR regulant lists (177 occupation files: real estate, contractors/tradesmen, cosmetology, architects, engineers, ...) | dpor.virginia.gov/RegulantLists | every ~5 business days |
 | `ca-dca` | 33 DCA boards | dca.ca.gov public_info monthly lists (`download-ca.py`) | monthly |
 | `mi-lara` | 7 LARA groups | MiPLUS FOIA reports | monthly |
 
@@ -24,7 +25,17 @@ node tools/registry/upload-shards.ts <shardsDir> ca-dre
 ```
 
 Checks after a load: the upload prints `rows_total`; look a known licensee up through `registry-lookup` (`sources: ["ca-cslb"]` / `["ca-dre"]`).
-Expected size (2026-10-01): CSLB 566,617 records / 44.5 MB; DRE 428,262 records / 31.5 MB. Bucket total after both: about 320 MiB of the 1 GiB free-plan limit.
+Expected size (2026-10-01): CSLB 566,617 records / 44.5 MB; DRE 428,262 records / 31.5 MB. Bucket total after CSLB + DRE + Virginia: about 342 MiB of the 1 GiB free-plan limit.
+
+## Virginia DPOR (about 10 minutes, mostly the polite 1.5 s pause between 177 files)
+
+```bash
+python tools/registry/download-dpor.py <dpordir>                       # one request per file; also writes labels.json (file stem -> occupation name)
+node tools/registry/test-dpor.ts <dpordir>                              # real-file check: every file parses, no e-mail kept, no schema problems
+node tools/registry/build-shards.ts va-dpor <shardsDir> <dpordir> ALL   # ~1 min
+node tools/registry/upload-shards.ts <shardsDir> va-dpor
+```
+Expected (2026-10-01): 328,690 records / 22.7 MB. The files contain real e-mail and street addresses; the parser drops them and the build refuses any e-mail.
 
 ## Rules the loads depend on
 * One request per file, no loops, no scraping of the search pages. These are the agencies' own free bulk downloads (no login, no CAPTCHA). The CSLB page says

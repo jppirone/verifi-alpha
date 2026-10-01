@@ -3,7 +3,7 @@
 Source: https://www.dpor.virginia.gov/RegulantLists ("Regulant lists are provided free of charge in electronic format", updated about every 5 business days).
 ONE request per file with a pause between them (about 5 minutes in all); never run it in a loop. The files contain e-mail addresses and street addresses: the parser
 (supabase/functions/_shared/registry/dpor.ts) drops them and the build refuses to store an e-mail.
-Writes <outDir>/<file>.txt for every list and <outDir>/labels.json {"0401": "APELSCIDLA Architect", ...}."""
+Writes <outDir>/<file>.txt for every list and <outDir>/labels.json {"0401__crnt": "APELSCIDLA Architect", "0225a_act": "Real Estate Active Associate Broker", ...}."""
 import html, json, os, re, sys, time, urllib.parse, urllib.request
 
 UA = "Mozilla/5.0 (Verifi data-load; contact john.pirone@gmail.com)"
@@ -15,11 +15,12 @@ body = re.sub(r"<script.*?</script>|<style.*?</style>", "", body, flags=re.S)
 links = []
 for m in re.finditer(r'href="([^"]*Regulant%20List/([^"/]+\.txt))"', body):
     if m.group(2) not in [f for _, f in links]: links.append((m.group(1), m.group(2)))
-# labels: the page lists "<code> <occupation name>" entries, e.g. "0401 APELSCIDLA Architect"
-txt = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", body)))
+# labels: each list is `<li><a href=".../0401__crnt.txt">0401</a> APELSCIDLA Architect</li>`; keyed by FILE STEM ("0401__crnt"), so the sub-lists of one code
+# (0225a / 0225o / 0225p / 0225s, 1301b / 1301mb, 4001c / 4001g / 4001l, ...) each keep their own name.
 labels = {}
-for m in re.finditer(r"\b(\d{4}(?:[a-z]+)?)\s+((?:\([A-Z]+\)\s+)?[A-Z][A-Za-z&'/\-,\. ()]+?)(?=\s+\d{4}\b|\s+Board\b|\s+Businesses:|\s+Individuals:|$)", txt):
-    labels.setdefault(m.group(1), m.group(2).strip())
+for m in re.finditer(r'<li>\s*<a href="[^"]*Regulant%20List/([^"/]+)\.txt"[^>]*>[^<]*</a>\s*([^<]*)</li>', body):
+    name = re.sub(r"\s+", " ", html.unescape(m.group(2))).strip()
+    if name: labels[m.group(1)] = name
 print(len(links), "files listed;", len(labels), "labels read")
 json.dump(labels, open(os.path.join(out, "labels.json"), "w"), indent=1)
 done = 0

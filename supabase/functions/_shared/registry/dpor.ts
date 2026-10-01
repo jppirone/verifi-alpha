@@ -2,7 +2,8 @@
 // Source: https://www.dpor.virginia.gov/RegulantLists, the Board's own free downloads: ~180 ASCII tab-delimited files, one per occupation (architect, professional
 // engineer, real estate broker/salesperson, contractor classes, cosmetologist, barber, home inspector, auctioneer, ...), "provided free of charge", updated about every
 // 5 business days, phone numbers not included. Health professions (nurses, physicians) are NOT here: Virginia's Department of Health Professions sells its data.
-// File names: <code>__crnt.txt (everyone currently licensed) or <code>_act.txt / <code>_inact.txt (real estate lists split by active / inactive).
+// File names: <code>__crnt.txt (everyone currently licensed), <code>_act.txt / <code>_inact.txt (real estate lists split by active / inactive), and
+// <code>_act__crnt.txt / <code>_inact__crnt.txt (an active / inactive split of a current list).
 // Columns: BOARD, OCCUPATION, CERTIFICATE #, INDIVIDUAL NAME ("FIRST [M] LAST", no delimiter), BUSINESS NAME, address lines, CITY, STATE, ZIP..., EXPIRATION DATE,
 // CERTIFICATION DATE, LICENSE RANK, LICENSE SPECIALTY, EMAILADDRESS.
 // NOT kept: every address line, zip, P O box, country / postal code, and the E-MAIL ADDRESS (the files carry real ones; they are never stored). Kept: city and state.
@@ -23,10 +24,14 @@ export function dporPersonName(raw: string): { full: string; first: string; last
 }
 
 export function dporFileInfo(fileName: string): { code: string; variant: "current" | "active" | "inactive" } | null {
-  const m = /^(\d{4}[a-z]*)_(_crnt|act|inact)\.txt$/i.exec(fileName.trim());
-  if (!m) return null;
-  return { code: m[1].toLowerCase(), variant: m[2].toLowerCase() === "_crnt" ? "current" : m[2].toLowerCase() === "act" ? "active" : "inactive" };
+  // 0401__crnt.txt (current) | 0225a_act.txt / 0225a_inact.txt (real estate) | 4001c_act__crnt.txt / 4001c_inact__crnt.txt (an active / inactive split of a current list)
+  const m = /^(\d{4}[a-z]*?)(?:_(act|inact))?(?:__crnt)?\.txt$/i.exec(fileName.trim());
+  if (!m || (!m[2] && !/__crnt\.txt$/i.test(fileName))) return null;
+  return { code: m[1].toLowerCase(), variant: m[2] ? (m[2].toLowerCase() === "act" ? "active" : "inactive") : "current" };
 }
+
+// Three lists the page names in a heading rather than as list items.
+const FALLBACK_LABELS: Record<string, string> = { "2710": "Tradesman (Combined License)", "2801cpg": "Certified Professional Geologist", "2801lpg": "Licensed Professional Geologist" };
 
 export function parseDporFile(text: string, fileName: string, labels: Record<string, string>): { rows: IngestLicense[]; stats: DporStats } {
   const stats: DporStats = { files: 1, rows: 0, individuals: 0, businesses: 0, rejected: 0, rejectedSamples: [], placeBlanked: 0 };
@@ -49,7 +54,8 @@ export function parseDporFile(text: string, fileName: string, labels: Record<str
     const person = personRaw ? dporPersonName(personRaw) : null;
     if (personRaw && !person) { stats.rejected++; continue; }
     const city = placeOrNull(r[c.city]); if (cleanStr(r[c.city]) && !city) stats.placeBlanked++;
-    const label = labels[info.code] ?? labels[code] ?? `Virginia DPOR occupation ${info.code}`;
+    const stem = fileName.replace(/\.txt$/i, "");
+    const label = labels[stem] ?? labels[info.code] ?? FALLBACK_LABELS[info.code] ?? labels[code] ?? `Virginia DPOR occupation ${info.code}`;
     const rank = cleanStr(r[c.rank]), spec = cleanStr(r[c.spec]);
     const record: LicenseRecord = {
       license_holder_name: person ? person.full : bizRaw!, holder_kind: (person ? "individual" : "business") as HolderKind, license_number: no,

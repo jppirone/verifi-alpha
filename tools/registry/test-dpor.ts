@@ -8,7 +8,8 @@ import { licenseProblems } from "../../supabase/functions/_shared/registry/schem
 import { containsEmail } from "../../supabase/functions/_shared/registry/normalize.ts";
 
 assert.deepEqual(dporFileInfo("0401__crnt.txt"), { code: "0401", variant: "current" }); assert.deepEqual(dporFileInfo("0225a_act.txt"), { code: "0225a", variant: "active" });
-assert.deepEqual(dporFileInfo("0225o_inact.txt"), { code: "0225o", variant: "inactive" }); assert.deepEqual(dporFileInfo("1301bbi__crnt.txt"), { code: "1301bbi", variant: "current" }); assert.equal(dporFileInfo("readme.txt"), null);
+assert.deepEqual(dporFileInfo("0225o_inact.txt"), { code: "0225o", variant: "inactive" }); assert.deepEqual(dporFileInfo("1301bbi__crnt.txt"), { code: "1301bbi", variant: "current" }); assert.deepEqual(dporFileInfo("4001c_act__crnt.txt"), { code: "4001c", variant: "active" }); assert.deepEqual(dporFileInfo("4001l_inact__crnt.txt"), { code: "4001l", variant: "inactive" });
+assert.equal(dporFileInfo("readme.txt"), null); assert.equal(dporFileInfo("0401.txt"), null);
 assert.deepEqual(dporPersonName("CHARLES H CHAMBERLAYNE "), { full: "CHARLES H CHAMBERLAYNE", first: "CHARLES", last: "CHAMBERLAYNE" });
 assert.deepEqual(dporPersonName("J A FITZGERALD"), { full: "J A FITZGERALD", first: "J", last: "FITZGERALD" }); assert.equal(dporPersonName("JOHN SMITH JR")!.last, "SMITH"); assert.equal(dporPersonName("MADONNA"), null);
 
