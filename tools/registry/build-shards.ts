@@ -1,5 +1,6 @@
 // Builds the sharded Parquet files for a file-based source from its ORIGINAL downloaded files (same parsers the live checks use).
 //   node tools/registry/build-shards.ts <source: ca-dca|mi-lara> <outDir> <inputDir> <file> [file ...]
+//   node tools/registry/build-shards.ts ca-cslb <outDir> <inputDir> license_master.csv personnel.csv   (the two CSLB files are parsed TOGETHER)
 // Output: <outDir>/<source>/name/xx.parquet, <outDir>/<source>/num/hh.parquet, <outDir>/<source>/manifest.json (with per-board /
 // license-type / status fingerprints and the per-input parse statistics).
 //
@@ -16,6 +17,7 @@ import path from "node:path";
 import zlib from "node:zlib";
 import { parquetWriteBuffer } from "hyparquet-writer";
 import { parseCaDcaTsv } from "../../supabase/functions/_shared/registry/ca-dca.ts";
+import { parseCslb } from "../../supabase/functions/_shared/registry/cslb.ts";
 import { parseMichiganTsv } from "../../supabase/functions/_shared/registry/michigan.ts";
 import type { IngestLicense, ParseStats } from "../../supabase/functions/_shared/registry/ca-dca.ts";
 import { licenseProblems } from "../../supabase/functions/_shared/registry/schema.ts";
@@ -27,6 +29,7 @@ setSha256((x) => crypto.createHash("sha256").update(x).digest("hex"));
 const [sourceId, outDir, inDir, ...files] = process.argv.slice(2);
 if (!sourceId || !outDir || !inDir || files.length === 0) { console.error("usage: build-shards.ts <ca-dca|mi-lara> <outDir> <inputDir> <file...>"); process.exit(2); }
 
+const CSLB = sourceId === "ca-cslb";
 const parseText = (text: string): { rows: IngestLicense[]; stats: ParseStats } =>
   sourceId === "ca-dca" ? parseCaDcaTsv(text) : sourceId === "mi-lara" ? parseMichiganTsv(text) : (() => { throw new Error("unknown source " + sourceId); })();
 const encodingFor = (f: string): BufferEncoding => (sourceId === "mi-lara" || f.endsWith(".tsv") ? "utf8" : "latin1");
@@ -54,7 +57,37 @@ const inputs: Array<Record<string, unknown>> = [];
 const pre = new Map<string, number>(); // `${board}|${license_type}` -> rows parsed before de-duplication
 let piiHits = 0, invalid = 0, parsedTotal = 0, placeBlankedTotal = 0;
 const CHUNK = 40_000;
-for (const f of files) {
+// One batch of parsed records through the PII gate, the schema check and the spill (shared by the line-chunked sources and CSLB).
+const consume = (rows: IngestLicense[]) => {
+  for (const p of rows) {
+    const r = p.record;
+    if (licenseProblems(r).length) { invalid++; continue; }
+    const k = `${r.board_agency}|${r.license_type ?? ""}`;
+    pre.set(k, (pre.get(k) ?? 0) + 1);
+    const texts = [r.license_holder_name, r.license_number, r.license_type, ...Object.values(r.details ?? {})];
+    const place = [r.details?.city, r.details?.county];
+    if (texts.some((t) => containsEmail(t)) || place.some((t) => typeof t === "string" && looksLikeStreetAddress(t))) { piiHits++; continue; }
+    const row: SpillRow = {
+      _name: nameKey(r.license_holder_name), _rk: p.record_key,
+      last_key: p.last_name ? nameKey(p.last_name) : null, first_key: p.first_name ? nameKey(p.first_name) : null,
+      license_holder_name: r.license_holder_name, holder_kind: r.holder_kind, license_number: r.license_number, license_type: r.license_type,
+      status: r.status, status_raw: r.status_raw, issue_date: r.issue_date, expiration_date: r.expiration_date, state: r.state,
+      board_agency: r.board_agency, source: r.source, details: JSON.stringify(r.details ?? {}),
+    };
+    spill("name/" + nameShardStem(nameShardKeyFor({ holder_kind: row.holder_kind!, last_key: row.last_key, name_key: row._name })), row);
+    spill("num/" + numberShardStem(row.license_number!), row);
+  }
+};
+if (CSLB) {
+  const [mf, pf] = files; if (!mf || !pf) { console.error("ca-cslb needs: license_master.csv personnel.csv"); process.exit(2); }
+  const mraw = fs.readFileSync(path.join(inDir, mf)), praw = fs.readFileSync(path.join(inDir, pf));
+  const { rows, stats } = parseCslb(mraw.toString("latin1"), praw.toString("latin1"));
+  consume(rows);
+  parsedTotal += rows.length; flush();
+  inputs.push({ file: mf, sha256: crypto.createHash("sha256").update(mraw).digest("hex"), bytes: mraw.length, parsed: stats.businessRows }, { file: pf, sha256: crypto.createHash("sha256").update(praw).digest("hex"), bytes: praw.length, parsed: stats.personRows, cslb_stats: stats });
+  console.log(`  parsed CSLB: ${stats.licenses} licenses -> ${stats.businessRows} business rows + ${stats.personRows} person rows (personnel: ${stats.personnelHistorical} historical, ${stats.personnelNonPerson} non-person, ${stats.personnelRows} total); ${stats.rejected} rejected`);
+}
+for (const f of CSLB ? [] : files) {
   const raw = fs.readFileSync(path.join(inDir, f));
   const sha256 = crypto.createHash("sha256").update(raw).digest("hex");
   const lines = raw.toString(encodingFor(f)).split(/\r?\n/);

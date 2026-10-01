@@ -172,6 +172,20 @@ LICENSE_PROFILES["ny-dos-appearance"] = {
   coverage: "ACTIVE cosmetology, nail, esthetics, waxing, natural hair styling and barber licenses issued by the New York Department of State",
   activeText: [], deadText: [], lapsedText: [],
 };
+// California CSLB (contractors), loaded from the Board's free License Master + Personnel files (2026-10-01). Rows: the licensed BUSINESS and each person currently
+// associated with it. Clean only when PrimaryStatus is bare CLEAR with no secondary status. Even a suspension is held, not treated as a definitive negative: CSLB
+// suspensions are mostly administrative (bond, workers' compensation, insurance) and cured within days, and this list is only as fresh as our last manual load.
+LICENSE_PROFILES["ca-cslb"] = {
+  source_id: "ca-cslb", state: "CA", completeness: "active_only", refresh: "monthly", numberScope: "shared", collapseAcrossTypes: true, lapsedIsDefinitive: false,
+  coverage: "contractor licenses currently in force (or suspended) on the California Contractors State License Board's public License Master, and the people associated with them, as of the latest load; cancelled, revoked and expired licenses are not in it",
+  activeText: [], deadText: [], lapsedText: [],
+  classify: (r) => (lc(r.status_raw) === "clear" ? "active" : "indeterminate"),
+  activeHold: (r) => {
+    const d = (r.details as Record<string, unknown> | undefined) ?? {};
+    if (d.qualifier === false) return "listed as an officer or member of the licensed business, not as its qualifying individual";
+    return d.discipline === true ? "a disciplinary case is on record" : null;
+  },
+};
 LICENSE_PROFILES["ny-dos-appraiser"] = {
   source_id: "ny-dos-appraiser", state: "NY", completeness: "active_only", refresh: "daily", numberScope: "unique", collapseAcrossTypes: false, lapsedIsDefinitive: true, nameOrder: "last_first", implicitActive: true,
   coverage: "CURRENTLY licensed real estate appraisers (trainee, licensed, certified residential and certified general) issued by the New York Department of State",
@@ -197,9 +211,9 @@ LICENSE_PROFILES["wa-cpa"] = {
   // indeterminate: ConvertedToCPA (moved to a new credential), the non-CPA firm-owner registration
 };
 
-export const STATE_SOURCES: Record<string, string[]> = { CO: ["co-dora"], CT: ["ct-dcp"], IL: ["il-idfpr"], WA: ["wa-doh", "wa-lni", "wa-cpa"], DE: ["de-dpr"], CA: ["ca-dca"], MI: ["mi-lara"], TX: ["tx-bon-rn", "tx-bon-vn", "tx-trec"], NY: ["ny-dos-re", "ny-dos-appearance", "ny-dos-appraiser"], OR: ["or-bcd", "or-ccb"] };
+export const STATE_SOURCES: Record<string, string[]> = { CO: ["co-dora"], CT: ["ct-dcp"], IL: ["il-idfpr"], WA: ["wa-doh", "wa-lni", "wa-cpa"], DE: ["de-dpr"], CA: ["ca-dca", "ca-cslb"], MI: ["mi-lara"], TX: ["tx-bon-rn", "tx-bon-vn", "tx-trec"], NY: ["ny-dos-re", "ny-dos-appearance", "ny-dos-appraiser"], OR: ["or-bcd", "or-ccb"] };
 export const STATE_LABELS_SHORT: Record<string, string> = {
-  CO: "Colorado DORA", CT: "Connecticut DCP eLicense", IL: "Illinois IDFPR", WA: "Washington DOH / L&I / CPA", DE: "Delaware DPR", CA: "California DCA", MI: "Michigan LARA", TX: "Texas Board of Nursing / TREC", NY: "New York DOS", OR: "Oregon BCD / CCB",
+  CO: "Colorado DORA", CT: "Connecticut DCP eLicense", IL: "Illinois IDFPR", WA: "Washington DOH / L&I / CPA", DE: "Delaware DPR", CA: "California DCA / CSLB", MI: "Michigan LARA", TX: "Texas Board of Nursing / TREC", NY: "New York DOS", OR: "Oregon BCD / CCB",
 };
 
 // ---- standing

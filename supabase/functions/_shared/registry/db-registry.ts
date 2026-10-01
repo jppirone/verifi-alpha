@@ -17,10 +17,11 @@ export const DB_BUSINESS_META: DbSourceMeta[] = [
 ];
 export const DB_LICENSE_META: DbSourceMeta[] = [
   { id: "ca-dca", label: "California Department of Consumer Affairs — monthly licensee lists", state: "CA", source_dataset: "dca.ca.gov/consumers/public_info (monthly licensee lists)", board_agency: "DCA boards" },
+  { id: "ca-cslb", label: "California Contractors State License Board — License Master + Personnel files", state: "CA", source_dataset: "cslb.ca.gov/OnlineServices/DataPortal (License Master + Personnel files)", board_agency: "Contractors State License Board" },
   { id: "mi-lara", label: "Michigan LARA — license lists", state: "MI", source_dataset: "michigan.gov/lara BPL license lists (MiPLUS FOIA reports)", board_agency: "LARA" },
   { id: "fl-doh", label: "Florida Department of Health — MQA bulk data", state: "FL", source_dataset: "Florida DOH MQA bulk data", board_agency: "DOH MQA" },
 ];
-export const STORAGE_LICENSE_SOURCES = new Set(["ca-dca", "mi-lara"]);
+export const STORAGE_LICENSE_SOURCES = new Set(["ca-dca", "ca-cslb", "mi-lara"]);
 
 export interface LoadedRun { source_id: string; kind: string; file_name: string | null; finished_at: string | null; rows_upserted: number; note: string | null }
 
