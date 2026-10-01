@@ -25,6 +25,9 @@ const cases: Array<[string, Record<string, unknown>]> = [
   ["LICENSE CA individual by first+last", { kind: "license", first_name: "Maryam", last_name: "Rahnema", states: ["CA"], limit: 3 }],
   ["LICENSE CA by number (Psychologist 10000)", { kind: "license", license_number: "10000", states: ["CA"], limit: 3 }],
   ["LICENSE business name (IL / WA)", { kind: "license", business_name: "NATIONAL UNIVERSITY OF HEALTH SCIENCES", limit: 2 }],
+  ["LICENSE Delaware (live Socrata, public roster)", { kind: "license", first_name: "Mark", last_name: "Schlangel", states: ["DE"], limit: 3 }],
+  ["LICENSE Delaware by number", { kind: "license", license_number: "M9-0012482", states: ["DE"], limit: 3 }],
+  ["LICENSE Michigan (ingested Real Estate group)", { kind: "license", business_name: "East Central LLC", states: ["MI"], limit: 3 }],
   ["LICENSE nonsense name -> honest empty, not an error", { kind: "license", name: "Zzqxv Plmnbv", limit: 3 }],
 ];
 for (const [title, body] of cases) show(title, await lookup(body));
