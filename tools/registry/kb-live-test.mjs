@@ -126,3 +126,29 @@ if (phase === "g") {
   for (const h of j.hits.slice(0, 2)) console.log(`   ${h.record.entity_name} [${h.record.entity_id}] status=${h.record.status} status_raw=${h.record.status_raw} registered=${h.record.registration_date}\n   details=${JSON.stringify(h.record.details)}`);
   const r2 = j.reports.find((x) => x.source_id === "pa-dos"); console.log(`   dedup evidence: raw_rows=${r2.raw_rows} entities=${r2.entities} (one row per officer collapsed to one entity)`);
 }
+
+if (phase === "h") {
+  const show = (r) => console.log(`        status=${r.entity?.status} (${r.entity?.status_raw}) source_completeness=${r.entity?.source_completeness} stale_after_days=${r.entity?.stale_after_days} operating_status=${r.operating_status} confirmation_required=${r.operating_status_confirmation_required} manual=${r.manual_verification_required}`);
+  console.log("== H1. Texas (Comptroller franchise-tax list, active_only coverage): real employers; first lookup = miss -> live; repeat = hit");
+  for (const n of ["Texas Instruments Incorporated", "Southwest Airlines Co.", "Dell Technologies Inc.", "Valero Energy Corporation", "Exxon Mobil Corporation", "AT&T Inc.", "Tesla, Inc.", "Halliburton Company", "Mary Kay Inc.", "Southwest Airlines Co."]) line(JSON.stringify(n), await kb({ name: n, state: "TX" }));
+  const one = await kb({ name: "Halliburton Company", state: "TX" }); console.log("   the cached answer for Halliburton:"); line("Halliburton Company (repeat)", one); show(one); console.log(`        message: ${one.message}`);
+
+  console.log("\n== H2. CONFIRMED-DEFUNCT employers (RadioShack: liquidated 2015; Enron: bankrupt 2001; Compaq: merged into HP 2002; Stanford Financial Group: receivership 2009; Blockbuster LLC): expected ABSENT from an open-account list");
+  for (const n of ["RadioShack Corporation", "Enron Corp.", "Compaq Computer Corporation", "Stanford Financial Group Company", "Blockbuster LLC"]) { const r = await kb({ name: n, state: "TX" }); line(JSON.stringify(n), r); console.log(`        ${r.message}`); }
+
+  console.log("\n== H3. a FORFEITED entity (SOS: forfeited franchise tax; right to transact: forfeited): must come back delinquent, never 'active', and never say 'active today'");
+  for (const n of ["ACME FLOORZ INC", "ACME EQUITIES, INC"]) { const r = await kb({ name: n, state: "TX" }); line(JSON.stringify(n), r); show(r); console.log(`        message: ${r.message}`); }
+
+  console.log("\n== H4. a row with NO SOS file number and 'franchise tax not established' = status UNKNOWN -> routes to staff like Pennsylvania");
+  const x = await kb({ name: "ACME HOLDING COMPANY", state: "TX" }); line("ACME HOLDING COMPANY", x); show(x); console.log(`        message: ${x.message}`);
+
+  console.log("\n== H5. a name shared by many real entities: never guessed");
+  const amb = await kb({ name: "Trinity Lutheran Church", state: "TX" }); line("Trinity Lutheran Church", amb); console.log(`        ${amb.message}`);
+
+  console.log("\n== H6. a miss");
+  const m = await kb({ name: "Zzqxv Nonexistent Holdings LLC", state: "TX" }); line("Zzqxv Nonexistent Holdings LLC (TX)", m); console.log(`        ${m.message}`);
+
+  console.log("\n== H7. other registries unaffected");
+  for (const [n, st] of [["Ball Corporation", "CO"], ["Nike, Inc.", "OR"], ["Comcast Corporation", "PA"]]) { const r = await kb({ name: n, state: st }); line(`${n} (${st})`, r); show(r); }
+  console.log("\n== H8. stats"); console.log(JSON.stringify((await kb({ action: "stats" })).stats));
+}
