@@ -186,6 +186,14 @@ LICENSE_PROFILES["ca-cslb"] = {
     return d.discipline === true ? "a disciplinary case is on record" : null;
   },
 };
+// California Department of Real Estate (2026-10-01): the DRE's free daily "Licensee List" (CurrList.csv), loaded manually into storage. CURRENT licensees only (no expired,
+// revoked or surrendered). "Licensed" is the clean text; "Licensed NBA" (no broker association: licensed but not able to act) and any restricted license are held.
+LICENSE_PROFILES["ca-dre"] = {
+  source_id: "ca-dre", state: "CA", completeness: "active_only", refresh: "monthly", numberScope: "shared", collapseAcrossTypes: true, lapsedIsDefinitive: false, padNumbersTo: [8],
+  coverage: "real estate salesperson, broker and corporate broker licenses issued by the California Department of Real Estate that are current as of the latest load; expired, revoked and surrendered licenses are not in it (mortgage loan originators, appraisers and other licenses are separate)",
+  activeText: ["licensed"], deadText: [], lapsedText: [],
+  activeHold: (r) => ((r.details as Record<string, unknown> | undefined)?.restricted === true ? "the license is restricted (restricted-license flag on the DRE list)" : null),
+};
 LICENSE_PROFILES["ny-dos-appraiser"] = {
   source_id: "ny-dos-appraiser", state: "NY", completeness: "active_only", refresh: "daily", numberScope: "unique", collapseAcrossTypes: false, lapsedIsDefinitive: true, nameOrder: "last_first", implicitActive: true,
   coverage: "CURRENTLY licensed real estate appraisers (trainee, licensed, certified residential and certified general) issued by the New York Department of State",
@@ -211,9 +219,9 @@ LICENSE_PROFILES["wa-cpa"] = {
   // indeterminate: ConvertedToCPA (moved to a new credential), the non-CPA firm-owner registration
 };
 
-export const STATE_SOURCES: Record<string, string[]> = { CO: ["co-dora"], CT: ["ct-dcp"], IL: ["il-idfpr"], WA: ["wa-doh", "wa-lni", "wa-cpa"], DE: ["de-dpr"], CA: ["ca-dca", "ca-cslb"], MI: ["mi-lara"], TX: ["tx-bon-rn", "tx-bon-vn", "tx-trec"], NY: ["ny-dos-re", "ny-dos-appearance", "ny-dos-appraiser"], OR: ["or-bcd", "or-ccb"] };
+export const STATE_SOURCES: Record<string, string[]> = { CO: ["co-dora"], CT: ["ct-dcp"], IL: ["il-idfpr"], WA: ["wa-doh", "wa-lni", "wa-cpa"], DE: ["de-dpr"], CA: ["ca-dca", "ca-cslb", "ca-dre"], MI: ["mi-lara"], TX: ["tx-bon-rn", "tx-bon-vn", "tx-trec"], NY: ["ny-dos-re", "ny-dos-appearance", "ny-dos-appraiser"], OR: ["or-bcd", "or-ccb"] };
 export const STATE_LABELS_SHORT: Record<string, string> = {
-  CO: "Colorado DORA", CT: "Connecticut DCP eLicense", IL: "Illinois IDFPR", WA: "Washington DOH / L&I / CPA", DE: "Delaware DPR", CA: "California DCA / CSLB", MI: "Michigan LARA", TX: "Texas Board of Nursing / TREC", NY: "New York DOS", OR: "Oregon BCD / CCB",
+  CO: "Colorado DORA", CT: "Connecticut DCP eLicense", IL: "Illinois IDFPR", WA: "Washington DOH / L&I / CPA", DE: "Delaware DPR", CA: "California DCA / CSLB / DRE", MI: "Michigan LARA", TX: "Texas Board of Nursing / TREC", NY: "New York DOS", OR: "Oregon BCD / CCB",
 };
 
 // ---- standing

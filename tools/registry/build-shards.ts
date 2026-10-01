@@ -17,6 +17,7 @@ import path from "node:path";
 import zlib from "node:zlib";
 import { parquetWriteBuffer } from "hyparquet-writer";
 import { parseCaDcaTsv } from "../../supabase/functions/_shared/registry/ca-dca.ts";
+import { parseDre } from "../../supabase/functions/_shared/registry/dre.ts";
 import { parseCslb } from "../../supabase/functions/_shared/registry/cslb.ts";
 import { parseMichiganTsv } from "../../supabase/functions/_shared/registry/michigan.ts";
 import type { IngestLicense, ParseStats } from "../../supabase/functions/_shared/registry/ca-dca.ts";
@@ -30,6 +31,7 @@ const [sourceId, outDir, inDir, ...files] = process.argv.slice(2);
 if (!sourceId || !outDir || !inDir || files.length === 0) { console.error("usage: build-shards.ts <ca-dca|mi-lara> <outDir> <inputDir> <file...>"); process.exit(2); }
 
 const CSLB = sourceId === "ca-cslb";
+const DRE = sourceId === "ca-dre";
 const parseText = (text: string): { rows: IngestLicense[]; stats: ParseStats } =>
   sourceId === "ca-dca" ? parseCaDcaTsv(text) : sourceId === "mi-lara" ? parseMichiganTsv(text) : (() => { throw new Error("unknown source " + sourceId); })();
 const encodingFor = (f: string): BufferEncoding => (sourceId === "mi-lara" || f.endsWith(".tsv") ? "utf8" : "latin1");
@@ -87,7 +89,16 @@ if (CSLB) {
   inputs.push({ file: mf, sha256: crypto.createHash("sha256").update(mraw).digest("hex"), bytes: mraw.length, parsed: stats.businessRows }, { file: pf, sha256: crypto.createHash("sha256").update(praw).digest("hex"), bytes: praw.length, parsed: stats.personRows, cslb_stats: stats });
   console.log(`  parsed CSLB: ${stats.licenses} licenses -> ${stats.businessRows} business rows + ${stats.personRows} person rows (personnel: ${stats.personnelHistorical} historical, ${stats.personnelNonPerson} non-person, ${stats.personnelRows} total); ${stats.rejected} rejected`);
 }
-for (const f of CSLB ? [] : files) {
+if (DRE) {
+  const [df] = files; if (!df) { console.error("ca-dre needs: CurrList.csv"); process.exit(2); }
+  const draw = fs.readFileSync(path.join(inDir, df));
+  const { rows, stats } = parseDre(draw.toString("latin1"));
+  consume(rows);
+  parsedTotal += rows.length; flush();
+  inputs.push({ file: df, sha256: crypto.createHash("sha256").update(draw).digest("hex"), bytes: draw.length, parsed: stats.rows, dre_stats: stats });
+  console.log(`  parsed DRE: ${stats.rows} rows (${stats.individuals} individuals, ${stats.businesses} corporations), ${stats.rejected} rejected`);
+}
+for (const f of CSLB || DRE ? [] : files) {
   const raw = fs.readFileSync(path.join(inDir, f));
   const sha256 = crypto.createHash("sha256").update(raw).digest("hex");
   const lines = raw.toString(encodingFor(f)).split(/\r?\n/);
