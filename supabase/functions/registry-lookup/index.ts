@@ -14,8 +14,9 @@ import { authenticateRegistryCaller } from "../_shared/registry/auth.ts";
 // One request shape, one response shape, every source. Body (JSON):
 //   { kind: "business" | "license", staff_session_token?,
 //     name?, entity_id?                                        (business)
-//     name?, first_name?, last_name?, business_name?, license_number?   (license)
-//     states?: ["CO", ...], sources?: ["co-sos", ...], limit?, include_people? }
+//     name?, first_name?, last_name?, business_name?, license_number?, license_type?   (license; license_type narrows by licence-type text,
+//        case-insensitive contains, applied BEFORE the 50-result cap -- use it to narrow a capped common-name search)
+//     states: ["CO", ...]  (REQUIRED unless all_states: true -- see the egress rule below), sources?: ["co-sos", ...], limit?, include_people? }
 // Response: { ok, kind, hits: [{source_id, match_type, record}], reports: [per-source status], not_loaded: [...], verification: {...} }.
 // `verification` is the staff-facing answer: status + message saying whether the record must be checked by hand. An empty result is
 // NEVER returned silently: no match, a failed source, and a state with no automated source each say so explicitly.
@@ -49,6 +50,12 @@ export default {
     const storageLoaded = new Set(runs.filter((r) => r.note === "storage").map((r) => r.source_id));
     const dbs = dbSources(db, new Set(runs.map((r) => r.source_id)), { baseUrl: SUPABASE_URL, serviceKey: SERVICE_KEY, readParquet }, storageLoaded);
     const common = { states: strArr(body.states), sources: strArr(body.sources), limit };
+    // EGRESS RULE (2026-10-01): every lookup is scoped by the candidate's stated state(s). A lookup with no state used to fan out to every
+    // source (reading a California shard AND a Michigan shard AND every live registry); that is refused unless the caller explicitly opts in
+    // with all_states: true (a deliberate staff cross-state search), so cross-state reads never happen by default.
+    if ((!common.states || common.states.length === 0) && body.all_states !== true) {
+      return json({ ok: false, error: "states_required", message: "Pass the candidate's state(s) as states: [\"CO\", ...]. A lookup with no state is refused so it never reads every state's data by default; set all_states: true only for a deliberate cross-state search." }, 400);
+    }
     try {
       if (kind === "business") {
         const name = str(body.name), entity_id = str(body.entity_id, 80);
@@ -59,7 +66,7 @@ export default {
         const verification = summarizeVerification({ hitCount: r.hits.length, reports: r.reports, notLoaded, requestedStates: common.states, coveredStates: all.map((s) => s.state) });
         return json({ ok: true, kind, ...r, not_loaded: notLoaded, loaded: runs.filter((x) => x.kind === "business"), verification });
       }
-      const q = { name: str(body.name), first_name: str(body.first_name, 80), last_name: str(body.last_name, 80), business_name: str(body.business_name), license_number: str(body.license_number, 80) };
+      const q = { name: str(body.name), first_name: str(body.first_name, 80), last_name: str(body.last_name, 80), business_name: str(body.business_name), license_number: str(body.license_number, 80), license_type: str(body.license_type, 80) };
       if (!q.name && !q.business_name && !(q.first_name && q.last_name) && !q.license_number) return json({ ok: false, error: "name_or_license_number_required" }, 400);
       const all = [...socrataLicenseSources(APP_TOKEN), ...dbs.license];
       const r = await lookupLicense(all, { ...common, ...q });

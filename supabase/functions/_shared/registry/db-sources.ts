@@ -69,6 +69,8 @@ export function makeDbLicenseSource(meta: DbSourceMeta, db: DbAccess): LicenseSo
       }
       if (iq.business) queries.push(`${base}&name_key=${likeValue(mode, nameKey(iq.business))}&limit=${limit}`);
       if (iq.number) queries.push(`${base}&license_number=eq.${enc(iq.number)}&limit=${limit}`);
+      const typeFilter = cleanStr(q.license_type);
+      if (typeFilter) for (let i = 0; i < queries.length; i++) queries[i] += `&license_type=ilike.${enc("*" + stripWildcards(typeFilter) + "*")}`;
       if (queries.length === 0) return { ok: false, source: meta.source_dataset, error: "empty_or_invalid_query" };
       const seen = new Set<string>();
       const records: LicenseRecord[] = [];

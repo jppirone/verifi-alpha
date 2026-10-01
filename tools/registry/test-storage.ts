@@ -67,3 +67,16 @@ const ca = makeStorageLicenseSource({ id: "ca-dca", label: "x", state: "CA", sou
 const one = await ca.search({ business_name: "A", limit: 5 }, "prefix");
 assert.ok(one.ok || one.error === "empty_or_invalid_query");
 console.log(`storage source: ${checks} assertions on real data passed; missing shard -> empty; corrupt shard -> storage_error`);
+
+// license_type narrowing filter (case-insensitive "contains"), applied before the result cap
+{
+  const ca = makeStorageLicenseSource({ id: "ca-dca", label: "ca", state: "CA", source_dataset: "ca" }, access());
+  const rec = sources["ca-dca"].rows.find((r) => r.first_name && r.last_name && r.record.license_type)!;
+  const type = rec.record.license_type!;
+  const withType = await ca.search({ first_name: rec.first_name!, last_name: rec.last_name!, license_type: type.toLowerCase().slice(0, Math.max(4, type.length - 2)), limit: 100 }, "exact");
+  assert.ok(withType.ok && withType.records.some((x) => x.license_number === rec.record.license_number), "type filter keeps the matching record");
+  assert.ok(withType.ok && withType.records.every((x) => (x.license_type ?? "").toLowerCase().includes(type.toLowerCase().slice(0, Math.max(4, type.length - 2)))), "every returned record matches the type filter");
+  const none = await ca.search({ first_name: rec.first_name!, last_name: rec.last_name!, license_type: "zzz-no-such-license-type", limit: 100 }, "exact");
+  assert.ok(none.ok && none.records.length === 0, "a type that matches nothing returns nothing");
+  console.log("license_type filter: keeps matching records, drops the rest, and a non-matching type returns nothing");
+}

@@ -30,6 +30,7 @@ export interface LicenseQuery {
   last_name?: string;
   business_name?: string;
   license_number?: string;
+  license_type?: string; // optional narrowing filter: case-insensitive "contains" match on the licence type text (e.g. "Manicurist")
   limit?: number;
 }
 

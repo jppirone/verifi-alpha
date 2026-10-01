@@ -27,7 +27,7 @@ export interface SourceReport {
 export interface Hit<T> { source_id: string; match_type: MatchType; name_match?: boolean; record: T }
 
 export interface BusinessLookup { name?: string; entity_id?: string; states?: string[]; sources?: string[]; limit?: number; include_people?: boolean }
-export interface LicenseLookupReq { name?: string; first_name?: string; last_name?: string; business_name?: string; license_number?: string; states?: string[]; sources?: string[]; limit?: number }
+export interface LicenseLookupReq { name?: string; first_name?: string; last_name?: string; business_name?: string; license_number?: string; license_type?: string; states?: string[]; sources?: string[]; limit?: number }
 
 const PER_SOURCE_TIMEOUT_MS = 45_000;
 
@@ -83,7 +83,7 @@ export async function lookupLicense(all: LicenseSource[], req: LicenseLookupReq)
     const base = { source_id: s.id, label: s.label, state: s.state, kind: s.kind, source_dataset: s.source_dataset };
     const failed = (o: Extract<Outcome<LicenseRecord>, { ok: false }>) => ({ hits: [] as Hit<LicenseRecord>[], report: { ...base, ok: false, count: 0, ms: Date.now() - t0, error: o.error, detail: o.detail } as SourceReport });
     const run = (mode: "exact" | "prefix") =>
-      withTimeout(s.search({ name: req.name, first_name: req.first_name, last_name: req.last_name, business_name: req.business_name, license_number: req.license_number, limit: req.limit }, mode),
+      withTimeout(s.search({ name: req.name, first_name: req.first_name, last_name: req.last_name, business_name: req.business_name, license_number: req.license_number, license_type: req.license_type, limit: req.limit }, mode),
         PER_SOURCE_TIMEOUT_MS, () => ({ ok: false as const, source: s.source_dataset, error: "source_timeout" }));
     let match: MatchType = hasNumber && !hasName ? "number" : "exact";
     let out = await run("exact");

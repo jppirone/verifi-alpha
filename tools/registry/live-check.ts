@@ -5,7 +5,7 @@ if (!base || !anon || !token) { console.error("set REGISTRY_URL, SUPABASE_ANON_K
 
 async function lookup(body: Record<string, unknown>) {
   const t = Date.now();
-  const res = await fetch(`${base}/functions/v1/registry-lookup`, { method: "POST", headers: { "Content-Type": "application/json", apikey: anon!, Authorization: `Bearer ${anon}` }, body: JSON.stringify({ ...body, staff_session_token: token }) });
+  const res = await fetch(`${base}/functions/v1/registry-lookup`, { method: "POST", headers: { "Content-Type": "application/json", apikey: anon!, Authorization: `Bearer ${anon}` }, body: JSON.stringify({ ...(body.states ? {} : { all_states: true }), ...body, staff_session_token: token }) });
   return { status: res.status, ms: Date.now() - t, json: await res.json().catch(() => null) };
 }
 function show(title: string, r: { status: number; ms: number; json: any }, perSource = 1) {

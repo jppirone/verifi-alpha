@@ -24,7 +24,7 @@ for (let i = 0; i < rows.length; i += step) {
 battery.push({ first_name: "Zzqxv", last_name: "Plmnbvq" }, { license_number: "NO-SUCH-NUMBER-0000" });
 
 async function ask(q: Record<string, unknown>) {
-  const res = await fetch(`${base}/functions/v1/registry-lookup`, { method: "POST", headers: { "Content-Type": "application/json", apikey: anon!, Authorization: `Bearer ${anon}` }, body: JSON.stringify({ kind: "license", sources: [sourceId], limit: 50, staff_session_token: token, ...q }) });
+  const res = await fetch(`${base}/functions/v1/registry-lookup`, { method: "POST", headers: { "Content-Type": "application/json", apikey: anon!, Authorization: `Bearer ${anon}` }, body: JSON.stringify({ kind: "license", sources: [sourceId], states: [sourceId === "ca-dca" ? "CA" : "MI"], limit: 50, staff_session_token: token, ...q }) });
   const j = await res.json();
   assert.ok(j.ok, JSON.stringify(j).slice(0, 300));
   const rep = j.reports.find((x: any) => x.source_id === sourceId);

@@ -12,7 +12,7 @@
 // licensees. The second Washington agency built here is therefore Labor & Industries (contractor licenses, m8qx-ubtq); the
 // Board of Accountancy's CPA roster (6du3-3h9e) is also on the portal and not built.
 
-import { SocrataClient, soqlString, soqlUpperEquals, soqlUpperPrefix } from "./socrata.ts";
+import { SocrataClient, soqlString, soqlUpperContains, soqlUpperEquals, soqlUpperPrefix } from "./socrata.ts";
 import type { LicenseQuery, LicenseSource, MatchMode, Outcome } from "./adapter.ts";
 import type { HolderKind, LicenseRecord } from "./schema.ts";
 import { cleanStr, isoDate, joinName, normalizeLicenseStatus, parsePersonName, stripWildcards } from "./normalize.ts";
@@ -27,6 +27,7 @@ export interface SocrataLicenseSpec {
   domain: string;
   datasetId: string;
   fields: string[];
+  typeField: string; // the dataset column that holds the licence type text (used by the optional license_type narrowing filter)
   orderBy: string;
   // Returns the WHERE for a query in the given match mode, or null when the query has nothing this source can search on.
   whereFor: (q: { person: { first: string; last: string } | null; business: string | null; number: string | null }, mode: MatchMode) => string | null;
@@ -66,8 +67,12 @@ export function makeSocrataLicenseSource(spec: SocrataLicenseSpec, appToken?: st
     id: spec.id, label: spec.label, state: spec.state, board_agency: spec.boardAgency, source_dataset, kind: "socrata",
     async search(q, mode): Promise<Outcome<LicenseRecord>> {
       const t0 = Date.now();
-      const where = spec.whereFor(interpretLicenseQuery(q), mode);
-      if (!where) return { ok: false, source: source_dataset, error: "empty_or_invalid_query" };
+      const base = spec.whereFor(interpretLicenseQuery(q), mode);
+      if (!base) return { ok: false, source: source_dataset, error: "empty_or_invalid_query" };
+      // The licence-type filter is part of the WHERE (not applied after the fact) so it narrows BEFORE the result cap: a capped common-name search
+      // can be narrowed to the one licence type that matters instead of the cap hiding it.
+      const typeFilter = cleanStr(q.license_type);
+      const where = typeFilter ? `(${base}) AND ${soqlUpperContains(spec.typeField, typeFilter)}` : base;
       const r = await client.query<Row>({ select: spec.fields.join(","), where, order: spec.orderBy, limit: Math.min(Math.max(q.limit ?? 25, 1), 100) });
       if (!r.ok) return { ok: false, source: source_dataset, error: r.error, status: r.status, detail: r.detail };
       const records = r.rows.map((row) => spec.map(row, source_dataset)).filter((x): x is LicenseRecord => !!x);
@@ -90,7 +95,7 @@ const eqOrPrefix = (field: string, v: string, mode: MatchMode) => mode === "exac
 const CO_DORA: SocrataLicenseSpec = {
   id: "co-dora", label: "Colorado DORA — Professional and Occupational Licenses", state: "CO",
   boardAgency: "Colorado Department of Regulatory Agencies (DORA)",
-  domain: "data.colorado.gov", datasetId: "7s5z-vewr", orderBy: "lastname, firstname, licensenumber",
+  domain: "data.colorado.gov", datasetId: "7s5z-vewr", typeField: "licensetype", orderBy: "lastname, firstname, licensenumber",
   fields: ["lastname", "firstname", "middlename", "suffix", "entityname", "city", "state", "licensetype", "subcategory", "licensenumber",
     "licensefirstissuedate", "licenseexpirationdate", "licensestatusdescription", "specialty", "linktoverifylicense"],
   whereFor: (q, mode) => anyOf([
@@ -115,7 +120,7 @@ const CO_DORA: SocrataLicenseSpec = {
 const CT_DCP: SocrataLicenseSpec = {
   id: "ct-dcp", label: "Connecticut DCP eLicense — State Licenses and Credentials", state: "CT",
   boardAgency: "Connecticut Department of Consumer Protection (eLicense)",
-  domain: "data.ct.gov", datasetId: "ngch-56tr", orderBy: "name, fullcredentialcode",
+  domain: "data.ct.gov", datasetId: "ngch-56tr", typeField: "credential", orderBy: "name, fullcredentialcode",
   fields: ["credentialid", "name", "type", "businessname", "dba", "fullcredentialcode", "credentialnumber", "credentialtype", "credential",
     "status", "statusreason", "issuedate", "effectivedate", "expirationdate", "city", "state"],
   whereFor: (q, mode) => anyOf([
@@ -142,7 +147,7 @@ const CT_DCP: SocrataLicenseSpec = {
 const IL_IDFPR: SocrataLicenseSpec = {
   id: "il-idfpr", label: "Illinois IDFPR — Professional Licensing", state: "IL",
   boardAgency: "Illinois Department of Financial and Professional Regulation (IDFPR)",
-  domain: "data.illinois.gov", datasetId: "pzzh-kp68", orderBy: "last_name, first_name, license_number",
+  domain: "data.illinois.gov", datasetId: "pzzh-kp68", typeField: "description", orderBy: "last_name, first_name, license_number",
   fields: ["license_type", "description", "license_number", "license_status", "business", "first_name", "middle", "last_name", "suffix", "business_name",
     "businessdba", "original_issue_date", "effective_date", "expiration_date", "city", "state", "ever_disciplined", "specialty_qualifier"],
   whereFor: (q, mode) => anyOf([
@@ -166,7 +171,7 @@ const IL_IDFPR: SocrataLicenseSpec = {
 const WA_DOH: SocrataLicenseSpec = {
   id: "wa-doh", label: "Washington Department of Health — Health Care Provider Credentials", state: "WA",
   boardAgency: "Washington State Department of Health",
-  domain: "data.wa.gov", datasetId: "qxh8-f4bd", orderBy: "lastname, firstname, credentialnumber",
+  domain: "data.wa.gov", datasetId: "qxh8-f4bd", typeField: "credentialtype", orderBy: "lastname, firstname, credentialnumber",
   fields: ["credentialnumber", "lastname", "firstname", "middlename", "credentialtype", "status", "firstissuedate", "lastissuedate", "expirationdate", "actiontaken"],
   whereFor: (q, mode) => anyOf([
     q.person ? `${soqlUpperEquals("lastname", q.person.last)} AND ${eqOrPrefix("firstname", q.person.first, mode)}` : null,
@@ -185,7 +190,7 @@ const WA_DOH: SocrataLicenseSpec = {
 const WA_LNI: SocrataLicenseSpec = {
   id: "wa-lni", label: "Washington Labor & Industries — Contractor Licenses", state: "WA",
   boardAgency: "Washington State Department of Labor & Industries",
-  domain: "data.wa.gov", datasetId: "m8qx-ubtq", orderBy: "businessname, contractorlicensenumber",
+  domain: "data.wa.gov", datasetId: "m8qx-ubtq", typeField: "contractorlicensetypecodedesc", orderBy: "businessname, contractorlicensenumber",
   fields: ["businessname", "contractorlicensenumber", "contractorlicensetypecodedesc", "businesstypecodedesc", "licenseeffectivedate", "licenseexpirationdate",
     "ubi", "primaryprincipalname", "contractorlicensestatus", "city", "state", "specialtycode1desc"],
   whereFor: (q, mode) => anyOf([
@@ -209,7 +214,7 @@ const WA_LNI: SocrataLicenseSpec = {
 const DE_DPR: SocrataLicenseSpec = {
   id: "de-dpr", label: "Delaware Division of Professional Regulation — Professional & Occupational Licensing", state: "DE",
   boardAgency: "Delaware Division of Professional Regulation",
-  domain: "data.delaware.gov", datasetId: "pjnv-eaih", orderBy: "last_name, first_name, license_no",
+  domain: "data.delaware.gov", datasetId: "pjnv-eaih", typeField: "license_type", orderBy: "last_name, first_name, license_no",
   fields: ["last_name", "first_name", "license_no", "profession_id", "license_type", "city", "state", "issue_date", "expiration_date", "license_status"],
   whereFor: (q, mode) => anyOf([
     q.person ? `${soqlUpperEquals("last_name", q.person.last)} AND ${eqOrPrefix("first_name", q.person.first, mode)}` : null,

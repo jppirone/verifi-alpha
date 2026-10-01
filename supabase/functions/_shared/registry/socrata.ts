@@ -47,6 +47,8 @@ export interface SoqlParams {
 // Single-quote doubling, the SQL rule. Every user-supplied value that reaches a $where goes through this first.
 export function soqlString(value: string): string { return "'" + value.replace(/'/g, "''") + "'"; }
 export function soqlUpperEquals(field: string, value: string): string { return `upper(${field}) = ${soqlString(value.toUpperCase())}`; }
+// upper(field) contains value (wildcards in the caller's text are stripped, so a caller cannot widen the match)
+export function soqlUpperContains(field: string, value: string): string { return `upper(${field}) like ${soqlString("%" + value.replace(/[%_]/g, " ").replace(/\s+/g, " ").trim().toUpperCase() + "%")}`; }
 export function soqlUpperPrefix(field: string, value: string): string { return `upper(${field}) like ${soqlString(value.toUpperCase() + "%")}`; }
 
 const RETRY_STATUS = (s: number) => s === 429 || s === 500 || s === 502 || s === 503 || s === 504;

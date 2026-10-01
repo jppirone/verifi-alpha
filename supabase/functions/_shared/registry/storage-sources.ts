@@ -53,22 +53,25 @@ export function makeStorageLicenseSource(meta: DbSourceMeta, st: StorageAccess):
       const t0 = Date.now();
       const iq = interpretLicenseQuery(q);
       const limit = Math.min(Math.max(q.limit ?? 25, 1), 100);
+      // Optional licence-type narrowing (case-insensitive "contains"): applied INSIDE each shard filter, i.e. before the result cap.
+      const typeNeedle = cleanStr(q.license_type) ? nameKey(stripWildcards(q.license_type!)) : null;
+      const typeOk = (r: Record<string, unknown>) => !typeNeedle || nameKey(String(r.license_type ?? "")).includes(typeNeedle);
       const jobs: Array<{ path: string; keep: (r: Record<string, unknown>) => boolean }> = [];
       if (iq.person) {
         const last = nameKey(iq.person.last), first = nameKey(stripWildcards(iq.person.first));
         jobs.push({
           path: namePath(meta.id, nameShardStem(last)),
-          keep: (r) => r.holder_kind === "individual" && r.last_key === last && (mode === "exact" ? r.first_key === first : String(r.first_key ?? "").startsWith(first)),
+          keep: (r) => typeOk(r) && r.holder_kind === "individual" && r.last_key === last && (mode === "exact" ? r.first_key === first : String(r.first_key ?? "").startsWith(first)),
         });
       }
       if (iq.business) {
         const key = nameKey(mode === "prefix" ? stripWildcards(iq.business) : iq.business);
         // A one-character prefix cannot identify a shard; skip rather than scan everything.
-        if (key.length >= 2) jobs.push({ path: namePath(meta.id, nameShardStem(key)), keep: (r) => (mode === "exact" ? nameKey(r.license_holder_name) === key : nameKey(r.license_holder_name).startsWith(key)) });
+        if (key.length >= 2) jobs.push({ path: namePath(meta.id, nameShardStem(key)), keep: (r) => typeOk(r) && (mode === "exact" ? nameKey(r.license_holder_name) === key : nameKey(r.license_holder_name).startsWith(key)) });
       }
       if (iq.number) {
         const num = iq.number.trim();
-        jobs.push({ path: numberPath(meta.id, numberShardStem(num)), keep: (r) => String(r.license_number).toUpperCase() === num.toUpperCase() });
+        jobs.push({ path: numberPath(meta.id, numberShardStem(num)), keep: (r) => typeOk(r) && String(r.license_number).toUpperCase() === num.toUpperCase() });
       }
       if (jobs.length === 0) return { ok: false, source: meta.source_dataset, error: "empty_or_invalid_query" };
       const seen = new Set<string>();

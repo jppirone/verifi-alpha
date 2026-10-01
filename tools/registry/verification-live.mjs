@@ -1,5 +1,5 @@
 // Live check of the manual-verification block (Part 3) against the DEPLOYED registry-lookup. Needs REGISTRY_URL, SUPABASE_ANON_KEY, STAFF_TOKEN.
-const ask = async (body) => { const t = Date.now(); const r = await (await fetch(process.env.REGISTRY_URL + "/functions/v1/registry-lookup", { method: "POST", headers: { "Content-Type": "application/json", apikey: process.env.SUPABASE_ANON_KEY, Authorization: "Bearer " + process.env.SUPABASE_ANON_KEY }, body: JSON.stringify({ staff_session_token: process.env.STAFF_TOKEN, ...body }) })).json(); return { ...r, wall: Date.now() - t }; };
+const ask = async (body) => { const t = Date.now(); const r = await (await fetch(process.env.REGISTRY_URL + "/functions/v1/registry-lookup", { method: "POST", headers: { "Content-Type": "application/json", apikey: process.env.SUPABASE_ANON_KEY, Authorization: "Bearer " + process.env.SUPABASE_ANON_KEY }, body: JSON.stringify({ staff_session_token: process.env.STAFF_TOKEN, ...(body.states ? {} : { all_states: true }), ...body }) })).json(); return { ...r, wall: Date.now() - t }; };
 const cases = [
   ["A. Florida business (no automated source loaded)", { kind: "business", name: "Publix Super Markets", states: ["FL"] }],
   ["B. Florida license (no automated source loaded)", { kind: "license", first_name: "Jane", last_name: "Doe", states: ["FL"] }],

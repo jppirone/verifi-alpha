@@ -49,7 +49,7 @@ export function summarizeVerification(input: {
   const uncovered = requested ? requested.filter((s) => !covered.includes(s)) : [];
   const notLoaded = input.notLoaded.filter((n) => !requested || requested.includes(n.state.toUpperCase())).map((n) => n.source_id);
   const truncated = input.reports.filter((r) => r.ok && r.truncated).map((r) => r.source_id);
-  const truncNote = truncated.length ? ` ${list(truncated)} returned the maximum number of results, so more matches may exist: add a middle name, license number or state to narrow the search.` : "";
+  const truncNote = truncated.length ? ` ${list(truncated)} returned the maximum number of results, so more matches may exist: add a middle name, a license number or a license_type filter to narrow the search.` : "";
   const base = { searched_sources: searched, failed_sources: failed, skipped_sources: skipped, not_loaded_sources: notLoaded, truncated_sources: truncated, states_requested: requested, states_without_automated_coverage: uncovered, states_with_automated_coverage: covered };
   const coverageNote = requested ? "" : ` Automated coverage is limited to ${list(covered)}; any other state has no automated source.`;
   const uncoveredNote = uncovered.length ? ` No automated source exists for ${list(uncovered)}: look ${uncovered.length === 1 ? "it" : "those"} up by hand.` : "";

@@ -14,7 +14,7 @@ const source = which === "ca" ? "ca-dca" : "mi-lara";
 
 async function ask(q: Record<string, unknown>) {
   const t = Date.now();
-  const res = await fetch(`${base}/functions/v1/registry-lookup`, { method: "POST", headers: { "Content-Type": "application/json", apikey: anon!, Authorization: `Bearer ${anon}` }, body: JSON.stringify({ kind: "license", sources: [source], limit: 50, staff_session_token: token, ...q }) });
+  const res = await fetch(`${base}/functions/v1/registry-lookup`, { method: "POST", headers: { "Content-Type": "application/json", apikey: anon!, Authorization: `Bearer ${anon}` }, body: JSON.stringify({ kind: "license", sources: [source], states: [source === "ca-dca" ? "CA" : "MI"], limit: 50, staff_session_token: token, ...q }) });
   const j = await res.json();
   const rep = j.reports?.find((x: any) => x.source_id === source);
   return { ms: Date.now() - t, ok: j.ok && rep?.ok, hits: (j.hits ?? []).map((h: any) => h.record), verification: j.verification?.status };
