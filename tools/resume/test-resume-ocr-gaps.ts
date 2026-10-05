@@ -96,13 +96,17 @@ t("checkpoint marking: no gaps -> nothing stored; errors are kept; escalation an
   assert.equal(big.escalated_to_vision, true); assert.equal(big.rows.length, 16); assert.equal(big.rows[0].text!.length, 300);
 });
 
-t("wiring: upload-resume stores the summary in the page checkpoint's timing, and rasterize flags recovered rows", () => {
-  const up = readFileSync(new URL("../../supabase/functions/upload-resume/index.ts", import.meta.url), "utf8");
-  assert.ok(up.includes("summarizeGapReport((d as { ocr_gaps?: unknown }).ocr_gaps)"));
-  assert.ok(up.includes("if (gapSummary) timing.ocr_gaps = gapSummary;"));
-  assert.ok(up.includes('upsert({ resume_document_id: docId, page_number: pn, extraction, ocr_text: ocrText, qa_retry: "not_needed", timing,')); // timing is what is persisted
-  const rz = readFileSync(new URL("../../supabase/functions/rasterize-pdf-page/index.ts", import.meta.url), "utf8");
-  assert.ok(rz.includes("report.regions[i].recovered = true;"));
+t("wiring: wherever the change is present (the real functions on the branch, the -next copies when staged on master), upload-resume stores the summary in the page checkpoint's timing and rasterize flags recovered rows", () => {
+  const read = (rel: string) => { try { return readFileSync(new URL("../../supabase/functions/" + rel + "/index.ts", import.meta.url), "utf8"); } catch { return null; } };
+  const uploads = ["upload-resume", "upload-resume-next"].map(read).filter((x): x is string => !!x && x.includes("guardSelfReferentialHeadings"));
+  const rasters = ["rasterize-pdf-page", "rasterize-pdf-page-next"].map(read).filter((x): x is string => !!x && x.includes("repairOcrGaps"));
+  assert.ok(uploads.length >= 1 && rasters.length >= 1, "no function carrying the change was found");
+  for (const up of uploads) {
+    assert.ok(up.includes("summarizeGapReport((d as { ocr_gaps?: unknown }).ocr_gaps)"));
+    assert.ok(up.includes("if (gapSummary) timing.ocr_gaps = gapSummary;"));
+    assert.ok(up.includes('upsert({ resume_document_id: docId, page_number: pn, extraction, ocr_text: ocrText, qa_retry: "not_needed", timing,')); // timing is what is persisted
+  }
+  for (const rz of rasters) assert.ok(rz.includes("report.regions[i].recovered = true;"));
 });
 
 console.log(`\n${n} tests passed`);
