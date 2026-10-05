@@ -3,6 +3,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { withSupabase } from "jsr:@supabase/server@1";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { createOCREngine } from "npm:tesseract-wasm@0.11.0";
+import { guardSelfReferentialHeadings } from "../_shared/resume-heading-guard.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -2811,6 +2812,8 @@ export default {
           // consistent rather than only covering the PDF path.
           extraction.certifications = dedupeCertifications(extraction.certifications);
           extraction.skills_heading = resolveSkillsHeading(sectionBoundaries, extraction);
+          // Same self-referential-heading guard as the PDF path (rasterize-pdf-page): a heading identical to one of its own items is cleared.
+          guardSelfReferentialHeadings(extraction as unknown as Parameters<typeof guardSelfReferentialHeadings>[0]);
         } catch (visionErr) {
           await supabase.from("resume_documents").update({ extraction_status: "failed" }).eq("id", docId);
           return new Response(JSON.stringify({ ok: false, error: "vision_extraction_failed", detail: String(visionErr), resume_document_id: docId }), {
