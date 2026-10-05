@@ -1816,7 +1816,7 @@ async function ocrRowsAdaptive(storagePath: string, pageNum: number, scale: numb
 // exactly the code path they ran before. Every failure here fails OPEN to the original OCR words.
 const GAP_CROP_SCALE = 2; // crops are re-rendered at 2x the page scale so small caps are legible
 const GAP_CALL_TIMEOUT_MS = 30_000;
-type GapReport = { detected: number; transcribed: number; injected_words: number; escalated: boolean; regions: Array<{ y0: number; y1: number; x0: number; x1: number; text?: string }>; error?: string };
+type GapReport = { detected: number; transcribed: number; injected_words: number; escalated: boolean; regions: Array<{ y0: number; y1: number; x0: number; x1: number; text?: string; recovered?: boolean }>; error?: string };
 
 async function transcribeGapRegions(mupdf: any, page: any, scale: number, regions: GapRegion[], stats: CallStat[]): Promise<string[]> {
   if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not configured");
@@ -1863,6 +1863,7 @@ async function repairOcrGaps(mupdf: any, page: any, scale: number, rgb: Uint8Arr
       const text = (texts[i] ?? "").replace(/\s+/g, " ").trim();
       report.regions[i].text = text;
       if (!plausibleTranscription(text, r)) return;
+      report.regions[i].recovered = true;
       report.transcribed++;
       for (const w of transcriptionToWords(text, r)) added.push(w);
     });

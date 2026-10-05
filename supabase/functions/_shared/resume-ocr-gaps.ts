@@ -116,3 +116,30 @@ export function transcriptionToWords(text: string, region: GapRegion): Array<{ t
   }
   return out;
 }
+
+// What upload-resume stores in the page checkpoint (resume_extraction_pages.timing.ocr_gaps) so a recovered row can always be
+// told apart from a row the OCR read itself: where each unexplained row was, what the vision crop read, and whether those words
+// were added to the OCR text. Pure and size-bounded; null for a page with no gaps (its timing record is then unchanged).
+export interface GapSummary {
+  recovered_by: "vision_crop";
+  detected: number; recovered_rows: number; injected_words: number; escalated_to_vision: boolean; error?: string;
+  rows: Array<{ y0: number; y1: number; x0: number; x1: number; text: string | null; recovered: boolean }>;
+}
+const MAX_SUMMARY_ROWS = 16, MAX_SUMMARY_TEXT = 300;
+const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.round(v) : 0);
+export function summarizeGapReport(raw: unknown): GapSummary | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const detected = num(r.detected);
+  if (detected <= 0 && typeof r.error !== "string") return null;
+  const regions = Array.isArray(r.regions) ? r.regions : [];
+  const out: GapSummary = {
+    recovered_by: "vision_crop", detected, recovered_rows: num(r.transcribed), injected_words: num(r.injected_words), escalated_to_vision: r.escalated === true,
+    rows: regions.slice(0, MAX_SUMMARY_ROWS).map((g) => {
+      const x = (g ?? {}) as Record<string, unknown>;
+      return { y0: num(x.y0), y1: num(x.y1), x0: num(x.x0), x1: num(x.x1), text: typeof x.text === "string" ? x.text.slice(0, MAX_SUMMARY_TEXT) : null, recovered: x.recovered === true };
+    }),
+  };
+  if (typeof r.error === "string") out.error = r.error.slice(0, 300);
+  return out;
+}

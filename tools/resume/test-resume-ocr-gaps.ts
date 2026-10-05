@@ -1,6 +1,7 @@
 // node tools/resume/test-resume-ocr-gaps.ts   (no dependencies; synthetic pages only -- the real-page measurements are in the 2026-10-05 report)
 import assert from "node:assert/strict";
-import { findOcrGaps, plausibleTranscription, transcriptionToWords, MAX_GAP_REGIONS } from "../../supabase/functions/_shared/resume-ocr-gaps.ts";
+import { readFileSync } from "node:fs";
+import { findOcrGaps, plausibleTranscription, transcriptionToWords, summarizeGapReport, MAX_GAP_REGIONS } from "../../supabase/functions/_shared/resume-ocr-gaps.ts";
 
 const W = 600, H = 400;
 const blank = () => new Uint8Array(W * H * 3).fill(255);
@@ -70,6 +71,38 @@ t("transcriptions: implausible text is rejected, plausible text becomes ordered 
   assert.deepEqual(w.map((x) => x.text), ["AREAS", "OF", "EXPERTISE"]);
   assert.ok(w[0].rect.left === 100 && w[2].rect.right === 400 && w[0].rect.right <= w[1].rect.left && w[1].rect.right <= w[2].rect.left);
   assert.ok(w.every((x) => x.rect.top === 50 && x.rect.bottom === 66));
+});
+
+t("checkpoint marking: the gap report is stored as a bounded, labelled summary (what was found, what the crop read, what was added)", () => {
+  const report = { detected: 2, transcribed: 1, injected_words: 3, escalated: false, regions: [
+    { y0: 432, y1: 448, x0: 505, x1: 754, text: "AREAS OF EXPERTISE", recovered: true },
+    { y0: 1432, y1: 1453, x0: 76, x1: 876, text: "", recovered: false },
+  ] };
+  const s = summarizeGapReport(report)!;
+  assert.equal(s.recovered_by, "vision_crop");
+  assert.deepEqual([s.detected, s.recovered_rows, s.injected_words, s.escalated_to_vision], [2, 1, 3, false]);
+  assert.deepEqual(s.rows[0], { y0: 432, y1: 448, x0: 505, x1: 754, text: "AREAS OF EXPERTISE", recovered: true });
+  assert.equal(s.rows[1].recovered, false);
+  assert.deepEqual(JSON.parse(JSON.stringify(s)), s); // plain JSON, fits the existing timing jsonb
+});
+
+t("checkpoint marking: no gaps -> nothing stored; errors are kept; escalation and oversized reports are bounded", () => {
+  assert.equal(summarizeGapReport(null), null);
+  assert.equal(summarizeGapReport({ detected: 0, transcribed: 0, injected_words: 0, escalated: false, regions: [] }), null);
+  assert.equal(summarizeGapReport("junk"), null);
+  const e = summarizeGapReport({ detected: 1, transcribed: 0, injected_words: 0, escalated: false, regions: [{ y0: 1, y1: 2, x0: 3, x1: 4 }], error: "Error: claude_call_timeout" })!;
+  assert.equal(e.error, "Error: claude_call_timeout"); assert.equal(e.rows[0].text, null); assert.equal(e.rows[0].recovered, false);
+  const big = summarizeGapReport({ detected: 40, escalated: true, regions: Array.from({ length: 40 }, () => ({ y0: 0, y1: 1, x0: 0, x1: 1, text: "x".repeat(2000) })) })!;
+  assert.equal(big.escalated_to_vision, true); assert.equal(big.rows.length, 16); assert.equal(big.rows[0].text!.length, 300);
+});
+
+t("wiring: upload-resume stores the summary in the page checkpoint's timing, and rasterize flags recovered rows", () => {
+  const up = readFileSync(new URL("../../supabase/functions/upload-resume/index.ts", import.meta.url), "utf8");
+  assert.ok(up.includes("summarizeGapReport((d as { ocr_gaps?: unknown }).ocr_gaps)"));
+  assert.ok(up.includes("if (gapSummary) timing.ocr_gaps = gapSummary;"));
+  assert.ok(up.includes('upsert({ resume_document_id: docId, page_number: pn, extraction, ocr_text: ocrText, qa_retry: "not_needed", timing,')); // timing is what is persisted
+  const rz = readFileSync(new URL("../../supabase/functions/rasterize-pdf-page/index.ts", import.meta.url), "utf8");
+  assert.ok(rz.includes("report.regions[i].recovered = true;"));
 });
 
 console.log(`\n${n} tests passed`);
