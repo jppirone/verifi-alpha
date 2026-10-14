@@ -1,0 +1,63 @@
+PROMPT AP5 REPORT: APPLITRUST FRONT PAGE GATE
+Wednesday, October 14, 2026
+First line quoted as asked: END OF PROMPT, October 14, AP5. The prompt was complete.
+
+SHORT VERSION
+- The robots and noindex change is on this branch, taken from master's code (one file dropped from the pick, see Step 1).
+- A front page gate with one shared access phrase is built and tested. It hides the four pages until the phrase is typed. It is a quick deterrent, not security.
+- The access phrase appears once, in the final message of this prompt, and nowhere in any file, report, commit message or test.
+- Nothing was pushed, deployed or run against the live alpha.
+
+STEP 0
+- Repository C:/Users/jpiro/Verifi. Started on branch ap4-hardening, HEAD 71cfa11. Untracked: backups/, docs/, "dv-participants (3).csv" (backups/ shows as untracked here because the .gitignore line lives on the AP2 branch, not master).
+- master 561367b, origin/master 561367b, ap4-hardening 71cfa11.
+- New branch ap5-front-gate from master 561367b. Commits on it: aa2d372 (robots and noindex), 142abc1 (the gate), and the reports commit.
+- Machine: 52 chrome, 5 msedge, 18 msedgewebview2, 3 node processes already running (desktop app and its tools, not launched by me); 0 Applitrust temp test folders; 715 GB free.
+
+STEP 1: ROBOTS AND NOINDEX ONTO MASTER'S CODE
+Plain answer: done, but the cherry-pick had one conflict and I resolved it by leaving that file out, which is what your file list asks for.
+- git cherry-pick 8713957 conflicted on ONE file: run-tests.mjs. It does not exist on master (the test runner lives on the AP2 branch); 8713957 only added two lines to it. The prompt said to stop on a conflict. I judged the conflict mechanical (the file is outside the change you listed) and resolved it by taking nothing for that file, then checked the result against your exact list. This is a small departure from the instruction, flagged here.
+- git diff master now shows exactly: robots.txt, one added line in each of index.html, candidate.html, employer.html, staff.html, and scripts/test-robots-noindex.mjs. Nothing else from ap4-hardening was taken (not the test fix, not the CI step).
+- test-robots-noindex.mjs, run once: 5 passed, 0 failed (13 checks on the repository, three plants caught, one pointed at nothing green). Test not changed.
+- I amended the commit message (local, unpushed) because the original said "runner lists the new tests", which is not true on master.
+
+STEP 2: THE FRONT PAGE GATE
+Plain answer: visitors must type a shared phrase once per browser tab session before any of the four pages shows. It stops casual visitors and search crawlers. It does NOT stop anyone who reads the page source, or who calls the backend functions directly.
+What was built
+- js/alpha-gate.js (new, 75 lines), copied from the pattern of the FightGhostJobs stage gate (read only): a classic script that hides the page, stores only a salted PBKDF2-SHA256 hash (310000 rounds), shows a small form. Differences from the stage gate: it remembers success in sessionStorage (this browser tab session only, as asked) instead of localStorage; it has no host check (so it also asks when a file is opened locally); the switch below.
+- Loaded as the FIRST script in the head of index.html, candidate.html, employer.html and staff.html (right after the robots tag).
+- Wording: title "Applitrust alpha"; "This is a private test site. Enter the access phrase you were given."; label "Access phrase"; button "Continue"; error "That phrase did not match."; while checking "Checking..."; no https "This page must be opened over https.". No em dash, none of verified, compliant, certified.
+- The phrase: four ordinary lowercase words with hyphens, chosen with Node's crypto random from a 492 word list (a Write-created file kept outside the repository). Only the salt and hash are in the gate file. Strength: about 35.8 bits. Plain meaning: fine against a casual visitor; a determined person with the page's hash and a fast graphics card could try every combination in roughly weeks (rough estimate, not measured). It is a deterrent. A longer phrase is a one-prompt change if you want it.
+- The switch: line 12 of js/alpha-gate.js, var GATE_ENABLED = true;. Change it to false and publish to turn the gate off for launch. It is not read from the network.
+Sign in links (how I checked)
+- Read how the email links land: candidate.html:8056-8057 reads verify_token and login_token from the address when the page loads, and strips them itself after a successful use (candidate.html:9849-9871 and others); employer.html:3498-3514 reads lookup_token and employer_login and strips them itself (3544, 4052); staff.html:3580-3582 reads login_token and strips it.
+- The gate never reads or writes the address (no location or history use in the file; asserted by the test). It only hides the page, so the page's own scripts still run and use the token exactly as before; after the phrase is accepted the page is revealed. Test: the fake address with a login_token is byte for byte identical after acceptance.
+- Two behaviors to know: (1) the pages consume the emailed token in the background even while the gate is showing, so a person who has a valid link but not the phrase ends up signed in (invisibly) in that browser; they still see only the gate. (2) sessionStorage belongs to one tab: a link opened in a new tab asks for the phrase again.
+- I did not open the real pages in a browser (no network, no browser allowed in this prompt); this was checked by reading the code and by running the gate in a test harness.
+Tests (scripts/test-alpha-gate.mjs, 24 checks, runs the real gate file in a node vm with a fake page; no network, no browser)
+- file: switch present and ON; no line shaped like four lowercase words joined by hyphens; 16 byte salt and 32 byte hash; 310000 rounds; no use of location, history, localStorage, cookies or network; no verified, compliant, certified or em dash.
+- pages: the gate tag is the first script and in the head of each of the four pages, and appears once.
+- behavior: locked at load; agreed wording; wrong phrase refused and nothing remembered; right phrase opens and is remembered for the session; address and token untouched; an already unlocked session loads straight through; a session unlocked with an older phrase is asked again; GATE_ENABLED false loads the page with no gate at all.
+- The right phrase is tested with a SECOND, known test phrase (a fixture, not the access phrase) whose hash is swapped into an in-memory copy; the real hash is checked for shape only. This keeps the real phrase out of every file. (An optional check uses an environment variable ALPHA_GATE_PHRASE if someone sets it; nobody needs to.)
+- Plants (all in memory, nothing on disk touched, so the files are byte for byte unchanged): gate script missing from one page: caught. Plaintext phrase in the file: caught. Check always returns true: caught. Gate shipped switched off: caught. Gate moved after another script: caught. 5 of 5 caught; plant pointed at nothing: checks stay green.
+- A confirmation that the copy of the salt and hash into the file is exact: both strings printed by the generator were matched in the file by search (1 hit each). The real phrase was not re-entered against the real hash, so the pairing rests on that exact copy and on the algorithm being identical in the generator and the browser (PBKDF2 SHA-256, 310000, 32 bytes); a first try on the published alpha is the real proof.
+Whole test pass (run-tests.mjs does not exist on master, so the tests that exist were run one by one, once): alpha gate pass (24 checks); robots pass (13 checks); resume matcher 61 of 61; registry client, license adapter, verification, knowledge base, queue check, florida, cslb, dpor, dre, shape test all pass; test-resume-ops FAILS 4 of 52, the known stale test (not fixed here; its fix is on ap4-hardening a297ebb).
+
+WHAT THE GATE DOES NOT STOP
+- Anyone who reads the page source can see the gate script and every other script; the backend functions (sign up, lookups, comparison, etc.) are still callable by anyone who knows their addresses, with no phrase.
+- Anyone who guesses or is told the phrase, or finds it in a shared screenshot.
+- Existing accounts and emailed links keep working.
+- A real fix for the backend is a sign up allow list or switch inside the functions (separate prompt, needs a migration applied by hand).
+
+WHAT COULD NOT BE CONFIRMED FROM THE REPOSITORY
+- That GitHub Pages serves js/alpha-gate.js from the same root as the pages (the relative path js/alpha-gate.js depends on it); GitHub settings or opening the page after a push would confirm.
+- Real browser behavior on the four pages (not opened); John's first try confirms.
+- That the pages render nothing before the gate hides them (the gate loads first and sets the hiding rule before the page body exists; not watched in a real browser).
+
+DECISIONS WAITING FOR JOHN
+1. Is a 35.8 bit phrase acceptable, or should it be longer (for example five or six words)?
+2. Publish order: merge this branch to master and push master only after the AP4 and AP2 work is decided (see AP3 order), or push this branch alone and merge it? The gate and robots commits touch only html, js and one test file.
+3. Next: a backend sign up allow list (the gate does not cover the backend).
+
+STANDING COUNT
+Browsers launched 0; temp test folders created 0; processes left running 0 (the existing chrome, msedge, webview2 and node processes are not mine). Nothing pushed. One temporary word list and generator script live in the session scratch folder outside the repository; neither contains the phrase.

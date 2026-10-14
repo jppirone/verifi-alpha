@@ -1,0 +1,32 @@
+AP5 STEPS FOR JOHN
+
+Nothing to run against the live alpha. Everything is on the local branch ap5-front-gate. Nothing was pushed.
+
+THE ACCESS PHRASE
+It was shown once, in the final message of this prompt. It is not written in any file, report or commit. Save it in your password manager now. If you lose it, a new prompt generates a new one (the old one then stops working).
+
+WHAT THE GATE DOES
+- Every page of the alpha (the front page, candidate, employer and staff) shows only a small "Applitrust alpha" box until the access phrase is typed. It asks again in a new tab or a new browser session.
+- It stops casual visitors and search engines.
+- It does NOT stop anyone who reads the page source or calls the backend directly. It is a quick measure, not security.
+
+HOW TO TRY IT BY HAND (after you push)
+1. Open each of the four pages on the published alpha in a private window: front page, candidate.html, employer.html, staff.html. You should see only the box.
+2. Type a wrong phrase: you should see "That phrase did not match."
+3. Type the right phrase: the page appears.
+4. Request an emailed sign in link (candidate and employer) and click it. It should land signed in. In a NEW tab the box asks for the phrase again, then the page shows.
+If any of this fails, tell me which page and what you saw.
+
+HOW TO TURN IT OFF FOR LAUNCH
+Open js/alpha-gate.js, find the line "var GATE_ENABLED = true;" near the top and change true to false, then publish. Nothing else changes.
+
+HOW TO PUSH (you decide)
+- Option A: merge ap5-front-gate into master, then push master. The change is two small html edits per page, one new script file, one robots file and two tests.
+- Option B: push the branch ap5-front-gate and merge it on GitHub.
+Pushing does not run the function deploy (no functions folder change). The AP2 migrations and the AP4 test fixes are separate and are NOT on this branch.
+Note: the test of this prompt's branch ran everything that exists on master. The test-resume-ops check still fails 4 of 52 here (the known stale test; the fix is on ap4-hardening).
+
+DECISIONS I NEED
+1. Is the phrase strength fine, or do you want a longer one?
+2. Option A or B above?
+3. Next prompt: a sign up allow list in the backend (the gate does not cover it)?
