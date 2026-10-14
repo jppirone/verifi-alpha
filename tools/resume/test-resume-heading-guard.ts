@@ -40,10 +40,31 @@ t("issuer-only / company-only / institution-only headings are legitimate groupin
   assert.deepEqual(guardSelfReferentialHeadings(ex), []);
 });
 
-t("work history: heading == title+company(+place+dates) is cleared", () => {
-  const ex: any = { work_history: [{ title: "Director of Talent Acquisition", company: "NorthBridge Technologies", location: "Annapolis, MD", heading: "Director of Talent Acquisition, NorthBridge Technologies | Annapolis, MD June 2014 March 2021" }] };
-  assert.equal(guardSelfReferentialHeadings(ex).length, 1);
-  assert.equal(ex.work_history[0].heading, "");
+t("work history: heading == title+company(+place+dates) is LEFT UNCHANGED (upload-resume's merge rule owns this case since the AP6 re-run)", () => {
+  const heading = "Director of Talent Acquisition, NorthBridge Technologies | Annapolis, MD June 2014 March 2021";
+  const ex: any = { work_history: [{ title: "Director of Talent Acquisition", company: "NorthBridge Technologies", location: "Annapolis, MD", heading }] };
+  assert.deepEqual(guardSelfReferentialHeadings(ex), []);
+  assert.equal(ex.work_history[0].heading, heading);
+});
+
+t("the PironeBeast case: a work history title-as-heading is left alone while a certifications title-as-heading in the same input is still cleared", () => {
+  const ex: any = {
+    work_history: [
+      { title: "Business Operations & Portfolio Manager", company: "Acme Corp", heading: "PROFESSIONAL EXPERIENCE" },
+      { title: "Business Operations & Portfolio Manager", company: "Acme Corp", heading: "Business Operations & Portfolio Manager" },
+    ],
+    certifications: [
+      { name: "SHRM-SCP Certification", issuing_body: "SHRM", issue_date: "2020", heading: "SHRM-SCP Certification | 2020" },
+      { name: "Prosci Change Management Certification", issuing_body: "Prosci", issue_date: "2019", heading: "SHRM-SCP Certification | 2020" },
+    ],
+  };
+  const r = guardSelfReferentialHeadings(ex);
+  assert.deepEqual(r, [{ section: "certifications", heading: "SHRM-SCP Certification | 2020" }]);
+  assert.deepEqual(ex.work_history.map((w: any) => w.heading), ["PROFESSIONAL EXPERIENCE", "Business Operations & Portfolio Manager"]);
+  assert.deepEqual(ex.certifications.map((c: any) => c.heading), ["", ""]);
+  // and the boundary list keeps the work history heading (nothing was rejected for it)
+  const secs = clearBoundaryHeadings([{ heading: "Business Operations & Portfolio Manager", category: "work_history" }, { heading: "SHRM-SCP Certification | 2020", category: "certifications" }], r);
+  assert.deepEqual(secs.map((s) => s.heading), ["Business Operations & Portfolio Manager", ""]);
 });
 
 t("education: heading == degree line (with institution / date) is cleared; heading 'EDUCATION' is kept", () => {
