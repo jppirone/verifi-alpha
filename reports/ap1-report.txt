@@ -1,0 +1,211 @@
+PROMPT AP1 REPORT: APPLITRUST INVESTIGATION (READ ONLY)
+Wednesday, October 14, 2026
+First line quoted as asked: END OF PROMPT, October 14, AP1. The prompt was complete.
+
+HOW THIS WAS GATHERED
+Four read-only surveys of the repository, split by topic. File paths and line numbers below come from those surveys. I did not re-open every line myself, so treat a line number as a pointer, not a proof. Nothing was run against the live project. No network call, no query, no deploy, no key used. The only file written is this report (and ap1-steps.txt).
+Wording note: the terms "P63.5", "P64", "P10", "HR-XML", "structured API layer" and "generated view" appear nowhere in this repository. The project notes use them; the code does not.
+
+STEP 0: REPOSITORY AND MACHINE
+- Path: C:/Users/jpiro/Verifi. Remote: github.com/jppirone/verifi-alpha.
+- Branch: ocr-gap-repair, HEAD 199f2ed. It is local only (not on origin) and 3 commits ahead of master. master (561367b) equals origin/master.
+- Clean? No. Untracked: backups/, docs/, "dv-participants (3).csv". No modified tracked files.
+- Top level folders:
+  .claude (launch config, worktrees); .github (one workflow: deploy-functions.yml); backups (one manual JSON export, untracked); docs (copy accuracy audit, overlap report, OCR runbook); scripts (matcher and ops tests, spike scripts, seed generators, deploy sync checks); supabase (config.toml, 81 function folders, 103 migrations); tools (registry: license and business registry loaders and tests; resume: OCR gap and heading guard tests, upload runner).
+  Files at root: candidate.html, employer.html, staff.html, index.html (front ends served from GitHub Pages, CNAME alpha.applitrust.com).
+- Edge functions in the repo (81 folders plus _shared): add-verification-timeline-entry, cancel-stripe-subscription, candidate-comparison-requests, candidate-feed-pause, check-duplicate-account, check-existence, check-item-employer, check-login-status, check-verification-status, confirm-login, confirm-resume-data, confirm-verification, create-candidate-summary, deactivate-account, delete-candidate-summary, delete-expired-accounts, detect-license-mentions, discard-resume-document, employer-api, employer-comparison, employer-confirm-login, employer-document, employer-guest-payment, employer-request-login, employer-stripe-events, extract-resume-fields, get-candidate-tier, get-customization, get-discoverable, get-resume-extraction, kb-verify-business, list-candidate-activity, list-candidate-licenses, list-candidate-summaries, list-candidate-verification-items, list-resume-extraction-failures, list-staff-users, list-unqueued-edited-items, list-verification-items, logout, mark-tour-complete, ocr-page-strip, purge-resume-storage, rasterize-pdf-page, reactivate-account, recheck-licenses, record-verification-event, registry-ingest, registry-lookup, request-login, resolve-employer-contact-details, resolve-session, resolve-work-overlap-hold, resume-resubmission, save-customization, save-header-preferences, send-lookup-confirmation, send-verification, set-candidate-tier, set-discoverable, skip-resume-extraction, staff-block-item, staff-confirm-login, staff-employer-documents, staff-logout, staff-request-login, staff-resolve-session, submit-candidate-correction-response, test-stripe-checkout, test-stripe-webhook, update-candidate-summary, update-license-details, update-profile-name, plus upload-resume, verify-license, update-verification-item and the staff manual check functions (verify-dbpr-license, verify-co-dora-license, verify-co-sos-entity, verify-fl-sos-entity, verify-credly-badge) named in the code.
+  (A few of those names come from code references, not from the folder listing I printed. Not confirmed one by one.)
+- Test suites: no package.json at the root, no test runner, no CI test step. 29 test-like files, all run by hand with "node <file>". Details under (k) and Step 2.
+- Machine state: 10 chrome.exe, 5 msedge.exe, 18 msedgewebview2.exe, 1 node.exe, 1 chrome-native-host. I launched nothing. Temp folders: no fgj-tabs or Applitrust test folders in the temp directory (0 and 0). About 4,987 other entries in temp, mostly FightGhostJobs logs. Free disk: 716 GB of 930 GB.
+
+STEP 1: WHERE THINGS STAND
+
+(a) Candidate data model
+The base tables candidates, verification_items, email_verifications and verification_item_timeline are NOT created in any migration. They were made by hand in the dashboard (20260903000000_resume_pipeline.sql:1-7, 108-114). Their columns are known only from later ALTERs and code.
+- Contact: printed values live per document on resume_documents (printed_header, candidate_location, candidate_phone, candidate_email; migrations 20260912030000, 20260912010000, 20260923040000). Account values live on candidates (email, phone, first_name, last_name, phone_verified_at, verified_phone_number, kyc_verified_at, personal_location, header_display_mode). Contact has no status column. "Verified" is implied by a timestamp being non null. The screen tags printed contact "Candidate-stated" (candidate.html:4191, 4246).
+- Work: work_history_items (company, title, dates with precision year/month/day/present, location, heading, job_responsibilities, status, candidate_edited_fields, flag and staff block columns).
+- Education: education_items, same pattern.
+- Certifications and licenses: certification_items (name, issuing_body, dates, license_number, status, source_match, issuer_category, heading); license_items is 1:1 with a certification (20260918020000, 20260918030000:23-24) and carries state, outcome, reason, detail, attempts, recheck and report columns.
+- Skills: skill_items (skill_text, position, heading). No status column by design (20260906020000:15-16).
+- Summary, needs review, other sections: candidate_freeform_sections (section_type summary, hobbies_other, needs_review, additional_info, skills_secondary; heading; content). Summary variants: candidate_summary_versions (20260908030000).
+- Customization: candidate_customization and candidate_item_overrides (20260921090000). They never store a verification status.
+- Overlap: work_overlap_holds (action pending/explained/ignored, explanation, source, resolved_by, resolution_note) and work_overlap_pairs (overlap_days; threshold more than 30 days, confirm-resume-data/index.ts:131), migration 20260927060000.
+- Where validation status is stored:
+  1) work_history_items.status, education_items.status, certification_items.status: text, default "Not Submitted for Verification". The intended words are in a comment only (20260903000000:95-97). No check constraint. Nothing writes to it after insert, and no screen or employer path reads it.
+  2) verification_items.status is the real status. Text with no check constraint (20260906030000:140-143). Linked by source_item_id. Values in use: New, In Progress, Awaiting Response, Needs Reconciliation, Confirmed, Discrepancy, Verification Not Possible, Unable to Verify, Resolved. Date: status_changed_at (trigger). Reason: free text in internal_note, automated_check, timeline note, and found_value for a Discrepancy. There is no structured reason column. Set by confirm-resume-data on insert, by staff through update-verification-item (STATUS_VALUES :41), and for licenses by verify-license and apply_license_downgrade.
+  3) license_items.verification_outcome (verified, ambiguous, unsupported_jurisdiction, not_found, error, incomplete) plus verification_reason and verified_at. This is the only structured reason code today.
+
+(b) Statuses and wording
+Defined in separate places that do not agree:
+- Staff queue: STATUS_OPTIONS (staff.html:3346; update-verification-item/index.ts:41), Resolved at staff.html:3361.
+- Candidate screen allowlist (candidate.html:7140-7147): Confirmed shows "Verified"; Unable to Verify; Verification Not Possible shows "No way to verify this was found"; Discrepancy shows "Under review"; anything else "Submitted, pending review".
+- Candidate export keys (candidate.html:8850-8880): verified, unable_to_verify, under_review, submitted_pending_review, flagged_not_submitted, not_submitted ("No verification submitted").
+- Customization SQL (_cz_vstatus, 20260921090000:101-104): verified, unable_to_verify, under_review, submitted_pending_review, and not_checked for a row with no queue row (20260925000000). Risk noted: a null passed straight in yields submitted_pending_review, so callers guard it.
+- Employer comparison, five outside statuses (candidate-comparison-requests/index.ts:~155-165): verified, in_progress, not_possible, unable, discrepancy. Labels at employer.html:5264.
+- License report (employer): verified, not_verified, discrepancy, with a closed set of reason sentences (LICENSE_REPORT_REASON, index.ts:~185-210), including not_checked = "This license has not been checked."
+- Candidate license finding sentences by code: list-candidate-verification-items/index.ts:~92-118 and list-candidate-licenses/index.ts:85.
+- "Attested": not found anywhere in code, SQL or html. The only related thing is the employer's typed attestation text on a comparison request.
+Can "no validation attempted" be shown without a special case? Partly, and the layers disagree:
+- Items table default says "Not Submitted for Verification" but nothing reads it.
+- Candidate side says "No verification submitted" or "Not checked".
+- The employer comparison treats a missing queue row as "not_possible" and shows "Verification not possible" (candidate-comparison-requests/index.ts, the line "if (!internal) return not_possible"). That wrongly says "attempted, no path" when nothing was attempted. This is the first thing to fix for a no validation deploy.
+- Skills and other sections get a synthetic "Verification Not Possible" queue row (confirm-resume-data/index.ts:~838, 850), relabelled "Not checked" only in the browser (candidate.html:7380-7392).
+- Items the candidate did not opt in get no queue row at all (confirm-resume-data/index.ts:~740-764).
+Wording needed for "not completed": a status value plus a reason code and reason sentence. It would be set in verification_items.status (accepted by update-verification-item, the staff dropdown, the candidate allowlist, externalStatus(), _cz_vstatus, employer STATUS_LABEL) and the synthetic rows written at confirm-resume-data:~830-852. License reasons already have a home in license_items.verification_reason. There is no reason column for the other item types.
+
+(c) Existing structured output
+No export, feed or public API exists. What exists is JSON consumed by the front ends.
+1) assemble_customized_resume(p_candidate, p_ignore_overrides, p_delivered_only), a database function (latest 20260927060000_work_overlap_detection.sql:166; earlier 20260921090000:116 and others). Output: available, assembled_at, customization state, candidate.name, header (printed or account), contact phone and email as {state private|verified|stated, value}, summary (source none/default/candidate_selected/resume), work[] (employer, title, location, start, end, current, description, description_edited, description_stale, included, verification {status, method, verified_on}), education[], certifications[], skills {items with source and included}, other_sections[] (verification not_checked). Dates keep source precision. Served by get-customization (index.ts:57; its header says the "delivered" view is what the PDF and any future feed consume) and by candidate-comparison-requests action assemble_plain_document (:655).
+2) Comparison snapshot, version 3, built by assembleResumeSnapshot (candidate-comparison-requests/index.ts:~245-345), returned by employer-api open_comparison (:826, 1030) and employer-comparison (:352, 443). Fields: name, work, education, certifications with the five outside statuses, found and claimed values, coverage and a prose basis. Deliberately omits skills, summary, other sections, job responsibilities and contact details. A separate license_report shape exists for license only accounts.
+3) employer-api is a session gateway for sessions, billing and comparisons. It is not a data API. It attaches the generated_document JSON to open_comparison (:800-826, 1022-1030).
+Customization applied to what employers receive? No.
+- Candidate edits and hidden items are applied only inside get-customization and only for tier "paid" (v_apply = paid and not p_ignore_overrides).
+- assemble_plain_document forces p_ignore_overrides true and p_delivered_only true (candidate-comparison-requests/index.ts:660). The comparison snapshot never reads overrides.
+- So hidden items, the chosen Summary, printed contact and edited skills are not in anything an employer gets. The employer PDF also drops the Summary in the browser (employer.html:~4590).
+Overlap disclosure: NOT carried with the job.
+- Overlap handling is exclusion only. An unresolved hold removes both jobs from the customized resume and from the comparison snapshot (index.ts:257-270). No output field says an overlap existed or carries the candidate's explanation. The explanation is staff only (list-verification-items/index.ts:172-298). After staff resolve it the job comes back with no marker.
+- The rule in the notes ("the overlap disclosure must travel with the job") is therefore not implemented in any output.
+Tests: none for any of this. A migration comment mentions a "parity test against the comparison snapshot" (20260921090000:112) but no such test exists. The only record is manual one-off calls in docs/overlap-detection-final-report.html (lines 233, 237).
+Missing for a delivered package: a schema and version id, a candidate customized employer view, overlap and edit disclosure fields, a reference to the source document, a status plus reason on every field, delivery plumbing, tests. The employer facing view and the customization are currently two separate code paths with no shared snapshot.
+
+(d) PDF output
+Two hand written raw PDF 1.4 byte writers running in the browser. No library, no server side PDF.
+- Candidate: candidate.html buildResumeLines (6844), buildAtsPdfBytes (7769), preview with pdf.js from a CDN, download as resume.pdf (12802).
+- Employer comparison: employer.html buildComparisonLines (4574), buildComparisonPdfBytes (4657), renderGeneratedDocument (4735).
+- The employer copy has drifted: work label is "title at employer, location" (employer.html:~4515) while the candidate side changed on 2026-09-28 to "employer, title, location" (candidate.html:6497); 10 pt versus 11 pt; no Summary.
+Plain ATS rules:
+- Real text, not an image: PASS (Helvetica text objects).
+- Single column: PASS (one x offset, no tables).
+- Contact in the body: PASS (first lines of page 1). Small flaw: the contact line is joined with a middle dot that the sanitizer strips, leaving a bare double space between phone and email.
+- Plain headings: PARTIAL. Headings are the candidate's own source headings, bold, and sections with no source heading print with none (candidate.html:6908). Not normalized to Experience, Education, Skills.
+- One date format: FAIL. Dates print at source precision ("2019", "Mar 2019", "Mar 15, 2019") and a range can mix them (candidate.html:6465, employer.html:~4515). This is deliberate (never invent a month) but it breaks the "one date format" rule.
+- Other: sanitizeAts (candidate.html:7086) deletes every character outside basic ASCII, so "José" becomes "Jos" with no transliteration; hard wrapped 90 character lines with page breaks at fixed line counts, so an entry can split across pages; no metadata or language tag.
+
+(e) Existing tokens, links and consents
+- Employer lookup confirmation link (employer_lookup_requests.token): emailed, 60 minutes (send-lookup-confirmation/index.ts:30, 76-100), single use via one conditional UPDATE (check-existence/index.ts:337-365). Pattern reusable, table is not.
+- Claim token: 32 random bytes, only the SHA-256 stored (check-existence/index.ts:331-335), legacy path, tied to a lookup.
+- Employer login link (employer_login_tokens): 15 minutes, single use, atomic claim (employer-confirm-login/index.ts:62-74). Employer session: 32 random bytes hashed, 30 days fixed, reusable.
+- Candidate login link (login_tokens) 15 minutes single use; candidate session 30 days reusable. Signup verification 60 minutes single use. Staff login link 15 minutes single use.
+- Guest comparison link (comparison_requests.guest_token_hash, candidate-comparison-requests/index.ts:517-537): hash only, valid to snapshot_expires_at (approval plus 7 days), NOT single use (first open redeems the payment, then reopens free within 21 days, migration 20260926000000:171). Legacy only since Gap #21. This is the closest existing thing to a delivery link.
+- Signed storage URL for the employer's own document: 60 seconds, not single use (employer-api.ts:790).
+- Org invite: 14 days, accepted once.
+- SMS consent flow: NOT FOUND. No SMS is sent anywhere. login_tokens.channel comment says "'sms' later" (20260904020000:22). Phone and ID checks are timestamps only; the Activity text says "no code was sent or checked" (list-candidate-activity/index.ts:148-153). The identity step is explicitly simulated (candidate.html:6148, 4353).
+- Recorded consent: employer's document disclosure tick (consent_at, consent_version 2026-09-20.1, employer-document/index.ts:33, 297, 324) and the candidate's per request approve or decline with a 72 hour window (candidate-comparison-requests :735-780).
+- Standing candidate consent to share, or any package link: not found. An apply time single use package link needs a new design. Reusable parts: atomic conditional UPDATE claim, hash only storage, emailed link pattern.
+
+(f) Employers and billing
+- Accounts: self serve signup by email link into employer_users, employer_orgs, employer_org_invites, employer_sessions (20260919060000_employer_accounts.sql). One org per person, roles owner and member. employer-api authenticates only by session token.
+- API keys: not found. Agreements or terms acceptance: not found beyond the document consent tick and the per request attestation text. Partner agreements: not found.
+- Both $10 products use ONE price row, employer_pricing key guest_comparison, 1000 cents, labelled PLACEHOLDER (20260919070000_employer_billing.sql:65). The kind is only a Stripe description.
+- Flow today: card saved via Stripe setup mode at request time; on candidate approval a manual capture hold is placed off session (employer-comparison/index.ts:200-250); captured only at genuine first open (open_paid_comparison, employer-api.ts:988-996, idempotency key employer-guest-capture-<id>); an uncaptured hold lapses (about 7 days) and nothing is charged. Fallbacks: direct charge (chargeGuestNow, employer-api.ts:157-183), org monthly subscription with a lookup quota (consume_org_lookup).
+- Could a small per delivery fee reuse this? Mechanically yes (card on file, manual capture, idempotency, refund webhook, receipts). Missing: a price key and amount (the price lookup is hard coded to guest_comparison, employer-comparison/index.ts:109-110, employer-api.ts:159); a $10 hold is the wrong size for a small fee; employer_payments is bound to comparison_request_id; card save lives on comparison_requests, users have no customer id (only orgs do); the one shot hold_attempted_at; no metered or usage billing; no partner agreement; no API key.
+
+(g) Candidate Activity view and events
+- Two feeds. list-candidate-activity (license only accounts, candidate.html:9687) is built from durable records: matched employer lookups, showing email domain and stated company, excluding lookups that became a comparison request; capped at 500 events (:123-132, 185-189). Its header comment says no session check but the code has one (:97-103), so the comment is stale. candidate-comparison-requests list (:670-709) returns requests, outcomes, first_delivered_at and unconverted Tier 1 lookups; candidate.html:8332-8374 merges them into Activity.
+- record-verification-event is NOT an event log. It only stamps phone_verified_at, kyc_verified_at, cross_validation_completed_at (:28-32, 105-118).
+- A delivery event could be added the same way: a new row type returned by the list action and merged in candidate.html. Today "delivered" means the employer's first open, not a push to a named recipient. No table records a delivery to a third party.
+- Retention windows today: candidate answer 72 hours; approved unopened snapshot 7 days (SNAPSHOT_DAYS, candidate-comparison-requests/index.ts:91; a hold can ratchet it forward, employer-stripe-events.ts:105-110); after first open 90 days for org resume comparison, 30 days for org license report, first open plus 21 days for pay per use (20260923030000:44-50, 20260926000000:171, 210); matched lookup rows kept for Activity, unmatched deleted after 30 days (20260919050000:14-29). I did not find the words "arbitrary placeholder" next to any snapshot window in the repo. What the code labels PLACEHOLDER or arbitrary is the price rows (20260919070000:65-66). Not confirmed: the notes' claim about snapshot retention. docs/copy-accuracy-audit-2026-09-27.md:75 says retention copy "understates retention by roughly 1000x" (severity high).
+
+(h) Deletion
+- Flow: deactivate-account sets deletion_scheduled_at and revokes sessions (index.ts:55-118). A trigger on deactivation (20260920020000:219-226, latest purge_candidate_comparisons in 20260920090000:192) deletes comparison snapshots and employer documents and closes open requests. reactivate-account clears the date and does not restore snapshots. After 30 days delete-expired-accounts clears Stripe, then run_account_deletions (cron) calls delete_candidate_account (latest 20260922030000:9-152).
+- Removes: candidates, sessions, login tokens, login attempts, email verifications, resume documents and extraction pages (files queued for purge), work/education/certification/skill/freeform/license items, verification items and timeline, resubmissions, item archive and lineage, summary versions, name changes, comparison requests, snapshots and documents, customization and overrides (cascade).
+- Scrubbed, not deleted: employer_lookup_requests lose matched_candidate_id, candidate_label, claim_token_hash.
+- Kept on purpose: employer_payments (candidate link ON DELETE SET NULL; payer email, kind, candidate label, requester company kept as snapshots, 20260922010000), employer_lookup_usage, stripe_webhook_events, staff_employer_document_views, purge queue audit rows, account_deletion_log (no personal data). Four exempt accounts (account_deletion_exempt).
+- DEFECT FOUND (from reading the DDL, not executed): work_overlap_holds (20260927060000:40) and staff_block_events (20260926060000:46) both reference candidates(id) with no cascade and both postdate the last version of delete_candidate_account. A hold or a staff block event for a candidate would make the final "delete from candidates" fail, rolling back that person's deletion on every hourly run. No later migration touches the function. Not confirmed against the live database.
+- A new delivery record naming the person must: either hang off comparison_requests or a table with candidate_id ON DELETE CASCADE, or be added to delete_candidate_account; if it is also a billing record, copy what billing needs at creation and use ON DELETE SET NULL (as employer_payments does); join the deactivation trigger if its deliverable should die at deactivation; be added to the deletion audit counts and to scripts/test-account-deletion-seed.js.
+- The deletion flow is not proven by any automated test. There is a seed generator and a header note that the inventory was "checked against a live account" (20260921030000:19). No recorded results in the repo.
+
+(i) Documents
+- Private bucket resume-documents (20260903000000:12), signed URLs only (get-resume-extraction/index.ts:322, 3600 s). Table resume_documents (20260903000000:33 plus alters): original_storage_path ("untouched original bytes, permanent, document of record", comment :37), original_filename, mime_type, sanitized_render_path (a flattened JPEG for image uploads only; null for PDFs), ocr_raw_text, extraction_status, confirmed_at, kind, supersedes_document_id, printed header and contact.
+- Layout: <owner>/<docId>/original.<ext> and sanitized.jpg (upload-resume/index.ts:2722-2731). PDFs have no stored render; rasterize-pdf-page renders transiently per page. Per page checkpoints in resume_extraction_pages are deleted after 7 days.
+- A confirmed document cannot be discarded by the candidate (discard-resume-document returns 409 confirmed_document_protected). Originals go only at account deletion. Whether superseded confirmed documents keep their files: not verified.
+- Citing by reference: an id (resume_documents.id, uploaded_at, confirmed_at) exists and items carry resume_document_id, but no employer facing output exposes it. There is NO content hash for candidate documents (no sha256 column, none computed at upload). A hash would have to be added at upload or computed over the stored original. The reference is stable only while the account exists.
+
+(j) Licenses and the validation layer
+- Code: verify-license/index.ts (786 lines; decide :90-103, adapters :163-245, handler :510-785, modes staff_rerun, after_correction, status_report :300, recheck_lookup :344); _shared/registry/license-adapter.ts (STATE_SOURCES :230); license-sources.ts (15 Socrata board sources); registry-lookup (live Socrata plus bulk sources ca-dca, ca-cslb, ca-dre, mi-lara, va-dpor from Parquet shards in the private registry-data bucket); registry-ingest; recheck-licenses (hourly cron, downgrade only, sends no email, 20260921060000:197); detect-license-mentions (model pass); update-license-details; list-candidate-licenses; staff manual checks wired at staff.html:3464-3874.
+- Counts do not match the notes: STATE_SOURCES holds 20 source ids in 11 states (CO, CT, IL, WA x3, DE, CA x3, MI, TX x3, NY x3, VA, OR x2) plus Florida DBPR as a separate adapter (12 jurisdictions). The "registry checks in 6 states" figure matches the business registries (CO, NY, CT, OR, PA, TX; business-sources.ts:119-224), used for employer existence, not licenses.
+- Staff queue fallback: ambiguous, or not_found after a correction, becomes a Needs Reconciliation row (verify-license :701-759). A first time not_found or unsupported state goes back to the candidate with no queue row (:686-699).
+- Existing feature flag or kill switch: NOT FOUND. No settings table. Environment variables are secrets and keys, not behaviour toggles.
+- Coupling: confirm-resume-data:892-922, confirm-verification:281-307 and resume-resubmission:1009-1015 call verify-license; detection is called from candidate.html maybeDetectLicenses (:11076-11114, gates the Confirm button, fails open) and resume-resubmission:909. Resubmission REQUIRES detection to finish (:900-916) or every license looks removed. check-item-employer runs at confirm-resume-data:938-945. The license report product reads freshLicenseCheck (candidate-comparison-requests:381) and stored queue status. Candidate copy says "we will always verify it ... This can't be turned off" (candidate.html:2763-2766, comment says "permanently unconditional"); the correction email points to a Validation tab (verify-license :420-428).
+- Switch off and on (analysis, not repo fact): needs new code and a deploy (CI deploys all functions on push to master). Lowest risk point is an early return in verify-license before the cooldown claim (:568-610); stored data is untouched. HAZARD: do not "disable" by removing adapters, because a missing adapter returns unsupported_jurisdiction, which asks candidates by email to fix their details (:686-699, :779). Per component: unschedule the recheck cron; gate detection at the candidate.html call and at resume-resubmission:900 (and relax its "detection done" requirement); skip check-item-employer at the two call sites. No bulk "verify everything never checked" path exists (not found); items already created re-verify only through staff_rerun or a correction.
+
+(k) Parse and review
+Confirmed end to end from code: upload (client strips EXIF; original stored; upload-resume) then OCR (tesseract in function for images, vision fallback for tall stitched images; PDFs one page per call through rasterize-pdf-page with checkpoints; the PDF text layer is deliberately not used, rasterize-pdf-page/index.ts:1814; dense or gap pages go to a vision route; gap repair in _shared/resume-ocr-gaps.ts) then model extraction (boundary step then field step; guards in _shared/resume-heading-guard.ts; atomic insert_resume_extraction; dates through parse_partial_date) then review screen (get-resume-extraction, which marks a document failed after 240 stale seconds; skip-resume-extraction; discard-resume-document) then confirm (confirm-resume-data writes edits, sets confirmed_at, inserts queue rows, runs overlap detection and license verification). Resubmission is a separate function.
+Tests by failure mode:
+- Flattened skills: no test (prompt rule only, extract-resume-fields/index.ts:556).
+- Two columns: no assertions. The three scripts/test-*columns folders are September 3 spike scripts with no pass or fail.
+- Dates: partial (scripts/test-resume-matcher.mjs:179, test-resume-ops.mjs). The SQL date parsing and printed date extraction are untested.
+- Em dashes and smart quotes: not found (prompt rule text only).
+- No text layer: not found.
+- Covered: OCR gap detection (tools/resume/test-resume-ocr-gaps.ts), self referential headings (test-resume-heading-guard.ts), resubmission matcher and ops.
+
+STEP 2: GAPS TO A FIRST DEPLOY WITH NO VALIDATION
+
+MUST DO BEFORE ANY REAL CANDIDATE USES IT (code work)
+1. Honest "not completed" wording end to end. Evidence: missing queue row shows as "Verification not possible" to employers (candidate-comparison-requests, "if (!internal) return not_possible"); candidate copy and the correction email promise verification ("always verify", candidate.html:2763-2766). The status vocabulary also has three versions that disagree (see b).
+2. A validation off switch that does not email candidates. Evidence: no flag exists; removing adapters triggers correction emails (verify-license :686-699). Confirm and resubmission both call the checks.
+3. Deletion fix and proof. Evidence: work_overlap_holds and staff_block_events block delete_candidate_account (see h); no automated deletion test.
+4. Consent and retention text matches the code. Evidence: docs/copy-accuracy-audit-2026-09-27.md section 0 (a "critical functional regression") and section 4 (retention understated, severity high, line 75). I did not check whether those findings were since fixed.
+5. Backups and the exposed export. Evidence: backups/verifi_backup_2026-09-25_212852.json (612 KB) holds candidate emails and phones, is untracked and not in .gitignore, so one careless "git add ." commits personal data. No scheduled backup or point in time recovery setting is in the repo.
+6. Staging versus production separation. Evidence: one project ref (ihmypoduvrzymasgactc) in config.toml:21, the deploy workflow and the html files; CI deploys every function to it on push to master; only temporary "-next" function slugs exist (tools/resume/stage-temp-slugs.sh). No staging project.
+7. Security items in code: 17 functions with verify_jwt false, resolve-work-overlap-hold has no config entry (defaults to true, so confirm that is intended), CORS "*" in about 76 responses, RLS enabled explicitly on only about 19 tables and the core tables (candidates, verification_items, license_items) have no RLS statement in the migrations, only one create policy. Live RLS state cannot be confirmed from the repo.
+8. Terms and privacy pages: not found in any html file.
+9. Monitoring and alerting: not found. Only per job run tables.
+10. Fake identity step: the ID step is "simulated" (candidate.html:6148, 4353). A no validation deploy must not present it as a check.
+
+SHOULD DO
+- One employer facing view that applies the candidate's customization (see c) and tests for it.
+- Unify the three PDF/date issues: one date format, accent handling (sanitizeAts strips non ASCII), the drifted employer copy.
+- Stale header comment in list-candidate-activity; contact line double space in the PDF.
+- CAPTCHA or other abuse control on signup (not found). Rate limits do exist on login, verification, lookups and uploads.
+- Tests for flattened skills, two columns, em dashes and smart quotes, no text layer, date parsing; a root test runner and a CI test step (CI runs none today).
+- Content hash on the original document.
+- Price rows are PLACEHOLDERS (20260919070000:65-66).
+
+CAN WAIT
+- Per component validation re-enable (licenses first), bulk "verify never checked" path, direct ATS integration, employer API keys and agreements.
+
+NOT CODE WORK (depends on a person outside the code)
+- Tom Heffernan's security review: the name "Heffernan" and any security review notes or open items list do not appear in the repo, so what is open is not confirmed.
+- Counsel: terms, privacy, consent wording, billing language. No counsel notes in the repo.
+- ID.me and CLEAR follow ups: not found in the repo.
+- Domain and email set up: emails send from verify@applitrust.com through Resend (10 call sites) and the site is alpha.applitrust.com. SPF, DKIM and DNS state is not in the repo.
+- Supabase backup plan or point in time recovery setting, and a decision on a staging project.
+
+STEP 3: DESIGN OPTIONS (ALL "PROPOSAL ONLY", NOTHING BUILT)
+
+(1) Package snapshot. Proposal only. New table delivery_packages: id, candidate_id, comparison/apply reference, schema_version, snapshot jsonb, snapshot_sha256, created_at. One database function assemble_delivery_snapshot(candidate, options) is the only place that builds content; it reuses assemble_customized_resume and ADDS the overlap disclosure and an explicit status and reason per field. Both JSON and PDF render from the stored snapshot jsonb, never from live tables, so they cannot disagree. JSON field list: schema_version, generated_at, snapshot_id, candidate (name), contact {value, state}, summary, work[], education[], certifications[], licenses[], skills[], other_sections[], overlaps[], document_reference {resume_document_id, sha256, uploaded_at}. Every item: status in {validated, not_completed, candidate_attested}, status_reason (closed sentence set), status_date. Reuses: assemble_customized_resume, delivered view, the closed reason sentence pattern of LICENSE_REPORT_REASON. Risk: medium (new table plus status mapping across three vocabularies). Never uses the word "verified" as a flat badge.
+(2) Single use link. Proposal only. Table package_links: token_hash only (32 random bytes, copy employer login token and guest token hash patterns), package_id, expires_at, spent_at, spent_by. Created at the apply click, opaque token only in the URL, no personal data. Spent by one conditional UPDATE (spent_at is null and expires_at > now), the same atomic claim as check-existence:337-365, and only after the pull returns 200. A failed pull leaves it unspent; a candidate "reissue" action revokes the old link and mints a new one. Reuses: atomic claim, hash storage. Risk: low to medium (race and replay are the points to test).
+(3) Employer side in three rungs. Rung 1: the candidate carries the PDF and a link. Needs the snapshot, the PDF renderer moved server side or kept in the browser from the snapshot, and the link page; no employer account required. Rung 2: the employer gets an input spot or endpoint: needs employer opt in, an employer record, a signing or API key concept (none exists today), and a documented schema. Rung 3: direct ATS integration: needs the schema frozen, a partner agreement, per ATS adapters. Each rung is safe to stop after.
+(4) Delivery record and Activity. Proposal only. Table deliveries: id, candidate_id (ON DELETE CASCADE), employer_ref, package_id, status, delivered_at, billing snapshot fields. Candidate Activity reads it through a new row type in the candidate-comparison-requests list response. Retention: keep the delivery record for the Activity view and billing; delete snapshot jsonb after a set window (value is John's decision). Deletion: cascade, added to delete_candidate_account and its audit counts and to the deletion seed script. Fix the two existing holes first.
+(5) Per delivery billing. Proposal only. New price key (for example delivery_fee), new hold size, link column from employer_payments to deliveries, card saved per employer org rather than per request. Reuses: SetupIntent, manual capture PaymentIntent, idempotency keys, refund webhook, capture on the successful pull only (the same moment the link is spent). Candidates never pay. Risk: high for money paths; needs full test rigor.
+(6) Turning validation on one at a time. Proposal only. New table feature_flags (component, enabled, changed_at) read by verify-license, detect-license-mentions, check-item-employer, recheck-licenses, the candidate screen copy and the PDF/JSON status mapper. Default all off. License package held back as one flag group. Off means status not_completed with reason "Validation not offered yet", never an email to the candidate. Existing stored license data is not touched.
+(7) Tests and mutation style controls. Proposal only. Add: snapshot parity (JSON and PDF built from the same snapshot, text compared); hidden field leakage (hide an item, assert it appears nowhere in JSON or PDF, with a planted defect that includes it so the control must fail); overlap disclosure always present (resolve a hold, assert the disclosure travels; planted defect removes it); status vocabulary closed set; link replay and expiry; spent only on success; billing capture only on success; deletion removes every delivery table row (extend the deletion seed with assertions). Make the root runner and CI step part of the first build step.
+(8) Ordered build list (proposal only, smallest first, each safe to stop after):
+ 1. Fix deletion holes (work_overlap_holds, staff_block_events) plus a deletion assertion test. Small.
+ 2. Untrack and ignore backups/ and the CSV; add a root test runner and CI test step. Small.
+ 3. Single status vocabulary and the "not completed" reason, fix the "missing row means not possible" mapping, candidate copy and email wording. Medium.
+ 4. Validation flag table and off switch in verify-license, detection, employer check, recheck cron. Medium.
+ 5. Snapshot function with status and reason per field, overlap disclosure, customization applied, tests (parity, leakage, overlap). Medium to large.
+ 6. PDF from the snapshot (one date format, accent handling, plain headings). Medium.
+ 7. Single use link and candidate side "send to employer" action, Activity entry, deletion coverage. Medium.
+ 8. Rung 1 delivery page for the employer. Small to medium.
+ 9. Per delivery billing. Medium to large.
+ 10. Rung 2 employer endpoint and keys; license package release. Large, later.
+
+DECISIONS WAITING FOR JOHN
+1. Which status words for "not completed", "validated", "candidate attested" and the reason sentences (and whether "attested" is the exact word).
+2. Retention window for the delivery snapshot content and how long the delivery record stays for Activity.
+3. Fee amount per delivery and whether the card is saved per employer organization.
+4. Whether to fix the deletion holes now (recommended, they would break real deletions).
+5. Whether the candidate copy "always verified, can't be turned off" may change for the first deploy.
+6. Whether the notes' "17 sources in 11 states" and "6 states" figures should be corrected to 20 in 11 (plus Florida) and "business registries only".
+7. Whether a staging Supabase project is wanted before launch.
+
+STANDING COUNT
+Browser launches by me: 0. Temp test folders created by me: 0. Processes launched by me: 0. Existing: 10 chrome.exe, 5 msedge.exe, 18 msedgewebview2.exe, 1 node.exe (not mine).
+
+NOT CONFIRMED
+Live RLS state; live database contents; whether the copy audit findings were fixed after Sept 27; whether superseded confirmed documents keep files; the snapshot retention "arbitrary placeholder" note (not in the repo); the contact of "Tom Heffernan" review. Function folder list in Step 0 partly assembled from code references.
+
+Holding.
