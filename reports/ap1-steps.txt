@@ -1,0 +1,16 @@
+AP1 STEPS FOR JOHN
+
+Nothing to run. Nothing was changed in the code. Nothing was pushed.
+
+Please read reports/ap1-report.txt and decide:
+
+1. Status words: the exact words for "validated", "not completed", "candidate attested", and the reason sentences.
+2. How long the delivered snapshot content is kept, and how long the delivery record stays in the candidate's Activity.
+3. The fee per delivery, and whether the employer's card is saved per organization.
+4. Fix the deletion holes now? Two tables (work_overlap_holds, staff_block_events) appear to block a real 30 day deletion. Recommended yes.
+5. May the candidate copy "we will always verify it, this can't be turned off" change for the first deploy?
+6. Correct the notes: license sources are 20 in 11 states plus Florida (not 17); "6 states" are business registries, not licenses.
+7. Do you want a separate staging project before launch?
+8. The backup file in backups/ holds candidate emails and phones and is not ignored by git. OK to add it to .gitignore in a later pass?
+
+Not code work (owners outside the code): Tom Heffernan's security review (nothing about it is in the repo), counsel for terms, privacy and consent wording, ID.me and CLEAR follow ups, domain and email set up (SPF and DKIM), backup plan.

@@ -2,6 +2,8 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { withSupabase } from "jsr:@supabase/server@1";
 import { createOCREngine } from "npm:tesseract-wasm@0.11.0";
+import { findOcrGaps, MAX_GAP_REGIONS, plausibleTranscription, transcriptionToWords, type GapRegion } from "../_shared/resume-ocr-gaps.ts";
+import { guardSelfReferentialHeadings, clearBoundaryHeadings } from "../_shared/resume-heading-guard.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -1683,7 +1685,7 @@ function correctAiOcrMisreads(text: string): string {
 const WASM_URL = "https://cdn.jsdelivr.net/npm/tesseract-wasm@0.11.0/dist/tesseract-core.wasm";
 const MODEL_URL = "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/eng.traineddata";
 
-async function runTesseract(rgbaBytes: Uint8Array, width: number, height: number): Promise<string> {
+async function runTesseract(rgbaBytes: Uint8Array, width: number, height: number): Promise<TextItem[]> {
   const [wasmRes, modelRes] = await Promise.all([fetch(WASM_URL), fetch(MODEL_URL)]);
   if (!wasmRes.ok || !modelRes.ok) throw new Error("ocr_asset_fetch_failed");
   const wasmBinary = new Uint8Array(await wasmRes.arrayBuffer());
@@ -1692,9 +1694,8 @@ async function runTesseract(rgbaBytes: Uint8Array, width: number, height: number
   engine.loadModel(modelBytes);
   engine.loadImage({ data: rgbaBytes, width, height });
   const wordBoxes = engine.getTextBoxes("word") as unknown as TextItem[];
-  const text = reconstructByWordClustering(wordBoxes);
   engine.destroy();
-  return text;
+  return wordBoxes; // the caller clusters them (after the gap check below), exactly as this function did itself before
 }
 
 // STRIP OCR (2026-09-19). Supabase kills an Edge Function invocation after ~2 s of CPU time (surfaces as
@@ -1804,6 +1805,73 @@ async function ocrRowsAdaptive(storagePath: string, pageNum: number, scale: numb
     }
     const r = await callOcrStrip(storagePath, pageNum, scale, width, y0, y1); // last resort: same rows once more (throws if it fails)
     return [{ words: r.words, rows: [y0, y1], timing_ms: r.timing_ms, attempts: 2 }];
+  }
+}
+
+// OCR GAP REPAIR (2026-10-05, Lisa Tom resume). tesseract's layout analysis can silently drop whole rows (measured: every
+// "------- HEADING -------" row and the line under one, 3 runs of 3), and nothing downstream can recover text the OCR never
+// emitted. After OCR, _shared/resume-ocr-gaps.ts finds rows of letter-like ink that no recognised word covers; each such
+// row is cropped from the SAME rendered page (never the PDF text layer -- the visible page stays the only source), read by
+// one small Haiku vision call, and added back as words before the normal word clustering runs. Pages with no gap run
+// exactly the code path they ran before. Every failure here fails OPEN to the original OCR words.
+const GAP_CROP_SCALE = 2; // crops are re-rendered at 2x the page scale so small caps are legible
+const GAP_CALL_TIMEOUT_MS = 30_000;
+type GapReport = { detected: number; transcribed: number; injected_words: number; escalated: boolean; regions: Array<{ y0: number; y1: number; x0: number; x1: number; text?: string; recovered?: boolean }>; error?: string };
+
+async function transcribeGapRegions(mupdf: any, page: any, scale: number, regions: GapRegion[], stats: CallStat[]): Promise<string[]> {
+  if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not configured");
+  const k = scale * GAP_CROP_SCALE;
+  const b = page.getBounds();
+  const originX = Math.floor(b[0] * k), originY = Math.floor(b[1] * k);
+  const content: Array<Record<string, unknown>> = [];
+  regions.forEach((r, i) => {
+    const x0 = Math.max(0, Math.floor((r.x0 - 12) * GAP_CROP_SCALE)), x1 = Math.ceil((r.x1 + 12) * GAP_CROP_SCALE);
+    const y0 = Math.max(0, Math.floor((r.y0 - 6) * GAP_CROP_SCALE)), y1 = Math.ceil((r.y1 + 6) * GAP_CROP_SCALE);
+    const pixmap = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, [originX + x0, originY + y0, originX + x1, originY + y1], false);
+    pixmap.clear(255);
+    const device = new mupdf.DrawDevice(mupdf.Matrix.scale(k, k), pixmap);
+    page.run(device, mupdf.Matrix.identity);
+    device.close();
+    content.push({ type: "text", text: `Region ${i + 1}:` }, { type: "image", source: { type: "base64", media_type: "image/png", data: bytesToB64(pixmap.asPNG()) } });
+  });
+  content.push({ type: "text", text: `Each image above is a small crop of one resume page, containing ONE line of printed text that a machine OCR failed to read. Transcribe exactly what is visibly printed on that line, character for character, keeping its capitalisation and punctuation. Rules: ignore decorative rules (rows of dashes, underscores, dots, boxes, lines) that sit beside or around the words and do not include them; ignore partial letters from neighbouring lines at the very top or bottom edge of the crop; never complete, correct, translate or guess text you cannot actually see (use "" for a crop with no legible text). Return ONLY a JSON object, no prose: {"regions":[{"region":1,"text":"..."}]} with one entry per region, in order.` });
+  const claudeData = await anthropicMessages("ocr_gap_transcribe", {
+    model: HAIKU_MODEL, max_tokens: 1024, temperature: 0, messages: [{ role: "user", content }],
+  }, GAP_CALL_TIMEOUT_MS, stats);
+  const { parsed, parseError } = extractJsonFromClaudeResponse(claudeData);
+  const list = (parsed as { regions?: Array<{ region?: number; text?: unknown }> } | null)?.regions;
+  if (parseError || !Array.isArray(list)) throw new Error("ocr_gap_transcribe_malformed_response");
+  return regions.map((_, i) => { const e = list.find((x) => Number(x?.region) === i + 1); return typeof e?.text === "string" ? e.text : ""; });
+}
+
+// Finds the page's unexplained rows and returns the OCR words with the transcribed ones added. `escalate` = more rows than
+// MAX_GAP_REGIONS: the OCR failed broadly, so the caller sends the whole page to the vision route instead of patching rows.
+async function repairOcrGaps(mupdf: any, page: any, scale: number, rgb: Uint8Array, width: number, height: number, words: TextItem[], stats: CallStat[]): Promise<{ words: TextItem[]; report: GapReport; escalate: boolean }> {
+  const report: GapReport = { detected: 0, transcribed: 0, injected_words: 0, escalated: false, regions: [] };
+  let regions: GapRegion[];
+  try {
+    regions = findOcrGaps(rgb, width, height, words.map((w) => ({ text: w.text, left: w.rect.left, right: w.rect.right, top: w.rect.top, bottom: w.rect.bottom })));
+  } catch (e) { report.error = `detect_failed: ${String(e)}`; return { words, report, escalate: false }; }
+  report.detected = regions.length;
+  report.regions = regions.map((r) => ({ y0: r.y0, y1: r.y1, x0: r.x0, x1: r.x1 }));
+  if (regions.length === 0) return { words, report, escalate: false };
+  if (regions.length > MAX_GAP_REGIONS) { report.escalated = true; return { words, report, escalate: true }; }
+  try {
+    const texts = await transcribeGapRegions(mupdf, page, scale, regions, stats);
+    const added: TextItem[] = [];
+    regions.forEach((r, i) => {
+      const text = (texts[i] ?? "").replace(/\s+/g, " ").trim();
+      report.regions[i].text = text;
+      if (!plausibleTranscription(text, r)) return;
+      report.regions[i].recovered = true;
+      report.transcribed++;
+      for (const w of transcriptionToWords(text, r)) added.push(w);
+    });
+    report.injected_words = added.length;
+    return { words: added.length ? [...words, ...added] : words, report, escalate: false };
+  } catch (e) {
+    report.error = String(e); // fail open: keep the original OCR words
+    return { words, report, escalate: false };
   }
 }
 
@@ -2047,8 +2115,8 @@ export default {
       if (force_vision) reasons.push("force_vision requested by caller");
       const useVision = reasons.length > 0;
 
-      let extraction: ExtractionResult;
-      let extractionMs: number;
+      let extraction!: ExtractionResult;
+      let extractionMs!: number;
       let ocrText: string | undefined;
       let ocrMs: number | undefined;
       let ocrStripCount = 0;
@@ -2063,10 +2131,12 @@ export default {
       // own null-boundaries branch hands step 2 the old, pre-Decision-38 shape-based fallback
       // instead, so a transient failure here degrades to yesterday's behavior for this one page
       // rather than failing the whole upload.
-      let sectionBoundaries: BoundaryResult | null = null;
+      let sectionBoundaries = null as BoundaryResult | null; // (cast: assigned inside runVisionPath below, which flow analysis cannot see)
       let boundaryMs: number | undefined;
 
-      if (useVision) {
+      let usedVision = useVision;
+      let gapReport: GapReport | null = null;
+      const runVisionPath = async () => {
         try {
           const boundaryStart = Date.now();
           sectionBoundaries = resolveContinuationCategory(await runBoundaryDetectionVision(bytesToB64(pngBytes), trailingContext, modelCalls), trailingContext);
@@ -2077,20 +2147,25 @@ export default {
         const visionStart = Date.now();
         extraction = await runVisionExtraction(bytesToB64(pngBytes), trailingContext, sectionBoundaries, modelCalls);
         extractionMs = Date.now() - visionStart;
+      };
+
+      if (useVision) {
+        await runVisionPath();
       } else {
         const ocrStart = Date.now();
         const rgb = pixmap.getPixels(); // raw RGB Uint8Array (3 bytes/pixel) — no alpha, per above
         const { strips: stripPlan, rowInk } = planOcrStrips(rgb, renderedWidth, renderedHeight, scale);
         ocrStripCount = stripPlan.length;
+        let ocrWords: TextItem[];
         if (stripPlan.length <= 1) {
           const rgba = rgbToRgba(rgb);
-          ocrText = await runTesseract(rgba, renderedWidth, renderedHeight);
+          ocrWords = await runTesseract(rgba, renderedWidth, renderedHeight);
         } else {
           try {
             if (stripPlan.length > OCR_MAX_STRIPS) throw new Error(`ocr_too_many_strips (${stripPlan.length})`);
             const parts = (await Promise.all(stripPlan.map(([a, b]) => ocrRowsAdaptive(storage_path, pageNum, scale, renderedWidth, a, b, rowInk, 0)))).flat();
             ocrStripTiming = parts.map((pt) => ({ rows: pt.rows, words: pt.words.length, attempts: pt.attempts, timing_ms: pt.timing_ms }));
-            ocrText = reconstructByWordClustering(parts.flatMap((pt) => pt.words));
+            ocrWords = parts.flatMap((pt) => pt.words);
           } catch (stripErr) {
             // Reported with the same code the caller's retry ladder already keys on (WORKER_RESOURCE_LIMIT): this page
             // cannot be OCR'd within the platform's CPU limit, so the ladder retries once at a lower DPI and finally
@@ -2100,19 +2175,40 @@ export default {
             });
           }
         }
+        // Rows of the page the OCR emitted nothing for (see OCR GAP REPAIR above); a page with none is untouched.
+        const gap = await repairOcrGaps(mupdf, page, scale, rgb, renderedWidth, renderedHeight, ocrWords, modelCalls);
+        gapReport = gap.report;
+        if (gap.report.detected > 0) console.log(`rasterize-pdf-page: page ${pageNum} OCR gaps ${JSON.stringify(gap.report)}`);
+        ocrText = reconstructByWordClustering(gap.words);
         ocrMs = Date.now() - ocrStart;
-        try {
-          const boundaryStart = Date.now();
-          sectionBoundaries = resolveContinuationCategory(await runBoundaryDetectionHaiku(ocrText, trailingContext, modelCalls), trailingContext);
-          boundaryMs = Date.now() - boundaryStart;
-        } catch (boundaryErr) {
-          console.log(`rasterize-pdf-page: boundary detection failed, falling back to shape-based classification for this page — ${String(boundaryErr)}`);
+        if (gap.escalate) {
+          // The OCR failed broadly on this page (more unexplained rows than a few dropped lines): the same vision route a
+          // page takes when OCR cannot run at all.
+          usedVision = true;
+          reasons.push(`ocr_gap_escalation: ${gap.report.detected} unexplained rows > ${MAX_GAP_REGIONS}`);
+          ocrText = undefined;
+          await runVisionPath();
+        } else {
+          try {
+            const boundaryStart = Date.now();
+            sectionBoundaries = resolveContinuationCategory(await runBoundaryDetectionHaiku(ocrText, trailingContext, modelCalls), trailingContext);
+            boundaryMs = Date.now() - boundaryStart;
+          } catch (boundaryErr) {
+            console.log(`rasterize-pdf-page: boundary detection failed, falling back to shape-based classification for this page — ${String(boundaryErr)}`);
+          }
+          const haikuStart = Date.now();
+          extraction = await runHaikuExtraction(ocrText, trailingContext, sectionBoundaries, modelCalls);
+          extractionMs = Date.now() - haikuStart;
         }
-        const haikuStart = Date.now();
-        extraction = await runHaikuExtraction(ocrText, trailingContext, sectionBoundaries, modelCalls);
-        extractionMs = Date.now() - haikuStart;
       }
       extraction.skills_heading = resolveSkillsHeading(sectionBoundaries, extraction);
+      // A section heading identical to one of its own items (the first list entry taken as the heading when the page printed
+      // none) is cleared to "" -- the render rule prints the literal source heading or nothing. See _shared/resume-heading-guard.ts.
+      const headingRejections = guardSelfReferentialHeadings(extraction as unknown as Parameters<typeof guardSelfReferentialHeadings>[0]);
+      if (headingRejections.length) {
+        console.log(`rasterize-pdf-page: page ${pageNum} cleared self-referential headings ${JSON.stringify(headingRejections)}`);
+        if (sectionBoundaries) sectionBoundaries = { ...sectionBoundaries, sections: clearBoundaryHeadings(sectionBoundaries.sections, headingRejections) };
+      }
 
       return new Response(JSON.stringify({
         ok: true,
@@ -2130,13 +2226,15 @@ export default {
           png_bytes: pngBytes.length,
           bytes_per_pixel: bytesPerPixel,
         },
-        routing: { method: useVision ? "vision" : "tesseract", reasons },
+        routing: { method: usedVision ? "vision" : "tesseract", reasons },
         extraction,
         section_boundaries: sectionBoundaries,
         ocr_raw_text: ocrText,
         timing_ms: { fetch: fetchMs, import: importMs, open: openMs, render: renderMs, ocr: ocrMs, boundary: boundaryMs, extraction: extractionMs, total: Date.now() - handlerStart },
         model_calls: modelCalls,
         ocr_strips: { count: ocrStripCount, strips: ocrStripTiming },
+        ocr_gaps: gapReport,
+        heading_guard: headingRejections,
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: "unhandled", detail: String(e) }), {

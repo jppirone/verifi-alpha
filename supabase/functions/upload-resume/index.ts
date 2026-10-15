@@ -3,6 +3,8 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { withSupabase } from "jsr:@supabase/server@1";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { createOCREngine } from "npm:tesseract-wasm@0.11.0";
+import { guardSelfReferentialHeadings } from "../_shared/resume-heading-guard.ts";
+import { summarizeGapReport, type GapSummary } from "../_shared/resume-ocr-gaps.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -2330,6 +2332,8 @@ type PageTiming = {
   render?: unknown;
   timing_ms?: unknown;
   model_calls?: unknown;
+  ocr_gaps?: GapSummary; // rows the OCR dropped and the vision crop recovered (absent when the page had none)
+  heading_guard?: unknown; // section headings cleared because they equalled an item's own name (absent when none)
   qa: { fired: boolean; deferred: boolean; skipped?: "vision_route" | "no_measured_benefit"; issues_before?: number; issues_after?: number; retry_ms?: number; kept?: "retry" | "original" };
 };
 
@@ -2431,6 +2435,10 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
         model_calls: (d as { model_calls?: unknown }).model_calls,
         qa: { fired: false, deferred: false },
       };
+      const gapSummary = summarizeGapReport((d as { ocr_gaps?: unknown }).ocr_gaps);
+      if (gapSummary) timing.ocr_gaps = gapSummary;
+      const guardCleared = (d as { heading_guard?: unknown }).heading_guard;
+      if (Array.isArray(guardCleared) && guardCleared.length > 0) timing.heading_guard = guardCleared.slice(0, 16);
 
       // STRUCTURAL QA CHECK — RETRY REMOVED (2026-09-19). findStructuralIssues still runs and its flag is still
       // recorded in the page timing, but it no longer triggers a second read of the page. That retry (one bounded,
@@ -2811,6 +2819,8 @@ export default {
           // consistent rather than only covering the PDF path.
           extraction.certifications = dedupeCertifications(extraction.certifications);
           extraction.skills_heading = resolveSkillsHeading(sectionBoundaries, extraction);
+          // Same self-referential-heading guard as the PDF path (rasterize-pdf-page): a heading identical to one of its own items is cleared.
+          guardSelfReferentialHeadings(extraction as unknown as Parameters<typeof guardSelfReferentialHeadings>[0]);
         } catch (visionErr) {
           await supabase.from("resume_documents").update({ extraction_status: "failed" }).eq("id", docId);
           return new Response(JSON.stringify({ ok: false, error: "vision_extraction_failed", detail: String(visionErr), resume_document_id: docId }), {
