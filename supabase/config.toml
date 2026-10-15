@@ -257,10 +257,3 @@ verify_jwt = true
 
 [functions.check-item-employer]
 verify_jwt = true
-
-# TEMPORARY test slugs for the OCR-gap regression run; remove after the run (see the runbook).
-[functions.rasterize-pdf-page-next]
-verify_jwt = true
-
-[functions.upload-resume-next]
-verify_jwt = false
