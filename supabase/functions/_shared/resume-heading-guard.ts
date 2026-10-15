@@ -8,14 +8,9 @@
 //
 // Rule: a section heading that is identical to an item's own name (with or without its date / issuer / place) is NOT a
 // heading. It is cleared to "" -- the standing render rule already prints the literal source heading or nothing -- and
-// the items are left exactly as extracted. Applies to these section types:
-//   work_history     NOT HANDLED HERE (gap 16h follow-up fix, 2026-09-25, kept by AP6 re-run, 2026-10-14): a work history heading
-//                    that equals the job's own title is left unchanged for upload-resume's existing merge rule to correct (it
-//                    replaces such a heading with the document's dominant work heading). Clearing it here first hid it from that
-//                    rule and left the job with a blank heading (PironeBeast regression). KNOWN LEFTOVER: a document where no work
-//                    heading is shared by two or more jobs has no dominant heading, so a title-as-heading stays, exactly as
-//                    production does today.
-//   education       heading == the degree, or any two or more of institution / degree / field (institution alone stays)
+// the items are left exactly as extracted. Applies to every section type that carries items:
+//   work_history     heading == the title, optionally with company / location (company alone is a legitimate grouping heading)
+//   education        heading == the degree, or any two or more of institution / degree / field (institution alone stays)
 //   certifications   heading == the name, optionally with issuer / licence number (issuer alone stays)
 //   skills           heading == one of the skill strings
 //   freeform         heading == the section's whole content or its first line
@@ -45,6 +40,11 @@ function combos(parts: string[], keep: (used: number[]) => boolean): Set<string>
 type Rec = Record<string, unknown>;
 const str = (v: unknown) => normalizeLabel(v);
 
+function workLabels(it: Rec): Set<string> {
+  const f = [str(it.title), str(it.company), str(it.location)]; const idx = [0, 1, 2].filter((i) => f[i]);
+  const parts = idx.map((i) => f[i]);
+  return combos(parts, (used) => used.some((u) => idx[u] === 0)); // must contain the title
+}
 function educationLabels(it: Rec): Set<string> {
   const f = [str(it.institution), str(it.degree), str(it.field_of_study), str(it.location)]; const idx = [0, 1, 2, 3].filter((i) => f[i]);
   const parts = idx.map((i) => f[i]);
@@ -75,7 +75,7 @@ export function guardSelfReferentialHeadings(extraction: {
     for (const it of items) if (typeof it.heading === "string" && bad.has(it.heading)) it.heading = "";
     for (const h of bad) rejected.push({ section, heading: h });
   };
-  // work_history is deliberately NOT cleared here: upload-resume's merge rule owns a work heading that equals the job's own title.
+  clear("work_history", extraction.work_history, workLabels);
   clear("education", extraction.education, educationLabels);
   clear("certifications", extraction.certifications, certLabels);
   // skills: the heading against each skill string
