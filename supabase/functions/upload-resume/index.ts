@@ -1701,7 +1701,7 @@ function describeTrailingItem(extraction: ExtractionResult): TrailingItemContext
 // this would touch anyway (the page-adjacency check alone rules out anything not a boundary case).
 // Certifications are deliberately NOT handled here — a continuation certification, once correctly
 // classified via the context hint, is already a normal, independent entry needing no merge.
-function mergeBoundaryContinuations(extraction: ExtractionResult): ExtractionResult {
+function mergeBoundaryContinuations(extraction: ExtractionResult, seam?: SeamInfo): ExtractionResult {
   const pageOf = (pos: number | undefined) => (typeof pos === "number" ? Math.floor(pos / PAGE_POSITION_SPAN) : null);
   // Severity 1 (2026-09-08 regression session, item 4/5 investigation): reproduced live against
   // the real document this whole merge logic was built against — the SAME heading
@@ -1848,7 +1848,19 @@ function mergeBoundaryContinuations(extraction: ExtractionResult): ExtractionRes
     // anything, it's a deterministic property of the row itself.
     const isBlankContinuation = isPageAdjacent && !item.company && !item.title;
     if (prev && (isMatchingHeader || isBlankContinuation)) {
-      prev.job_responsibilities = `${prev.job_responsibilities}\n\n${item.job_responsibilities}`.trim();
+      // AP9U (Fix D): a bullet cut by the page break whose last word(s) the page extraction left out. Fail open per seam: any error joins as before.
+      let stitched: string | null = null;
+      try {
+        const s = seam && itemPage !== null ? stitchSeamFragment(prev.job_responsibilities, item.job_responsibilities, seam.ocrByPage.get(itemPage)) : null;
+        if (s) {
+          stitched = s.text;
+          seam!.report("log", `seam stitch - page ${itemPage}: appended fragment "${s.fragment.slice(0, 40)}" to the last bullet of the previous page`);
+        }
+      } catch (seamErr) {
+        stitched = null;
+        try { seam?.report("error", `seam stitch FAILED, joining as before: ${String(seamErr)}`); } catch { /* reporting only */ }
+      }
+      prev.job_responsibilities = stitched ?? `${prev.job_responsibilities}\n\n${item.job_responsibilities}`.trim();
       if (itemPage !== null) lastWorkHistoryPageOf.set(prev, itemPage);
       continue;
     }
@@ -2172,9 +2184,33 @@ function dedupePositions(extraction: ExtractionResult, boundaries?: BoundaryResu
 // page that established the block; a later page with its OWN, DIFFERENT heading is rerouted to
 // freeform instead — same section_type/shape as skills_secondary already uses for the same-page case
 // — never silently relabeled under the wrong heading.
+// AP9U (Fix D): what the work history merge needs to stitch a bullet that the page break cut in two and whose last word(s) the page extraction left out:
+// the stored OCR text of each page, and a report function for the log lines (the caller adds the document id).
+type SeamInfo = { ocrByPage: Map<number, string>; report: (level: "log" | "error", message: string) => void };
+
+// The fragment is the FIRST LINE of the next page's OCR text, and only when it is a short run of plain words: 1 to 6 words, at most 40 characters,
+// starting with a lowercase letter, made only of letters, spaces, apostrophes, hyphens and . , ; : ! ? ) " (no digit, no @, no slash, no bullet or
+// other symbol, so a lowercase page header such as "page 2 of 5", an e-mail, a URL or a bullet line is never taken). The previous text must NOT end
+// with terminal punctuation (. ! ? ) ] " ' and the curly quotes), and the fragment must not already be inside the first 200 characters of the continuation
+// text the model returned (whitespace and case ignored). Anything else returns null and the caller joins exactly as before. When it applies the bullet is
+// completed with one space and the fragment, and the continuation (which is the next bullet) follows on the next line, with no blank line.
+function stitchSeamFragment(prevText: string, contText: string, nextPageOcr: string | undefined): { text: string; fragment: string } | null {
+  if (typeof prevText !== "string" || typeof contText !== "string" || typeof nextPageOcr !== "string") return null;
+  const prev = prevText.trim();
+  if (!prev || /[.!?)\]"'”’]$/.test(prev)) return null; // empty, or already ends the sentence
+  const fragment = nextPageOcr.split("\n")[0].trim();
+  if (!fragment || fragment.length > 40) return null;
+  if (!/^[a-z]/.test(fragment) || !/^[A-Za-z][A-Za-z '\-.,;:!?)"]*$/.test(fragment)) return null;
+  if (fragment.split(/\s+/).length > 6) return null;
+  const fold = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
+  if (fold(contText).slice(0, 200).includes(fold(fragment))) return null; // the model already kept it
+  return { text: `${prev} ${fragment}\n${contText.trimStart()}`.trim(), fragment };
+}
+
 // A page of the merge: its pageNumber, the model's extraction, and (AP9R, Fix A's hand-over) the indexes of the skills strings that the
 // skill text restore step actually restored on this upload (absent or empty when it did not run, failed open, or restored nothing here).
-type SkillPage = { pageNumber: number; extraction: ExtractionResult; skillsRestored?: number[] };
+// ocrText (AP9U, Fix D) is the stored OCR text of the page (null for a vision routed page).
+type SkillPage = { pageNumber: number; extraction: ExtractionResult; skillsRestored?: number[]; ocrText?: string | null };
 type RehomeNote = { heading: string; items: number; first: string };
 
 // `rehome` (AP9R, Fix B) is false for every call that has no restored string and on every fallback: with it false this function is exactly
@@ -2343,7 +2379,17 @@ function mergeExtractions(pages: SkillPage[], report?: (level: "log" | "error", 
       ...crossPageSkillsSecondary, // gap #16a fix — see splitCrossPageSkills; positions already globalized there
     ],
   };
-  return anchorSameHeadingFreeform(mergeBoundaryContinuations(merged));
+  // AP9U (Fix D): the seam stitch needs each page's OCR text and a place to report to; without a report function (older callers) it is off.
+  let seam: SeamInfo | undefined;
+  try {
+    seam = report
+      ? { ocrByPage: new Map(pages.filter((p) => typeof p.ocrText === "string").map((p) => [p.pageNumber, p.ocrText as string] as [number, string])), report }
+      : undefined;
+  } catch (seamSetupErr) {
+    seam = undefined; // fail open: no stitching, the merge goes on exactly as before
+    try { report?.("error", `seam stitch FAILED, joining as before: ${String(seamSetupErr)}`); } catch { /* reporting only */ }
+  }
+  return anchorSameHeadingFreeform(mergeBoundaryContinuations(merged, seam));
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -2597,14 +2643,14 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
       return { ...r, extraction: { ...r.extraction, work_history: fix.work_history as any, freeform: [...r.extraction.freeform, ...fix.needsReview] } };
     });
     if (roleBucketLog.length) console.log(`upload-resume: ${docId} role buckets — ${roleBucketLog.join("; ")}`);
-    merged = dedupePositions(mergeExtractions(bucketed.map((r) => ({ pageNumber: r.page_number, extraction: r.extraction, skillsRestored: r.skillsRestored })), skillBlockReport), mergedBoundaries);
+    merged = dedupePositions(mergeExtractions(bucketed.map((r) => ({ pageNumber: r.page_number, extraction: r.extraction, skillsRestored: r.skillsRestored, ocrText: r.ocr_text })), skillBlockReport), mergedBoundaries);
     // A repaired role group was written in the order the page merge needs (the role that receives continuing text last); now that
     // the pages are merged and numbered it takes its final order, latest role first, and its marker field is removed.
     merged.work_history = orderRoleGroupsLatestFirst(merged.work_history as any) as any;
   } catch (roleBucketErr) {
     console.error(`upload-resume: ${docId} role bucket repair FAILED, using the unrepaired pages — ${String(roleBucketErr)}`);
     skillBlockLog.length = 0; // the first attempt's lines are void: the merge is run again from the unrepaired pages
-    merged = dedupePositions(mergeExtractions(pagesForMerge.map((r) => ({ pageNumber: r.page_number, extraction: r.extraction, skillsRestored: r.skillsRestored })), skillBlockReport), mergedBoundaries);
+    merged = dedupePositions(mergeExtractions(pagesForMerge.map((r) => ({ pageNumber: r.page_number, extraction: r.extraction, skillsRestored: r.skillsRestored, ocrText: r.ocr_text })), skillBlockReport), mergedBoundaries);
   }
   for (const line of skillBlockLog) console.log(line);
   // OCR text per page, in page order, with a marker so a person or a future tool can tell where a stretch came
