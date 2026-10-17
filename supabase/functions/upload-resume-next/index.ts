@@ -253,24 +253,30 @@ short bare phrases) as the list above it — judge it as its own heading like an
 ${KNOWN_CATEGORIES_GUIDE}
 
 A SEPARATE TASK, after boundaries — SAME-COMPANY, MULTIPLE ROLES: decide, for every employer name that
-appears more than once within whatever section(s) you judged as work_history above, whether it must
-merge into one work_history entry or stay as separate entries. Do NOT leave this decision to a later
-step — decide it definitively here, for every repeated company, so nothing is left ambiguous.
+appears more than once, OR is printed once on a company line with several role lines under it, within
+whatever section(s) you judged as work_history above, whether its roles stay as separate work_history
+entries or form one entry (each dated role is its own entry, so staff can confirm each role and
+period). Do NOT leave this decision to a later step — decide it definitively here, for every such
+company, so nothing is left ambiguous.
 
-The test: count the COMPLETE header lines naming this company. A complete header line is one that, by
-itself, states a title, this company, AND a date range (the same header shape the document uses for
-every other employer entry) — not a parenthetical or a subordinate aside underneath a single shared
-header.
-  - Exactly ONE complete header line names this company, with any other role for it mentioned ONLY as
-    a subordinate aside UNDER that one header (a parenthetical, an italicized note, a short line like
-    "Promoted mid-year from Desktop Publishing Manager (1996-1997)" that has no company/location/date-
-    range fields of its own) → list the company's exact printed name in "mergeCompanies". This is a
-    genuine internal promotion/title-change within one tenure.
-  - TWO OR MORE complete header lines independently name this company, each with its own title AND its
-    own date range → list the company's exact printed name in "noMergeCompanies", regardless of
-    whether the roles read like an internal promotion or carry a caption such as "Role transition" or
-    "Promoted from...". A caption on one header never erases the fact that the other role has its own
-    separate, complete header elsewhere.
+The test: count the DATED ROLE LINES for this company. A dated role line is either a complete header
+line (it states a title, this company, AND a date range, the same header shape the document uses for
+every other employer entry) or a role line under a company line that names the company once: a title
+AND that role's OWN full date range, with the company inherited from the company line above and not
+repeated. A parenthetical, a note, or a prose line with no full date range of its own underneath a
+single header is not a dated role line.
+  - Exactly ONE dated role line for this company, with any other role mentioned ONLY as a subordinate
+    aside UNDER it (a parenthetical, an italicized note, a short line like "Promoted mid-year from
+    Desktop Publishing Manager (1996-1997)" with no company/location/own header) → list the company's
+    exact printed name in "mergeCompanies". This means "one header with a progression note": the
+    extraction step then keeps ONE entry for the header's role, and makes the earlier role its own
+    entry only when the note itself carries a date range.
+  - TWO OR MORE dated role lines independently belong to this company, each with its own title AND its
+    own date range → list the company's exact printed name in "noMergeCompanies", whether they are
+    complete headers or role lines under one company line, and regardless of whether the roles read
+    like an internal promotion or carry a caption such as "Role transition" or "Promoted from...". A
+    caption on one header never erases that the other role has its own date range. Each role becomes
+    its own entry with the company copied onto it.
   - The company's two mentions read as genuinely separate, disconnected stints with an unrelated gap
     (not a continuous tenure at all) → list it in neither array; leave it out entirely.
 A company appears in at most one of the two arrays, never both. When no company repeats at all, return
@@ -286,9 +292,12 @@ Reuters | Montvale, NJ | 1996 - 1998" followed on its own line by "Promoted mid-
 Publishing Manager (1996-1997)" is only ONE complete header line — the second line names an earlier
 title but has no company, no location, and no independent date range of its own printed on it (the
 "(1996-1997)" is a parenthetical aside inside that one sentence, not a standalone date-range field
-like the header line has) — list "Thomson Reuters" in "mergeCompanies". The test is whether the SECOND
-mention independently repeats the company name AND prints its own location AND its own date range as
-separate fields the way the first one does, not whether it names an earlier title at all.
+like the header line has) — list "Thomson Reuters" in "mergeCompanies". A third shape: "WESTCX, Remote
+September 2023 - August 2026" (a company line) followed by the role lines "Senior Recruiter, July 2024
+- August 2026" and "Recruiter, September 2023 - June 2024", each with its own bullets, is TWO dated
+role lines even though the company name is not repeated on them — list "WESTCX" in "noMergeCompanies".
+The test is whether each role carries its OWN full date range as a separate field, not whether the
+company name is repeated and not whether a note names an earlier title.
 
 ${MULTI_ENTRY_SECTION_BOUNDARY_RULE}
 
@@ -380,24 +389,25 @@ above goes to needs_review, same as always.`;
   const noMergeBlock = noMergeCompanies.length
     ? `
 
-SAME COMPANY, MULTIPLE ROLES — ALREADY DECIDED, DO NOT MERGE THESE COMPANIES (do not run your own
-gating test against them, do not merge them, no matter what caption or transition language is nearby):
-the following employer names have two or more independent, complete header lines in this document —
-each with its own title and its own date range — so each of THEIR header lines must be its own
-separate work_history entry, keeping its own real title and its own real start_date/end_date exactly
-as printed on that line:
+SAME COMPANY, MULTIPLE ROLES — ALREADY DECIDED, ONE ENTRY PER ROLE FOR THESE COMPANIES (do not run your
+own gating test against them, do not merge them, no matter what caption or transition language is
+nearby): the following employer names have two or more dated roles in this document — complete header
+lines or role lines under one company line, each with its own title and its own date range — so each
+of THEIR dated roles must be its own separate work_history entry, keeping its own real title and its
+own real start_date/end_date exactly as printed on that line, with the company name copied onto every
+one (a company line's own overall years are not an entry; per "HOW TO EXTRACT" cases a and b below):
 ${noMergeCompanies.map((c) => `  - "${c}"`).join("\n")}`
     : "";
   const mergeBlock = mergeCompanies.length
     ? `
 
-SAME COMPANY, MULTIPLE ROLES — ALREADY DECIDED, MERGE THESE COMPANIES (do not run your own gating test
-against them, go straight to the "HOW TO MERGE" mechanics below for each one — this IS a genuine
-internal promotion/title-change within one tenure, already confirmed): the following employer names
-have exactly one complete header line, with any other role for that same tenure mentioned only as a
-subordinate aside underneath it — combine each into ONE work_history entry per the HOW TO MERGE steps
-below (joined title, earliest start_date, latest end_date, full job_responsibilities including the
-aside's own content):
+SAME COMPANY, MULTIPLE ROLES — ALREADY DECIDED, ONE HEADER WITH A PROGRESSION NOTE (do not run your own
+gating test against them, go straight to "HOW TO EXTRACT" cases c, d and e below for each one, already
+confirmed): the following employer names have exactly one dated role line, with any other role for that
+same tenure mentioned only as a subordinate aside underneath it. Keep ONE entry for the header's role
+with the title and dates printed on the header and never a joined title; if the aside carries its own
+date range in parentheses, the earlier role is also its own entry with empty job_responsibilities (case
+d), otherwise the aside stays inside the one entry's text (case c):
 ${mergeCompanies.map((c) => `  - "${c}"`).join("\n")}`
     : "";
   const sameCompanyFooter = (noMergeBlock || mergeBlock)
@@ -632,15 +642,23 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   GATING TEST — count the COMPLETE header lines naming this company. A complete header line is one
   that, by itself, states a title, this company, and a date range — the same shape every other
   employer entry in this section uses (e.g. "Title | Company | Location | Dates", or whatever exact
-  header shape this resume uses elsewhere).
+  header shape this resume uses elsewhere). A ROLE LINE under a company line counts too: when a
+  company line names the employer once (often with the overall years) and the lines under it each state
+  a title and that role's OWN full date range, every such role line is a complete header for that
+  company even though the company name is not repeated on it (the company is inherited from the
+  company line above). A title alone, a parenthetical, or a note with no full date range of its own
+  does not count.
     - Count == 1 (only one complete header line names this company; any other role is mentioned ONLY
       as a subordinate aside UNDER that one header — a parenthetical, an italicized note, a short line
       like "Promoted mid-year from Desktop Publishing Manager (1996-1997)" that does NOT itself state
-      its own title+company+dates as a standalone header) → MERGE-ELIGIBLE. Go to "HOW TO MERGE" below.
-    - Count >= 2 (two or more complete header lines each independently name this company, each with
-      its own title and its own date range) → NOT MERGE-ELIGIBLE. STOP HERE. Extract one work_history
-      entry per header line, each keeping its own real title and its own real start_date/end_date
-      exactly as printed on that line. Do not proceed to "HOW TO MERGE" for this company at all.
+      its own title+company+dates as a standalone header) → ONE ROLE GROUP. Go to "HOW TO EXTRACT"
+      below, cases c, d and e.
+    - Count >= 2 (two or more complete header lines or dated role lines each independently belong to
+      this company, each with its own title and its own date range) → SEPARATE ENTRIES. STOP HERE.
+      Extract one work_history entry per header line or role line, each keeping its own real title and
+      its own real start_date/end_date exactly as printed on that line, with the company name copied
+      onto every one of them (a company line's own overall years are not an entry). Go to "HOW TO
+      EXTRACT" below, cases a and b only (they decide which entry holds the bullets).
       This stays NOT MERGE-ELIGIBLE even when one of the header lines carries a caption that explicitly
       frames it as a continuation or promotion (e.g. "Role transition; retained [prior title] title of
       record," "Promoted from...") — a caption on one header does not erase the fact that the OTHER
@@ -659,35 +677,37 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   ending 2026, never a single merged "Business Education Teacher to Associate Dean of Discipline" entry
   and never a fabricated open-ended/"Present" end date on either one.
 
-  HOW TO MERGE (only reached when the gating test above found exactly count == 1 — one company-level
-  header followed by one or more role sub-entries mentioned only as subordinate asides beneath it, an
-  internal promotion or title change within that single tenure): combine it into ONE work_history
-  entry, never one entry per role:
-    - "company" = the employer's name, copied verbatim once.
-    - "title" = every role's own title, in chronological order (earlier role FIRST, later/current role
-      LAST), joined as "First Title to Second Title" (extend the same way for three or more roles) —
-      e.g. "Recruiter to Senior Recruiter" — never just the most senior/most recent title alone, which
-      would misrepresent the whole tenure as having started at that level, and never the reverse order
-      either. Determine which title is earlier from the subordinate aside's own wording, not from which
-      title sounds more senior: a note reading "Promoted FROM [Title]," "Started as [Title]," or similar
-      names the EARLIER title explicitly — that named title goes FIRST, and the header line's OWN title
-      (the one with the company/location/date-range) goes SECOND, since the header always describes the
-      tenure's current/most recent state. A real, confirmed failure mode: "Manager of Business Analysis
-      and Publishing Systems | Thomson Reuters | ... | 1996-1998" with a subordinate note "Promoted
-      mid-year from Desktop Publishing Manager (1996-1997)" came back as "Manager of Business Analysis
-      and Publishing Systems to Desktop Publishing Manager" — backwards; "from" explicitly names Desktop
-      Publishing Manager as the earlier role, so the correct title is "Desktop Publishing Manager to
-      Manager of Business Analysis and Publishing Systems".
-    - "start_date" = the EARLIEST role's own start date. "end_date" = the LATEST role's own end date
-      (or the current-role rule below if that latest role is still ongoing).
-    - "job_responsibilities" = rebuild the full internal structure as one piece of text, nothing
-      dropped: first, any company-level description or context that applies to the whole tenure and
-      isn't specific to either individual role (what the company does, an acquisition note, and
-      similar) — copied verbatim, on its own line(s); then, for each role in chronological order, a
-      line naming that role and its own exact date range (e.g. "Recruiter, September 2023 - June
-      2024:"), followed by that role's own bullets exactly as printed, using "\n" between lines per the
-      LINE-BREAK PRESERVATION rule above. Never shorten, summarize, or drop any real content from either
-      role or from the company-level context while combining them — the combining is structural only.
+  HOW TO EXTRACT A COMPANY WITH SEVERAL ROLES — AS PRINTED, ONE ENTRY PER DATED ROLE (a role can only
+  be confirmed by its own title, company and date range, so each dated role is its own entry). NEVER
+  join titles into one "First Title to Second Title" entry; every title stays exactly as printed:
+    a) Each role has its own title AND its own full date range (as role lines under one company line,
+       or each as a full header): ONE work_history entry per role. "company" = the employer's name copied
+       onto EVERY one of those entries even though the role line does not repeat it. Each role keeps its
+       own title, its own start_date and end_date (written under the DATES rules, YYYY-MM or YYYY, never in the printed word form), and ONLY the lines printed under that role (its description lines, its bullets and any
+       sub-group label lines such as "Notable Experiences:" or "Responsibilities:", kept exactly as printed). The company line's own overall years (the umbrella tenure) are
+       NOT an entry, and are dropped when every role under it has its own dates.
+    b) Roles that each list their own years but share ONE pooled bullet list: the latest (top) role
+       entry gets all the bullets; every other role is still its own entry with company, title and dates
+       and an empty job_responsibilities.
+    c) One header plus a prose line (a bullet, or a line under the header) that says the person
+       progressed from one role to another and gives NO date range of its own: ONE entry. The sentence
+       stays inside that entry's job_responsibilities as printed. No extra entry, no combined title.
+    d) One header plus a note that DOES carry its own date range in parentheses, e.g. "Promoted mid-year
+       from Desktop Publishing Manager (1996-1997)": TWO entries. The header's role keeps the title and
+       the dates printed on its header (never changed to match the note, never an invented start or end
+       date), and the note line is copied as the FIRST line of its job_responsibilities, followed by its
+       bullets. The earlier role is its own entry: same company, title taken from the note ("Desktop
+       Publishing Manager"), dates taken from the parentheses, empty job_responsibilities.
+    e) One header whose bullets are split into sub-groups that have no dates of their own (for example
+       "Notable Experiences:" and "Responsibilities:"): ONE role, ONE entry; copy every group AND its label
+       line exactly as printed into its job_responsibilities.
+    f) A company description sentence (what the company does, an acquisition note): copy it verbatim as
+       the first line of the LATEST role's job_responsibilities only, never repeated on earlier roles.
+    g) A layout that fits none of a to f: put everything under the main job as text, set its
+       extraction_confidence to "low", and keep the literal text; never guess a structure.
+    Role blocks keep the order the resume printed them; the start_date and end_date of each entry are
+    the ones printed for that role (the current-role rule below applies to a role still ongoing).
+    Never shorten, summarize, or drop any real content while splitting; the split is structural only.
 
   Separately, do NOT apply any of this (merge or not) when two entries merely share an employer NAME
   but read as genuinely separate, disconnected stints — a real gap where the candidate left and later
