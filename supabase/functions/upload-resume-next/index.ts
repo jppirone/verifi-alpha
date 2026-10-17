@@ -683,8 +683,8 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
     a) Each role has its own title AND its own full date range (as role lines under one company line,
        or each as a full header): ONE work_history entry per role. "company" = the employer's name copied
        onto EVERY one of those entries even though the role line does not repeat it. Each role keeps its
-       own title, its own start_date and end_date (written under the DATES rules, YYYY-MM or YYYY, never in the printed word form), and ONLY the lines printed under that role (its description lines, its bullets and any
-       sub-group label lines such as "Notable Experiences:" or "Responsibilities:", kept exactly as printed). The company line's own overall years (the umbrella tenure) are
+       own title, its own start_date/end_date exactly as printed, and ONLY the description lines and
+       bullets printed under that role. The company line's own overall years (the umbrella tenure) are
        NOT an entry, and are dropped when every role under it has its own dates.
     b) Roles that each list their own years but share ONE pooled bullet list: the latest (top) role
        entry gets all the bullets; every other role is still its own entry with company, title and dates
@@ -699,8 +699,8 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
        bullets. The earlier role is its own entry: same company, title taken from the note ("Desktop
        Publishing Manager"), dates taken from the parentheses, empty job_responsibilities.
     e) One header whose bullets are split into sub-groups that have no dates of their own (for example
-       "Notable Experiences:" and "Responsibilities:"): ONE role, ONE entry; copy every group AND its label
-       line exactly as printed into its job_responsibilities.
+       "Notable Experiences:" and "Responsibilities:"): ONE role, ONE entry; every group stays in its
+       job_responsibilities.
     f) A company description sentence (what the company does, an acquisition note): copy it verbatim as
        the first line of the LATEST role's job_responsibilities only, never repeated on earlier roles.
     g) A layout that fits none of a to f: put everything under the main job as text, set its
