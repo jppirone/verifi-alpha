@@ -5,6 +5,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { createOCREngine } from "npm:tesseract-wasm@0.11.0";
 import { guardSelfReferentialHeadings } from "../_shared/resume-heading-guard.ts";
 import { summarizeGapReport, type GapSummary } from "../_shared/resume-ocr-gaps.ts";
+import { repairRoleBuckets, orderRoleGroupsLatestFirst } from "../_shared/resume-role-buckets.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -2483,7 +2484,24 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
   // the single-call/single-image paths, just assembled from several pages' worth of per-page results
   // instead of one call's own list.
   const mergedBoundaries: BoundaryResult = { sections: ordered.flatMap((r) => r.sectionBoundaries?.sections || []) };
-  const merged = dedupePositions(mergeExtractions(ordered.map((r) => ({ pageNumber: r.page_number, extraction: r.extraction }))), mergedBoundaries);
+  // One bucket per dated role (AP9, John's rule of 2026-10-16): the page extraction model decides "one entry or one per role"
+  // unreliably in both directions, so the two clean text shapes (dated role lines under a company line, a header with a dated
+  // "from <Title>" note) are repaired here from the page's own OCR text, no model call; anything unsettled is flagged as
+  // needs_review with the literal lines. Works on copies: the checkpointed rows (the model's raw answer) are not changed.
+  // See _shared/resume-role-buckets.ts for the exact text patterns. A vision-routed page has no OCR text and is left as is.
+  // The check runs per page, BEFORE the cross-page merge below (which stays the only owner of joining pages).
+  const roleBucketLog: string[] = [];
+  const bucketed = ordered.map((r) => {
+    const fix = repairRoleBuckets(r.ocr_text, r.extraction.work_history as any, r.page_number);
+    if (!fix.actions.length && !fix.needsReview.length) return r;
+    for (const a of fix.actions) roleBucketLog.push(`page ${r.page_number}: ${a}`);
+    return { ...r, extraction: { ...r.extraction, work_history: fix.work_history as any, freeform: [...r.extraction.freeform, ...fix.needsReview] } };
+  });
+  if (roleBucketLog.length) console.log(`upload-resume: ${docId} role buckets — ${roleBucketLog.join("; ")}`);
+  const merged = dedupePositions(mergeExtractions(bucketed.map((r) => ({ pageNumber: r.page_number, extraction: r.extraction }))), mergedBoundaries);
+  // A repaired role group was written in the order the page merge needs (the role that receives continuing text last); now that
+  // the pages are merged and numbered it takes its final order, latest role first, and its marker field is removed.
+  merged.work_history = orderRoleGroupsLatestFirst(merged.work_history as any) as any;
   // OCR text per page, in page order, with a marker so a person or a future tool can tell where a stretch came
   // from. A vision-routed page contributes no OCR text by architecture; its marker still shows the gap.
   const combinedOcrText = ordered.map((r) => `--- page ${r.page_number} ---\n` + (r.ocr_text ?? "(vision-routed page, no OCR text)")).join("\n\n");

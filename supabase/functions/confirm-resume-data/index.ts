@@ -127,7 +127,10 @@ function effectiveWorkEnd(endDate: string | null, endPrecision: unknown): string
   if (endPrecision === "present") return new Date().toISOString().slice(0, 10);
   return endDate;
 }
-type OverlapItem = { id: string; start: string | null; end: string | null };
+type OverlapItem = { id: string; start: string | null; end: string | null; company?: string | null };
+// AP9 (2026-10-16, John's rule 11): roles of the SAME company are one tenure with several dated roles, not two
+// jobs held at once, so a pair with the same company (case, spacing and punctuation ignored) is never flagged.
+const overlapCompanyKey = (c: unknown): string => (typeof c === "string" ? c.toLowerCase().replace(/[^a-z0-9]+/g, "") : "");
 // A pair is flagged when the overlapping span exceeds 30 days -- exactly 30 does not trigger (spec's own
 // test case), 31+ does. Every pair in the set is returned in one pass; nothing here decides how many
 // pairs constitute one "incident" -- that's the caller's job (one hold per detection run, however many
@@ -138,6 +141,7 @@ function detectWorkOverlaps(items: OverlapItem[]): Array<{ a: string; b: string;
     for (let j = i + 1; j < items.length; j++) {
       const a = items[i], b = items[j];
       if (!a.start || !a.end || !b.start || !b.end) continue;
+      if (overlapCompanyKey(a.company) && overlapCompanyKey(a.company) === overlapCompanyKey(b.company)) continue;
       const aS = Date.parse(a.start), aE = Date.parse(a.end), bS = Date.parse(b.start), bE = Date.parse(b.end);
       if (!Number.isFinite(aS) || !Number.isFinite(aE) || !Number.isFinite(bS) || !Number.isFinite(bE)) continue;
       const overlapStart = Math.max(aS, bS), overlapEnd = Math.min(aE, bE);
@@ -397,14 +401,14 @@ export default {
       // one. Read-only, so safe to run before anything is claimed: this batch's own (possibly edited)
       // dates plus every other already-confirmed work_history_items row for this candidate.
       const priorConfirmedRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/work_history_items?candidate_id=eq.${candidate_id}&candidate_confirmed=is.true&select=id,start_date,start_date_precision,end_date,end_date_precision`,
+        `${SUPABASE_URL}/rest/v1/work_history_items?candidate_id=eq.${candidate_id}&candidate_confirmed=is.true&select=id,company,start_date,start_date_precision,end_date,end_date_precision`,
         { headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } },
       );
       const priorConfirmed: any[] = priorConfirmedRes.ok ? await priorConfirmedRes.json() : [];
       const batchIds = new Set(work_history.map((w) => w.id));
       const overlapUniverse: OverlapItem[] = [
-        ...priorConfirmed.filter((r) => !batchIds.has(r.id)).map((r) => ({ id: r.id as string, start: dateOrNull(r.start_date), end: effectiveWorkEnd(dateOrNull(r.end_date), r.end_date_precision) })),
-        ...work_history.map((w) => ({ id: w.id, start: dateOrNull(w.start_date), end: effectiveWorkEnd(dateOrNull(w.end_date), w.end_date_precision) })),
+        ...priorConfirmed.filter((r) => !batchIds.has(r.id)).map((r) => ({ id: r.id as string, company: r.company as string | null, start: dateOrNull(r.start_date), end: effectiveWorkEnd(dateOrNull(r.end_date), r.end_date_precision) })),
+        ...work_history.map((w) => ({ id: w.id, company: w.company, start: dateOrNull(w.start_date), end: effectiveWorkEnd(dateOrNull(w.end_date), w.end_date_precision) })),
       ];
       const overlapPairs = detectWorkOverlaps(overlapUniverse);
       if (overlapPairs.length > 0) {

@@ -622,7 +622,10 @@ function effectiveWorkEnd(endDate: string | null | undefined, endPrecision: unkn
   if (endPrecision === "present") return new Date().toISOString().slice(0, 10);
   return typeof endDate === "string" && endDate ? endDate : null;
 }
-type OverlapItem = { id: string; start: string | null; end: string | null };
+type OverlapItem = { id: string; start: string | null; end: string | null; company?: string | null };
+// AP9 (2026-10-16, John's rule 11): roles of the SAME company are one tenure with several dated roles, not two
+// jobs held at once, so a pair with the same company (case, spacing and punctuation ignored) is never flagged.
+const overlapCompanyKey = (c: unknown): string => (typeof c === "string" ? c.toLowerCase().replace(/[^a-z0-9]+/g, "") : "");
 // A pair is flagged when the overlapping span exceeds 30 days -- exactly 30 does not trigger (spec's own
 // test case), 31+ does. Every pair is returned in one pass; one hold per detection RUN, however many
 // pairs it finds (never one hold per pair).
@@ -632,6 +635,7 @@ function detectWorkOverlaps(items: OverlapItem[]): Array<{ a: string; b: string;
     for (let j = i + 1; j < items.length; j++) {
       const a = items[i], b = items[j];
       if (!a.start || !a.end || !b.start || !b.end) continue;
+      if (overlapCompanyKey(a.company) && overlapCompanyKey(a.company) === overlapCompanyKey(b.company)) continue;
       const aS = Date.parse(a.start), aE = Date.parse(a.end), bS = Date.parse(b.start), bE = Date.parse(b.end);
       if (!Number.isFinite(aS) || !Number.isFinite(aE) || !Number.isFinite(bS) || !Number.isFinite(bE)) continue;
       const overlapStart = Math.max(aS, bS), overlapEnd = Math.min(aE, bE);
@@ -653,11 +657,11 @@ function postApplyWorkItems(ctx: any): (OverlapItem & { row: Rec })[] {
   for (const p of W.pairs) {
     const o = aW[p.oldIdx], n = sW[p.newIdx];
     const r = p.cls === "kept" ? o : mergeFacts("work", o, n, p.changes).merged;
-    out.push({ id: o.id, start: typeof r.start_date === "string" ? r.start_date : null, end: effectiveWorkEnd(r.end_date, r.end_date_precision), row: r });
+    out.push({ id: o.id, start: typeof r.start_date === "string" ? r.start_date : null, end: effectiveWorkEnd(r.end_date, r.end_date_precision), company: r.company, row: r });
   }
   for (const j of W.added) {
     const n = sW[j];
-    out.push({ id: n.id, start: typeof n.start_date === "string" ? n.start_date : null, end: effectiveWorkEnd(n.end_date, n.end_date_precision), row: n });
+    out.push({ id: n.id, start: typeof n.start_date === "string" ? n.start_date : null, end: effectiveWorkEnd(n.end_date, n.end_date_precision), company: n.company, row: n });
   }
   return out;
 }
