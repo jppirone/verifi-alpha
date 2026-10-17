@@ -12,7 +12,7 @@ let n = 0; const t = (name: string, fn: () => void) => { fn(); n++; console.log(
 const src = fs.readFileSync(new URL("../../supabase/functions/upload-resume/index.ts", import.meta.url), "utf8").replace(/\r\n/g, "\n");
 const mergeCode = src.slice(src.indexOf("const PAGE_POSITION_SPAN"), src.indexOf("const RELAY_CALLS_PER_INVOCATION"));
 const m: any = await import("data:text/javascript;base64," + Buffer.from(stripTypeScriptTypes(mergeCode) + "\nexport { mergeExtractions, dedupePositions };", "utf8").toString("base64"));
-const start = src.indexOf("  let pagesForMerge = ordered;"); // AP9O: the block now starts with the skill text restore step, which sits before the role bucket step
+const start = src.indexOf("  let pagesForMerge"); // AP9O: the block now starts with the skill text restore step, which sits before the role bucket step
 const end = src.indexOf("  // OCR text per page, in page order");
 assert.ok(start > 0 && end > start, "repair block not found in upload-resume");
 const block = src.slice(start, end);

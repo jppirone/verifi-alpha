@@ -2155,7 +2155,16 @@ function dedupePositions(extraction: ExtractionResult, boundaries?: BoundaryResu
 // page that established the block; a later page with its OWN, DIFFERENT heading is rerouted to
 // freeform instead — same section_type/shape as skills_secondary already uses for the same-page case
 // — never silently relabeled under the wrong heading.
-function splitCrossPageSkills(pages: Array<{ pageNumber: number; extraction: ExtractionResult }>): {
+// A page of the merge: its pageNumber, the model's extraction, and (AP9R, Fix A's hand-over) the indexes of the skills strings that the
+// skill text restore step actually restored on this upload (absent or empty when it did not run, failed open, or restored nothing here).
+type SkillPage = { pageNumber: number; extraction: ExtractionResult; skillsRestored?: number[] };
+type RehomeNote = { heading: string; items: number; first: string };
+
+// `rehome` (AP9R, Fix B) is false for every call that has no restored string and on every fallback: with it false this function is exactly
+// the code that existed before Fix B. With it true, a skills-labeled block that contains a string Fix A restored, and that is not a
+// continuation of the primary skills list, is not a skills list at all (its items carry a description each): it is placed in freeform as
+// additional_info under its own heading, together with its continuation pages, instead of needs_review. `notes` collects what moved, for the log.
+function splitCrossPageSkills(pages: SkillPage[], rehome = false, notes: RehomeNote[] = []): {
   primary: string[];
   heading: string;
   secondaryFreeform: Array<{ section_type: string; heading: string; content: string; position?: number }>;
@@ -2164,17 +2173,40 @@ function splitCrossPageSkills(pages: Array<{ pageNumber: number; extraction: Ext
   let lastPrimaryPage: number | null = null;
   let lastSecondaryHeading: string | null = null;
   let lastSecondaryPage: number | null = null;
+  let lastSecondaryRehomed = false; // the pending secondary block was re-homed as additional_info (its continuation pages follow it)
   const primary: string[] = [];
   const secondaryFreeform: Array<{ section_type: string; heading: string; content: string; position?: number }> = [];
-  for (const { pageNumber, extraction } of pages) {
+  for (const { pageNumber, extraction, skillsRestored } of pages) {
     if (!extraction.skills.length) continue;
     const pageHeading = cleanHeading(extraction.skills_heading);
-    const push = (heading: string) => secondaryFreeform.push({
-      section_type: "needs_review",
+    const push = (heading: string, sectionType = "needs_review") => secondaryFreeform.push({
+      section_type: sectionType,
       heading,
       content: extraction.skills.join("\n"),
       position: typeof extraction.skills_position === "number" ? globalizePosition(pageNumber, extraction.skills_position) ?? undefined : undefined,
     });
+    if (rehome) {
+      const restored = Array.isArray(skillsRestored) && skillsRestored.length > 0;
+      const looksLikePrimaryPage = establishedHeading !== null && (!pageHeading || pageHeading === establishedHeading);
+      const adjacentToRehomed = lastSecondaryRehomed && lastSecondaryPage !== null && pageNumber === lastSecondaryPage + 1;
+      const adjacentToPrimaryPage = lastPrimaryPage !== null && pageNumber === lastPrimaryPage + 1;
+      if (adjacentToRehomed && (!pageHeading || pageHeading === lastSecondaryHeading || (looksLikePrimaryPage && !adjacentToPrimaryPage))) {
+        // the next page of a block already re-homed, with no heading of its own (or its heading repeated): the rest of the same section
+        push(lastSecondaryHeading || "", "additional_info");
+        lastSecondaryPage = pageNumber;
+        if (notes.length) notes[notes.length - 1].items += extraction.skills.length;
+        continue;
+      }
+      if (restored && !looksLikePrimaryPage) {
+        // restored text on a block that is not the continuation of the primary skills list (a differently headed block, or the first block)
+        push(pageHeading, "additional_info");
+        lastSecondaryHeading = pageHeading;
+        lastSecondaryPage = pageNumber;
+        lastSecondaryRehomed = true;
+        notes.push({ heading: pageHeading, items: extraction.skills.length, first: String(extraction.skills[0] ?? "").slice(0, 60) });
+        continue;
+      }
+    }
     if (establishedHeading === null) {
       establishedHeading = pageHeading; // may itself be "" (no heading at all) — still establishes the block
       primary.push(...extraction.skills);
@@ -2214,6 +2246,7 @@ function splitCrossPageSkills(pages: Array<{ pageNumber: number; extraction: Ext
     push(pageHeading);
     lastSecondaryHeading = pageHeading;
     lastSecondaryPage = pageNumber;
+    lastSecondaryRehomed = false;
   }
   // Same value primary's own establishing page used, so the two can never disagree — kept in step
   // with the pre-existing "first page that reported one" intent, just sourced from the single pass
@@ -2221,8 +2254,23 @@ function splitCrossPageSkills(pages: Array<{ pageNumber: number; extraction: Ext
   return { primary, heading: establishedHeading || "", secondaryFreeform };
 }
 
-function mergeExtractions(pages: Array<{ pageNumber: number; extraction: ExtractionResult }>): ExtractionResult {
-  const { primary: primarySkills, heading: primarySkillsHeading, secondaryFreeform: crossPageSkillsSecondary } = splitCrossPageSkills(pages);
+// AP9R (Fix B): the guarded entry point used by mergeExtractions. No page with a restored string -> exactly the old split. Otherwise the
+// re-homing split runs; ANY error in it is reported through `report` and the old split runs instead, so a bug here can only ever mean "as before".
+function splitCrossPageSkillsGuarded(pages: SkillPage[], report?: (level: "log" | "error", message: string) => void): ReturnType<typeof splitCrossPageSkills> {
+  if (!pages.some((p) => Array.isArray(p.skillsRestored) && p.skillsRestored.length > 0)) return splitCrossPageSkills(pages);
+  try {
+    const notes: RehomeNote[] = [];
+    const result = splitCrossPageSkills(pages, true, notes);
+    if (report) for (const n of notes) report("log", `workplace block rehomed: heading "${n.heading}", ${n.items} item(s) moved to additional_info, first: "${n.first}"`);
+    return result;
+  } catch (e) {
+    if (report) { try { report("error", `workplace block rehome FAILED, using the old skills split: ${String(e)}`); } catch { /* reporting only */ } }
+    return splitCrossPageSkills(pages);
+  }
+}
+
+function mergeExtractions(pages: SkillPage[], report?: (level: "log" | "error", message: string) => void): ExtractionResult {
+  const { primary: primarySkills, heading: primarySkillsHeading, secondaryFreeform: crossPageSkillsSecondary } = splitCrossPageSkillsGuarded(pages, report);
   const merged = {
     // Item 19 (2026-09-12 live-testing session): same "first page that actually reported one"
     // pattern as skills_position just below — a candidate's own personal location, printed once
@@ -2499,7 +2547,7 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
   // Runs per page, before the role bucket check and before the cross-page merge; it changes only the skills strings of a page that
   // passes its gate and nothing else. FAIL OPEN on its own try: if anything throws, nothing is restored and the pages go on exactly
   // as the model gave them.
-  let pagesForMerge = ordered;
+  let pagesForMerge: Array<(typeof ordered)[number] & { skillsRestored?: number[] }> = ordered;
   try {
     const restoreLog: string[] = [];
     const restoredPages = ordered.map((r) => {
@@ -2509,7 +2557,7 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
       if (!Array.isArray(fix.skills) || fix.skills.length !== r.extraction.skills.length || fix.skills.some((x) => typeof x !== "string")) throw new Error(`page ${r.page_number}: unusable restore result`);
       const c = fix.changes[0];
       restoreLog.push(`upload-resume: ${docId} skill text restored - page ${r.page_number}: ${fix.changes.length} string(s), first: "${c.before.slice(0, 60)}" -> "${c.after.slice(0, 80)}"`);
-      return { ...r, extraction: { ...r.extraction, skills: fix.skills } };
+      return { ...r, extraction: { ...r.extraction, skills: fix.skills }, skillsRestored: fix.changes.map((ch) => ch.index) }; // AP9R: the merge reads skillsRestored
     });
     pagesForMerge = restoredPages;
     for (const line of restoreLog) console.log(line);
@@ -2517,6 +2565,11 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
     pagesForMerge = ordered;
     console.error(`upload-resume: ${docId} skill text restore FAILED, using the pages as the model gave them: ${String(skillTextErr)}`);
   }
+  // AP9R (Fix B): lines from the cross-page skills split, printed once after the merge has succeeded ("rehomed" lines), errors at once.
+  const skillBlockLog: string[] = [];
+  const skillBlockReport = (level: "log" | "error", message: string) => {
+    if (level === "error") console.error(`upload-resume: ${docId} ${message}`); else skillBlockLog.push(`upload-resume: ${docId} ${message}`);
+  };
   const roleBucketLog: string[] = [];
   let merged: ExtractionResult;
   try {
@@ -2527,14 +2580,16 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
       return { ...r, extraction: { ...r.extraction, work_history: fix.work_history as any, freeform: [...r.extraction.freeform, ...fix.needsReview] } };
     });
     if (roleBucketLog.length) console.log(`upload-resume: ${docId} role buckets — ${roleBucketLog.join("; ")}`);
-    merged = dedupePositions(mergeExtractions(bucketed.map((r) => ({ pageNumber: r.page_number, extraction: r.extraction }))), mergedBoundaries);
+    merged = dedupePositions(mergeExtractions(bucketed.map((r) => ({ pageNumber: r.page_number, extraction: r.extraction, skillsRestored: r.skillsRestored })), skillBlockReport), mergedBoundaries);
     // A repaired role group was written in the order the page merge needs (the role that receives continuing text last); now that
     // the pages are merged and numbered it takes its final order, latest role first, and its marker field is removed.
     merged.work_history = orderRoleGroupsLatestFirst(merged.work_history as any) as any;
   } catch (roleBucketErr) {
     console.error(`upload-resume: ${docId} role bucket repair FAILED, using the unrepaired pages — ${String(roleBucketErr)}`);
-    merged = dedupePositions(mergeExtractions(pagesForMerge.map((r) => ({ pageNumber: r.page_number, extraction: r.extraction }))), mergedBoundaries);
+    skillBlockLog.length = 0; // the first attempt's lines are void: the merge is run again from the unrepaired pages
+    merged = dedupePositions(mergeExtractions(pagesForMerge.map((r) => ({ pageNumber: r.page_number, extraction: r.extraction, skillsRestored: r.skillsRestored })), skillBlockReport), mergedBoundaries);
   }
+  for (const line of skillBlockLog) console.log(line);
   // OCR text per page, in page order, with a marker so a person or a future tool can tell where a stretch came
   // from. A vision-routed page contributes no OCR text by architecture; its marker still shows the gap.
   const combinedOcrText = ordered.map((r) => `--- page ${r.page_number} ---\n` + (r.ocr_text ?? "(vision-routed page, no OCR text)")).join("\n\n");

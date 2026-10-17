@@ -202,7 +202,7 @@ const mergeCode = src.slice(src.indexOf("const PAGE_POSITION_SPAN"), src.indexOf
 const cleanHeadingLine = src.split("\n").find((l) => l.startsWith("function cleanHeading("));
 assert.ok(cleanHeadingLine, "cleanHeading not found in upload-resume (splitCrossPageSkills uses it)");
 const m: any = await import("data:text/javascript;base64," + Buffer.from(stripTypeScriptTypes(cleanHeadingLine + "\n" + mergeCode) + "\nexport { mergeExtractions, dedupePositions };", "utf8").toString("base64"));
-const start = src.indexOf("  let pagesForMerge = ordered;");
+const start = src.indexOf("  let pagesForMerge");
 const end = src.indexOf("  // OCR text per page, in page order");
 assert.ok(start > 0 && end > start, "restore block not found in upload-resume");
 const block = src.slice(start, end);
@@ -234,7 +234,7 @@ t("upload-resume block: with the restore, the Workplace Strengths section keeps 
   assert.ok(!a[0].content.includes("big-picture mindset"), "today (without the restore) the descriptions of the first three items are lost");
   assert.ok(b[0].content.includes("big-picture mindset") && b[0].content.includes("trusted by clients") && b[0].content.includes("clarity for diverse"));
   assert.ok(b[0].content.includes("proactively identifies") && b[0].content.includes("drives alignment"), "page 4 items still present");
-  assert.equal(b[0].section_type, "needs_review", "Fix A does not change the label: the section is still needs_review (that is Fix B)");
+  assert.equal(b[0].section_type, "additional_info", "AP9R (Fix B): a block with restored strings is re-homed as additional_info, not needs_review");
   assert.equal(b[0].heading, a[0].heading);
   assert.equal(errors.length, 0);
 });
