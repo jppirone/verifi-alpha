@@ -1235,6 +1235,22 @@ type TextItem = { rect: { left: number; top: number; right: number; bottom: numb
 // bullet-indent whitespace.
 const MIN_COLUMN_GAP_PX = 60;
 
+// AP9U (Fix C): a gap alone does not make a column. On a sparse page the last word of the longest line starts far to the right of every other
+// word, so the biggest gap in word left edges is that one word, and it used to be moved after the text as a "second column" ("coursework" at the
+// end of the Beast round trip page 4, "and" and "2010)" on two other generated pages, an e-mail in a Donofrio page footer). A real column holds
+// several lines of text, so the right-hand block must hold at least MIN_COLUMN_LINES separate text lines (same 6 pixel line tolerance as the
+// line builder below); otherwise the page stays one column, exactly as for a page with no gap at all. Kept identical in rasterize-pdf-page and
+// upload-resume (tools/resume/test-column-detection.ts fails if the two copies drift).
+const MIN_COLUMN_LINES = 2;
+function countTextLines(tops: number[]): number {
+  const sorted = [...tops].sort((a, b) => a - b);
+  let lines = 0, last: number | null = null;
+  for (const top of sorted) {
+    if (last === null || Math.abs(top - last) > 6) { lines++; last = top; }
+  }
+  return lines;
+}
+
 function reconstructByWordClustering(words: TextItem[]): string {
   const real = words.filter((w) => w.text.trim().length > 0);
   if (real.length === 0) return "";
@@ -1251,7 +1267,8 @@ function reconstructByWordClustering(words: TextItem[]): string {
   // No real column boundary at all if the biggest gap on the page doesn't clear the real-data
   // threshold above — treat the whole page as a single column rather than splitting on what's
   // really just margin or bullet-indent whitespace.
-  const boundary = (gapIdx > 0 && maxGap > MIN_COLUMN_GAP_PX) ? (sortedLefts[gapIdx - 1].left + sortedLefts[gapIdx].left) / 2 : Infinity;
+  const gapBoundary = (gapIdx > 0 && maxGap > MIN_COLUMN_GAP_PX) ? (sortedLefts[gapIdx - 1].left + sortedLefts[gapIdx].left) / 2 : Infinity;
+  const boundary = (gapBoundary !== Infinity && countTextLines(withLeft.filter((w) => w.left > gapBoundary).map((w) => w.top)) >= MIN_COLUMN_LINES) ? gapBoundary : Infinity;
 
   const col0 = withLeft.filter((w) => w.left <= boundary);
   const col1 = withLeft.filter((w) => w.left > boundary);
