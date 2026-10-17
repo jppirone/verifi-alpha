@@ -2490,18 +2490,27 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
   // needs_review with the literal lines. Works on copies: the checkpointed rows (the model's raw answer) are not changed.
   // See _shared/resume-role-buckets.ts for the exact text patterns. A vision-routed page has no OCR text and is left as is.
   // The check runs per page, BEFORE the cross-page merge below (which stays the only owner of joining pages).
+  // FAIL OPEN: the whole repaired path (check, merge of the repaired pages, final order) sits in one try. If anything in it throws, the
+  // error is logged and the upload carries on with the model's original, unrepaired pages merged by the existing code; a bug in the
+  // repair code can never block an upload.
   const roleBucketLog: string[] = [];
-  const bucketed = ordered.map((r) => {
-    const fix = repairRoleBuckets(r.ocr_text, r.extraction.work_history as any, r.page_number);
-    if (!fix.actions.length && !fix.needsReview.length) return r;
-    for (const a of fix.actions) roleBucketLog.push(`page ${r.page_number}: ${a}`);
-    return { ...r, extraction: { ...r.extraction, work_history: fix.work_history as any, freeform: [...r.extraction.freeform, ...fix.needsReview] } };
-  });
-  if (roleBucketLog.length) console.log(`upload-resume: ${docId} role buckets — ${roleBucketLog.join("; ")}`);
-  const merged = dedupePositions(mergeExtractions(bucketed.map((r) => ({ pageNumber: r.page_number, extraction: r.extraction }))), mergedBoundaries);
-  // A repaired role group was written in the order the page merge needs (the role that receives continuing text last); now that
-  // the pages are merged and numbered it takes its final order, latest role first, and its marker field is removed.
-  merged.work_history = orderRoleGroupsLatestFirst(merged.work_history as any) as any;
+  let merged: ExtractionResult;
+  try {
+    const bucketed = ordered.map((r) => {
+      const fix = repairRoleBuckets(r.ocr_text, r.extraction.work_history as any, r.page_number);
+      if (!fix.actions.length && !fix.needsReview.length) return r;
+      for (const a of fix.actions) roleBucketLog.push(`page ${r.page_number}: ${a}`);
+      return { ...r, extraction: { ...r.extraction, work_history: fix.work_history as any, freeform: [...r.extraction.freeform, ...fix.needsReview] } };
+    });
+    if (roleBucketLog.length) console.log(`upload-resume: ${docId} role buckets — ${roleBucketLog.join("; ")}`);
+    merged = dedupePositions(mergeExtractions(bucketed.map((r) => ({ pageNumber: r.page_number, extraction: r.extraction }))), mergedBoundaries);
+    // A repaired role group was written in the order the page merge needs (the role that receives continuing text last); now that
+    // the pages are merged and numbered it takes its final order, latest role first, and its marker field is removed.
+    merged.work_history = orderRoleGroupsLatestFirst(merged.work_history as any) as any;
+  } catch (roleBucketErr) {
+    console.error(`upload-resume: ${docId} role bucket repair FAILED, using the unrepaired pages — ${String(roleBucketErr)}`);
+    merged = dedupePositions(mergeExtractions(ordered.map((r) => ({ pageNumber: r.page_number, extraction: r.extraction }))), mergedBoundaries);
+  }
   // OCR text per page, in page order, with a marker so a person or a future tool can tell where a stretch came
   // from. A vision-routed page contributes no OCR text by architecture; its marker still shows the gap.
   const combinedOcrText = ordered.map((r) => `--- page ${r.page_number} ---\n` + (r.ocr_text ?? "(vision-routed page, no OCR text)")).join("\n\n");
