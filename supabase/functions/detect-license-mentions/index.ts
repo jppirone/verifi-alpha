@@ -3,6 +3,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { withSupabase } from "jsr:@supabase/server@1";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { encodeBase64 } from "jsr:@std/encoding@1/base64";
+import { logRawAnswer, logItemDecision } from "../_shared/license-detect-log.ts";
 
 // detect-license-mentions: a SEPARATE, additive model pass that finds license-shaped content
 // wherever it sits on a resume (its own section, mixed into Certifications, mixed into Education,
@@ -65,11 +66,12 @@ function stripPunct(s: string): string {
 // (3) the evidence is not just the candidate's own location text.
 function validateState(
   state: unknown, evidence: unknown, locationTexts: string[],
-): { state: string | null; evidence: string | null } {
-  if (typeof state !== "string" || typeof evidence !== "string") return { state: null, evidence: null };
+): { state: string | null; evidence: string | null; rule?: string; detail?: Record<string, unknown> } {
+  // rule/detail (AP9L) only say which check decided; callers read state and evidence exactly as before.
+  if (typeof state !== "string" || typeof evidence !== "string") return { state: null, evidence: null, rule: "model_gave_no_state_or_no_evidence", detail: { state_type: typeof state, evidence_type: typeof evidence } };
   const code = state.trim().toUpperCase();
   const ev = evidence.trim();
-  if (!VALID_STATES.has(code) || ev.length < 2) return { state: null, evidence: null };
+  if (!VALID_STATES.has(code) || ev.length < 2) return { state: null, evidence: null, rule: "invalid_state_code_or_evidence_under_2_chars", detail: { code, evidence_length: ev.length } };
 
   const evUpper = ev.toUpperCase();
   let signalled = false;
@@ -82,14 +84,14 @@ function validateState(
       if (abbr === code && new RegExp(`\\b${agency}\\b`).test(evUpper)) signalled = true;
     }
   }
-  if (!signalled) return { state: null, evidence: null };
+  if (!signalled) return { state: null, evidence: null, rule: "evidence_does_not_name_the_state", detail: { code, evidence: ev } };
 
   const evNorm = stripPunct(ev);
   for (const loc of locationTexts) {
     const locNorm = stripPunct(loc);
-    if (locNorm.length >= 4 && (locNorm.includes(evNorm) || evNorm.includes(locNorm))) return { state: null, evidence: null };
+    if (locNorm.length >= 4 && (locNorm.includes(evNorm) || evNorm.includes(locNorm))) return { state: null, evidence: null, rule: "evidence_is_part_of_candidate_location_text", detail: { code, evidence_normalized: evNorm, location_normalized: locNorm, location: loc.slice(0, 300) } };
   }
-  return { state: code, evidence: ev };
+  return { state: code, evidence: ev, rule: "accepted", detail: { code, evidence: ev } };
 }
 
 function normNumber(s: unknown): string {
@@ -181,8 +183,12 @@ type Mention = {
 // back as an ordinary failure (status 'failed', which the client already treats as fail-open) instead of a hang.
 const DETECT_CALL_TIMEOUT_MS = 60_000;
 
-async function callModel(fileBase64: string, mime: string, existing: ExistingCert[]): Promise<{ ok: true; mentions: Mention[] } | { ok: false; error: string }> {
+// AP9L: filled in by callModel for the diagnostic log only; nothing reads it to make a decision.
+type CallDiag = { model?: unknown; rawText?: unknown; promptText?: string };
+
+async function callModel(fileBase64: string, mime: string, existing: ExistingCert[], diag?: CallDiag): Promise<{ ok: true; mentions: Mention[] } | { ok: false; error: string }> {
   if (!ANTHROPIC_API_KEY) return { ok: false, error: "ANTHROPIC_API_KEY not configured" };
+  try { if (diag) diag.promptText = buildDetectionPrompt(existing); } catch { /* diagnostics only */ }
   const fileBlock = mime === "application/pdf"
     ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: fileBase64 } }
     : { type: "image", source: { type: "base64", media_type: mime, data: fileBase64 } };
@@ -213,6 +219,7 @@ async function callModel(fileBase64: string, mime: string, existing: ExistingCer
     return { ok: false, error: `claude_body_failed: ${String(e)}` };
   }
   const textBlock = (data?.content ?? []).find((b: { type?: string }) => b.type === "text");
+  try { if (diag) { diag.model = data?.model; diag.rawText = textBlock?.text; } } catch { /* diagnostics only */ }
   const cleaned = String(textBlock?.text ?? "").trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "");
   let parsed: any;
   try {
@@ -362,14 +369,30 @@ export default {
         .select("id, name, issuing_body, license_number, issue_date, expiration_date").eq("resume_document_id", doc.id);
       const existing: ExistingCert[] = (existingCerts || []).map((c: any) => ({ id: c.id, name: c.name, issuing_body: c.issuing_body, license_number: c.license_number }));
 
-      const result = await callModel(encodeBase64(bytes), mime, existing);
+      const diag: CallDiag = {};
+      const result = await callModel(encodeBase64(bytes), mime, existing, diag);
+      // AP9L: one diagnostic line per model call. Built from names only (no keys, tokens or headers); a failure here is swallowed.
+      const logRaw = (locs: Array<{ source: string; value: string | null | undefined }>, ok: boolean, error?: string) => {
+        try {
+          logRawAnswer({
+            docId: doc.id, ok, error: error ?? null, model: diag.model, rawText: diag.rawText,
+            inputSnippet: (diag.promptText ?? "").slice(-1000), inputKind: mime, inputBytes: bytes.byteLength, locations: locs,
+          });
+        } catch { /* diagnostics only */ }
+      };
       if (!result.ok) {
+        logRaw([{ source: "resume_documents.candidate_location", value: doc.candidate_location }, { source: "resume_documents.printed_header", value: doc.printed_header }], false, result.error);
         await supabase.from("resume_documents").update({ license_detection_status: "failed" }).eq("id", doc.id);
         return json({ ok: false, error: result.error }, 200);
       }
 
       const { data: cand } = await supabase.from("candidates").select("personal_location").eq("id", candidateId).maybeSingle();
       const locationTexts = [doc.candidate_location, doc.printed_header, cand?.personal_location].filter((x): x is string => typeof x === "string" && !!x.trim());
+      logRaw([
+        { source: "resume_documents.candidate_location", value: doc.candidate_location },
+        { source: "resume_documents.printed_header", value: doc.printed_header },
+        { source: "candidates.personal_location", value: cand?.personal_location },
+      ], true);
 
       const certById = new Map<string, any>((existingCerts || []).map((c: any) => [c.id, c]));
       const certIdByNumber = new Map<string, string>();
@@ -382,12 +405,22 @@ export default {
       const usedCertIds = new Set<string>();
       const licenseRows: Record<string, unknown>[] = [];
       for (const m of result.mentions) {
-        if (m.confidence < MIN_CONFIDENCE) continue;
+        if (m.confidence < MIN_CONFIDENCE) {
+          logItemDecision({ docId: doc.id, name: m.license_name ?? m.source_text, stateReturned: m.state, evidenceReturned: m.state_evidence, accepted: false, rule: "item_skipped_confidence_below_minimum", detail: { confidence: m.confidence, minimum: MIN_CONFIDENCE } });
+          continue;
+        }
         const num = normNumber(m.license_number);
         const key = num || normName(m.license_name) + "|" + normName(m.source_text);
-        if (!key || seen.has(key)) continue;
+        if (!key || seen.has(key)) {
+          logItemDecision({ docId: doc.id, name: m.license_name ?? m.source_text, stateReturned: m.state, evidenceReturned: m.state_evidence, accepted: false, rule: key ? "item_skipped_duplicate_of_earlier_item" : "item_skipped_no_number_name_or_text", detail: { key } });
+          continue;
+        }
         seen.add(key);
         const vs = validateState(m.state, m.state_evidence, locationTexts);
+        logItemDecision({
+          docId: doc.id, name: m.license_name ?? m.source_text, stateReturned: m.state, evidenceReturned: m.state_evidence,
+          accepted: !!vs.state, rule: m.state == null && m.state_evidence == null ? "model_returned_no_state" : (vs.rule ?? "unknown"), detail: vs.detail,
+        });
 
         // Which certification row is this credential? The model's answer (validated against this
         // document's real rows), else an exact license-number match, else it's new.
