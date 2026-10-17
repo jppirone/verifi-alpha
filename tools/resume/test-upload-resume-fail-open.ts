@@ -6,17 +6,18 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
 import { repairRoleBuckets, orderRoleGroupsLatestFirst } from "../../supabase/functions/_shared/resume-role-buckets.ts";
+import { restoreSkillText } from "../../supabase/functions/_shared/resume-skill-text.ts";
 
 let n = 0; const t = (name: string, fn: () => void) => { fn(); n++; console.log("ok  ", name); };
 const src = fs.readFileSync(new URL("../../supabase/functions/upload-resume/index.ts", import.meta.url), "utf8").replace(/\r\n/g, "\n");
 const mergeCode = src.slice(src.indexOf("const PAGE_POSITION_SPAN"), src.indexOf("const RELAY_CALLS_PER_INVOCATION"));
 const m: any = await import("data:text/javascript;base64," + Buffer.from(stripTypeScriptTypes(mergeCode) + "\nexport { mergeExtractions, dedupePositions };", "utf8").toString("base64"));
-const start = src.indexOf("  const roleBucketLog: string[] = [];");
+const start = src.indexOf("  let pagesForMerge = ordered;"); // AP9O: the block now starts with the skill text restore step, which sits before the role bucket step
 const end = src.indexOf("  // OCR text per page, in page order");
 assert.ok(start > 0 && end > start, "repair block not found in upload-resume");
 const block = src.slice(start, end);
 assert.ok(block.includes("try {") && block.includes("catch (roleBucketErr)"), "the repair block must sit in a try with a catch");
-const run = new Function("ordered", "repairRoleBuckets", "orderRoleGroupsLatestFirst", "dedupePositions", "mergeExtractions", "docId", "mergedBoundaries", "console",
+const run = new Function("ordered", "restoreSkillText", "repairRoleBuckets", "orderRoleGroupsLatestFirst", "dedupePositions", "mergeExtractions", "docId", "mergedBoundaries", "console",
   stripTypeScriptTypes(block) + "\nreturn merged;") as any;
 
 const row = (page: number, ocr: string, wh: any[]) => ({ page_number: page, ocr_text: ocr, extraction: { work_history: wh, education: [], certifications: [], skills: [], freeform: [] } });
@@ -25,7 +26,7 @@ const ordered = [row(1, "PROFESSIONAL EXPERIENCE\nAcme Corp, Austin, TX 2015 202
 const unrepaired = m.dedupePositions(m.mergeExtractions(ordered.map((r) => ({ pageNumber: r.page_number, extraction: r.extraction }))), { sections: [] });
 const logs: string[] = []; const errors: string[] = [];
 const fakeConsole = { log: (s: string) => logs.push(s), error: (s: string) => errors.push(s) };
-const call = (repair: any, order: any) => { logs.length = 0; errors.length = 0; return run(ordered, repair, order, m.dedupePositions, m.mergeExtractions, "doc-test", { sections: [] }, fakeConsole); };
+const call = (repair: any, order: any) => { logs.length = 0; errors.length = 0; return run(ordered, restoreSkillText, repair, order, m.dedupePositions, m.mergeExtractions, "doc-test", { sections: [] }, fakeConsole); };
 
 t("normal case: the repair splits the merged entry (so the test block really does the repair)", () => {
   const merged = call(repairRoleBuckets, orderRoleGroupsLatestFirst);

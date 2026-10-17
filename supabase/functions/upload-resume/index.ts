@@ -6,6 +6,7 @@ import { createOCREngine } from "npm:tesseract-wasm@0.11.0";
 import { guardSelfReferentialHeadings } from "../_shared/resume-heading-guard.ts";
 import { summarizeGapReport, type GapSummary } from "../_shared/resume-ocr-gaps.ts";
 import { repairRoleBuckets, orderRoleGroupsLatestFirst } from "../_shared/resume-role-buckets.ts";
+import { restoreSkillText } from "../_shared/resume-skill-text.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -2493,10 +2494,33 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
   // FAIL OPEN: the whole repaired path (check, merge of the repaired pages, final order) sits in one try. If anything in it throws, the
   // error is logged and the upload carries on with the model's original, unrepaired pages merged by the existing code; a bug in the
   // repair code can never block an upload.
+  // Skill text restore (AP9O, Fix A): a "title plus description" list the boundary step labeled "skills" comes back from the model as
+  // bare titles; the full item text is put back from the page's own OCR (see _shared/resume-skill-text.ts for the exact narrow rule).
+  // Runs per page, before the role bucket check and before the cross-page merge; it changes only the skills strings of a page that
+  // passes its gate and nothing else. FAIL OPEN on its own try: if anything throws, nothing is restored and the pages go on exactly
+  // as the model gave them.
+  let pagesForMerge = ordered;
+  try {
+    const restoreLog: string[] = [];
+    const restoredPages = ordered.map((r) => {
+      const fix = restoreSkillText(r.extraction.skills, r.ocr_text, (r.sectionBoundaries?.sections || []).map((s) => s.heading));
+      if (!fix.changes.length) return r;
+      // A result that is not exactly "the same skills list, same length, strings only" is a bug: throw so the whole step falls back to the model's pages.
+      if (!Array.isArray(fix.skills) || fix.skills.length !== r.extraction.skills.length || fix.skills.some((x) => typeof x !== "string")) throw new Error(`page ${r.page_number}: unusable restore result`);
+      const c = fix.changes[0];
+      restoreLog.push(`upload-resume: ${docId} skill text restored - page ${r.page_number}: ${fix.changes.length} string(s), first: "${c.before.slice(0, 60)}" -> "${c.after.slice(0, 80)}"`);
+      return { ...r, extraction: { ...r.extraction, skills: fix.skills } };
+    });
+    pagesForMerge = restoredPages;
+    for (const line of restoreLog) console.log(line);
+  } catch (skillTextErr) {
+    pagesForMerge = ordered;
+    console.error(`upload-resume: ${docId} skill text restore FAILED, using the pages as the model gave them: ${String(skillTextErr)}`);
+  }
   const roleBucketLog: string[] = [];
   let merged: ExtractionResult;
   try {
-    const bucketed = ordered.map((r) => {
+    const bucketed = pagesForMerge.map((r) => {
       const fix = repairRoleBuckets(r.ocr_text, r.extraction.work_history as any, r.page_number);
       if (!fix.actions.length && !fix.needsReview.length) return r;
       for (const a of fix.actions) roleBucketLog.push(`page ${r.page_number}: ${a}`);
@@ -2509,7 +2533,7 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
     merged.work_history = orderRoleGroupsLatestFirst(merged.work_history as any) as any;
   } catch (roleBucketErr) {
     console.error(`upload-resume: ${docId} role bucket repair FAILED, using the unrepaired pages — ${String(roleBucketErr)}`);
-    merged = dedupePositions(mergeExtractions(ordered.map((r) => ({ pageNumber: r.page_number, extraction: r.extraction }))), mergedBoundaries);
+    merged = dedupePositions(mergeExtractions(pagesForMerge.map((r) => ({ pageNumber: r.page_number, extraction: r.extraction }))), mergedBoundaries);
   }
   // OCR text per page, in page order, with a marker so a person or a future tool can tell where a stretch came
   // from. A vision-routed page contributes no OCR text by architecture; its marker still shows the gap.
