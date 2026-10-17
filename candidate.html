@@ -11371,6 +11371,11 @@ class Component extends DCLogic {
   // for the modal's own labels) -- never just ids, unlike the server's own wire format, since this
   // never leaves the browser. A pair is flagged only when the overlap exceeds 30 days (exactly 30
   // does not trigger, 31+ does -- same threshold the server enforces).
+  // AP9 (2026-10-17, John's rule 11): roles of the SAME company are one tenure with several dated roles, not
+  // two jobs held at once, so a pair with the same company (case, spacing and punctuation ignored; an empty
+  // company never matches) is never flagged. Identical to overlapCompanyKey in confirm-resume-data and
+  // resume-resubmission, which must stay in step with this.
+  overlapCompanyKey(c) { return typeof c === 'string' ? c.toLowerCase().replace(/[^a-z0-9]+/g, '') : ''; }
   detectWorkOverlaps(workHistory) {
     const items = (workHistory || []).map(w => ({ item: w, start: w.start_date || null, end: this.effectiveWorkEndForOverlap(w.end_date, w.end_date_precision) }));
     const pairs = [];
@@ -11378,6 +11383,7 @@ class Component extends DCLogic {
       for (let j = i + 1; j < items.length; j++) {
         const a = items[i], b = items[j];
         if (!a.start || !a.end || !b.start || !b.end) continue;
+        if (this.overlapCompanyKey(a.item.company) && this.overlapCompanyKey(a.item.company) === this.overlapCompanyKey(b.item.company)) continue;
         const aS = Date.parse(a.start), aE = Date.parse(a.end), bS = Date.parse(b.start), bE = Date.parse(b.end);
         if (![aS, aE, bS, bE].every(Number.isFinite)) continue;
         const overlapStart = Math.max(aS, bS), overlapEnd = Math.min(aE, bE);
