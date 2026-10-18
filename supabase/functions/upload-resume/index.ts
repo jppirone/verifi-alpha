@@ -2288,6 +2288,8 @@ function looksLikeJobHeadingLine(line: string): boolean {
 //  * page P's first stored boundary section is EITHER unknown, empty-heading and a continuation (shape A), OR a work_history continuation with a heading whose
 //    first 14 characters (letters and digits, case ignored) are NOT found in the first 200 characters of the page OCR (shape B; needs the OCR text);
 //  * page P has no work row that continues the target (same company and title, or both blank).
+// AP9AC adds a second shape handled by the same function in the same page loop (tryWorkRow below): the opening bullets come back as a WORK ROW instead of a freeform
+// block. The freeform shape is tried first for a page; the work row shape only when the freeform shape did not move anything on that page.
 // Action: the block text is appended to the target's job_responsibilities after one line break and the block is removed from freeform. Any error anywhere: nothing
 // is changed, the error is reported, and the merge goes on exactly as before. Returns the input object itself when nothing moved.
 function applyLeadingBullets(extraction: ExtractionResult, seam?: SeamInfo): ExtractionResult {
@@ -2306,18 +2308,31 @@ function applyLeadingBullets(extraction: ExtractionResult, seam?: SeamInfo): Ext
     }
     const replaced = new Map<(typeof rows)[number], (typeof rows)[number]>();
     const removed = new Set<(typeof free)[number]>();
+    const removedRows = new Set<(typeof rows)[number]>();
     const logs: string[] = [];
-    for (const [page, block] of [...firstOnPage.entries()].sort((a, b) => a[0] - b[0])) {
-      const prevSections = seam.sectionsByPage.get(page - 1), sections = seam.sectionsByPage.get(page);
-      if (!prevSections?.length || !sections?.length) continue;
-      if (prevSections[prevSections.length - 1].category !== "work_history") continue;
-      if (block.section_type !== "needs_review" && block.section_type !== "unknown") continue;
-      if ((block.heading || "").trim() !== "") continue;
+    const nrm = (s: string | undefined) => (s || "").trim().toLowerCase().replace(/\s+/g, " ");
+    // the work row of page `page` - 1 that receives the text: the highest position, rows already moved away excluded
+    const targetFor = (page: number) => {
+      let target: (typeof rows)[number] | undefined;
+      for (const r of rows) {
+        if (removedRows.has(r) || pageOf(r.position) !== page - 1) continue;
+        if (!target || (r.position as number) >= (target.position as number)) target = r;
+      }
+      return target;
+    };
+    const append = (target: (typeof rows)[number], text: string) => {
+      const base = (replaced.get(target) ?? target).job_responsibilities || "";
+      replaced.set(target, { ...(replaced.get(target) ?? target), job_responsibilities: base.trim() ? `${base.replace(/\s+$/, "")}\n${text}` : text });
+    };
+    // The freeform block shape (AP9AA-1). Returns true when the block was moved.
+    const tryFreeform = (page: number, block: (typeof free)[number], sections: SeamSection[]): boolean => {
+      if (block.section_type !== "needs_review" && block.section_type !== "unknown") return false;
+      if ((block.heading || "").trim() !== "") return false;
       const text = (block.content || "").trim();
-      if (!text || text.length > 3000) continue;
-      if (looksLikeJobHeadingLine(text.split("\n")[0])) continue;
+      if (!text || text.length > 3000) return false;
+      if (looksLikeJobHeadingLine(text.split("\n")[0])) return false;
       const ocr = seam.ocrByPage.get(page);
-      if (typeof ocr === "string" && !fold(ocr).slice(0, 200).includes(fold(text).slice(0, 20).trim())) continue;
+      if (typeof ocr === "string" && !fold(ocr).slice(0, 200).includes(fold(text).slice(0, 20).trim())) return false;
       const s0 = sections[0];
       const shapeA = s0.category === "unknown" && !(s0.heading || "").trim() && s0.is_continuation_of_previous_page === true;
       let shapeB = false;
@@ -2325,25 +2340,66 @@ function applyLeadingBullets(extraction: ExtractionResult, seam?: SeamInfo): Ext
         const key = fold(s0.heading as string).slice(0, 14).trim();
         shapeB = key !== "" && !fold(ocr).slice(0, 200).includes(key);
       }
-      if (!shapeA && !shapeB) continue;
-      let target: (typeof rows)[number] | undefined;
-      for (const r of rows) {
-        if (pageOf(r.position) !== page - 1) continue;
-        if (!target || (r.position as number) >= (target.position as number)) target = r;
-      }
-      if (!target) continue;
-      const nrm = (s: string | undefined) => (s || "").trim().toLowerCase().replace(/\s+/g, " ");
-      const continues = rows.some((r) => pageOf(r.position) === page &&
-        ((!nrm(r.company) && !nrm(r.title)) || (nrm(r.company) === nrm(target!.company) && nrm(r.title) === nrm(target!.title))));
-      if (continues) continue;
-      const base = (replaced.get(target) ?? target).job_responsibilities || "";
-      replaced.set(target, { ...(replaced.get(target) ?? target), job_responsibilities: base.trim() ? `${base.replace(/\s+$/, "")}\n${text}` : text });
+      if (!shapeA && !shapeB) return false;
+      const target = targetFor(page);
+      if (!target) return false;
+      const continues = rows.some((r) => !removedRows.has(r) && pageOf(r.position) === page &&
+        ((!nrm(r.company) && !nrm(r.title)) || (nrm(r.company) === nrm(target.company) && nrm(r.title) === nrm(target.title))));
+      if (continues) return false;
+      append(target, text);
       removed.add(block);
       logs.push(`leading bullets moved to previous job - page ${page}: ${target.company}, ${text.slice(0, 40)}`);
+      return true;
+    };
+    // The work row shape (AP9AC): the page answer put the opening bullets in a work row of their own (company taken from the first words of the text, title
+    // empty or "Unknown", no dates, no heading) instead of in the previous job. The page's first boundary section must be unknown, empty-heading and a continuation;
+    // the row is the one with the lowest position on the page; its text is not empty, at most 3000 characters, does not start with a job heading line, and (OCR
+    // known) its first 20 characters are in the first 200 characters of the page OCR; its company is not contained in any heading of the page's boundary sections;
+    // a row with BOTH company and title empty is left to the existing blank continuation merge; no other row of the page continues the target.
+    const tryWorkRow = (page: number, sections: SeamSection[]): boolean => {
+      const s0 = sections[0];
+      if (!(s0.category === "unknown" && !(s0.heading || "").trim() && s0.is_continuation_of_previous_page === true)) return false;
+      let row: (typeof rows)[number] | undefined;
+      for (const r of rows) {
+        if (pageOf(r.position) !== page) continue;
+        if (!row || (r.position as number) < (row.position as number)) row = r;
+      }
+      if (!row) return false;
+      if ((row.heading || "").trim() !== "") return false;
+      const ttl = nrm(row.title);
+      if (ttl !== "" && ttl !== "unknown") return false;
+      if (!nrm(row.company) && !ttl) return false;
+      if ((row.start_date || "").trim() !== "" || (row.end_date || "").trim() !== "") return false;
+      const text = (row.job_responsibilities || "").trim();
+      if (!text || text.length > 3000) return false;
+      if (looksLikeJobHeadingLine(text.split("\n")[0])) return false;
+      const ocr = seam.ocrByPage.get(page);
+      if (typeof ocr === "string" && !fold(ocr).slice(0, 200).includes(fold(text).slice(0, 20).trim())) return false;
+      const co = fold(row.company || "");
+      if (co && sections.some((s) => (s.heading || "").trim() !== "" && fold(s.heading as string).includes(co))) return false;
+      const target = targetFor(page);
+      if (!target) return false;
+      const continues = rows.some((r) => r !== row && !removedRows.has(r) && pageOf(r.position) === page &&
+        ((!nrm(r.company) && !nrm(r.title)) || (nrm(r.company) === nrm(target.company) && nrm(r.title) === nrm(target.title))));
+      if (continues) return false;
+      append(target, text);
+      removedRows.add(row);
+      logs.push(`leading bullets moved to previous job (work row) - page ${page}: ${target.company}, ${text.slice(0, 40)}`);
+      return true;
+    };
+    const pages = new Set<number>(firstOnPage.keys());
+    for (const r of rows) { const p = pageOf(r.position); if (p !== null) pages.add(p); }
+    for (const page of [...pages].sort((a, b) => a - b)) {
+      const prevSections = seam.sectionsByPage.get(page - 1), sections = seam.sectionsByPage.get(page);
+      if (!prevSections?.length || !sections?.length) continue;
+      if (prevSections[prevSections.length - 1].category !== "work_history") continue;
+      const block = firstOnPage.get(page);
+      if (block && tryFreeform(page, block, sections)) continue;
+      tryWorkRow(page, sections);
     }
-    if (removed.size === 0) return extraction;
+    if (removed.size === 0 && removedRows.size === 0) return extraction;
     for (const line of logs) seam.report("log", line);
-    return { ...extraction, work_history: rows.map((r) => replaced.get(r) ?? r), freeform: free.filter((f) => !removed.has(f)) };
+    return { ...extraction, work_history: rows.filter((r) => !removedRows.has(r)).map((r) => replaced.get(r) ?? r), freeform: free.filter((f) => !removed.has(f)) };
   } catch (e) {
     try { seam.report("error", `leading bullets move FAILED, joining as before: ${String(e)}`); } catch { /* reporting only */ }
     return extraction;

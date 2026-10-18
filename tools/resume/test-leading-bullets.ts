@@ -44,14 +44,14 @@ const S1 = [sec("", "unknown"), sec("SENIOR RECRUITER & TALENT ACQUISITION PARTN
 const S2 = [sec("CONTRACT ENGAGEMENTS, Sourcing Recruiter, Remote (Nov 2020-May 2023)", "work_history", true), sec("CDW, Senior Talent Acquisition Specialist, Remote (Nov 2015-Sep 2020)", "work_history"), sec("ALLEGIS GLOBAL SOLUTIONS, Senior Technical Recruiter, Remote (Jan 2011-Nov 2015)", "work_history")];
 const S3 = [sec("", "unknown", true), sec("RANDSTAD STAFFING (FORMERLY SPHERION), Senior Recruiter, Remote (Oct 2006-Dec 2010)", "work_history"), sec("EDUCATION", "education")];
 const aclarkPages = () => [
-  { pageNumber: 1, ocrText: OCR1, sections: S1, extraction: emptyEx({
+  { pageNumber: 1, ocrText: OCR1, sections: S1.map((x) => ({ ...x })), extraction: emptyEx({
     work_history: [job("WESTCX", "Recruiter to Senior Recruiter", WESTCX, { start_date: "2023-09", end_date: "2026-08", heading: "PROFESSIONAL EXPERIENCE", position: 2, extraction_confidence: "medium" })],
     skills: ["Full-Cycle Recruitment Leadership", "Sourcing & Pipeline Management", "AI-Enabled Recruiting Workflows", "Employer Branding", "Vendor Management & Procurement Strategy", "Global Expansion & International Hiring Infrastructure", "DEI & Inclusive Hiring Strategy", "Team Leadership & Mentorship"], skills_heading: "CORE COMPETENCIES", skills_position: 1,
     freeform: [{ section_type: "summary", heading: "SENIOR RECRUITER & TALENT ACQUISITION PARTNER", content: "Senior Recruiter & Talent Acquisition Partner who fills roles other channels can't reach building referral pipelines and AI-enabled sourcing strategies when standard recruiting falls short. Full-cycle ownership from sourcing through close across agency, RPO, consulting, and corporate environments, with a 97% offer acceptance rate and global recruiting infrastructure built from the ground up.", position: 0 }, { section_type: "skills_secondary", heading: "RECENT TECHNICAL SKILLS", content: TECH, position: 3 }] }) },
-  { pageNumber: 2, ocrText: OCR2, sections: S2, extraction: emptyEx({
+  { pageNumber: 2, ocrText: OCR2, sections: S2.map((x) => ({ ...x })), extraction: emptyEx({
     work_history: [job("CONTRACT ENGAGEMENTS", "Sourcing Recruiter", CONTRACT, { start_date: "Nov 2020", end_date: "May 2023", position: 0 }), job("CDW", "Senior Talent Acquisition Specialist", CDW, { start_date: "Nov 2015", end_date: "Sep 2020", position: 1 }), job("ALLEGIS GLOBAL SOLUTIONS", "Senior Technical Recruiter", ALLEGIS, { start_date: "Jan 2011", end_date: "Nov 2015", position: 2 })],
     freeform: [blockOf(P2_BLOCK, { position: 3 })] }) },
-  { pageNumber: 3, ocrText: OCR3, sections: S3, extraction: emptyEx({
+  { pageNumber: 3, ocrText: OCR3, sections: S3.map((x) => ({ ...x })), extraction: emptyEx({
     work_history: [job("RANDSTAD STAFFING (FORMERLY SPHERION)", "Senior Recruiter", RANDSTAD, { start_date: "2006-10", end_date: "2010-12", position: 0 })],
     education: [{ institution: "Brigham Young University", degree: "coursework toward Bachelor of Science (60 credits completed)", field_of_study: "Travel and Tourism", location: "Provo UT", start_date: "", end_date: "", heading: "EDUCATION", extraction_confidence: "high", position: 1 }],
     freeform: [blockOf(P3_BLOCK, { position: 0 })] }) },
