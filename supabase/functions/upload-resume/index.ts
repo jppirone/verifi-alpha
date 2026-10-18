@@ -1892,7 +1892,19 @@ function mergeBoundaryContinuations(extraction: ExtractionResult, seam?: SeamInf
         stitched = null;
         try { seam?.report("error", `seam stitch FAILED, joining as before: ${String(seamErr)}`); } catch { /* reporting only */ }
       }
-      prev.job_responsibilities = stitched ?? `${prev.job_responsibilities}\n\n${item.job_responsibilities}`.trim();
+      // AP9AF-2: the continuation row itself starts with the lowercase rest of the sentence that the page break cut (the model kept the fragment in the row, so the
+      // stitch above had nothing to add). Join with one space. Fail open per seam: any error joins as before.
+      let spaced: string | null = null;
+      if (stitched === null) {
+        try {
+          spaced = seam && itemPage !== null ? joinLowercaseContinuation(prev.job_responsibilities, item.job_responsibilities) : null;
+          if (spaced !== null) seam!.report("log", `seam stitch (work row) - page ${itemPage}: joined with one space, continuation starts "${item.job_responsibilities.trimStart().slice(0, 40)}"`);
+        } catch (spaceErr) {
+          spaced = null;
+          try { seam?.report("error", `seam stitch (work row) FAILED, joining as before: ${String(spaceErr)}`); } catch { /* reporting only */ }
+        }
+      }
+      prev.job_responsibilities = stitched ?? spaced ?? `${prev.job_responsibilities}\n\n${item.job_responsibilities}`.trim();
       if (itemPage !== null) lastWorkHistoryPageOf.set(prev, itemPage);
       continue;
     }
@@ -2239,6 +2251,20 @@ function stitchSeamFragment(prevText: string, contText: string, nextPageOcr: str
   const fold = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
   if (fold(contText).slice(0, 200).includes(fold(fragment))) return null; // the model already kept it
   return { text: `${prev} ${fragment}\n${contText.trimStart()}`.trim(), fragment };
+}
+
+// AP9AF-2: a work row that continues the previous page's job (same company and title, or both blank) starts with a lowercase letter and the previous text, whose last
+// line is at least 20 characters long, does not end with terminal punctuation (. ! ? : ; ) ] " ' and the curly quotes): the page break cut a sentence and the model
+// returned the rest as the start of the continuation row (6fc77af5: "...high-caliber sourcing" / "consistently locating hard-to-reach candidates ..."). The two are joined
+// with ONE space instead of a blank line. Anything else returns null and the caller joins exactly as before. Fix D's stitch (a fragment the model left out) runs first.
+function joinLowercaseContinuation(prevText: string, contText: string): string | null {
+  if (typeof prevText !== "string" || typeof contText !== "string") return null;
+  const prev = prevText.replace(/\s+$/, ""), cont = contText.replace(/^\s+/, "");
+  if (!prev || !cont || !/^[a-z]/.test(cont)) return null;
+  const lines = prev.split("\n");
+  const last = (lines[lines.length - 1] || "").trim();
+  if (last.length < 20 || /[.!?:;)\]"'”’]$/.test(last)) return null;
+  return `${prev} ${cont}`;
 }
 
 // AP9X-2: two ways the page N+1 answer repeats text the previous entry already ends with. Only the LAST line of the previous text and the FIRST line of

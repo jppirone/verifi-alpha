@@ -35,8 +35,9 @@ t("6fc77af5: the live merge saves the second WESTCX job as 'Recruiter to Senior 
   const nw = run(mNew, pages6fc(), rep);
   assert.equal(find(nw, "WESTCX", "2023-09").title, "Recruiter");
   assert.equal(find(nw, "WESTCX", "2024-07").title, "Senior Recruiter");
-  assert.deepEqual(rep, [["log", "title restored from heading line - page 2: Recruiter to Senior Recruiter -> Recruiter"]]);
-  const strip = (m: any) => JSON.stringify({ ...m, work_history: m.work_history.map((w: any) => ({ ...w, title: w.title === "Recruiter" ? "Recruiter to Senior Recruiter" : w.title })) });
+  assert.deepEqual(rep.filter(([, m]) => m.startsWith("title restored")), [["log", "title restored from heading line - page 2: Recruiter to Senior Recruiter -> Recruiter"]]);
+  // AP9AF-2 (the next commit) also changes the ALLEGIS join (blank line -> space) on this document; that job is left out of this comparison, it has its own test file
+  const strip = (m: any) => JSON.stringify({ ...m, work_history: m.work_history.filter((w: any) => w.company !== "ALLEGIS GLOBAL SOLUTIONS").map((w: any) => ({ ...w, title: w.title === "Recruiter" ? "Recruiter to Senior Recruiter" : w.title })) });
   assert.equal(strip(nw), strip(old), "only that one title differs");
   console.log("      WESTCX second job title BEFORE '" + find(old, "WESTCX", "2023-09").title + "' AFTER '" + find(nw, "WESTCX", "2023-09").title + "'");
 });
@@ -80,7 +81,7 @@ t("a page without OCR text (vision routed) is left alone; the stored title stays
 t("the other 6fc77af5 titles are all on the page or have no matching line: no other row changes (no log line for them)", () => {
   const rep: Rep = [];
   run(mNew, pages6fc(), rep);
-  assert.equal(rep.length, 1);
+  assert.equal(rep.filter(([, m]) => m.startsWith("title restored")).length, 1);
 });
 
 // ---------- fail open ----------
@@ -89,8 +90,10 @@ t("fail open: a forced throw inside the guard saves the live merge output and re
   Object.defineProperty(p[1], "ocrText", { get() { n++; if (n === 1) throw new Error("forced"); return OCR2_6FC; }, configurable: true });
   const rep: Rep = [];
   const nw = run(mNew, p, rep), old = run(mOld, pages6fc(), []);
-  assert.equal(JSON.stringify(nw), JSON.stringify(old));
-  assert.deepEqual(rep, [["error", "title restore FAILED, saving as before: Error: forced"]]);
+  const noAllegis = (m: any) => JSON.stringify({ ...m, work_history: m.work_history.filter((w: any) => w.company !== "ALLEGIS GLOBAL SOLUTIONS") }); // AP9AF-2 changes that join
+  assert.equal(noAllegis(nw), noAllegis(old));
+  assert.equal(find(nw, "WESTCX", "2023-09").title, "Recruiter to Senior Recruiter", "the title is saved as the model gave it");
+  assert.deepEqual(rep.filter(([l]) => l === "error"), [["error", "title restore FAILED, saving as before: Error: forced"]]);
 });
 
 // ---------- the clean upload 797fc5d5 and the combination with AP9AA, AP9AC and AP9AD ----------
