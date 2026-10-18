@@ -7,6 +7,7 @@ import { guardSelfReferentialHeadings } from "../_shared/resume-heading-guard.ts
 import { summarizeGapReport, type GapSummary } from "../_shared/resume-ocr-gaps.ts";
 import { repairRoleBuckets, orderRoleGroupsLatestFirst } from "../_shared/resume-role-buckets.ts";
 import { restoreSkillText } from "../_shared/resume-skill-text.ts";
+import { normalizeExtractionDates } from "../_shared/resume-date-normalize.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -2806,6 +2807,12 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
   // Item 1 (2026-09-08 regression session): race-window fix — the candidate_id captured when the upload started can
   // be stale by the time extraction finishes (confirm-verification backfills it while pages are being read).
   // Re-reading it fresh, immediately before the insert, shrinks that window to one query.
+  // AP9AA-2: "Nov 2020" style dates become "YYYY-MM" (the database function accepts only YYYY, YYYY-MM, YYYY-MM-DD and nulls the rest). Never throws.
+  const datesFixedPdf = normalizeExtractionDates(merged);
+  if (datesFixedPdf.changed > 0) {
+    merged = datesFixedPdf.extraction;
+    console.log(`upload-resume: ${docId} dates normalized: ${datesFixedPdf.changed} value(s), first: ${datesFixedPdf.first}`);
+  }
   const { data: freshDocPdf } = await supabase.from("resume_documents").select("candidate_id").eq("id", docId).maybeSingle();
   const { error: pdfRpcErr } = await supabase.rpc("insert_resume_extraction", {
     p_resume_document_id: docId,
@@ -3148,6 +3155,12 @@ export default {
         // extract-resume-fields — docRow.candidate_id was captured before the vision call just made
         // (a real, network-bound Claude call), which is exactly the window a fast signup-email
         // confirmation could land in and permanently orphan every row about to be inserted.
+        // AP9AA-2: same date normalization as the PDF path just above.
+        const datesFixedVision = normalizeExtractionDates(extraction);
+        if (datesFixedVision.changed > 0) {
+          extraction = datesFixedVision.extraction;
+          console.log(`upload-resume: ${docId} dates normalized: ${datesFixedVision.changed} value(s), first: ${datesFixedVision.first}`);
+        }
         const { data: freshDocVision } = await supabase
           .from("resume_documents").select("candidate_id").eq("id", docId).maybeSingle();
         const { error: rpcErr } = await supabase.rpc("insert_resume_extraction", {
