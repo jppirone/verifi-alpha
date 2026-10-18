@@ -2580,7 +2580,81 @@ function splitCrossPageSkillsGuarded(pages: SkillPage[], report?: (level: "log" 
   }
 }
 
+// AP9AF-1: restore the job title from the heading line of the page. The extraction model sometimes writes a title that is not on the page (document 6fc77af5: the
+// page says "WESTCX, Recruiter, Remote (Sep 2023-Jun 2024)" and the row came back titled "Recruiter to Senior Recruiter", the example title of its own prompt).
+// A row's title is replaced only when ALL hold: the row has a company; its stored title does not appear in the page OCR (letters and digits, case ignored); the page
+// OCR has exactly one line that starts with the company name (case-insensitive) and a comma and ends with a parenthesised date range ("COMPANY, Title, Location
+// (Sep 2023-Jun 2024)", the location is optional); the row has at least one date and every date it has agrees with that line (month names, YYYY-MM, YYYY and MM/YYYY
+// are compared as values); the title from the line is not empty, is under 80 characters and has no " to " and no "/". Otherwise null (nothing changes).
+const HEADING_MONTHS: Record<string, string> = {
+  jan: "01", january: "01", feb: "02", february: "02", mar: "03", march: "03", apr: "04", april: "04", may: "05", jun: "06", june: "06",
+  jul: "07", july: "07", aug: "08", august: "08", sep: "09", sept: "09", september: "09", oct: "10", october: "10", nov: "11", november: "11", dec: "12", december: "12",
+};
+function headingDateKey(s: string): string | null {
+  const v = (s || "").trim();
+  if (/^(present|current|now|ongoing)$/i.test(v)) return "present";
+  let m = v.match(/^(\d{4})(?:-(\d{1,2}))?$/);
+  if (m) return m[2] ? `${m[1]}-${m[2].padStart(2, "0")}` : m[1];
+  m = v.match(/^([A-Za-z]{3,9})\.?\s+(\d{4})$/);
+  if (m) { const mo = HEADING_MONTHS[m[1].toLowerCase()]; return mo ? `${m[2]}-${mo}` : null; }
+  m = v.match(/^(\d{1,2})\/(\d{4})$/);
+  if (m && +m[1] >= 1 && +m[1] <= 12) return `${m[2]}-${m[1].padStart(2, "0")}`;
+  return null;
+}
+function titleFromHeadingLine(row: { company?: string; title?: string; start_date?: string; end_date?: string }, ocr: string): string | null {
+  const company = (row.company || "").trim();
+  if (!company) return null;
+  const fold = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const stored = fold(row.title || "");
+  if (stored && fold(ocr).includes(stored)) return null;
+  const rs = (row.start_date || "").trim(), re = (row.end_date || "").trim();
+  if (!rs && !re) return null;
+  const rsKey = rs ? headingDateKey(rs) : "", reKey = re ? headingDateKey(re) : "";
+  if (rsKey === null || reKey === null) return null;
+  const lower = company.toLowerCase() + ",";
+  const found: Array<{ title: string; start: string | null; end: string | null }> = [];
+  for (const raw of ocr.split("\n")) {
+    const l = raw.trim();
+    if (!l.toLowerCase().startsWith(lower)) continue;
+    const m = l.match(/\(\s*([^()]+?)\s*(?:-|–|—|\bto\b)\s*([^()]+?)\s*\)\s*$/i);
+    if (!m || m.index === undefined) continue;
+    const middle = l.slice(company.length + 1, m.index).trim().replace(/,\s*$/, "");
+    found.push({ title: middle.split(",")[0].trim(), start: headingDateKey(m[1]), end: headingDateKey(m[2]) });
+  }
+  if (found.length !== 1) return null;
+  const f = found[0];
+  if (f.start === null || f.end === null) return null;
+  if ((rsKey && rsKey !== f.start) || (reKey && reKey !== f.end)) return null;
+  if (!f.title || f.title.length >= 80 || /\sto\s|\//i.test(f.title)) return null;
+  return f.title;
+}
+// Applies titleFromHeadingLine to every work row of every page that has OCR text. Fail open: any error returns the pages unchanged and is reported.
+function restoreTitlesFromHeadingLines(pages: SkillPage[], report?: (level: "log" | "error", message: string) => void): SkillPage[] {
+  try {
+    const logs: string[] = [];
+    const out = pages.map((p) => {
+      if (typeof p.ocrText !== "string" || !Array.isArray(p.extraction.work_history)) return p;
+      let changed = false;
+      const rows = p.extraction.work_history.map((w) => {
+        const t = titleFromHeadingLine(w, p.ocrText as string);
+        if (t === null || t === w.title) return w;
+        changed = true;
+        logs.push(`title restored from heading line - page ${p.pageNumber}: ${w.title} -> ${t}`);
+        return { ...w, title: t };
+      });
+      return changed ? { ...p, extraction: { ...p.extraction, work_history: rows } } : p;
+    });
+    if (logs.length === 0) return pages;
+    if (report) for (const line of logs) report("log", line);
+    return out;
+  } catch (e) {
+    try { report?.("error", `title restore FAILED, saving as before: ${String(e)}`); } catch { /* reporting only */ }
+    return pages;
+  }
+}
+
 function mergeExtractions(pages: SkillPage[], report?: (level: "log" | "error", message: string) => void): ExtractionResult {
+  pages = restoreTitlesFromHeadingLines(pages, report); // AP9AF-1
   const { primary: primarySkills, heading: primarySkillsHeading, secondaryFreeform: crossPageSkillsSecondary } = splitCrossPageSkillsGuarded(pages, report);
   const merged = {
     // Item 19 (2026-09-12 live-testing session): same "first page that actually reported one"
