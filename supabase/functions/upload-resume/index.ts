@@ -1861,6 +1861,22 @@ function mergeBoundaryContinuations(extraction: ExtractionResult, seam?: SeamInf
     // anything, it's a deterministic property of the row itself.
     const isBlankContinuation = isPageAdjacent && !item.company && !item.title;
     if (prev && (isMatchingHeader || isBlankContinuation)) {
+      // AP9X-2: the page extraction repeated text the previous entry already ends with (case A: the previous last line is the start of the continuation's
+      // first line; case B: the continuation's first line is already at the end of the previous text). Looks only at those two lines. Runs before Fix D's
+      // stitch; when it applies the stitch does not run. Fail open per seam: any error joins as before.
+      let repeated: { text: string; kase: "A" | "B"; first: string } | null = null;
+      try {
+        repeated = seam && itemPage !== null ? repeatSeamRule(prev.job_responsibilities, item.job_responsibilities) : null;
+        if (repeated) seam!.report("log", `seam repeat - page ${itemPage}: case ${repeated.kase}, first 40 chars: ${repeated.first.slice(0, 40)}`);
+      } catch (repeatErr) {
+        repeated = null;
+        try { seam?.report("error", `seam repeat FAILED, joining as before: ${String(repeatErr)}`); } catch { /* reporting only */ }
+      }
+      if (repeated) {
+        prev.job_responsibilities = repeated.text;
+        if (itemPage !== null) lastWorkHistoryPageOf.set(prev, itemPage);
+        continue;
+      }
       // AP9U (Fix D): a bullet cut by the page break whose last word(s) the page extraction left out. Fail open per seam: any error joins as before.
       let stitched: string | null = null;
       try {
@@ -2218,6 +2234,33 @@ function stitchSeamFragment(prevText: string, contText: string, nextPageOcr: str
   const fold = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
   if (fold(contText).slice(0, 200).includes(fold(fragment))) return null; // the model already kept it
   return { text: `${prev} ${fragment}\n${contText.trimStart()}`.trim(), fragment };
+}
+
+// AP9X-2: two ways the page N+1 answer repeats text the previous entry already ends with. Only the LAST line of the previous text and the FIRST line of
+// the continuation are looked at; comparisons ignore case and spacing; anything else returns null and the caller joins exactly as before.
+//  Case A (partial, then full): the previous last line is at least 20 characters, has no terminal punctuation (. ! ? ) ] " ' and the curly quotes), and the
+//    continuation's first line starts with it and is longer. The previous last line is replaced by the continuation's first line; the rest of the
+//    continuation follows on the next line (a single line break, as bullets sit inside a page).
+//  Case B (repeat): the continuation's first line is at least 60 characters and its last 60 characters occur inside the last 600 characters of the previous
+//    text. That first line is dropped; the rest of the continuation, if any, is joined after a blank line as before.
+function repeatSeamRule(prevText: string, contText: string): { text: string; kase: "A" | "B"; first: string } | null {
+  if (typeof prevText !== "string" || typeof contText !== "string") return null;
+  const fold = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
+  const prev = prevText.replace(/\s+$/, "");
+  const cont = contText.replace(/^\s+/, "");
+  if (!prev || !cont) return null;
+  const nl = prev.lastIndexOf("\n");
+  const prevHead = prev.slice(0, nl + 1), prevLast = prev.slice(nl + 1).trim();
+  const cnl = cont.indexOf("\n");
+  const contFirst = (cnl < 0 ? cont : cont.slice(0, cnl)).trim(), contRest = cnl < 0 ? "" : cont.slice(cnl + 1).replace(/^\s+/, "");
+  const fFirst = fold(contFirst), fLast = fold(prevLast);
+  if (prevLast.length >= 20 && !/[.!?)\]"'”’]$/.test(prevLast) && fFirst.length > fLast.length && fFirst.startsWith(fLast)) {
+    return { text: `${prevHead}${contFirst}${contRest ? "\n" + contRest : ""}`.trim(), kase: "A", first: contFirst };
+  }
+  if (fFirst.length >= 60 && fold(prev).slice(-600).includes(fFirst.slice(-60))) {
+    return { text: contRest ? `${prev}\n\n${contRest}`.trim() : prev.trim(), kase: "B", first: contFirst };
+  }
+  return null;
 }
 
 // A page of the merge: its pageNumber, the model's extraction, and (AP9R, Fix A's hand-over) the indexes of the skills strings that the
