@@ -1103,7 +1103,8 @@ function resolveContinuationCategory(boundaries: BoundaryResult, previousPageCon
 // made the next page's context a freeform section). This removes such a section from the list, so its lines stay part of the job above, as on the original uploads.
 // A section is removed only when ALL hold: (a) its category is unknown or additional_info; (b) the page OCR has a line equal to the heading plus a colon (case and
 // spacing ignored; the stored heading has no colon); (c) a job is open at that point: an earlier section of the page is work_history, or it is the first section
-// of the page and the previous page's trailing item is a work_history entry (previousPageContext.kind). Nothing else is touched: sections of any other category
+// of the page, the previous page's trailing item is a work_history entry (previousPageContext.kind) AND the section is flagged is_continuation_of_previous_page
+// (AP9AJ; a first section flagged false is a new headed section and is kept). Nothing else is touched: sections of any other category
 // (summary, skills, education, certifications, work_history, hobbies_other), headings with no colon line on the page, and headed sections that are not inside an
 // open job ("Leadership Training" after EDUCATION, "PROFESSIONAL AFFILIATIONS") stay. When the removed section is the FIRST of the page its lines continue the open
 // job of the previous page, so it is replaced by a headerless work_history continuation section (heading "", is_continuation_of_previous_page true); otherwise
@@ -1125,7 +1126,10 @@ function removeInlineSubLabels(
     const removed: string[] = [];
     boundaries.sections.forEach((s, i) => {
       const heading = typeof s.heading === "string" ? s.heading : "";
-      const eligible = (s.category === "unknown" || s.category === "additional_info") && fold(heading) !== "" && lines.has(fold(heading) + ":");
+      // AP9AJ: the FIRST section of a page is only a sub-label when the boundary step itself marked it a continuation of the previous page; a first section with the
+      // flag false is a new, headed section ("Awards:" at the top of a page) and stays. Sections after the first keep the plain rule.
+      const eligible = (s.category === "unknown" || s.category === "additional_info") && fold(heading) !== "" && lines.has(fold(heading) + ":") &&
+        (i !== 0 || s.is_continuation_of_previous_page === true);
       const jobOpen = out.some((o) => o.category === "work_history") || (i === 0 && previousPageContext?.kind === "work_history");
       if (!(eligible && jobOpen)) { out.push(s); return; }
       removed.push(heading);

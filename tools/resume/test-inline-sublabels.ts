@@ -90,6 +90,36 @@ t("two label sections at the very top of a page become ONE continuation section"
   assert.equal(log.length, 2);
 });
 
+// ---------- AP9AJ: the continuation flag of a first section ----------
+const AWARDS_OCR = "Recognized as top performer in 2019.\nAwards:\nPresident's Club 2018\nSalesperson of the year 2019\nEDUCATION\nBA, New York University (1988)";
+t("AP9AJ (a): FIRST section 'Awards' (additional_info), OCR has an 'Awards:' line, the previous page ends in a job, continuation flag FALSE: the section is KEPT (same object)", () => {
+  const input = B([sec("Awards", "additional_info", false), sec("EDUCATION", "education")]);
+  const log: Log = [];
+  assert.strictEqual(run(input, AWARDS_OCR, WH, log), input); assert.deepEqual(log, []);
+});
+t("AP9AJ (b): the same first section with the continuation flag TRUE is REMOVED and becomes the headerless work_history continuation", () => {
+  const log: Log = [];
+  const out = run(B([sec("Awards", "additional_info", true), sec("EDUCATION", "education")]), AWARDS_OCR, WH, log);
+  assert.deepEqual(heads(out), ["|work_history|cont", "EDUCATION|education|new"]); assert.deepEqual(log, [["removed", "Awards"]]);
+});
+t("AP9AJ (b2): the flag must be exactly true (missing flag is treated as false)", () => {
+  const input = B([{ heading: "Awards", category: "additional_info" }, sec("EDUCATION", "education")]);
+  assert.strictEqual(run(input, AWARDS_OCR, WH), input);
+});
+t("AP9AJ (c): a NON-first section with a colon line inside an open job and continuation flag false is still REMOVED (the page 2 Donofrio case)", () => {
+  const log: Log = [];
+  const out = run(B(P2_SECS()), P2_OCR, WH, log);
+  assert.ok(P2_SECS().slice(1).every((s: any) => s.is_continuation_of_previous_page === false), "the stored page 2 label sections are flagged false");
+  assert.equal(out.sections.length, 2); assert.equal(log.length, 3);
+  const input = B([sec("Responsibilities", "unknown", false), sec("FAME, Director (Oct 1996-Nov 1998)", "work_history")]);
+  const o2 = run(B([sec("", "work_history", true), ...input.sections]), "bullet\nResponsibilities:\nitem\nFAME, Director (Oct 1996-Nov 1998)", null);
+  assert.deepEqual(heads(o2), ["|work_history|cont", "FAME, Director (Oct 1996-Nov 1998)|work_history|new"]);
+});
+t("AP9AJ: the stored Donofrio page 4 section is flagged continuation true, so it is still removed (as in the page 4 test above)", () => {
+  assert.equal(P4_SECS()[0].is_continuation_of_previous_page, true);
+  assert.equal(run(B(P4_SECS()), P4_OCR, WH).sections[0].category, "work_history");
+});
+
 // ---------- negative tests ----------
 t("Aclark pages (stored OCR and boundary answers of 6fc77af5): no colon-ended line, the same object comes back", () => {
   const a = B(ACLARK_S2.map((x: any) => ({ ...x }))), b = B(ACLARK_S3.map((x: any) => ({ ...x })));
