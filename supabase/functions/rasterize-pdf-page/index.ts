@@ -1097,6 +1097,49 @@ function resolveContinuationCategory(boundaries: BoundaryResult, previousPageCon
   return { ...boundaries, sections };
 }
 
+// AP9AI: INLINE SUB-LABELS. A work-history job that prints its own sub-labels on lines of their own ("Notable Experiences:", "Responsibilities:") sometimes gets them
+// back from the boundary step as sections of their own (category unknown, or additional_info). The page extraction then follows the list and moves each label's
+// bullets out of the job into a freeform block (the Donofrio round trip, document 031b895c: 2253 characters out of five jobs, and a leftover freeform block that
+// made the next page's context a freeform section). This removes such a section from the list, so its lines stay part of the job above, as on the original uploads.
+// A section is removed only when ALL hold: (a) its category is unknown or additional_info; (b) the page OCR has a line equal to the heading plus a colon (case and
+// spacing ignored; the stored heading has no colon); (c) a job is open at that point: an earlier section of the page is work_history, or it is the first section
+// of the page and the previous page's trailing item is a work_history entry (previousPageContext.kind). Nothing else is touched: sections of any other category
+// (summary, skills, education, certifications, work_history, hobbies_other), headings with no colon line on the page, and headed sections that are not inside an
+// open job ("Leadership Training" after EDUCATION, "PROFESSIONAL AFFILIATIONS") stay. When the removed section is the FIRST of the page its lines continue the open
+// job of the previous page, so it is replaced by a headerless work_history continuation section (heading "", is_continuation_of_previous_page true); otherwise
+// the lines simply fall under the section before it. mergeCompanies/noMergeCompanies name employers and are returned unchanged. Needs the page OCR text: a page read
+// by vision (no OCR text) is returned as it was. Never throws: any error returns the list as it was and reports it.
+function removeInlineSubLabels(
+  boundaries: BoundaryResult,
+  ocrText: string | undefined | null,
+  previousPageContext: TrailingItemContext | null | undefined,
+  report?: (kind: "removed" | "failed", text: string) => void,
+): BoundaryResult {
+  try {
+    if (typeof ocrText !== "string" || !boundaries || !Array.isArray(boundaries.sections) || boundaries.sections.length === 0) return boundaries;
+    const fold = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
+    const lines = new Set<string>();
+    for (const l of ocrText.split("\n")) { const f = fold(l); if (f.endsWith(":")) lines.add(f); }
+    if (lines.size === 0) return boundaries;
+    const out: BoundarySection[] = [];
+    const removed: string[] = [];
+    boundaries.sections.forEach((s, i) => {
+      const heading = typeof s.heading === "string" ? s.heading : "";
+      const eligible = (s.category === "unknown" || s.category === "additional_info") && fold(heading) !== "" && lines.has(fold(heading) + ":");
+      const jobOpen = out.some((o) => o.category === "work_history") || (i === 0 && previousPageContext?.kind === "work_history");
+      if (!(eligible && jobOpen)) { out.push(s); return; }
+      removed.push(heading);
+      if (i === 0) out.push({ heading: "", category: "work_history", is_continuation_of_previous_page: true });
+    });
+    if (removed.length === 0) return boundaries;
+    for (const h of removed) { try { report?.("removed", h); } catch { /* reporting only */ } }
+    return { ...boundaries, sections: out };
+  } catch (e) {
+    try { report?.("failed", String(e)); } catch { /* reporting only */ }
+    return boundaries;
+  }
+}
+
 // STEP 2 OF 2 support: renders step 1's already-decided boundaries into the block step 2's prompt
 // includes — this is what actually enforces "do not independently re-judge category", the same way
 // buildContinuationContext's block below enforces continuation behavior. Kept separate from that
@@ -2222,6 +2265,11 @@ export default {
           try {
             const boundaryStart = Date.now();
             sectionBoundaries = resolveContinuationCategory(await runBoundaryDetectionHaiku(ocrText, trailingContext, modelCalls), trailingContext);
+            // AP9AI: job sub-labels ("Notable Experiences:") that the boundary step listed as sections stay inside the job. Needs the OCR text, so only this path.
+            sectionBoundaries = removeInlineSubLabels(sectionBoundaries, ocrText, trailingContext, (kind, text) =>
+              console.log(kind === "removed"
+                ? `rasterize-pdf-page: inline sub-label removed - page ${pageNum}: ${text}`
+                : `rasterize-pdf-page: inline sub-label removal FAILED, keeping the boundary list - page ${pageNum}: ${text}`));
             boundaryMs = Date.now() - boundaryStart;
           } catch (boundaryErr) {
             console.log(`rasterize-pdf-page: boundary detection failed, falling back to shape-based classification for this page — ${String(boundaryErr)}`);
