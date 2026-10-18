@@ -1876,7 +1876,29 @@ function mergeBoundaryContinuations(extraction: ExtractionResult, seam?: SeamInf
         try { seam?.report("error", `seam repeat FAILED, joining as before: ${String(repeatErr)}`); } catch { /* reporting only */ }
       }
       if (repeated) {
-        prev.job_responsibilities = repeated.text;
+        let repeatedText = repeated.text;
+        // AP9AM: case B dropped a repeated first line; when the page OCR then shows the lowercase rest of the cut line (the model copied the previous line instead of
+        // writing the fragment), Fix D's stitch is run on the result with larger caps (80 characters, 10 words), only here. Needs: the previous last line at least 20
+        // characters with no . ! ? : ; at the end, a lowercase plain-word OCR first line within the caps that is not already in the continuation text. The fragment is
+        // joined to the previous last line with ONE space and the rest of the continuation follows on the next line. Anything else keeps case B's text. Fail open.
+        if (repeated.kase === "B") {
+          try {
+            const prevTrim = prev.job_responsibilities.replace(/\s+$/, "");
+            const lastLine = (prevTrim.split("\n").pop() || "").trim();
+            if (seam && itemPage !== null && repeated.text.startsWith(prevTrim) && lastLine.length >= 20 && !/[.!?:;]$/.test(lastLine)) {
+              const rest = repeated.text.slice(prevTrim.length).replace(/^\s+/, "");
+              const s = stitchSeamFragment(prevTrim, rest, seam.ocrByPage.get(itemPage), { maxChars: 80, maxWords: 10 });
+              if (s) {
+                repeatedText = s.text;
+                seam.report("log", `seam stitch (case B fragment) - page ${itemPage}: joined with one space, fragment "${s.fragment.slice(0, 40)}"`);
+              }
+            }
+          } catch (caseBErr) {
+            repeatedText = repeated.text;
+            try { seam?.report("error", `seam stitch (case B fragment) FAILED, joining as before: ${String(caseBErr)}`); } catch { /* reporting only */ }
+          }
+        }
+        prev.job_responsibilities = repeatedText;
         if (itemPage !== null) lastWorkHistoryPageOf.set(prev, itemPage);
         continue;
       }
@@ -2240,14 +2262,15 @@ type SeamInfo = { ocrByPage: Map<number, string>; sectionsByPage: Map<number, Se
 // with terminal punctuation (. ! ? ) ] " ' and the curly quotes), and the fragment must not already be inside the first 200 characters of the continuation
 // text the model returned (whitespace and case ignored). Anything else returns null and the caller joins exactly as before. When it applies the bullet is
 // completed with one space and the fragment, and the continuation (which is the next bullet) follows on the next line, with no blank line.
-function stitchSeamFragment(prevText: string, contText: string, nextPageOcr: string | undefined): { text: string; fragment: string } | null {
+// AP9AM: the optional opts raise the two caps (default 40 characters and 6 words, unchanged for every caller that passes nothing); only the AP9X-2 case B path passes them.
+function stitchSeamFragment(prevText: string, contText: string, nextPageOcr: string | undefined, opts?: { maxChars?: number; maxWords?: number }): { text: string; fragment: string } | null {
   if (typeof prevText !== "string" || typeof contText !== "string" || typeof nextPageOcr !== "string") return null;
   const prev = prevText.trim();
   if (!prev || /[.!?)\]"'”’]$/.test(prev)) return null; // empty, or already ends the sentence
   const fragment = nextPageOcr.split("\n")[0].trim();
-  if (!fragment || fragment.length > 40) return null;
+  if (!fragment || fragment.length > (opts?.maxChars ?? 40)) return null;
   if (!/^[a-z]/.test(fragment) || !/^[A-Za-z][A-Za-z '\-.,;:!?)"]*$/.test(fragment)) return null;
-  if (fragment.split(/\s+/).length > 6) return null;
+  if (fragment.split(/\s+/).length > (opts?.maxWords ?? 6)) return null;
   const fold = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
   if (fold(contText).slice(0, 200).includes(fold(fragment))) return null; // the model already kept it
   return { text: `${prev} ${fragment}\n${contText.trimStart()}`.trim(), fragment };
