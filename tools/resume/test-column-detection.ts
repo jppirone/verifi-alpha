@@ -28,20 +28,25 @@ async function load(src: string): Promise<(w: any[]) => string> {
 }
 const rzNew = await load(read(RZ)), urNew = await load(read(UR));
 const rzOld = await load(gitShow("6135d7c", RZ)), urOld = await load(gitShow("6135d7c", UR));
+// AP9X-1: the code of 286d5f4 (Fix C live, before the gutter rule) is the "before" side of the gutter cases
+const rzPrev = await load(gitShow("286d5f4", RZ)), urPrev = await load(gitShow("286d5f4", UR));
 
 // ---- drift: the two product copies are the same code (comments and spacing ignored) ----
 const norm = (s: string) => s.replace(/\/\/[^\n]*/g, "").replace(/\s+/g, " ").trim();
 function fnText(src: string, name: string): string {
   const a = src.indexOf(`function ${name}(`);
   assert.ok(a > 0, name + " not found");
-  let depth = 0, i = src.indexOf("{", a);
+  // skip the parameter list first (a parameter type can contain braces, e.g. columnGutter's Array<{ left: number; right: number }>)
+  let p = src.indexOf("(", a), pd = 0;
+  for (; p < src.length; p++) { if (src[p] === "(") pd++; else if (src[p] === ")") { pd--; if (pd === 0) break; } }
+  let depth = 0, i = src.indexOf("{", p);
   const start = i;
   for (; i < src.length; i++) { if (src[i] === "{") depth++; else if (src[i] === "}") { depth--; if (depth === 0) break; } }
   return src.slice(a, i + 1);
 }
 t("drift guard: the two copies of the column code are identical apart from comments and spacing (constants, line counter, reconstructByWordClustering, the AI correction)", () => {
   const rz = read(RZ), ur = read(UR);
-  for (const name of ["countTextLines", "reconstructByWordClustering", "correctAiOcrMisreads"]) assert.equal(norm(fnText(rz, name)), norm(fnText(ur, name)), `${name} differs between rasterize-pdf-page and upload-resume`);
+  for (const name of ["countTextLines", "columnGutter", "reconstructByWordClustering", "correctAiOcrMisreads"]) assert.equal(norm(fnText(rz, name)), norm(fnText(ur, name)), `${name} differs between rasterize-pdf-page and upload-resume`);
   for (const c of ["MIN_COLUMN_GAP_PX", "MIN_COLUMN_LINES"]) {
     const re = new RegExp(`const ${c} = [^;]+;`);
     assert.equal((rz.match(re) || [""])[0], (ur.match(re) || ["x"])[0], `${c} differs`);
@@ -54,6 +59,11 @@ t("negative control: the drift guard really fails when one copy is changed", () 
   const drifted = ur.replace("Math.abs(top - last) > 6", "Math.abs(top - last) > 7");
   assert.notEqual(drifted, ur, "control edit must change the text");
   assert.notEqual(norm(fnText(rz, "countTextLines")), norm(fnText(drifted, "countTextLines")));
+  const drifted3 = ur.replace("columnGutter(withLeft, gapBoundary) >= 0", "columnGutter(withLeft, gapBoundary) >= -5");
+  assert.notEqual(drifted3, ur, "gutter control edit must change the text");
+  assert.notEqual(norm(fnText(rz, "reconstructByWordClustering")), norm(fnText(drifted3, "reconstructByWordClustering")));
+  const drifted4 = ur.replace("if (w.right > maxLeftBlockRight)", "if (w.right >= maxLeftBlockRight)");
+  assert.notEqual(norm(fnText(rz, "columnGutter")), norm(fnText(drifted4, "columnGutter")));
   const drifted2 = ur.replace("const MIN_COLUMN_LINES = 2;", "const MIN_COLUMN_LINES = 1;");
   assert.notEqual((drifted2.match(/const MIN_COLUMN_LINES = [^;]+;/) || [""])[0], (rz.match(/const MIN_COLUMN_LINES = [^;]+;/) || [""])[0]);
 });
@@ -115,6 +125,74 @@ t("empty page and whitespace-only words: empty text, no error", () => {
 t("pages with no gap above 60 px are untouched (identical to before)", () => {
   const page = [...line(100, ["a", "b", "c"], 100, 50), ...line(130, ["d", "e"], 100, 50)];
   for (const [n, o] of [[rzNew, rzOld], [urNew, urOld]] as const) assert.equal(n(page), o(page));
+});
+
+// ---------------- AP9X-1: a negative gutter rejects the boundary ----------------
+// word with explicit left and right edges (pixels at 150 dpi)
+const wr = (text: string, left: number, right: number, top: number): W => ({ text, rect: { left, top, right, bottom: top + 18 } });
+
+// (a) the generated PironeSimple page 4, as measured in AP9W: every line starts with a long word (left 113 to 115, right 186 to 304), the second words start at 195 or
+// more, so the biggest jump in left edges is 80 px and 13 lines of words sit "right" of it, but the first words run past the start of the second words
+const firstRights = [233, 188, 200, 207, 223, 215, 304, 186];
+const simple4: W[] = [];
+firstRights.forEach((r, i) => {
+  const top = 95 + 31 * i;
+  simple4.push(wr(["Redeployed", "needed", "Letraset,", "Managed", "thousands,", "execution,", "CERTIFICATIONS", "Google"][i], 114, r, top));
+  if (i !== 6) ["existing", "staff", "capacity", "across"].forEach((x, k) => simple4.push(wr(x, r + 9 + k * 80, r + 9 + k * 80 + 70, top)));
+});
+t("AP9X-1 (a) the PironeSimple page 4 shape (first words overrun the second words, 13 right lines): one column now; before, it was split in two", () => {
+  for (const f of [rzNew, urNew]) { const out = f(simple4); assert.ok(!out.includes("\n\n"), out); assert.ok(out.startsWith("Redeployed existing staff capacity across\nneeded "), out); assert.ok(out.includes("\nCERTIFICATIONS\n")); }
+  for (const f of [rzPrev, urPrev]) assert.ok(f(simple4).includes("\n\n"), "the code of 286d5f4 splits this page");
+});
+
+// (b) a one word per line label column with a positive gutter: still two columns
+const labelPage: W[] = [];
+["Email", "Phone", "City", "Web"].forEach((label, i) => {
+  const top = 100 + 31 * i;
+  labelPage.push(wr(label, 100, 160, top));
+  ["jane@example.com", "and", "more", "text"].forEach((x, k) => labelPage.push(wr(x, 300 + k * 90, 300 + k * 90 + 80, top)));
+});
+t("AP9X-1 (b) a one word per line label column with a positive gutter (140 px): two columns kept, identical to before", () => {
+  for (const [n, o] of [[rzNew, rzPrev], [urNew, urPrev]] as const) { assert.ok(n(labelPage).includes("\n\n")); assert.equal(n(labelPage), o(labelPage)); }
+});
+
+// (c) a real two column page with multi-word lines (the one defined above): still two columns, identical to before
+t("AP9X-1 (c) a real two column page with multi-word lines (positive gutter): two columns kept, identical to before", () => {
+  for (const [n, o] of [[rzNew, rzPrev], [urNew, urPrev]] as const) { assert.ok(n(twoCol).includes("\n\n")); assert.equal(n(twoCol), o(twoCol)); }
+});
+
+// (d) the Fix C cases again, against the code of 286d5f4: a sparse far-right word (one line) is still rejected; exactly 2 lines is a column; exactly 1 is not
+t("AP9X-1 (d) the Fix C cases again: far-right word rejected, exactly 2 right lines kept, exactly 1 rejected, all identical to the code of 286d5f4", () => {
+  const base = [...line(100, ["Left", "one"]), ...line(130, ["Left", "two"]), ...line(160, ["Left", "three"])];
+  const two = [...base, ...line(100, ["Side", "a"], 600), ...line(130, ["Side", "b"], 600)];
+  const one = [...base, ...line(100, ["Side", "a"], 600)];
+  for (const [n, o] of [[rzNew, rzPrev], [urNew, urPrev]] as const) {
+    for (const page of [beast4, two, one, twoCol]) assert.equal(n(page), o(page));
+    assert.ok(n(two).includes("\n\n")); assert.ok(!n(one).includes("\n\n")); assert.ok(!n(beast4).includes("\n\n"));
+  }
+});
+
+// (e) a page where the gap rule accepted a boundary AND Fix C's two line test passes, but a left block word runs past the first right block word: rejected
+const overlapPage: W[] = [
+  wr("Header", 100, 400, 100), wr("alpha", 120, 170, 131),
+  ...[0, 1, 2].flatMap((i) => [wr("Right" + i, 300, 360, 100 + 31 * i + 62), wr("text", 370, 420, 100 + 31 * i + 62)]),
+  wr("beta", 110, 160, 162), wr("gamma", 110, 160, 193),
+];
+t("AP9X-1 (e) a negative gutter on a page the gap rule accepted (and with 3 right lines): the boundary is rejected; before, the page was split", () => {
+  for (const [n, o] of [[rzNew, rzPrev], [urNew, urPrev]] as const) {
+    assert.ok(o(overlapPage).includes("\n\n"), "286d5f4 splits it");
+    assert.ok(!n(overlapPage).includes("\n\n"), n(overlapPage));
+  }
+});
+t("AP9X-1 a gutter of exactly 0 keeps the columns (only a negative gutter rejects), a gutter of -1 rejects", () => {
+  const mk = (leftRight: number) => [
+    wr("Aaa", 100, leftRight, 100), wr("Bbb", 100, leftRight, 131), wr("Ccc", 100, leftRight, 162),
+    wr("Xxx", 300, 360, 100), wr("Yyy", 300, 360, 131), wr("Zzz", 300, 360, 162),
+  ];
+  for (const f of [rzNew, urNew]) { assert.ok(f(mk(300)).includes("\n\n"), "gutter 0 keeps the columns"); assert.ok(!f(mk(301)).includes("\n\n"), "gutter -1 rejects"); assert.ok(f(mk(250)).includes("\n\n")); }
+});
+t("AP9X-1 words without right edges are not used: the function reads rect.right of every word (both copies the same on the same boxes)", () => {
+  for (const page of [simple4, labelPage, twoCol, overlapPage, beast4]) assert.equal(rzNew(page), urNew(page));
 });
 
 for (const [name, fn] of tests) { await fn(); console.log("ok  ", name); }

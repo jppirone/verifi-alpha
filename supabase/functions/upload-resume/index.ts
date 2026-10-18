@@ -1251,10 +1251,23 @@ function countTextLines(tops: number[]): number {
   return lines;
 }
 
+// AP9X-1: a real column cannot overlap the other one. The gutter is the smallest left edge of any right-block word minus the largest right edge of
+// any left-block word; when it is negative the two blocks share horizontal space (on the generated PironeSimple page 4 every line's first word ran
+// past the start of the second words), so the "column" is only the gap between first words and second words and the boundary is rejected.
+// Kept identical in rasterize-pdf-page and upload-resume (tools/resume/test-column-detection.ts fails if the two copies drift).
+function columnGutter(words: Array<{ left: number; right: number }>, boundary: number): number {
+  let maxLeftBlockRight = -Infinity, minRightBlockLeft = Infinity;
+  for (const w of words) {
+    if (w.left <= boundary) { if (w.right > maxLeftBlockRight) maxLeftBlockRight = w.right; }
+    else if (w.left < minRightBlockLeft) minRightBlockLeft = w.left;
+  }
+  return minRightBlockLeft - maxLeftBlockRight;
+}
+
 function reconstructByWordClustering(words: TextItem[]): string {
   const real = words.filter((w) => w.text.trim().length > 0);
   if (real.length === 0) return "";
-  const withLeft = real.map((w) => ({ text: w.text, left: w.rect.left, top: w.rect.top }));
+  const withLeft = real.map((w) => ({ text: w.text, left: w.rect.left, top: w.rect.top, right: w.rect.right }));
   const sortedLefts = [...withLeft].sort((a, b) => a.left - b.left);
   let maxGap = -1, gapIdx = -1;
   for (let i = 1; i < sortedLefts.length; i++) {
@@ -1268,7 +1281,7 @@ function reconstructByWordClustering(words: TextItem[]): string {
   // threshold above — treat the whole page as a single column rather than splitting on what's
   // really just margin or bullet-indent whitespace.
   const gapBoundary = (gapIdx > 0 && maxGap > MIN_COLUMN_GAP_PX) ? (sortedLefts[gapIdx - 1].left + sortedLefts[gapIdx].left) / 2 : Infinity;
-  const boundary = (gapBoundary !== Infinity && countTextLines(withLeft.filter((w) => w.left > gapBoundary).map((w) => w.top)) >= MIN_COLUMN_LINES) ? gapBoundary : Infinity;
+  const boundary = (gapBoundary !== Infinity && countTextLines(withLeft.filter((w) => w.left > gapBoundary).map((w) => w.top)) >= MIN_COLUMN_LINES && columnGutter(withLeft, gapBoundary) >= 0) ? gapBoundary : Infinity;
 
   const col0 = withLeft.filter((w) => w.left <= boundary);
   const col1 = withLeft.filter((w) => w.left > boundary);
