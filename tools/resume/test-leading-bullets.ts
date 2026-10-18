@@ -67,14 +67,16 @@ t("document 2f1fdc89: today's merge puts both blocks in skills_secondary (1701 c
   const rep: Rep = [];
   const nw = run(mNew, aclarkPages(), rep);
   assert.equal(ff(nw, "skills_secondary").content, TECH); assert.equal(ff(nw, "skills_secondary").content.length, 163);
-  assert.equal(wh(nw, "WESTCX"), WESTCX + "\n" + P2_BLOCK); assert.equal(wh(nw, "WESTCX").length, 1056 + 1 + 941);
+  // AP9AD: the WESTCX text ends "...solo for both" (cut mid-sentence), so the block is joined with ONE SPACE now (it was a line break in AP9AA); same length (1 character)
+  assert.equal(wh(nw, "WESTCX"), WESTCX + " " + P2_BLOCK); assert.equal(wh(nw, "WESTCX").length, 1056 + 1 + 941);
   assert.ok(wh(nw, "WESTCX").endsWith("amplifying time savings for multi-contractor requests."));
   assert.equal(wh(nw, "ALLEGIS GLOBAL SOLUTIONS"), ALLEGIS + "\n" + P3_BLOCK); assert.equal(wh(nw, "ALLEGIS GLOBAL SOLUTIONS").split("\n").length, 5, "description line plus four bullets");
   assert.equal(wh(nw, "CONTRACT ENGAGEMENTS"), CONTRACT); assert.equal(wh(nw, "CDW"), CDW); assert.equal(wh(nw, "RANDSTAD STAFFING (FORMERLY SPHERION)"), RANDSTAD);
   assert.equal(nw.freeform.length, old.freeform.length); assert.ok(!nw.freeform.some((f: any) => f.content.includes("TeleVox")));
-  assert.deepEqual(rep, [["log", "leading bullets moved to previous job - page 2: WESTCX, " + P2_BLOCK.slice(0, 40)], ["log", "leading bullets moved to previous job - page 3: ALLEGIS GLOBAL SOLUTIONS, " + P3_BLOCK.slice(0, 40)]]);
+  assert.deepEqual(rep, [["log", "leading join: space (previous line unterminated) - page 2"], ["log", "leading bullets moved to previous job - page 2: WESTCX, " + P2_BLOCK.slice(0, 40)], ["log", "leading bullets moved to previous job - page 3: ALLEGIS GLOBAL SOLUTIONS, " + P3_BLOCK.slice(0, 40)]]);
   assert.equal(P2_BLOCK.slice(0, 40), "TeleVox and Mosaicx (including the India"); assert.equal(P3_BLOCK.slice(0, 40), "Assisted CDW talent team with full life ");
   const before = (s: string) => JSON.stringify(s.slice(-110)), tail = (s: string) => JSON.stringify(s.slice(-110));
+  { const w = wh(nw, "WESTCX"), at = w.indexOf("solo for both"); console.log("      2f1fdc89 WESTCX from 'solo for both' (" + (w.length - at) + " chars to the end): " + JSON.stringify(w.slice(at, at + 330)) + " ... " + JSON.stringify(w.slice(-70))); }
   console.log("      WESTCX BEFORE (" + wh(old, "WESTCX").length + " chars) ends: " + before(wh(old, "WESTCX")));
   console.log("      WESTCX AFTER  (" + wh(nw, "WESTCX").length + " chars) ends: " + tail(wh(nw, "WESTCX")));
   console.log("      ALLEGIS BEFORE (" + wh(old, "ALLEGIS GLOBAL SOLUTIONS").length + " chars): " + JSON.stringify(wh(old, "ALLEGIS GLOBAL SOLUTIONS")));

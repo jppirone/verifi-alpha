@@ -2277,6 +2277,39 @@ function looksLikeJobHeadingLine(line: string): boolean {
   return /\(\s*(?:[A-Za-z]{3,9}\.?\s+)?\d{4}\s*(?:-|–|—|to)\s*(?:(?:[A-Za-z]{3,9}\.?\s+)?\d{4}|present|current|now)\s*\)\s*$/i.test(l);
 }
 
+// AP9AD (b): the moved text continues a sentence that the page break cut. True when the previous text's last line is at least 20 characters long and does not end
+// with . ! ? : or ; AND the cut looks like a real mid-sentence cut: the next text starts with a lowercase letter, OR the last word of the previous line is a function
+// word (a sentence cannot end on it: "solo for both"). The second condition is an addition to the plain "unterminated" test: a bullet or a description line
+// without a final period is common ("AGS is a global provider of workforce solutions"), and the plain test would glue the next bullet onto it.
+const MID_SENTENCE_LAST_WORDS = new Set([
+  "a", "an", "the", "and", "or", "but", "nor", "of", "to", "for", "with", "without", "in", "on", "at", "by", "as", "from", "into", "onto", "across", "over", "under",
+  "through", "between", "among", "within", "per", "via", "than", "that", "which", "who", "whom", "whose", "while", "when", "where", "if", "so", "both", "each", "all",
+  "our", "their", "his", "her", "its", "my", "your", "this", "these", "those", "such", "including", "toward", "towards", "about", "after", "before", "during", "against",
+]);
+function endsMidSentence(prevText: string, nextText: string): boolean {
+  const lines = prevText.replace(/\s+$/, "").split("\n");
+  const last = (lines[lines.length - 1] || "").trim();
+  if (last.length < 20 || /[.!?:;]$/.test(last)) return false;
+  if (/^[a-z]/.test(nextText.trim())) return true;
+  const words = last.replace(/[^A-Za-z']+$/, "").split(/\s+/);
+  return MID_SENTENCE_LAST_WORDS.has((words[words.length - 1] || "").toLowerCase());
+}
+
+// AP9AD (a): the OCR text between the start of the page and the start of a moved work row's text (the row's first five words, found case-insensitively with any
+// spacing or line breaks between the words), as one line (OCR line breaks become spaces). null when there is none, when it is longer than 600 characters, when
+// the row's words are not found, or when any of its lines looks like a job heading line.
+function leadInFromOcr(ocr: string, rowText: string): string | null {
+  const words = rowText.trim().split(/\s+/).slice(0, 5);
+  if (words.length < 3) return null;
+  const idx = ocr.search(new RegExp(words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+"), "i"));
+  if (idx <= 0) return null;
+  const raw = ocr.slice(0, idx).trim();
+  if (!raw || raw.length > 600) return null;
+  const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
+  if (lines.length === 0 || lines.some(looksLikeJobHeadingLine)) return null;
+  return lines.join(" ");
+}
+
 // AP9AA-1: leading continuation bullets. A page that opens in the middle of a job sometimes comes back with the opening bullets as a freeform block (needs_review or
 // unknown, no heading) instead of as the job's continuation, and the freeform loop of mergeBoundaryContinuations then glues that block onto the previous freeform
 // section with a heading (for example a skills section on page 1). This moves such a block onto the last work row of the previous page, before the freeform loop.
@@ -2320,9 +2353,17 @@ function applyLeadingBullets(extraction: ExtractionResult, seam?: SeamInfo): Ext
       }
       return target;
     };
-    const append = (target: (typeof rows)[number], text: string) => {
+    // AP9AD (b): one space instead of the line break when the previous text ends in the middle of a sentence (endsMidSentence). A helper error joins with the line break.
+    const append = (target: (typeof rows)[number], text: string, page: number) => {
       const base = (replaced.get(target) ?? target).job_responsibilities || "";
-      replaced.set(target, { ...(replaced.get(target) ?? target), job_responsibilities: base.trim() ? `${base.replace(/\s+$/, "")}\n${text}` : text });
+      let sep = "\n";
+      try {
+        if (base.trim() && endsMidSentence(base, text)) { sep = " "; logs.push(`leading join: space (previous line unterminated) - page ${page}`); }
+      } catch (joinErr) {
+        sep = "\n";
+        try { seam.report("error", `leading join FAILED, joining with a line break: ${String(joinErr)}`); } catch { /* reporting only */ }
+      }
+      replaced.set(target, { ...(replaced.get(target) ?? target), job_responsibilities: base.trim() ? `${base.replace(/\s+$/, "")}${sep}${text}` : text });
     };
     // The freeform block shape (AP9AA-1). Returns true when the block was moved.
     const tryFreeform = (page: number, block: (typeof free)[number], sections: SeamSection[]): boolean => {
@@ -2346,7 +2387,7 @@ function applyLeadingBullets(extraction: ExtractionResult, seam?: SeamInfo): Ext
       const continues = rows.some((r) => !removedRows.has(r) && pageOf(r.position) === page &&
         ((!nrm(r.company) && !nrm(r.title)) || (nrm(r.company) === nrm(target.company) && nrm(r.title) === nrm(target.title))));
       if (continues) return false;
-      append(target, text);
+      append(target, text, page);
       removed.add(block);
       logs.push(`leading bullets moved to previous job - page ${page}: ${target.company}, ${text.slice(0, 40)}`);
       return true;
@@ -2382,7 +2423,24 @@ function applyLeadingBullets(extraction: ExtractionResult, seam?: SeamInfo): Ext
       const continues = rows.some((r) => r !== row && !removedRows.has(r) && pageOf(r.position) === page &&
         ((!nrm(r.company) && !nrm(r.title)) || (nrm(r.company) === nrm(target.company) && nrm(r.title) === nrm(target.title))));
       if (continues) return false;
-      append(target, text);
+      // AP9AD (a): the sentence the extraction left out in front of the row (it used its first words as the company). Taken from the page OCR between the start of the
+      // page and the start of the row's text; restored only when the target text ends in the middle of a sentence (so a running page header is never taken for it),
+      // it is not a job heading line, at most 600 characters, and not already in the target's or the row's text. Any failure moves the row as before.
+      let moveText = text;
+      try {
+        if (typeof ocr === "string") {
+          const lead = leadInFromOcr(ocr, text);
+          const targetText = (replaced.get(target) ?? target).job_responsibilities || "";
+          if (lead && endsMidSentence(targetText, lead) && !fold(targetText).includes(fold(lead)) && !fold(text).includes(fold(lead))) {
+            moveText = `${lead}\n${text}`;
+            logs.push(`lead-in restored from OCR - page ${page}: ${lead.slice(0, 40)}`);
+          }
+        }
+      } catch (leadErr) {
+        moveText = text;
+        try { seam.report("error", `lead-in restore FAILED, moving as before: ${String(leadErr)}`); } catch { /* reporting only */ }
+      }
+      append(target, moveText, page);
       removedRows.add(row);
       logs.push(`leading bullets moved to previous job (work row) - page ${page}: ${target.company}, ${text.slice(0, 40)}`);
       return true;

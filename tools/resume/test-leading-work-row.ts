@@ -51,19 +51,23 @@ const pages = (mut?: (p: any[]) => void) => {
   return p;
 };
 
+// AP9AD: the sentence the extraction dropped in front of the row, as the OCR prints it (three lines at the top of page 2) joined into one line
+const LEAD = "TeleVox and Mosaicx (including the India entity, TVX Private Ltd.), and built cross-functional expertise by partnering with technical, operational, and executive leaders.";
+const MOVED = WESTCX + " " + LEAD + "\n" + TV; // WESTCX ends "...solo for both" (cut mid-sentence): one space, the restored lead-in, then the row's bullets
 t("fixtures match the stored lengths (WESTCX 1056, the TeleVox row text 770)", () => { assert.equal(WESTCX.length, 1056); assert.equal(TV.length, 770); });
 
-t("document 0cab3106: today's live merge leaves WESTCX at 1056 and a separate TeleVox and Mosaicx job; now the text goes onto WESTCX (1827) and the row is gone", () => {
+t("document 0cab3106: today's live merge leaves WESTCX at 1056 and a separate TeleVox and Mosaicx job; now the text (with the lead-in restored from the OCR) goes onto WESTCX (1998) and the row is gone", () => {
   const old = run(mOld, pages());
   assert.equal(wh(old, "WESTCX").length, 1056); assert.ok(old.work_history.some((w: any) => w.company === "TeleVox and Mosaicx"));
   const rep: Rep = [];
   const nw = run(mNew, pages(), rep);
-  assert.equal(wh(nw, "WESTCX"), WESTCX + "\n" + TV); assert.equal(wh(nw, "WESTCX").length, 1056 + 1 + 770); assert.equal(wh(nw, "WESTCX").length, 1827);
+  assert.equal(wh(nw, "WESTCX"), MOVED); assert.equal(wh(nw, "WESTCX").length, 1056 + 1 + LEAD.length + 1 + 770);
   assert.ok(wh(nw, "WESTCX").endsWith("amplifying time savings for multi-contractor requests."));
   assert.ok(!nw.work_history.some((w: any) => w.company === "TeleVox and Mosaicx"));
   assert.equal(nw.work_history.length, old.work_history.length - 1);
-  assert.deepEqual(rep, [["log", "leading bullets moved to previous job (work row) - page 2: WESTCX, " + TV.slice(0, 40)]]);
+  assert.deepEqual(rep, [["log", "lead-in restored from OCR - page 2: " + LEAD.slice(0, 40)], ["log", "leading join: space (previous line unterminated) - page 2"], ["log", "leading bullets moved to previous job (work row) - page 2: WESTCX, " + TV.slice(0, 40)]]);
   assert.equal(TV.slice(0, 40), "Standardized the global recruiting SOP b");
+  { const w = wh(nw, "WESTCX"), at = w.indexOf("solo for both"); console.log("      0cab3106 WESTCX from 'solo for both' (" + (w.length - at) + " chars to the end): " + JSON.stringify(w.slice(at, at + 330)) + " ... " + JSON.stringify(w.slice(-70))); }
   // everything else equal to today's merge: the other jobs (ALLEGIS page 3 continuation is joined by the existing work merge exactly as before)
   const strip = (m: any) => JSON.stringify({ ...m, work_history: m.work_history.filter((w: any) => w.company !== "WESTCX" && w.company !== "TeleVox and Mosaicx") });
   assert.equal(strip(nw), strip(old));
@@ -99,8 +103,8 @@ t("a row with an EMPTY title and a company moves (same as 'Unknown'); a company-
   for (const mut of [(p: any[]) => { p[1].extraction.work_history[0].title = ""; }, (p: any[]) => { p[1].extraction.work_history[0].company = ""; }]) {
     const rep: Rep = [];
     const nw = run(mNew, pages(mut), rep);
-    assert.equal(wh(nw, "WESTCX").length, 1827, "rep=" + JSON.stringify(rep));
-    assert.equal(wh(nw, "WESTCX"), WESTCX + "\n" + TV); assert.equal(rep.length, 1);
+    assert.equal(wh(nw, "WESTCX"), MOVED, "rep=" + JSON.stringify(rep));
+    assert.equal(rep.length, 3);
   }
 });
 
@@ -112,8 +116,13 @@ t("the freeform shape (2f1fdc89) still moves exactly as before: same output as t
   ];
   const rep: Rep = [];
   const nw = run(mNew, fp(), rep), old = run(mOld, fp(), []);
-  assert.equal(JSON.stringify(nw), JSON.stringify(old));
-  assert.equal(wh(nw, "WESTCX"), WESTCX + "\n" + BLOCK); assert.equal(rep.length, 1); assert.equal(rep[0][1], "leading bullets moved to previous job - page 2: WESTCX, " + BLOCK.slice(0, 40));
+  // AP9AD: the only difference from the live merge is the join: ONE SPACE after "...solo for both" instead of a line break (same length)
+  const strip = (m: any) => JSON.stringify({ ...m, work_history: m.work_history.filter((w: any) => w.company !== "WESTCX") });
+  assert.equal(strip(nw), strip(old));
+  assert.equal(wh(old, "WESTCX"), WESTCX + "\n" + BLOCK);
+  assert.equal(wh(nw, "WESTCX"), WESTCX + " " + BLOCK); assert.equal(wh(nw, "WESTCX").length, wh(old, "WESTCX").length);
+  assert.equal(wh(nw, "WESTCX"), MOVED, "the freeform run (2f1fdc89) and the work row run (0cab3106) now give the very same WESTCX text");
+  assert.deepEqual(rep.map((r) => r[1]), ["leading join: space (previous line unterminated) - page 2", "leading bullets moved to previous job - page 2: WESTCX, " + BLOCK.slice(0, 40)]);
 });
 
 t("fail open: a forced throw inside the rule leaves today's output and reports the error", () => {
