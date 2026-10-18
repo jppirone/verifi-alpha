@@ -1715,6 +1715,8 @@ function describeTrailingItem(extraction: ExtractionResult): TrailingItemContext
 // Certifications are deliberately NOT handled here — a continuation certification, once correctly
 // classified via the context hint, is already a normal, independent entry needing no merge.
 function mergeBoundaryContinuations(extraction: ExtractionResult, seam?: SeamInfo): ExtractionResult {
+  // AP9AA-1: leading continuation bullets that the page answer put in a freeform block go onto the previous page's last job before anything else is merged.
+  extraction = applyLeadingBullets(extraction, seam);
   const pageOf = (pos: number | undefined) => (typeof pos === "number" ? Math.floor(pos / PAGE_POSITION_SPAN) : null);
   // Severity 1 (2026-09-08 regression session, item 4/5 investigation): reproduced live against
   // the real document this whole merge logic was built against — the SAME heading
@@ -2215,7 +2217,9 @@ function dedupePositions(extraction: ExtractionResult, boundaries?: BoundaryResu
 // — never silently relabeled under the wrong heading.
 // AP9U (Fix D): what the work history merge needs to stitch a bullet that the page break cut in two and whose last word(s) the page extraction left out:
 // the stored OCR text of each page, and a report function for the log lines (the caller adds the document id).
-type SeamInfo = { ocrByPage: Map<number, string>; report: (level: "log" | "error", message: string) => void };
+// AP9AA-1 adds sectionsByPage: each page's stored boundary sections (heading, category, continuation flag), read only by applyLeadingBullets.
+type SeamSection = { heading?: string; category?: string; is_continuation_of_previous_page?: boolean };
+type SeamInfo = { ocrByPage: Map<number, string>; sectionsByPage: Map<number, SeamSection[]>; report: (level: "log" | "error", message: string) => void };
 
 // The fragment is the FIRST LINE of the next page's OCR text, and only when it is a short run of plain words: 1 to 6 words, at most 40 characters,
 // starting with a lowercase letter, made only of letters, spaces, apostrophes, hyphens and . , ; : ! ? ) " (no digit, no @, no slash, no bullet or
@@ -2263,10 +2267,93 @@ function repeatSeamRule(prevText: string, contText: string): { text: string; kas
   return null;
 }
 
+// AP9AA-1: the first line of a block looks like the heading line of a NEW job: an all-capitals company name followed by a comma ("CDW, Senior ..."), or a line
+// ending with a date range in parentheses ("(Nov 2020-May 2023)", "(2011-2015)", "(Jan 2011 - Present)"). Such a block is never moved.
+function looksLikeJobHeadingLine(line: string): boolean {
+  const l = line.trim();
+  const comma = l.match(/^([^,]{3,}),/);
+  if (comma && /[A-Z]/.test(comma[1]) && !/[a-z]/.test(comma[1])) return true;
+  return /\(\s*(?:[A-Za-z]{3,9}\.?\s+)?\d{4}\s*(?:-|–|—|to)\s*(?:(?:[A-Za-z]{3,9}\.?\s+)?\d{4}|present|current|now)\s*\)\s*$/i.test(l);
+}
+
+// AP9AA-1: leading continuation bullets. A page that opens in the middle of a job sometimes comes back with the opening bullets as a freeform block (needs_review or
+// unknown, no heading) instead of as the job's continuation, and the freeform loop of mergeBoundaryContinuations then glues that block onto the previous freeform
+// section with a heading (for example a skills section on page 1). This moves such a block onto the last work row of the previous page, before the freeform loop.
+// It fires for page P (P-1 = previous page) only when ALL hold:
+//  * the previous page's last stored boundary section is work_history and a work row from the previous page exists (the target: the one with the highest position);
+//  * the block is the freeform item with the lowest position on page P, its type is needs_review or unknown, its heading is empty, its text is not empty and
+//    is at most 3000 characters, its first line does not look like a job heading line (looksLikeJobHeadingLine), and, when the page OCR is known, the first
+//    20 characters of the block (letters and digits, case ignored) are found in the first 200 characters of the page OCR (the block is at the top of the page);
+//  * page P's first stored boundary section is EITHER unknown, empty-heading and a continuation (shape A), OR a work_history continuation with a heading whose
+//    first 14 characters (letters and digits, case ignored) are NOT found in the first 200 characters of the page OCR (shape B; needs the OCR text);
+//  * page P has no work row that continues the target (same company and title, or both blank).
+// Action: the block text is appended to the target's job_responsibilities after one line break and the block is removed from freeform. Any error anywhere: nothing
+// is changed, the error is reported, and the merge goes on exactly as before. Returns the input object itself when nothing moved.
+function applyLeadingBullets(extraction: ExtractionResult, seam?: SeamInfo): ExtractionResult {
+  if (!seam || seam.sectionsByPage.size === 0) return extraction;
+  try {
+    const pageOf = (pos: number | undefined) => (typeof pos === "number" ? Math.floor(pos / PAGE_POSITION_SPAN) : null);
+    const fold = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const rows = extraction.work_history;
+    const free = extraction.freeform;
+    const firstOnPage = new Map<number, (typeof free)[number]>();
+    for (const f of free) {
+      const p = pageOf(f.position);
+      if (p === null) continue;
+      const cur = firstOnPage.get(p);
+      if (!cur || (f.position as number) < (cur.position as number)) firstOnPage.set(p, f);
+    }
+    const replaced = new Map<(typeof rows)[number], (typeof rows)[number]>();
+    const removed = new Set<(typeof free)[number]>();
+    const logs: string[] = [];
+    for (const [page, block] of [...firstOnPage.entries()].sort((a, b) => a[0] - b[0])) {
+      const prevSections = seam.sectionsByPage.get(page - 1), sections = seam.sectionsByPage.get(page);
+      if (!prevSections?.length || !sections?.length) continue;
+      if (prevSections[prevSections.length - 1].category !== "work_history") continue;
+      if (block.section_type !== "needs_review" && block.section_type !== "unknown") continue;
+      if ((block.heading || "").trim() !== "") continue;
+      const text = (block.content || "").trim();
+      if (!text || text.length > 3000) continue;
+      if (looksLikeJobHeadingLine(text.split("\n")[0])) continue;
+      const ocr = seam.ocrByPage.get(page);
+      if (typeof ocr === "string" && !fold(ocr).slice(0, 200).includes(fold(text).slice(0, 20).trim())) continue;
+      const s0 = sections[0];
+      const shapeA = s0.category === "unknown" && !(s0.heading || "").trim() && s0.is_continuation_of_previous_page === true;
+      let shapeB = false;
+      if (!shapeA && s0.category === "work_history" && (s0.heading || "").trim() && s0.is_continuation_of_previous_page === true && typeof ocr === "string") {
+        const key = fold(s0.heading as string).slice(0, 14).trim();
+        shapeB = key !== "" && !fold(ocr).slice(0, 200).includes(key);
+      }
+      if (!shapeA && !shapeB) continue;
+      let target: (typeof rows)[number] | undefined;
+      for (const r of rows) {
+        if (pageOf(r.position) !== page - 1) continue;
+        if (!target || (r.position as number) >= (target.position as number)) target = r;
+      }
+      if (!target) continue;
+      const nrm = (s: string | undefined) => (s || "").trim().toLowerCase().replace(/\s+/g, " ");
+      const continues = rows.some((r) => pageOf(r.position) === page &&
+        ((!nrm(r.company) && !nrm(r.title)) || (nrm(r.company) === nrm(target!.company) && nrm(r.title) === nrm(target!.title))));
+      if (continues) continue;
+      const base = (replaced.get(target) ?? target).job_responsibilities || "";
+      replaced.set(target, { ...(replaced.get(target) ?? target), job_responsibilities: base.trim() ? `${base.replace(/\s+$/, "")}\n${text}` : text });
+      removed.add(block);
+      logs.push(`leading bullets moved to previous job - page ${page}: ${target.company}, ${text.slice(0, 40)}`);
+    }
+    if (removed.size === 0) return extraction;
+    for (const line of logs) seam.report("log", line);
+    return { ...extraction, work_history: rows.map((r) => replaced.get(r) ?? r), freeform: free.filter((f) => !removed.has(f)) };
+  } catch (e) {
+    try { seam.report("error", `leading bullets move FAILED, joining as before: ${String(e)}`); } catch { /* reporting only */ }
+    return extraction;
+  }
+}
+
 // A page of the merge: its pageNumber, the model's extraction, and (AP9R, Fix A's hand-over) the indexes of the skills strings that the
 // skill text restore step actually restored on this upload (absent or empty when it did not run, failed open, or restored nothing here).
 // ocrText (AP9U, Fix D) is the stored OCR text of the page (null for a vision routed page).
-type SkillPage = { pageNumber: number; extraction: ExtractionResult; skillsRestored?: number[]; ocrText?: string | null };
+// sections (AP9AA-1) are the page's stored boundary sections; absent for a vision routed page or an older caller (the leading bullets rule is then off).
+type SkillPage = { pageNumber: number; extraction: ExtractionResult; skillsRestored?: number[]; ocrText?: string | null; sections?: SeamSection[] | null };
 type RehomeNote = { heading: string; items: number; first: string };
 
 // `rehome` (AP9R, Fix B) is false for every call that has no restored string and on every fallback: with it false this function is exactly
@@ -2439,7 +2526,11 @@ function mergeExtractions(pages: SkillPage[], report?: (level: "log" | "error", 
   let seam: SeamInfo | undefined;
   try {
     seam = report
-      ? { ocrByPage: new Map(pages.filter((p) => typeof p.ocrText === "string").map((p) => [p.pageNumber, p.ocrText as string] as [number, string])), report }
+      ? {
+        ocrByPage: new Map(pages.filter((p) => typeof p.ocrText === "string").map((p) => [p.pageNumber, p.ocrText as string] as [number, string])),
+        sectionsByPage: new Map(pages.filter((p) => Array.isArray(p.sections)).map((p) => [p.pageNumber, p.sections as SeamSection[]] as [number, SeamSection[]])),
+        report,
+      }
       : undefined;
   } catch (seamSetupErr) {
     seam = undefined; // fail open: no stitching, the merge goes on exactly as before
@@ -2699,14 +2790,14 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
       return { ...r, extraction: { ...r.extraction, work_history: fix.work_history as any, freeform: [...r.extraction.freeform, ...fix.needsReview] } };
     });
     if (roleBucketLog.length) console.log(`upload-resume: ${docId} role buckets — ${roleBucketLog.join("; ")}`);
-    merged = dedupePositions(mergeExtractions(bucketed.map((r) => ({ pageNumber: r.page_number, extraction: r.extraction, skillsRestored: r.skillsRestored, ocrText: r.ocr_text })), skillBlockReport), mergedBoundaries);
+    merged = dedupePositions(mergeExtractions(bucketed.map((r) => ({ pageNumber: r.page_number, extraction: r.extraction, skillsRestored: r.skillsRestored, ocrText: r.ocr_text, sections: (r.sectionBoundaries?.sections ?? null) as SeamSection[] | null })), skillBlockReport), mergedBoundaries);
     // A repaired role group was written in the order the page merge needs (the role that receives continuing text last); now that
     // the pages are merged and numbered it takes its final order, latest role first, and its marker field is removed.
     merged.work_history = orderRoleGroupsLatestFirst(merged.work_history as any) as any;
   } catch (roleBucketErr) {
     console.error(`upload-resume: ${docId} role bucket repair FAILED, using the unrepaired pages — ${String(roleBucketErr)}`);
     skillBlockLog.length = 0; // the first attempt's lines are void: the merge is run again from the unrepaired pages
-    merged = dedupePositions(mergeExtractions(pagesForMerge.map((r) => ({ pageNumber: r.page_number, extraction: r.extraction, skillsRestored: r.skillsRestored, ocrText: r.ocr_text })), skillBlockReport), mergedBoundaries);
+    merged = dedupePositions(mergeExtractions(pagesForMerge.map((r) => ({ pageNumber: r.page_number, extraction: r.extraction, skillsRestored: r.skillsRestored, ocrText: r.ocr_text, sections: (r.sectionBoundaries?.sections ?? null) as SeamSection[] | null })), skillBlockReport), mergedBoundaries);
   }
   for (const line of skillBlockLog) console.log(line);
   // OCR text per page, in page order, with a marker so a person or a future tool can tell where a stretch came
