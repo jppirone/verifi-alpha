@@ -46,6 +46,31 @@ export function atidDisplay(value: string): string {
   return `${ATID_PREFIX}-${value.slice(4, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}`;
 }
 
+// ---- typed text -> stored ATID (the employer lookup) ----------------------------------------------------------------------------------------
+// The same rules as the KIO ID reader: any case; spaces, hyphens and dash variants ignored; I and L read as 1, O reads as 0 (the alphabet has none of them);
+// the prefix with or without its hyphen, or no prefix at all when the 12 characters pass the check. A bad check character is refused HERE, before any
+// database query. Result: {kind:"atid", stored, display} or {kind:"none", reason}. The reason is for tests only; callers must treat every "none" the same.
+export type AtidReading = { kind: "atid"; stored: string; display: string } | { kind: "none"; reason: string };
+export function atidNormalise(raw: unknown): AtidReading {
+  if (typeof raw !== "string") return { kind: "none", reason: "type" };
+  const s = raw.replace(/[ \t\r\n \-‐-―−]+/g, "").toUpperCase();
+  if (s === "" || !/^[0-9A-Z]+$/.test(s)) return { kind: "none", reason: "characters" };
+  const fold = (x: string) => x.replace(/[IL]/g, "1").replace(/O/g, "0");
+  let body: string;
+  if (s.length === 12 + ATID_PREFIX.length) {
+    if (fold(s.slice(0, ATID_PREFIX.length)) !== fold(ATID_PREFIX)) return { kind: "none", reason: "no-prefix" };
+    body = fold(s.slice(ATID_PREFIX.length));
+  } else if (s.length === 12) {
+    body = fold(s);
+  } else {
+    return { kind: "none", reason: "length" };
+  }
+  if (!/^[0-9A-HJKMNP-TV-Z]{12}$/.test(body)) return { kind: "none", reason: "alphabet" };
+  if (!atidValidCode(body)) return { kind: "none", reason: "check" };
+  const stored = ATID_PREFIX + body;
+  return { kind: "atid", stored, display: atidDisplay(stored) };
+}
+
 // ---- the re-upload strip rule -------------------------------------------------------------------------------------------------------------
 // A line that is ESSENTIALLY JUST an ATID (as printed by the candidate page, read back through OCR) is removed before the text reaches the
 // boundary and extraction steps, so a resume that carries its own ATID line never gets it stored as content. Tolerances: the OCR confusions

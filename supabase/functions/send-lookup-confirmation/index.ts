@@ -55,13 +55,16 @@ export default {
       const candidateName = clip(body.candidate_name, 160);
       const candidateEmail = clip(body.candidate_email, 254);
       const candidatePhone = clip(body.candidate_phone, 40);
+      // Name + ATID form (AR, October 19, 2026): staged like the typed email or phone and checked later, in check-existence. NOT validated here (a bad check
+      // character must look like "no match", not like a form error), so this stage answers {ok:true} for any ATID text. When present, email and phone are not used.
+      const candidateAtid = clip(body.candidate_atid, 40);
 
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(requesterEmail)) return json({ ok: false, error: "requester_email_invalid" }, 400);
       if (!requesterName) return json({ ok: false, error: "requester_name_required" }, 400);
       if (candidateName.split(/\s+/).filter(Boolean).length < 2) return json({ ok: false, error: "candidate_name_required" }, 400);
       const phoneDigits = candidatePhone.replace(/\D/g, "");
-      if (!candidateEmail && phoneDigits.length < 10) return json({ ok: false, error: "candidate_contact_required" }, 400);
-      if (candidateEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidateEmail)) return json({ ok: false, error: "candidate_email_invalid" }, 400);
+      if (!candidateAtid && !candidateEmail && phoneDigits.length < 10) return json({ ok: false, error: "candidate_contact_required" }, 400);
+      if (!candidateAtid && candidateEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidateEmail)) return json({ ok: false, error: "candidate_email_invalid" }, 400);
 
       // Rate limit per requester address.
       const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
@@ -80,7 +83,8 @@ export default {
         headers: { ...REST, "Content-Type": "application/json", "Prefer": "return=representation" },
         body: JSON.stringify({
           token, requester_email: requesterEmail, requester_name: requesterName || null, requester_company: requesterCompany || null,
-          candidate_name: candidateName, candidate_email: candidateEmail || null, candidate_phone: candidatePhone || null,
+          candidate_name: candidateName, candidate_email: candidateAtid ? null : (candidateEmail || null), candidate_phone: candidateAtid ? null : (candidatePhone || null),
+          candidate_atid: candidateAtid || null,
           expires_at: expiresAt,
         }),
       });

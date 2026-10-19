@@ -3,7 +3,7 @@
 // line that is essentially just an ATID, and how rasterize-pdf-page wires it in (read from the source).
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { atidCheckChar, atidValidCode, atidIsStored, atidDisplay, isAtidLine, stripATIDLines } from "../../supabase/functions/_shared/resume-atid.ts";
+import { atidCheckChar, atidValidCode, atidIsStored, atidDisplay, atidNormalise, isAtidLine, stripATIDLines } from "../../supabase/functions/_shared/resume-atid.ts";
 
 const V = JSON.parse(fs.readFileSync(new URL("./atid-vectors.json", import.meta.url), "utf8"));
 const tests: Array<[string, () => void | Promise<void>]> = [];
@@ -40,6 +40,27 @@ t("property: 20000 random bodies; check character from the function makes a vali
     const pos = Math.floor(rnd() * 12);
     let other = A[Math.floor(rnd() * 32)]; if (other === code[pos]) other = A[(A.indexOf(other) + 1) % 32];
     assert.equal(atidValidCode(code.slice(0, pos) + other + code.slice(pos + 1)), false, code + " at " + pos);
+  }
+});
+
+// ---------- typed text -> stored ATID (AR, the employer lookup) ----------
+t("vector: atidNormalise turns every typed form into the stored ATID, and every refusal into kind none", () => {
+  for (const c of V.normalise_cases) {
+    const r = atidNormalise(c.typed);
+    if (c.stored === null) assert.equal(r.kind, "none", JSON.stringify(c.typed) + " " + (c.why ?? ""));
+    else { assert.equal(r.kind, "atid", JSON.stringify(c.typed)); assert.equal((r as any).stored, c.stored, JSON.stringify(c.typed)); assert.equal((r as any).display, atidDisplay(c.stored)); }
+  }
+  console.log("      " + V.normalise_cases.length + " typed forms (" + V.normalise_cases.filter((c: any) => c.stored).length + " accepted)");
+});
+t("atidNormalise: a bad check character is refused (reason check) and anything it accepts is a stored ATID", () => {
+  assert.deepEqual(atidNormalise("ATID-7K3M-Q9XP-2WD3"), { kind: "none", reason: "check" });
+  let seed = 99; const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  const A = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+  for (let n = 0; n < 5000; n++) {
+    let s = ""; for (let i = 0; i < 12; i++) s += A[Math.floor(rnd() * 32)];
+    const r = atidNormalise("ATID-" + s.slice(0, 4) + "-" + s.slice(4, 8) + "-" + s.slice(8));
+    assert.equal(r.kind === "atid", atidIsStored("ATID" + s));
+    if (r.kind === "atid") assert.ok(atidIsStored(r.stored));
   }
 });
 

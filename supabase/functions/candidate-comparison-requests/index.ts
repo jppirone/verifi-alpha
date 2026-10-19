@@ -1,6 +1,7 @@
 // Setup type definitions for built-in Supabase Runtime APIs
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { withSupabase } from "jsr:@supabase/server@^1";
+import { atidIsStored, atidDisplay } from "../_shared/resume-atid.ts";
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -659,7 +660,15 @@ export default {
         if (!r.ok) return json({ ok: false, error: "assemble_failed" }, 500);
         const resume = await r.json();
         if (!resume || !resume.available) return json({ ok: false, error: "unavailable" }, 409);
-        return json({ ok: true, resume });
+        // ATID (AR, October 19, 2026): the candidate's ATID goes on the employer's document ONLY while their atid_employer_visible switch is on (default off). Read fresh on every
+        // assembly, so turning the switch off removes it from the next open. Any problem reading the switch means no ATID. With the switch off the response is exactly what it was
+        // before this existed (the same object, no extra key). assemble_customized_resume itself is unchanged and never carries the ATID.
+        let withAtid = resume;
+        try {
+          const cand = (await rows(`candidates?id=eq.${body.candidate_id}&select=atid,atid_employer_visible`))[0];
+          if (cand && cand.atid_employer_visible === true && atidIsStored(cand.atid)) withAtid = { ...resume, atid: atidDisplay(cand.atid) };
+        } catch (_e) { withAtid = resume; }
+        return json({ ok: true, resume: withAtid });
       }
 
       // ---- candidate-session actions ----

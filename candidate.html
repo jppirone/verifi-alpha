@@ -4064,6 +4064,15 @@ a:hover{color:var(--color-accent)}
             <button type="button" class="btn btn-ghost" style="font-size:12px;padding:2px 10px" sc-camel-on-click="{{ copyAtid }}">Copy</button>
           </div>
           <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">ATID stands for Applitrust ID. It is yours for the life of your account and never changes when you upload a new resume.</div>
+          <!-- AR: stored switch (a server column, default off), shown from the session and saved with the other privacy settings. Not one of the three export switches. -->
+          <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;color:var(--color-neutral-300);cursor:pointer;border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
+            <input type="checkbox" id="atid-employer-visible-switch" checked="{{ atidEmployerVisible }}" disabled="{{ discoverableProfileDisabled }}" sc-camel-on-change="{{ toggleAtidEmployerVisible }}" style="margin-top:2px">
+            <span>Let employers use my ATID</span>
+          </label>
+          <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">When this is on, an employer can look you up with your name and your ATID, and your ATID appears on comparison documents. You still approve every request. When it is off, employers cannot use your ATID at all.</div>
+          <sc-if value="{{ discoverableProfileError }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:#e2735c">{{ discoverableProfileError }}</div>
+          </sc-if>
         </div>
         </sc-if>
 
@@ -8216,6 +8225,9 @@ class Component extends DCLogic {
     savedHeaderDisplayMode: 'printed', savedPersonalLocation: '',
     // ATID (October 19, 2026): the candidate's own permanent public identifier, stored form (ATID + 12 characters), from the session responses. A pointer only.
     atid: '',
+    // AR (October 19, 2026): "Let employers use my ATID". Unlike the three export switches (unchecked on every load, never stored), this one IS stored: it is a
+    // server column (candidates.atid_employer_visible, default off) that decides what employers can do, so it is loaded with the session and saved through set-discoverable.
+    atidEmployerVisible: false,
     headerPrefsSavePending: false, headerPrefsSaveError: null, headerPrefsSaved: false,
     profileNameSavePending: false, profileNameError: '', profileNameNotice: '',
     optInWorkHistory: false, optInEducation: false, optInCertifications: false,
@@ -9768,16 +9780,20 @@ class Component extends DCLogic {
     const previous = s[field];
     const nextDiscoverable = field === 'discoverable' ? checked : s.discoverable;
     const nextAllow = field === 'allowComparisonRequests' ? checked : s.allowComparisonRequests;
+    // AR: the ATID switch is named in the call only when it is the one being changed, so toggling the other two can never write a stale copy of it
+    const atidPart = field === 'atidEmployerVisible' ? { atid_employer_visible: checked } : {};
     this.setState({ [field]: checked, discoverableProfileSaving: true, discoverableProfileError: null, discoverableProfileSaved: false });
     let saved = false;
     try {
       const res = await fetch(this.SUPABASE_FN_URL + '/set-discoverable', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: id, discoverable: nextDiscoverable, allow_comparison_requests: nextAllow }),
+        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: id, discoverable: nextDiscoverable, allow_comparison_requests: nextAllow, ...atidPart }),
       });
       const data = await res.json().catch(() => ({}));
       saved = res.ok && !!data.ok;
+      // show what the server holds (it answers with the saved value), not what was assumed
+      if (saved && field === 'atidEmployerVisible' && typeof data.atid_employer_visible === 'boolean') this.setState({ atidEmployerVisible: data.atid_employer_visible });
     } catch (e) { saved = false; }
     if (!saved) {
       this.setState({ [field]: previous, discoverableProfileSaving: false, discoverableProfileError: "We couldn't save that change, so it's back to what it was. Please try again." });
@@ -9787,6 +9803,7 @@ class Component extends DCLogic {
   }
   toggleDiscoverableProfile(checked) { return this.savePrivacySetting('discoverable', checked); }
   toggleAllowComparisonRequestsProfile(checked) { return this.savePrivacySetting('allowComparisonRequests', checked); }
+  toggleAtidEmployerVisible(checked) { return this.savePrivacySetting('atidEmployerVisible', checked); }
 
   ensureLicenseActivityLoaded(force) {
     const s = this.state;
@@ -10187,6 +10204,7 @@ class Component extends DCLogic {
       headerDisplayMode: (profile && profile.header_display_mode) || this.state.headerDisplayMode,
       personalLocation: (profile && profile.personal_location) || this.state.personalLocation,
       atid: (profile && typeof profile.atid === 'string' && profile.atid) || this.state.atid,
+      atidEmployerVisible: (profile && typeof profile.atid_employer_visible === 'boolean') ? profile.atid_employer_visible : this.state.atidEmployerVisible,
       // Same "seed both the live and saved copy together" shape as savedFirst/savedLast above —
       // without this, isDirty() would read this tab as having unsaved changes immediately after a
       // fresh session load, comparing a just-loaded real value against the stale initial-state
@@ -13208,6 +13226,8 @@ class Component extends DCLogic {
       discoverableProfileSaved: s.discoverableProfileSaved,
       toggleDiscoverableProfile: (e) => this.toggleDiscoverableProfile(!!e.target.checked),
       toggleAllowComparisonRequestsProfile: (e) => this.toggleAllowComparisonRequestsProfile(!!e.target.checked),
+      atidEmployerVisible: s.atidEmployerVisible,
+      toggleAtidEmployerVisible: (e) => this.toggleAtidEmployerVisible(!!e.target.checked),
       // license_only Activity tab
       licActStart: s.licActStart,
       licActEnd: s.licActEnd,

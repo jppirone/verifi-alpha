@@ -192,7 +192,8 @@ t("JSON on: exactly one extra key, basics.applitrustId = the display form; remov
 // ---------- the screen ----------
 t("the screen: three checkboxes with the exact labels, none checked by default, none bound to state or storage; the explanation sits with each group", () => {
   for (const label of ["Include my ATID in the JSON file", "Include my ATID as a line at the end of the PDF", "Include my ATID in the PDF's hidden information"]) assert.ok(NOW.includes("<span>" + label + "</span>"), label);
-  const boxes = [...NOW.matchAll(/<input type="checkbox" id="(atid-[a-z-]+)"([^>]*)>/g)];
+  // (AR added a fourth ATID checkbox, atid-employer-visible-switch, which IS stored; it is not one of the three export switches and is tested in test-atid-lookup-page.mjs)
+  const boxes = [...NOW.matchAll(/<input type="checkbox" id="(atid-[a-z-]+)"([^>]*)>/g)].filter((m) => m[1] !== "atid-employer-visible-switch");
   assert.deepEqual(boxes.map((m) => m[1]), ["atid-json-switch", "atid-pdf-line-switch", "atid-pdf-meta-switch"]);
   for (const m of boxes) assert.doesNotMatch(m[2], /checked/, m[1]);
   assert.equal([...NOW.matchAll(/An ATID printed on a resume can be copied by anyone, so include it only when you want a recipient to be able to send information back to you\./g)].length, 2, "the explanation under the JSON switch and under the two PDF switches");
@@ -202,7 +203,7 @@ t("the screen: three checkboxes with the exact labels, none checked by default, 
 t("the screen: the Profile row shows the display form, a Copy button and the agreed sentence, for every account type (not inside the full-resume gate)", () => {
   assert.ok(NOW.includes("ATID stands for Applitrust ID. It is yours for the life of your account and never changes when you upload a new resume."));
   const i = NOW.indexOf('<sc-if value="{{ hasAtid }}" hint-placeholder-val="{{ false }}">\n        <div class="card elev-sm"');
-  assert.ok(i > 0); const j = NOW.indexOf("Basic info", i); assert.ok(j > i && j - i < 1800);
+  assert.ok(i > 0); const j = NOW.indexOf("Basic info", i); assert.ok(j > i && j - i < 3600);
   assert.ok(NOW.slice(i, j).includes("{{ atidDisplay }}") && NOW.slice(i, j).includes("{{ copyAtid }}"));
   assert.equal(NOW.slice(i, j).includes("isFullResumeAccount"), false);
 });

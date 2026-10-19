@@ -1,6 +1,7 @@
 // Setup type definitions for built-in Supabase Runtime APIs
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { withSupabase } from "jsr:@supabase/server@^1";
+import { atidNormalise, atidDisplay } from "../_shared/resume-atid.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -42,6 +43,16 @@ const corsHeaders = {
 // deactivated, name mismatch, contact mismatch — takes the same code path and returns the
 // byte-identical {"ok":true,"exists":false}. Only a real internal failure differs, and it differs
 // from ALL genuine results equally.
+//
+// NAME + ATID (October 19, 2026, prompt AR): an alternative to name + email/phone. The requester types the candidate's name and ATID instead of an email or phone
+// (candidate_atid; when it is present the email and phone are ignored). A match needs ALL of: the same fuzzy NAME match as above, the ATID, the candidate's
+// atid_employer_visible switch ON (default off), and the same discoverable / not-being-deleted gates as the email path. The ATID alone is never enough: the name is
+// required before anything is looked at. The typed text is normalised like the KIO ID reader (case, dashes, spaces, I/L as 1, O as 0, prefix optional) and a
+// bad check character is refused before any candidate is read; to keep the work and the timing the same, a refused ATID still runs ONE candidates query, for a value that
+// cannot exist. Every failure (bad check, wrong name, wrong ID, unknown ID, switch off, not discoverable) takes the same path and returns the byte-identical
+// {"ok":true,"exists":false}; an employer cannot tell a switched-off account from a person who does not exist. Same row, same burn, same rate limits
+// (5 an hour per requester address, here for the session path and in send-lookup-confirmation for the emailed path). Nothing here logs the typed value, and the
+// staged value (employer_lookup_requests.candidate_atid) is nulled when the lookup completes.
 //
 // MATCHING: email is case-insensitive; phone compares the last 10 digits (any formatting); when both
 // email and phone are given they must match the SAME row. Only the signup email/phone on
@@ -256,11 +267,12 @@ export default {
         const candidateName = clip(body.candidate_name, 160);
         const candidateEmail = clip(body.candidate_email, 254);
         const candidatePhone = clip(body.candidate_phone, 40);
+        const candidateAtid = clip(body.candidate_atid, 40);   // name + ATID form: when present, the email and phone below are not used
         const requesterCompany = clip(body.requester_company, 160);
         if (candidateName.split(/\s+/).filter(Boolean).length < 2) return json({ ok: false, error: "candidate_name_required" }, 400);
         const phoneDigits = candidatePhone.replace(/\D/g, "");
-        if (!candidateEmail && phoneDigits.length < 10) return json({ ok: false, error: "candidate_contact_required" }, 400);
-        if (candidateEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidateEmail)) return json({ ok: false, error: "candidate_email_invalid" }, 400);
+        if (!candidateAtid && !candidateEmail && phoneDigits.length < 10) return json({ ok: false, error: "candidate_contact_required" }, 400);
+        if (!candidateAtid && candidateEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidateEmail)) return json({ ok: false, error: "candidate_email_invalid" }, 400);
 
         const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
         const rlRes = await fetch(`${SUPABASE_URL}/rest/v1/employer_lookup_requests?requester_email=eq.${encodeURIComponent(employer.email)}&created_at=gte.${encodeURIComponent(since)}&select=id`, { headers: REST });
@@ -275,8 +287,9 @@ export default {
           headers: { ...REST, "Content-Type": "application/json", "Prefer": "return=representation" },
           body: JSON.stringify({
             token: crypto.randomUUID(), requester_email: employer.email, requester_name: employer.name || employer.email,
-            requester_company: requesterCompany || null, candidate_name: candidateName, candidate_email: candidateEmail || null,
-            candidate_phone: candidatePhone || null, expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+            requester_company: requesterCompany || null, candidate_name: candidateName, candidate_email: candidateAtid ? null : (candidateEmail || null),
+            candidate_phone: candidateAtid ? null : (candidatePhone || null), candidate_atid: candidateAtid || null,
+            expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
           }),
         });
         if (!insRes.ok) return json({ ok: false, error: "lookup_failed" }, 500);
@@ -304,12 +317,26 @@ export default {
       }
 
       // ---- the lookup itself, from the staged details (shared by both paths) ----
-      const emailTyped = String(row.candidate_email || "").trim().toLowerCase();
-      const phoneTyped = digitsOf(row.candidate_phone);
+      const atidTyped = String(row.candidate_atid || "").trim();
+      const hasAtid = atidTyped.length > 0;                 // the name + ATID form; then the email and phone are not used
+      const emailTyped = hasAtid ? "" : String(row.candidate_email || "").trim().toLowerCase();
+      const phoneTyped = hasAtid ? "" : digitsOf(row.candidate_phone);
       const hasEmail = emailTyped.length > 0;
       const hasPhone = phoneTyped.length >= 10;
       let candidates: any[] = [];
-      if (hasEmail || hasPhone) {
+      let atidStored = "";                                  // the normalised ATID, only when it passed the check character
+      if (hasAtid) {
+        const reading = atidNormalise(atidTyped);
+        if (reading.kind === "atid") atidStored = reading.stored;
+        // A refused ATID (bad check character, wrong shape) still runs one query, for a value no row can hold (its check character is wrong, and the
+        // table's own CHECK refuses such a value), so every failure does the same work.
+        const queryKey = atidStored || "ATID000000000001";
+        const cols = "id,email,phone,first_name,last_name,full_name,discoverable,deletion_scheduled_at,atid,atid_employer_visible";
+        const cRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates?select=${cols}&atid=eq.${encodeURIComponent(queryKey)}&limit=2`, { headers: REST });
+        if (!cRes.ok) return json({ ok: false, error: "lookup_failed" }, 500);
+        candidates = await cRes.json();
+        if (!Array.isArray(candidates)) return json({ ok: false, error: "lookup_failed" }, 500);
+      } else if (hasEmail || hasPhone) {
         const cols = "id,email,phone,first_name,last_name,full_name,discoverable,deletion_scheduled_at";
         // Fetch a superset (email ilike / phone contains last 4 digits), then decide in code.
         const filter = hasEmail
@@ -321,6 +348,7 @@ export default {
         if (!Array.isArray(candidates)) return json({ ok: false, error: "lookup_failed" }, 500);
       }
       const matched = candidates.find((c) =>
+        (!hasAtid || (atidStored !== "" && c.atid === atidStored && c.atid_employer_visible === true)) &&
         (!hasEmail || String(c.email || "").trim().toLowerCase() === emailTyped) &&
         (!hasPhone || phonesMatch(phoneTyped, c.phone)) &&
         c.discoverable === true &&
@@ -351,7 +379,7 @@ export default {
             used_at: completedAt, result_exists: exists, matched_candidate_id: matched ? matched.id : null,
             candidate_label: matched ? String(row.candidate_name || "").slice(0, 120) || null : null,
             claim_token_hash: claimHash,
-            candidate_name: null, candidate_email: null, candidate_phone: null,
+            candidate_name: null, candidate_email: null, candidate_phone: null, candidate_atid: null,
           }),
         },
       );
@@ -377,7 +405,7 @@ export default {
         lookup_id: row.id, completed_at: completedAt, claim_token: claimToken,
         session_token: newSessionToken || undefined,
         // Echo of what the requester themselves typed (the new page load has no other copy of it).
-        candidate_name: row.candidate_name, contact_used: row.candidate_email || row.candidate_phone || "",
+        candidate_name: row.candidate_name, contact_used: row.candidate_email || row.candidate_phone || (atidStored ? atidDisplay(atidStored) : ""),
         requester_name: row.requester_name, requester_company: row.requester_company, requester_email: row.requester_email,
       });
     } catch (_e) {

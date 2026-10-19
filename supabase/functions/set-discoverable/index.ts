@@ -76,7 +76,7 @@ export default {
       const authBody = await req.clone().json().catch(() => ({}));
       const authDenied = await authGateCandidate(req, authBody);
       if (authDenied) return authDenied;
-      const { candidate_id, discoverable, allow_comparison_requests } = await req.json();
+      const { candidate_id, discoverable, allow_comparison_requests, atid_employer_visible } = await req.json();
       if (!candidate_id || typeof candidate_id !== "string" || typeof discoverable !== "boolean") {
         return new Response(JSON.stringify({ ok: false, error: "candidate_id and discoverable (boolean) are required" }), {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -90,6 +90,9 @@ export default {
       // never known about the second field) or both together.
       const patch: Record<string, boolean> = { discoverable };
       if (typeof allow_comparison_requests === "boolean") patch.allow_comparison_requests = allow_comparison_requests;
+      // ATID (AR, October 19, 2026): "Let employers use my ATID" (name + ATID lookup, and the ATID on the comparison document). Default off. Saved through this same call so
+      // there is one privacy save path; only written when the caller names it, so every older call site leaves it exactly as it is.
+      if (typeof atid_employer_visible === "boolean") patch.atid_employer_visible = atid_employer_visible;
 
       const res = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${encodeURIComponent(candidate_id)}`, {
         method: "PATCH",
@@ -114,7 +117,7 @@ export default {
         });
       }
 
-      return new Response(JSON.stringify({ ok: true, discoverable: rows[0].discoverable, allow_comparison_requests: rows[0].allow_comparison_requests !== false }), {
+      return new Response(JSON.stringify({ ok: true, discoverable: rows[0].discoverable, allow_comparison_requests: rows[0].allow_comparison_requests !== false, atid_employer_visible: rows[0].atid_employer_visible === true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     } catch (e) {

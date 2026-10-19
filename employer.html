@@ -2916,10 +2916,20 @@ const __ds_scope = {};
 
     <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-4)">
       <div class="card-kicker">Candidate</div>
+      <!-- AR (October 19, 2026): the second way to look someone up. The name is required either way. -->
+      <div style="display:flex;gap:var(--space-4);flex-wrap:wrap">
+        <label style="display:flex;gap:8px;align-items:center;font-size:13px;color:var(--color-neutral-300);cursor:pointer">
+          <input type="radio" name="lookup-mode" checked="{{ lookupModeContact }}" sc-camel-on-change="{{ selectLookupModeContact }}"> <span>Name and email (or phone)</span>
+        </label>
+        <label style="display:flex;gap:8px;align-items:center;font-size:13px;color:var(--color-neutral-300);cursor:pointer">
+          <input type="radio" name="lookup-mode" checked="{{ lookupModeAtid }}" sc-camel-on-change="{{ selectLookupModeAtid }}"> <span>Name and ATID</span>
+        </label>
+      </div>
       <div class="field">
         <label for="el-name">Candidate's full name</label>
         <input class="input" id="el-name" value="{{ candNameInput }}" sc-camel-on-change="{{ setCandNameInput }}" placeholder="First Last">
       </div>
+      <sc-if value="{{ lookupModeContact }}" hint-placeholder-val="{{ true }}">
       <div class="field">
         <label for="el-email">Candidate's email address</label>
         <input class="input" id="el-email" value="{{ candEmailInput }}" sc-camel-on-change="{{ setCandEmailInput }}" placeholder="name@email.com">
@@ -2929,6 +2939,14 @@ const __ds_scope = {};
         <input class="input" id="el-phone" value="{{ candPhoneInput }}" sc-camel-on-change="{{ setCandPhoneInput }}" placeholder="(555) 000-0000">
       </div>
       <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Give at least one of the two. If you give both, they must belong to the same record. The name is matched too, allowing for common variations (nicknames, middle names or initials, minor typos).</div>
+      </sc-if>
+      <sc-if value="{{ lookupModeAtid }}" hint-placeholder-val="{{ false }}">
+      <div class="field">
+        <label for="el-atid">Candidate's ATID</label>
+        <input class="input" id="el-atid" value="{{ candAtidInput }}" sc-camel-on-change="{{ setCandAtidInput }}" placeholder="ATID-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false">
+      </div>
+      <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">The ATID is the most exact match. The name is still required and is matched the same way.</div>
+      </sc-if>
     </div>
 
     <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-4)">
@@ -3477,6 +3495,8 @@ class Component extends DCLogic {
     return {
       screen: 'lookup',
       candNameInput: '', candEmailInput: '', candPhoneInput: '',
+      // AR: which way the lookup form is filled in: 'contact' (name + email or phone, the original) or 'atid' (name + ATID)
+      lookupMode: 'contact', candAtidInput: '',
       reqNameInput: '', reqCompanyInput: '', reqEmailInput: '',
       lookupResult: null,
       pendingEmail: '',
@@ -3574,6 +3594,14 @@ class Component extends DCLogic {
   norm(v) { return (v || '').trim().toLowerCase(); }
   digits(v) { return (v || '').replace(/\D/g, ''); }
 
+  // AR: the candidate part of a lookup call. In the ATID form only the name and the ATID are sent (email and phone are blanked, the server ignores them anyway);
+  // otherwise exactly the three fields this form always sent.
+  lookupCandidateFields() {
+    const s = this.state;
+    if (s.lookupMode === 'atid') return { candidate_name: (s.candNameInput || '').trim(), candidate_email: '', candidate_phone: '', candidate_atid: (s.candAtidInput || '').trim() };
+    return { candidate_name: (s.candNameInput || '').trim(), candidate_email: (s.candEmailInput || '').trim(), candidate_phone: (s.candPhoneInput || '').trim() };
+  }
+
   // Step 1: ask the server to email a confirmation link to the requester's address. Nothing is looked up
   // here; the candidate details are staged server-side and the lookup only runs when the link is used.
   //
@@ -3598,9 +3626,7 @@ class Component extends DCLogic {
           requester_email: email,
           requester_name: (s.reqNameInput || '').trim(),
           requester_company: (s.reqCompanyInput || '').trim(),
-          candidate_name: (s.candNameInput || '').trim(),
-          candidate_email: (s.candEmailInput || '').trim(),
-          candidate_phone: (s.candPhoneInput || '').trim(),
+          ...this.lookupCandidateFields(),
         }),
       });
       data = await res.json().catch(() => ({}));
@@ -3636,9 +3662,7 @@ class Component extends DCLogic {
         body: JSON.stringify({
           session_token: s.realToken || '',
           requester_company: (s.reqCompanyInput || '').trim(),
-          candidate_name: (s.candNameInput || '').trim(),
-          candidate_email: (s.candEmailInput || '').trim(),
-          candidate_phone: (s.candPhoneInput || '').trim(),
+          ...this.lookupCandidateFields(),
         }),
       });
       data = await res.json().catch(() => ({}));
@@ -4587,6 +4611,9 @@ class Component extends DCLogic {
       const contactLine = [c.phone && c.phone.value, c.email && c.email.value].filter(Boolean).join(' · ');
       if (contactLine) push(contactLine);
     }
+    // AR (October 19, 2026): the candidate's ATID, present in the server's data ONLY while the candidate has chosen to let employers use it (candidates.atid_employer_visible).
+    // No key, no line: with the switch off this document is exactly what it was. Only the ATID shape is drawn.
+    if (typeof R.atid === 'string' && /^ATID-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/.test(R.atid)) push('Applitrust ID: ' + R.atid);
     // Gap #18 (2026-09-25, John's explicit requirement — see that requirement doc's own header):
     // "Everything else should match what the candidate view and the print output show, not a
     // separately-drifting render path" — with exactly ONE approved exception, the Professional
@@ -5049,6 +5076,13 @@ class Component extends DCLogic {
       setCandNameInput: (e) => this.setState({ candNameInput: e.target.value, lookupResult: null }),
       setCandEmailInput: (e) => this.setState({ candEmailInput: e.target.value, lookupResult: null }),
       setCandPhoneInput: (e) => this.setState({ candPhoneInput: e.target.value, lookupResult: null }),
+      // AR: the lookup form's second way, name + ATID
+      lookupModeContact: s.lookupMode !== 'atid',
+      lookupModeAtid: s.lookupMode === 'atid',
+      selectLookupModeContact: () => this.setState({ lookupMode: 'contact', lookupResult: null }),
+      selectLookupModeAtid: () => this.setState({ lookupMode: 'atid', lookupResult: null }),
+      candAtidInput: s.candAtidInput,
+      setCandAtidInput: (e) => this.setState({ candAtidInput: e.target.value, lookupResult: null }),
       setReqNameInput: (e) => this.setState({ reqNameInput: e.target.value, lookupResult: null }),
       setReqCompanyInput: (e) => this.setState({ reqCompanyInput: e.target.value, lookupResult: null }),
       setReqEmailInput: (e) => this.setState({ reqEmailInput: e.target.value, lookupResult: null }),
@@ -5056,7 +5090,7 @@ class Component extends DCLogic {
       // Gap #21 "one verification": a signed-in person's name/email come from their session (submitLookupSignedIn
       // never reads reqNameInput/reqEmailInput), so those two fields are neither shown nor required for them below.
       lookupIncomplete: s.lookupSending || !((s.candNameInput || '').trim().split(/\s+/).filter(Boolean).length >= 2
-        && ((s.candEmailInput || '').trim() || (s.candPhoneInput || '').trim())
+        && (s.lookupMode === 'atid' ? (s.candAtidInput || '').trim() : ((s.candEmailInput || '').trim() || (s.candPhoneInput || '').trim()))
         && (!!s.real || ((s.reqNameInput || '').trim() && (s.reqEmailInput || '').trim()))),
       pendingRequesterEmail: s.pendingEmail || '',
       // Gap #22: the "Request a comparison" screen's own one-step submit (request_comparison_direct) --
