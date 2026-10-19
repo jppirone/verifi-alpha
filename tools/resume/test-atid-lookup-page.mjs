@@ -27,8 +27,26 @@ const CARD = CAND.slice(CAND.lastIndexOf('<sc-if value="{{ hasAtid }}"', CARD_ST
 t("candidate page: the switch sits on the ATID card, with the agreed wording, bound to saved state (not a plain unchecked box), disabled while loading or saving", () => {
   assert.ok(CARD.includes('id="atid-employer-visible-switch" checked="{{ atidEmployerVisible }}" disabled="{{ discoverableProfileDisabled }}" sc-camel-on-change="{{ toggleAtidEmployerVisible }}"'));
   assert.ok(CARD.includes("<span>Let employers use my ATID</span>"));
-  assert.ok(CARD.includes("When this is on, an employer can look you up with your name and your ATID, and your ATID appears on comparison documents. You still approve every request. When it is off, employers cannot use your ATID at all."));
+  assert.ok(CARD.includes('When this is on, an employer who knows your name and your ATID can find you, and your ATID appears on comparison documents. This only works while "Let employers confirm I have an account here" is also on. You still approve every request. When this is off, employers cannot use your ATID at all.'));
+  assert.equal(CARD.includes("can look you up"), false, "the old, over-promising wording is gone");
   assert.ok(CARD.includes("{{ atidDisplay }}") && CARD.includes("{{ copyAtid }}"), "it is the same card as the ATID row");
+});
+t("candidate page (AS): the real label of Allow lookup is quoted, and a note beside the switch appears only when Allow lookup is really off; the switch itself is never disabled by it", () => {
+  const label = /<span>(Let employers confirm I have an account here)<\/span>/.exec(CAND)[1];
+  assert.ok(CARD.includes('"' + label + '"'));
+  assert.ok(CARD.includes('<sc-if value="{{ atidLookupIsOff }}"'));
+  assert.ok(CARD.includes('Employers cannot find you by ATID until "' + label + '" is turned on.'));
+  const sw = /<input type="checkbox" id="atid-employer-visible-switch"[^>]*>/.exec(CARD)[0];
+  assert.equal(/atidLookupIsOff/.test(sw), false, "the note does not touch the switch");
+  const m = /atidLookupIsOff: ([^\n]*),\n/.exec(CAND); assert.ok(m);
+  const f = new Function("s", "return " + m[1]);
+  const base = { discoverableLoadedFor: "cid", resumeCandidateId: "cid", discoverable: false };
+  assert.equal(f(base), true, "loaded and off: shown");
+  assert.equal(f({ ...base, discoverable: true }), false, "on: hidden");
+  assert.equal(f({ ...base, discoverableLoadedFor: null }), false, "not loaded yet: no guess");
+  assert.equal(f({ ...base, resumeCandidateId: "" , discoverableLoadedFor: ""}), false, "no candidate: hidden");
+  // it follows the Allow lookup box live, across re-renders, because it is computed from state on every render and does not depend on the ATID switch
+  for (const atidEmployerVisible of [true, false]) assert.equal(f({ ...base, atidEmployerVisible }), true);
 });
 t("candidate page: no em dash and no 'verified' in the new copy", () => {
   assert.equal(CARD.includes("—"), false); assert.equal(/verified/i.test(CARD), false);
@@ -153,6 +171,46 @@ t("employer page: the comparison document has no ATID line unless the data carri
   // printed-header mode too
   const printed = { ...RES, header: { mode: "printed", printed_header: "Jane Doe\nAustin" } };
   assert.deepEqual(lines(NewC, { ...printed, atid: undefined }), lines(OldC, printed));
+});
+
+// ---------------------------------------------------------------- AS: every way the comparison document can reach the employer's screen
+const fnSrc = (fn) => read(`supabase/functions/${fn}/index.ts`);
+t("document paths, server: every generated_document the employer pages ever receive comes from ONE place, the assemble_plain_document call (employer-api 2 sites, employer-comparison 1 site), passed on untouched", () => {
+  const api = fnSrc("employer-api"), cmp = fnSrc("employer-comparison");
+  const count = (s, re) => [...s.matchAll(re)].length;
+  assert.equal(count(api, /action: "assemble_plain_document"/g), 2); assert.equal(count(api, /generatedDocument = genJson\.resume/g), 2);
+  assert.equal(count(cmp, /action: "assemble_plain_document"/g), 1); assert.equal(count(cmp, /generatedDocument = genJson\.resume/g), 1);
+  for (const s of [api, cmp]) for (const m of s.matchAll(/generated_document[^\n]*/g)) assert.ok(/generated_document: generatedDocument|generated_document \}|generated_document,|const \{ document, generated_document \}|generated_document: unknown|generated_document\)/.test(m[0]) || /\/\/|^\s*\*/.test(m[0]), m[0].slice(0, 120));
+  // no other function builds or returns a generated document
+  for (const f of fs.readdirSync(new URL("supabase/functions", repo))) { if (["employer-api", "employer-comparison", "candidate-comparison-requests"].includes(f)) continue; const p = new URL(`supabase/functions/${f}/index.ts`, repo); if (fs.existsSync(p)) assert.equal(/generated_document|assemble_plain_document/.test(fs.readFileSync(p, "utf8")), false, f); }
+});
+t("document paths, page: there is one opener (showCompare, called from 4 places that pass the server payload straight in), one place that stores the document, one that draws it, and no print or export code of its own", () => {
+  const idx = [...EMP.matchAll(/this\.showCompare\(/g)].map((m) => m.index);
+  assert.equal(idx.length, 4, "four openers");
+  for (const i of idx) { const chunk = EMP.slice(i, i + 700); assert.ok(/\},\s*(d|x),\s*\{/.test(chunk), "passes the server payload unchanged: " + chunk.slice(0, 80)); }
+  assert.ok(EMP.includes("showGuestDelivered(d) {\n    const x = d.delivered;"), "x is the server's delivered object, untouched");
+  assert.equal([...EMP.matchAll(/generatedDocument:/g)].length, 1, "stored in one place");
+  assert.equal([...EMP.matchAll(/cmp\.generatedDocument/g)].length, 1, "read in one place");
+  assert.equal([...EMP.matchAll(/this\.buildComparisonLines\(/g)].length, 1); assert.equal([...EMP.matchAll(/this\.buildComparisonPdfBytes\(/g)].length, 1);
+  assert.equal([...EMP.matchAll(/this\._genDocUrl = URL\.createObjectURL/g)].length, 1, "the viewer is given one blob, built from those lines");
+  assert.equal(/window\.print|\.print\(\)|download\s*=|a\.download|exportCompar|saveAs\(/i.test(EMP.slice(EMP.indexOf("renderGeneratedDocument()"), EMP.indexOf("renderGeneratedDocument()") + 2500)), false, "no print / download code beside the document");
+});
+t("document paths, behaviour: for each of the four openers' payload, the document the employer is shown has the Applitrust ID line only when the server sent an atid (switch on), and nothing else changes", () => {
+  const P = makeClass(EMP, ["showCompare", "buildComparisonLines", "sanitizeAts", "czWorkLabel", "czEduLabel", "czCertLabel", "czRange", "czPartialLabel", "groupByLiteralHeading", "wrapText"]);
+  const RES = { available: true, candidate: { name: "Jane Doe" }, header: { mode: "account" }, contact: {}, work: [{ employer: "Acme", title: "Analyst", start: "2019-01", end: "2022-03" }], education: [], skills: [] };
+  const openers = { "org / request": { cmpBusy: false, compareFrom: "request" }, "guest link": { guestBusy: false }, "account compare": { compareFrom: "acct" }, "paid, payment history": { myPaidBusy: false, compareFrom: "acct" } };
+  for (const [name, state] of Object.entries(openers)) {
+    const run = (atid) => {
+      const p = new P(); p.state = {}; p.setState = (patch) => Object.assign(p.state, typeof patch === "function" ? patch(p.state) : patch); p.renderComparisonDocuments = () => {};
+      const d = { content: { kind: "resume" }, assembled_at: "x", first_open: true, document: null, generated_document: atid ? { ...RES, atid } : RES };
+      p.showCompare(state, d, { id: "1", label: "Candidate" });
+      return p.buildComparisonLines(p.state.compare.generatedDocument).map((l) => l.text);
+    };
+    const off = run(undefined), on = run("ATID-7K3M-Q9XP-2WD2");
+    assert.equal(off.some((l) => /ATID|Applitrust ID/.test(l)), false, name + " off");
+    assert.deepEqual(on.filter((l) => l !== "Applitrust ID: ATID-7K3M-Q9XP-2WD2"), off, name + " on = off + one line");
+    assert.equal(on.length, off.length + 1, name);
+  }
 });
 
 let failed = 0;

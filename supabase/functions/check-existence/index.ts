@@ -1,7 +1,7 @@
 // Setup type definitions for built-in Supabase Runtime APIs
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { withSupabase } from "jsr:@supabase/server@^1";
-import { atidNormalise, atidDisplay } from "../_shared/resume-atid.ts";
+import { atidNormalise } from "../_shared/resume-atid.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -44,15 +44,21 @@ const corsHeaders = {
 // byte-identical {"ok":true,"exists":false}. Only a real internal failure differs, and it differs
 // from ALL genuine results equally.
 //
-// NAME + ATID (October 19, 2026, prompt AR): an alternative to name + email/phone. The requester types the candidate's name and ATID instead of an email or phone
+// NAME + ATID (October 19, 2026, prompts AR and AS): an alternative to name + email/phone. The requester types the candidate's name and ATID instead of an email or phone
 // (candidate_atid; when it is present the email and phone are ignored). A match needs ALL of: the same fuzzy NAME match as above, the ATID, the candidate's
 // atid_employer_visible switch ON (default off), and the same discoverable / not-being-deleted gates as the email path. The ATID alone is never enough: the name is
 // required before anything is looked at. The typed text is normalised like the KIO ID reader (case, dashes, spaces, I/L as 1, O as 0, prefix optional) and a
 // bad check character is refused before any candidate is read; to keep the work and the timing the same, a refused ATID still runs ONE candidates query, for a value that
 // cannot exist. Every failure (bad check, wrong name, wrong ID, unknown ID, switch off, not discoverable) takes the same path and returns the byte-identical
 // {"ok":true,"exists":false}; an employer cannot tell a switched-off account from a person who does not exist. Same row, same burn, same rate limits
-// (5 an hour per requester address, here for the session path and in send-lookup-confirmation for the emailed path). Nothing here logs the typed value, and the
-// staged value (employer_lookup_requests.candidate_atid) is nulled when the lookup completes.
+// (5 an hour per requester address, here for the session path and in send-lookup-confirmation for the emailed path).
+//
+// THE TYPED ATID IS NEVER SAVED (AS). It is turned into a candidate id the moment it is typed: send-lookup-confirmation resolves it and stores only that id in
+// employer_lookup_requests.matched_candidate_id (the column that already holds a lookup's candidate, already unlinked by delete_candidate_account and set null by its
+// foreign key when the candidate row goes); this function's signed-in door resolves it in memory. After that the lookup works from the id alone: the id is re-read here, and the
+// switch, Allow lookup, the deletion flag and the NAME are all checked NOW, not when it was typed. A row with no email and no usable phone is an ATID row (the staging step
+// requires one or the other for every other row). Rows that never complete are deleted a day after they expire, like every unfinished lookup. Nothing here logs anything,
+// and the response never repeats the typed value.
 //
 // MATCHING: email is case-insensitive; phone compares the last 10 digits (any formatting); when both
 // email and phone are given they must match the SAME row. Only the signup email/phone on
@@ -178,6 +184,21 @@ async function employerFromSession(sessionToken: unknown): Promise<{ id: string;
   return (await uRes.json())[0] || null;
 }
 const SESSION_REQUESTS_PER_HOUR = 5;
+
+// Name + ATID (AR/AS). The candidate columns the ATID form needs, a nil id (matches nobody), and the one step that turns typed ATID text into a candidate id.
+const ATID_COLS = "id,email,phone,first_name,last_name,full_name,discoverable,deletion_scheduled_at,atid,atid_employer_visible";
+const NIL_UUID = "00000000-0000-0000-0000-000000000000";
+// Exactly ONE candidates query for any input. A bad check character or a wrong shape is refused before a real value is used: the query then asks for a value no row can hold
+// (its check character is wrong, and the table's own CHECK refuses such a value), so every kind of input does the same work. Returns the candidate id, or null. The typed text is not kept.
+async function resolveAtidToId(typed: string): Promise<{ ok: boolean; id: string | null }> {
+  const reading = atidNormalise(typed);
+  const key = reading.kind === "atid" ? reading.stored : "ATID000000000001";
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/candidates?select=id&atid=eq.${encodeURIComponent(key)}&limit=1`, { headers: REST });
+  if (!r.ok) return { ok: false, id: null };
+  const rows = await r.json();
+  if (!Array.isArray(rows)) return { ok: false, id: null };
+  return { ok: true, id: reading.kind === "atid" && rows[0] && typeof rows[0].id === "string" ? rows[0].id : null };
+}
 function clip(v: unknown, n: number): string {
   return typeof v === "string" ? v.trim().slice(0, n) : "";
 }
@@ -258,6 +279,7 @@ export default {
       // Unification: only the anonymous branch below ever needs a NEW session established -- the
       // session-authenticated branch above already has one by definition.
       let isAnonymousPath = true;
+      let atidMode = false;   // the name + ATID form (see the header): the candidate comes from an id, never from typed text
 
       if (!token && sessionToken) {
         isAnonymousPath = false;
@@ -282,19 +304,27 @@ export default {
 
         // expires_at is a few minutes out only as a safety buffer for the burn step below (a synchronous
         // continuation of this same call, not a real email-click window like the anonymous path's).
+        // Name + ATID: turn the typed text into a candidate id right now (one candidates query, always) and keep nothing of the text. The id lives in memory only.
+        let atidResolvedId: string | null = null;
+        if (candidateAtid) {
+          const rr = await resolveAtidToId(candidateAtid);
+          if (!rr.ok) return json({ ok: false, error: "lookup_failed" }, 500);
+          atidResolvedId = rr.id;
+        }
         const insRes = await fetch(`${SUPABASE_URL}/rest/v1/employer_lookup_requests`, {
           method: "POST",
           headers: { ...REST, "Content-Type": "application/json", "Prefer": "return=representation" },
           body: JSON.stringify({
             token: crypto.randomUUID(), requester_email: employer.email, requester_name: employer.name || employer.email,
             requester_company: requesterCompany || null, candidate_name: candidateName, candidate_email: candidateAtid ? null : (candidateEmail || null),
-            candidate_phone: candidateAtid ? null : (candidatePhone || null), candidate_atid: candidateAtid || null,
+            candidate_phone: candidateAtid ? null : (candidatePhone || null),
             expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
           }),
         });
         if (!insRes.ok) return json({ ok: false, error: "lookup_failed" }, 500);
         row = (await insRes.json())[0];
         if (!row) return json({ ok: false, error: "lookup_failed" }, 500);
+        if (candidateAtid) { atidMode = true; row.matched_candidate_id = atidResolvedId; }   // in memory only; the burn below writes the real outcome
         // Remember the company typed, for next time's pre-fill (finding 1). Best-effort; never blocks the lookup.
         if (requesterCompany) {
           fetch(`${SUPABASE_URL}/rest/v1/employer_users?id=eq.${employer.id}`, {
@@ -314,25 +344,21 @@ export default {
         if (!row) return json({ ok: false, error: "not_found" }, 404);
         if (row.used_at) return json({ ok: false, error: "already_used" }, 409);
         if (new Date(row.expires_at) < new Date()) return json({ ok: false, error: "expired" }, 410);
+        // a staged row with no email and no usable phone can only be a name + ATID row (send-lookup-confirmation requires one or the other for every other row)
+        atidMode = !String(row.candidate_email || "").trim() && digitsOf(row.candidate_phone).length < 10;
       }
 
       // ---- the lookup itself, from the staged details (shared by both paths) ----
-      const atidTyped = String(row.candidate_atid || "").trim();
-      const hasAtid = atidTyped.length > 0;                 // the name + ATID form; then the email and phone are not used
-      const emailTyped = hasAtid ? "" : String(row.candidate_email || "").trim().toLowerCase();
-      const phoneTyped = hasAtid ? "" : digitsOf(row.candidate_phone);
+      const emailTyped = atidMode ? "" : String(row.candidate_email || "").trim().toLowerCase();
+      const phoneTyped = atidMode ? "" : digitsOf(row.candidate_phone);
       const hasEmail = emailTyped.length > 0;
       const hasPhone = phoneTyped.length >= 10;
       let candidates: any[] = [];
-      let atidStored = "";                                  // the normalised ATID, only when it passed the check character
-      if (hasAtid) {
-        const reading = atidNormalise(atidTyped);
-        if (reading.kind === "atid") atidStored = reading.stored;
-        // A refused ATID (bad check character, wrong shape) still runs one query, for a value no row can hold (its check character is wrong, and the
-        // table's own CHECK refuses such a value), so every failure does the same work.
-        const queryKey = atidStored || "ATID000000000001";
-        const cols = "id,email,phone,first_name,last_name,full_name,discoverable,deletion_scheduled_at,atid,atid_employer_visible";
-        const cRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates?select=${cols}&atid=eq.${encodeURIComponent(queryKey)}&limit=2`, { headers: REST });
+      if (atidMode) {
+        // The candidate comes from the id the typed ATID was turned into (or the nil id when it matched nobody, so every case runs the same one query).
+        // Everything is checked now, from the candidate's current row: the switch, Allow lookup, the deletion flag and the name.
+        const byId = typeof row.matched_candidate_id === "string" && row.matched_candidate_id ? row.matched_candidate_id : NIL_UUID;
+        const cRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates?select=${ATID_COLS}&id=eq.${encodeURIComponent(byId)}&limit=1`, { headers: REST });
         if (!cRes.ok) return json({ ok: false, error: "lookup_failed" }, 500);
         candidates = await cRes.json();
         if (!Array.isArray(candidates)) return json({ ok: false, error: "lookup_failed" }, 500);
@@ -348,7 +374,7 @@ export default {
         if (!Array.isArray(candidates)) return json({ ok: false, error: "lookup_failed" }, 500);
       }
       const matched = candidates.find((c) =>
-        (!hasAtid || (atidStored !== "" && c.atid === atidStored && c.atid_employer_visible === true)) &&
+        (!atidMode || c.atid_employer_visible === true) &&
         (!hasEmail || String(c.email || "").trim().toLowerCase() === emailTyped) &&
         (!hasPhone || phonesMatch(phoneTyped, c.phone)) &&
         c.discoverable === true &&
@@ -379,7 +405,7 @@ export default {
             used_at: completedAt, result_exists: exists, matched_candidate_id: matched ? matched.id : null,
             candidate_label: matched ? String(row.candidate_name || "").slice(0, 120) || null : null,
             claim_token_hash: claimHash,
-            candidate_name: null, candidate_email: null, candidate_phone: null, candidate_atid: null,
+            candidate_name: null, candidate_email: null, candidate_phone: null,
           }),
         },
       );
@@ -405,7 +431,7 @@ export default {
         lookup_id: row.id, completed_at: completedAt, claim_token: claimToken,
         session_token: newSessionToken || undefined,
         // Echo of what the requester themselves typed (the new page load has no other copy of it).
-        candidate_name: row.candidate_name, contact_used: row.candidate_email || row.candidate_phone || (atidStored ? atidDisplay(atidStored) : ""),
+        candidate_name: row.candidate_name, contact_used: row.candidate_email || row.candidate_phone || (atidMode ? "name and ATID" : ""),
         requester_name: row.requester_name, requester_company: row.requester_company, requester_email: row.requester_email,
       });
     } catch (_e) {

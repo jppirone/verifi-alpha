@@ -4069,7 +4069,11 @@ a:hover{color:var(--color-accent)}
             <input type="checkbox" id="atid-employer-visible-switch" checked="{{ atidEmployerVisible }}" disabled="{{ discoverableProfileDisabled }}" sc-camel-on-change="{{ toggleAtidEmployerVisible }}" style="margin-top:2px">
             <span>Let employers use my ATID</span>
           </label>
-          <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">When this is on, an employer can look you up with your name and your ATID, and your ATID appears on comparison documents. You still approve every request. When it is off, employers cannot use your ATID at all.</div>
+          <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">When this is on, an employer who knows your name and your ATID can find you, and your ATID appears on comparison documents. This only works while "Let employers confirm I have an account here" is also on. You still approve every request. When this is off, employers cannot use your ATID at all.</div>
+          <!-- AS: shown only once the privacy settings have loaded and "Let employers confirm I have an account here" (Allow lookup) is really off; the switch above is never disabled by it -->
+          <sc-if value="{{ atidLookupIsOff }}" hint-placeholder-val="{{ false }}">
+            <div id="atid-lookup-off-note" style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">Employers cannot find you by ATID until "Let employers confirm I have an account here" is turned on.</div>
+          </sc-if>
           <sc-if value="{{ discoverableProfileError }}" hint-placeholder-val="{{ false }}">
             <div style="font-size:12px;color:#e2735c">{{ discoverableProfileError }}</div>
           </sc-if>
@@ -13227,6 +13231,8 @@ class Component extends DCLogic {
       toggleDiscoverableProfile: (e) => this.toggleDiscoverableProfile(!!e.target.checked),
       toggleAllowComparisonRequestsProfile: (e) => this.toggleAllowComparisonRequestsProfile(!!e.target.checked),
       atidEmployerVisible: s.atidEmployerVisible,
+      // AS: computed from state on every render, so it follows the Allow lookup box live (that box saves instantly) and never guesses before the settings have loaded
+      atidLookupIsOff: s.discoverableLoadedFor === s.resumeCandidateId && !!s.resumeCandidateId && !s.discoverable,
       toggleAtidEmployerVisible: (e) => this.toggleAtidEmployerVisible(!!e.target.checked),
       // license_only Activity tab
       licActStart: s.licActStart,

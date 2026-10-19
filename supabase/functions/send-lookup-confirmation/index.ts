@@ -1,6 +1,7 @@
 // Setup type definitions for built-in Supabase Runtime APIs
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { withSupabase } from "jsr:@supabase/server@^1";
+import { atidNormalise } from "../_shared/resume-atid.ts";
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -55,8 +56,8 @@ export default {
       const candidateName = clip(body.candidate_name, 160);
       const candidateEmail = clip(body.candidate_email, 254);
       const candidatePhone = clip(body.candidate_phone, 40);
-      // Name + ATID form (AR, October 19, 2026): staged like the typed email or phone and checked later, in check-existence. NOT validated here (a bad check
-      // character must look like "no match", not like a form error), so this stage answers {ok:true} for any ATID text. When present, email and phone are not used.
+      // Name + ATID form (AR, October 19, 2026): NOT validated here (a bad check character must look like "no match", not like a form error), so this stage answers
+      // {ok:true} for any ATID text. When present, email and phone are not used. The text itself is not kept (AS): see the resolve step below.
       const candidateAtid = clip(body.candidate_atid, 40);
 
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(requesterEmail)) return json({ ok: false, error: "requester_email_invalid" }, 400);
@@ -76,6 +77,19 @@ export default {
       const recent = await rlRes.json();
       if (Array.isArray(recent) && recent.length >= REQUESTS_PER_HOUR) return json({ ok: false, error: "rate_limited" }, 429);
 
+      // Name + ATID (AS): the typed text is turned into a candidate id HERE and only the id is staged (in matched_candidate_id, the column that already holds a lookup's
+      // candidate: delete_candidate_account unlinks it and its foreign key sets it null). The typed ATID is never written anywhere. One candidates query for any input.
+      let atidResolvedId: string | null = null;
+      if (candidateAtid) {
+        const reading = atidNormalise(candidateAtid);
+        const key = reading.kind === "atid" ? reading.stored : "ATID000000000001";
+        const rr = await fetch(`${SUPABASE_URL}/rest/v1/candidates?select=id&atid=eq.${encodeURIComponent(key)}&limit=1`, { headers: REST });
+        if (!rr.ok) return json({ ok: false, error: "request_failed" }, 500);
+        const found = await rr.json();
+        if (!Array.isArray(found)) return json({ ok: false, error: "request_failed" }, 500);
+        atidResolvedId = reading.kind === "atid" && found[0] && typeof found[0].id === "string" ? found[0].id : null;
+      }
+
       const token = crypto.randomUUID();
       const expiresAt = new Date(Date.now() + LINK_MINUTES * 60 * 1000).toISOString();
       const insRes = await fetch(`${SUPABASE_URL}/rest/v1/employer_lookup_requests`, {
@@ -84,7 +98,7 @@ export default {
         body: JSON.stringify({
           token, requester_email: requesterEmail, requester_name: requesterName || null, requester_company: requesterCompany || null,
           candidate_name: candidateName, candidate_email: candidateAtid ? null : (candidateEmail || null), candidate_phone: candidateAtid ? null : (candidatePhone || null),
-          candidate_atid: candidateAtid || null,
+          ...(atidResolvedId ? { matched_candidate_id: atidResolvedId } : {}),
           expires_at: expiresAt,
         }),
       });

@@ -17,7 +17,12 @@ create role anon; create role authenticated; create role service_role;
 create table public.candidates (id uuid primary key default gen_random_uuid(), email text not null unique, first_name text, last_name text, verification_id uuid,
   account_type text not null default 'full_resume', discoverable boolean not null default false, deletion_scheduled_at timestamptz);
 create table public.employer_lookup_requests (id uuid primary key default gen_random_uuid(), token text not null unique, requester_email text not null, candidate_name text, candidate_email text, candidate_phone text,
-  created_at timestamptz not null default now(), expires_at timestamptz not null default now(), used_at timestamptz);
+  created_at timestamptz not null default now(), expires_at timestamptz not null default now(), used_at timestamptz,
+  matched_candidate_id uuid references public.candidates(id) on delete set null);
+create table public.account_deletion_log (candidate_id uuid, outcome text, billing_cleared_for timestamptz, last_attempt_at timestamptz);
+create table public.purge_calls (candidate_id uuid, at timestamptz default now());
+create table public.comparison_children (id uuid primary key default gen_random_uuid(), candidate_id uuid references public.candidates(id) on delete cascade);
+create function public.purge_candidate_comparisons(p uuid) returns void language sql as $$ insert into public.purge_calls (candidate_id) values (p) $$;
 insert into public.candidates (email, first_name, discoverable) values ('a@x.test','A',true),('b@x.test','B',false),('c@x.test','C',true);
 insert into public.employer_lookup_requests (token, requester_email, candidate_name, candidate_email) values ('t1','r@x.test','A B','a@x.test');
 `;
@@ -56,13 +61,50 @@ t("the AQ rules still hold with the new column present: insert ignores a supplie
   await db.query("delete from public.candidates where email='z@x.test'");
   assert.ok(await one("select retired_at from public.atid_registry where atid = $1", [a]));
 });
-t("employer_lookup_requests.candidate_atid exists, is nullable text, is null on the old rows, and can hold a typed value", async () => {
-  const c = (await q("select data_type, is_nullable from information_schema.columns where table_name='employer_lookup_requests' and column_name='candidate_atid'"))[0];
-  assert.deepEqual(c, { data_type: "text", is_nullable: "YES" });
-  assert.equal(await one("select candidate_atid from public.employer_lookup_requests where token='t1'"), null);
-  await db.query("insert into public.employer_lookup_requests (token, requester_email, candidate_name, candidate_atid) values ('t2','r@x.test','A B','ATID-7K3M-Q9XP-2WD2')");
-  await db.query("update public.employer_lookup_requests set candidate_name = null, candidate_atid = null where token='t2'");
-  assert.equal(await one("select candidate_atid from public.employer_lookup_requests where token='t2'"), null);
+t("AS: no table the migrations touch has any column for a typed ATID: employer_lookup_requests has no atid-named column at all (the typed text is not stored)", async () => {
+  assert.equal(Number(await one("select count(*) from information_schema.columns where table_name='employer_lookup_requests' and column_name ilike '%atid%'")), 0);
+  assert.equal(/candidate_atid/i.test(M2.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n")), false, "the migration adds no such column");
+  const cols = (await q("select table_name, column_name from information_schema.columns where table_schema='public' and column_name ilike '%atid%' order by 1, 2")).map((r) => r.table_name + "." + r.column_name);
+  assert.deepEqual(cols, ["atid_registry.atid", "candidates.atid", "candidates.atid_employer_visible"]);
+});
+t("AS: the id a typed ATID is turned into lives in matched_candidate_id, which the candidate's foreign key sets to null when the candidate is deleted (and the AQ delete trigger still retires the ATID)", async () => {
+  const id = await one("insert into public.candidates (email, atid_employer_visible) values ('p@x.test', true) returning id");
+  const atid = await one("select atid from public.candidates where id = $1", [id]);
+  await db.query("insert into public.employer_lookup_requests (token, requester_email, candidate_name, matched_candidate_id) values ('t3','r@x.test','P Q',$1)", [id]);
+  await db.query("insert into public.comparison_children (candidate_id) values ($1)", [id]);
+  await db.query("delete from public.candidates where id = $1", [id]);
+  assert.equal(await one("select matched_candidate_id from public.employer_lookup_requests where token='t3'"), null);
+  assert.equal(Number(await one("select count(*) from public.comparison_children")), 0, "cascade children are gone");
+  const r = (await q("select atid, retired_at from public.atid_registry where atid = $1", [atid]))[0];
+  assert.ok(r && r.retired_at, "the tombstone survives the real delete and is retired");
+});
+t("AS: the tombstone table has no foreign key in either direction and no ON DELETE action, so nothing can cascade into it", async () => {
+  assert.equal(Number(await one("select count(*) from pg_constraint where contype='f' and (conrelid='public.atid_registry'::regclass or confrelid='public.atid_registry'::regclass)")), 0);
+  assert.deepEqual((await q("select column_name from information_schema.columns where table_name='atid_registry' order by ordinal_position")).map((r) => r.column_name), ["atid", "issued_at", "retired_at"]);
+  const start = M1.indexOf("create table if not exists public.atid_registry");
+  const ddl = M1.slice(start, M1.indexOf(");", start) + 2);
+  assert.equal(/references|on delete|on update|cascade/i.test(ddl), false, ddl);
+});
+t("AS: deactivate then reactivate keeps the same ATID. The two REAL existing triggers on deletion_scheduled_at (taken from their migration files) fire as they always did, and the ATID triggers stay out of it", async () => {
+  const mig = (f) => fs.readFileSync(new URL("../../supabase/migrations/" + f, import.meta.url), "utf8");
+  const react = mig("20260921050000_account_deletion_log_reactivation.sql"), purge = mig("20260920020000_comparison_requests.sql");
+  const grab = (src, from, to) => src.slice(src.indexOf(from), src.indexOf(to, src.indexOf(from)) + to.length);
+  await db.exec(grab(react, "create or replace function trg_account_deletion_log_on_reactivation", "execute function trg_account_deletion_log_on_reactivation();"));
+  await db.exec(grab(purge, "create or replace function trg_purge_comparisons_on_deactivation", "execute function trg_purge_comparisons_on_deactivation();"));
+  const triggers = (await q("select tgname from pg_trigger where tgrelid='public.candidates'::regclass and not tgisinternal order by tgname")).map((r) => r.tgname);
+  assert.deepEqual(triggers, ["account_deletion_log_on_reactivation", "candidates_atid_insert", "candidates_atid_no_change", "candidates_atid_retire", "purge_comparisons_on_deactivation"]);
+  const id = await one("insert into public.candidates (email, atid_employer_visible) values ('react@x.test', true) returning id");
+  const atid = await one("select atid from public.candidates where id = $1", [id]);
+  await db.query("insert into public.account_deletion_log (candidate_id, outcome) values ($1, 'billing_cleared')", [id]);
+  await db.query("update public.candidates set deletion_scheduled_at = now() + interval '30 days' where id = $1", [id]);
+  assert.equal(Number(await one("select count(*) from public.purge_calls where candidate_id = $1", [id])), 1, "the purge trigger fired on deactivation");
+  assert.equal(await one("select atid from public.candidates where id = $1", [id]), atid);
+  await db.query("update public.candidates set deletion_scheduled_at = null where id = $1", [id]);
+  assert.equal(await one("select outcome from public.account_deletion_log where candidate_id = $1", [id]), "reactivated", "the reactivation trigger fired");
+  assert.equal(await one("select atid from public.candidates where id = $1", [id]), atid, "same ATID after reactivation");
+  assert.equal(await one("select atid_employer_visible from public.candidates where id = $1", [id]), true, "and the switch is as it was");
+  assert.equal(await one("select retired_at from public.atid_registry where atid = $1", [atid]), null, "not retired by a deactivation");
+  assert.equal(Number(await one("select count(*) from public.atid_registry where atid = $1", [atid])), 1);
 });
 t("running the second migration twice changes nothing (idempotent)", async () => {
   await db.query("update public.candidates set atid_employer_visible = true where email='a@x.test'");

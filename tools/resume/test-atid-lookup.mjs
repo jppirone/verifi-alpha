@@ -131,7 +131,7 @@ t("name + ATID matches (switch on), in every typed form: with hyphens, spaces, l
     assert.equal(r.status, 200, typed);
     const j = JSON.parse(r.text);
     assert.equal(j.exists, true, "typed " + typed);
-    assert.match(j.claim_token, /^[0-9a-f]{64}$/); assert.ok(j.lookup_id); assert.equal(j.contact_used, d); assert.equal(j.candidate_name, "Jane Doe");
+    assert.match(j.claim_token, /^[0-9a-f]{64}$/); assert.ok(j.lookup_id); assert.equal(j.contact_used, "name and ATID", "the response never repeats the typed ATID"); assert.equal(j.candidate_name, "Jane Doe");
     assert.equal(DB.employer_lookup_requests[0].matched_candidate_id, "c-a1");
   }
   for (const name of ["jane doe", "Jane M. Doe", "Doe, Jane", "Janet Doe".replace("Janet", "Jane")]) {
@@ -172,14 +172,15 @@ t("every failure gives the identical full response (status, headers' content typ
   }
   console.log("      " + Object.keys(FAILS).length + " kinds of failure, all exactly " + NOMATCH);
 });
-t("every failure makes the same sequence of database calls (our stand-in for timing), exactly one candidates query each, and the bad-check query asks for a value no row can hold", async () => {
+t("every failure makes the same sequence of database calls (our stand-in for timing), exactly two candidates queries each (resolve the typed text, then re-read by id), and the bad-check query asks for a value no row can hold", async () => {
   const seqs = new Set(); const queryUrls = [];
   for (const [why, p] of Object.entries(FAILS)) {
     resetDb(SEED);
     const seen = [];
     const inner = globalThis.fetch; globalThis.fetch = async (u, i) => { if (String(u).includes("/rest/v1/candidates")) seen.push(String(u)); return inner(u, i); };
     await sessionLookup(NEW.check, p); globalThis.fetch = inner;
-    assert.equal(seen.length, 1, why + ": one candidates query");
+    assert.equal(seen.length, 2, why + ": two candidates queries");
+    assert.match(seen[1], /id=eq\./, why + ": the second one is by id");
     seqs.add(seq(CALLS)); queryUrls.push([why, seen[0]]);
   }
   assert.equal(seqs.size, 1, "all failures do the same database work: " + [...seqs].join(" // "));
@@ -236,11 +237,11 @@ t("the email and the ATID are never mixed: when an ATID is sent, a (correct) ema
 });
 
 // ---------------------------------------------------------------- scrub, rate limit, logs
-t("the typed ATID is scrubbed from the staged row when the lookup completes (match and no match); the match records the candidate, the no match records nothing", async () => {
+t("the finished lookup row holds no typed details (match and no match); the match records the candidate, the no match records nothing; there is no ATID field on the row at all", async () => {
   for (const [p, shouldMatch] of [[{ candidate_name: "Jane Doe", candidate_atid: atidDisplay(ID.A) }, true], [FAILS["switch off"], false], [FAILS["bad check character"], false]]) {
     resetDb(SEED); await sessionLookup(NEW.check, p);
     const row = DB.employer_lookup_requests[0];
-    assert.equal(row.candidate_atid, null); assert.equal(row.candidate_name, null); assert.equal(row.candidate_email, null); assert.equal(row.candidate_phone, null);
+    assert.equal("candidate_atid" in row, false); assert.equal(row.candidate_name, null); assert.equal(row.candidate_email, null); assert.equal(row.candidate_phone, null);
     assert.ok(row.used_at); assert.equal(row.result_exists, shouldMatch); assert.equal(row.matched_candidate_id, shouldMatch ? "c-a1" : null);
     assert.equal(row.claim_token_hash != null, shouldMatch);
   }
@@ -264,14 +265,16 @@ t("a database failure is the same real 500 for the ATID form as for the email fo
 });
 
 // ---------------------------------------------------------------- the emailed (anonymous) path
-t("send-lookup-confirmation stages the ATID like an email: any ATID text is accepted with the same answer (a bad check character is NOT a form error), no contact and no ATID is still refused", async () => {
+t("send-lookup-confirmation turns the ATID into a candidate id and stages only the id: any ATID text is accepted with the same answer (a bad check character is NOT a form error), no contact and no ATID is still refused", async () => {
   const answers = new Set();
   for (const atid of [atidDisplay(ID.A), atidDisplay(ID.UNKNOWN), "garbage", atidDisplay(ID.A).slice(0, -1) + "0"]) {
     resetDb(SEED);
     const r = await call(NEW.send, { requester_email: "pat@corp.test", requester_name: "Pat", candidate_name: "Jane Doe", candidate_atid: atid });
     assert.equal(r.status, 200); answers.add(r.text);
     const row = DB.employer_lookup_requests[0];
-    assert.equal(row.candidate_atid, atid); assert.equal(row.candidate_email, null); assert.equal(row.candidate_phone, null);
+    assert.equal("candidate_atid" in row, false); assert.equal(JSON.stringify(row).includes(atid), false, "the typed text is not on the row");
+    assert.equal(row.matched_candidate_id ?? null, atid === atidDisplay(ID.A) ? "c-a1" : null, "only the id of the real, valid ATID");
+    assert.equal(row.candidate_email, null); assert.equal(row.candidate_phone, null); assert.equal(row.used_at, null);
   }
   assert.deepEqual([...answers], [JSON.stringify({ ok: true, link_minutes: 60 })]);
   resetDb(SEED);
@@ -305,12 +308,83 @@ t("the whole emailed route: staged ATID -> check-existence with the token: a mat
     return { r, again, row: DB.employer_lookup_requests[0] };
   };
   const good = await run(atidDisplay(ID.A), "Jane Doe");
-  const g = JSON.parse(good.r.text); assert.equal(g.exists, true); assert.equal(g.contact_used, atidDisplay(ID.A)); assert.equal(g.requester_email, "pat@corp.test"); assert.ok(g.session_token);
-  assert.equal(good.again.status, 409); assert.equal(good.row.candidate_atid, null);
+  const g = JSON.parse(good.r.text); assert.equal(g.exists, true); assert.equal(g.contact_used, "name and ATID"); assert.equal(g.requester_email, "pat@corp.test"); assert.ok(g.session_token);
+  assert.equal(good.again.status, 409); assert.equal("candidate_atid" in good.row, false);
   const strip = (s) => JSON.stringify({ ...JSON.parse(s), session_token: undefined });
   for (const [atid, name, vis] of [[atidDisplay(ID.A), "Jane Doe", false], [atidDisplay(ID.A).slice(0, -1) + "0", "Jane Doe"], [atidDisplay(ID.UNKNOWN), "Jane Doe"], [atidDisplay(ID.A), "Mark Twain"], ["garbage", "Jane Doe"]]) {
     const x = await run(atid, name, vis);
     assert.equal(x.r.status, 200); assert.equal(strip(x.r.text), NOMATCH, atid + " " + name + " " + vis);
+  }
+});
+
+// ---------------------------------------------------------------- AS: the typed ATID is not persisted anywhere
+const typedForms = (id) => { const d = atidDisplay(id); return [d, id, id.slice(4), d.toLowerCase(), d.replace(/-/g, " "), d.replace(/-/g, "")]; };
+const leaks = (forms, extra) => {
+  const hay = [["a table", JSON.stringify(Object.fromEntries(Object.entries(DB).filter(([k]) => k !== "candidates")))], ["the log", LOG.join("\n")], ...extra];
+  return hay.flatMap(([where, text]) => forms.filter((f) => text.toLowerCase().includes(f.toLowerCase())).map((f) => where + ": " + f));
+};
+t("the typed ATID is not persisted in any table, log or response: after a match, after a no match, after a rate-limit rejection, on both doors (the candidates table itself, which holds every account's own ATID, is the one place not searched)", async () => {
+  const wrongRight = atidDisplay(ID.UNKNOWN) + "x";
+  const cases = {
+    "signed-in door, match": [typedForms(ID.A), async () => sessionLookup(NEW.check, { candidate_name: "Jane Doe", candidate_atid: atidDisplay(ID.A) })],
+    "signed-in door, no match (switch off)": [typedForms(ID.B), async () => sessionLookup(NEW.check, { candidate_name: "John Roe", candidate_atid: atidDisplay(ID.B) })],
+    "signed-in door, no match (unknown)": [typedForms(ID.UNKNOWN), async () => sessionLookup(NEW.check, { candidate_name: "Jane Doe", candidate_atid: atidDisplay(ID.UNKNOWN) })],
+    "signed-in door, bad check character": [["7K3M-Q9XP-2WD3", "ATID7K3MQ9XP2WD3"], async () => sessionLookup(NEW.check, { candidate_name: "Jane Doe", candidate_atid: "ATID-7K3M-Q9XP-2WD3" })],
+    "signed-in door, garbage text": [["hello world zzz"], async () => sessionLookup(NEW.check, { candidate_name: "Jane Doe", candidate_atid: "hello world zzz" })],
+  };
+  for (const [why, [forms, run]] of Object.entries(cases)) {
+    resetDb(SEED); LOG.length = 0;
+    const r = await run();
+    assert.deepEqual(leaks(forms, [["the response", r.text]]), [], why);
+  }
+  // rate-limit rejection, signed-in door: five earlier lookups, the sixth is refused before anything is read
+  resetDb(SEED); LOG.length = 0;
+  for (let i = 0; i < 5; i++) await sessionLookup(NEW.check, { candidate_name: "Jane Doe", candidate_email: "x" + i + "@example.test" });
+  const typed = atidDisplay(ID.A); const before = CALLS.length;
+  const rej = await sessionLookup(NEW.check, { candidate_name: "Jane Doe", candidate_atid: typed });
+  assert.equal(rej.status, 429); assert.deepEqual(leaks(typedForms(ID.A), [["the response", rej.text]]), [], "rate-limit rejection, signed-in door");
+  assert.equal(CALLS.slice(before).some((c) => c.endsWith("candidates")), false, "a rejected request reads no candidate at all");
+  // the emailed door: stage (match / no match), click, and a rate-limit rejection at staging
+  for (const [why, id, name, vis] of [["emailed door, match", ID.A, "Jane Doe", undefined], ["emailed door, no match (switch off)", ID.B, "John Roe", undefined], ["emailed door, no match (unknown)", ID.UNKNOWN, "Jane Doe", undefined]]) {
+    resetDb(SEED); LOG.length = 0;
+    const s = await call(NEW.send, { requester_email: "pat@corp.test", requester_name: "Pat", candidate_name: name, candidate_atid: atidDisplay(id) });
+    const staged = JSON.stringify(DB.employer_lookup_requests);
+    const c = await call(NEW.check, { token: DB.employer_lookup_requests[0].token });
+    assert.deepEqual(leaks(typedForms(id), [["the staging response", s.text], ["the staged row (before the click)", staged], ["the click response", c.text]]), [], why);
+  }
+  resetDb(SEED); LOG.length = 0;
+  for (let i = 0; i < 5; i++) await call(NEW.send, { requester_email: "pat@corp.test", requester_name: "Pat", candidate_name: "Jane Doe", candidate_email: "y" + i + "@example.test" });
+  const rej2 = await call(NEW.send, { requester_email: "pat@corp.test", requester_name: "Pat", candidate_name: "Jane Doe", candidate_atid: typed });
+  assert.equal(rej2.status, 429); assert.deepEqual(leaks(typedForms(ID.A), [["the response", rej2.text]]), [], "rate-limit rejection, emailed door");
+  assert.equal(DB.employer_lookup_requests.length, 5, "a rejected staging request stores nothing");
+  assert.equal(LOG.length, 0, "nothing logged");
+});
+t("the emailed route checks everything at the click, not when the ATID was typed: switch turned off, Allow lookup turned off, account scheduled for deletion, or the candidate deleted in between, each gives the identical no match", async () => {
+  const strip = (s) => JSON.stringify({ ...JSON.parse(s), session_token: undefined });
+  const mutations = {
+    "switch turned off": (db) => { db.candidates.find((c) => c.id === "c-a1").atid_employer_visible = false; },
+    "Allow lookup turned off": (db) => { db.candidates.find((c) => c.id === "c-a1").discoverable = false; },
+    "scheduled for deletion": (db) => { db.candidates.find((c) => c.id === "c-a1").deletion_scheduled_at = "2026-12-01T00:00:00Z"; },
+    "candidate deleted (foreign key sets the staged id to null)": (db) => { db.candidates = db.candidates.filter((c) => c.id !== "c-a1"); db.employer_lookup_requests.forEach((r) => { if (r.matched_candidate_id === "c-a1") r.matched_candidate_id = null; }); },
+  };
+  for (const [why, mutate] of Object.entries(mutations)) {
+    resetDb(SEED);
+    await call(NEW.send, { requester_email: "pat@corp.test", requester_name: "Pat", candidate_name: "Jane Doe", candidate_atid: atidDisplay(ID.A) });
+    assert.equal(DB.employer_lookup_requests[0].matched_candidate_id, "c-a1");
+    mutate(DB);
+    const r = await call(NEW.check, { token: DB.employer_lookup_requests[0].token });
+    assert.equal(r.status, 200); assert.equal(strip(r.text), NOMATCH, why);
+  }
+});
+t("a staged name + ATID row is invisible to everything that reads matched_candidate_id as a result: it has no used_at and no result_exists, so no activity list, comparison request or document sees it", async () => {
+  resetDb(SEED);
+  await call(NEW.send, { requester_email: "pat@corp.test", requester_name: "Pat", candidate_name: "Jane Doe", candidate_atid: atidDisplay(ID.A) });
+  const row = DB.employer_lookup_requests[0];
+  assert.equal(row.matched_candidate_id, "c-a1"); assert.equal(row.used_at, null); assert.equal(row.result_exists, null);
+  for (const fn of ["list-candidate-activity", "candidate-comparison-requests", "employer-api", "employer-document"]) {
+    const src = nowSrc(fn);
+    const uses = [...src.matchAll(/employer_lookup_requests\?[^`"]*matched_candidate_id[^`"]*/g)].map((m) => m[0]);
+    for (const u of uses) assert.ok(/result_exists=eq\.true/.test(u) || /used_at=not\.is\.null/.test(u) || (fn === "employer-document" && src.includes("l.result_exists !== true || !l.used_at")), fn + ": " + u.slice(0, 120));
   }
 });
 
@@ -374,10 +448,13 @@ t("planted defects are caught: switch gate removed, name check removed, early re
   const mutate = (src, from, to) => { assert.ok(src.includes(from), "plant target exists: " + from); return src.replace(from, to); };
   const chk = nowSrc("check-existence");
   const probes = {
-    "switch gate removed": async () => { const f = await load("m1", mutate(chk, " && c.atid_employer_visible === true)) &&", ")) &&")); resetDb(SEED); return (await sessionLookup(f, FAILS["switch off"])).text === NOMATCH; },
+    "switch gate removed": async () => { const f = await load("m1", mutate(chk, "(!atidMode || c.atid_employer_visible === true) &&", "")); resetDb(SEED); return (await sessionLookup(f, FAILS["switch off"])).text === NOMATCH; },
     "name check removed": async () => { const f = await load("m2", mutate(chk, "namesMatch(String(row.candidate_name || \"\"), c.first_name, c.last_name, c.full_name)", "true")); resetDb(SEED); return (await sessionLookup(f, FAILS["wrong name, right ATID"])).text === NOMATCH; },
-    "early return on a bad check": async () => { const f = await load("m3", mutate(chk, "const queryKey = atidStored || \"ATID000000000001\";", "if (!atidStored) return json({ ok: true, exists: false });\n        const queryKey = atidStored;")); resetDb(SEED); await sessionLookup(f, FAILS["bad check character"]); const a = seq(CALLS); resetDb(SEED); await sessionLookup(f, FAILS["switch off"]); return a === seq(CALLS); },
-    "scrub removed": async () => { const f = await load("m4", mutate(chk, ", candidate_atid: null,\n          }),", ",\n          }),")); resetDb(SEED); await sessionLookup(f, { candidate_name: "Jane Doe", candidate_atid: atidDisplay(ID.A) }); return DB.employer_lookup_requests[0].candidate_atid === null; },
+    "early return on a bad check": async () => { const f = await load("m3", mutate(chk, "const key = reading.kind === \"atid\" ? reading.stored : \"ATID000000000001\";", "if (reading.kind !== \"atid\") return { ok: true, id: null };\n  const key = reading.stored;")); resetDb(SEED); await sessionLookup(f, FAILS["bad check character"]); const a = seq(CALLS); resetDb(SEED); await sessionLookup(f, FAILS["switch off"]); return a === seq(CALLS); },
+    "typed value saved on the row": async () => { const f = await load("m4", mutate(chk, "candidate_phone: candidateAtid ? null : (candidatePhone || null),\n", "candidate_phone: candidateAtid ? null : (candidatePhone || null), candidate_atid: candidateAtid,\n")); resetDb(SEED); await sessionLookup(f, { candidate_name: "Jane Doe", candidate_atid: atidDisplay(ID.A) }); return leaks(typedForms(ID.A), []).length === 0; },
+    "typed value saved when staging": async () => { const f = await load("m7", mutate(nowSrc("send-lookup-confirmation"), "...(atidResolvedId ? { matched_candidate_id: atidResolvedId } : {}),", "candidate_atid: candidateAtid, ...(atidResolvedId ? { matched_candidate_id: atidResolvedId } : {}),")); resetDb(SEED); await call(f, { requester_email: "pat@corp.test", requester_name: "Pat", candidate_name: "Jane Doe", candidate_atid: atidDisplay(ID.A) }); return leaks(typedForms(ID.A), []).length === 0; },
+    "typed value echoed in the response": async () => { const f = await load("m8", mutate(chk, "(atidMode ? \"name and ATID\" : \"\")", "(atidMode ? String(matched.atid) : \"\")")); resetDb(SEED); const r = await sessionLookup(f, { candidate_name: "Jane Doe", candidate_atid: atidDisplay(ID.A) }); return !/ATID/.test(JSON.parse(r.text).contact_used) ; },
+    "the click trusts the staged id without re-checking Allow lookup": async () => { const f = await load("m9", mutate(chk, "c.discoverable === true &&\n        !c.deletion_scheduled_at", "!c.deletion_scheduled_at")); resetDb(SEED); return (await sessionLookup(f, FAILS["candidate not discoverable"])).text === NOMATCH; },
     "the discoverable gate removed": async () => { const f = await load("m5", mutate(chk, "c.discoverable === true &&\n        !c.deletion_scheduled_at", "!c.deletion_scheduled_at")); resetDb(SEED); return (await sessionLookup(f, FAILS["candidate not discoverable"])).text === NOMATCH; },
     "switch gate removed from the document": async () => { const f = await load("m6", mutate(nowSrc("candidate-comparison-requests"), "cand.atid_employer_visible === true && ", "")); resetDb(CMPSEED({ atid_employer_visible: false })); return !/atid/i.test((await plainDoc(f)).text); },
   };
