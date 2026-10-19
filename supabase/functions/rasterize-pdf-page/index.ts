@@ -4,6 +4,7 @@ import { withSupabase } from "jsr:@supabase/server@1";
 import { createOCREngine } from "npm:tesseract-wasm@0.11.0";
 import { findOcrGaps, MAX_GAP_REGIONS, plausibleTranscription, transcriptionToWords, type GapRegion } from "../_shared/resume-ocr-gaps.ts";
 import { guardSelfReferentialHeadings, clearBoundaryHeadings } from "../_shared/resume-heading-guard.ts";
+import { stripATIDLines } from "../_shared/resume-atid.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -2257,6 +2258,13 @@ export default {
         gapReport = gap.report;
         if (gap.report.detected > 0) console.log(`rasterize-pdf-page: page ${pageNum} OCR gaps ${JSON.stringify(gap.report)}`);
         ocrText = reconstructByWordClustering(gap.words);
+        // ATID (October 19, 2026): a line that is essentially just the candidate's printed ATID is not resume content. Removed before the boundary and extraction steps; the value is never logged or compared with anything (fails open).
+        try {
+          const atidStrip = stripATIDLines(ocrText);
+          if (atidStrip.stripped > 0) { ocrText = atidStrip.text; console.log(`rasterize-pdf-page: ATID line stripped - page ${pageNum}`); }
+        } catch (stripErr) {
+          console.log(`rasterize-pdf-page: ATID line strip FAILED, text unchanged - page ${pageNum}: ${String(stripErr)}`);
+        }
         ocrMs = Date.now() - ocrStart;
         if (gap.escalate) {
           // The OCR failed broadly on this page (more unexplained rows than a few dropped lines): the same vision route a

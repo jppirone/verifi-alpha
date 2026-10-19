@@ -63,10 +63,14 @@ export default {
       });
       if (!r.ok) return json({ ok: false, error: "assemble_failed" }, 500);
       const resume = await r.json();
-      const ackRow = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=customization_edit_ack_at,customization_edit_ack_text_version`, { headers: REST })
+      const ackRow = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=customization_edit_ack_at,customization_edit_ack_text_version,atid`, { headers: REST })
         .then((res) => res.ok ? res.json() : null).then((a) => (a && a[0]) || null).catch(() => null);
       const ackGiven = !!(ackRow && ackRow.customization_edit_ack_at && ackRow.customization_edit_ack_text_version === CUSTOMIZATION_EDIT_ACK_VERSION);
-      return json({ ok: true, resume, edit_ack: { given: ackGiven, version: CUSTOMIZATION_EDIT_ACK_VERSION } });
+      // ATID (October 19, 2026): the candidate's OWN permanent public identifier, beside the resume and NOT inside it: assemble_customized_resume's output also
+      // feeds the employer's comparison document, so the ATID is attached here, only for a candidate-session caller (never the service-role key). The PDF line and
+      // hidden copy are drawn only when the candidate ticks the switches on the export screen.
+      const atid = !isServiceCaller(req) && ackRow && typeof ackRow.atid === "string" ? ackRow.atid : null;
+      return json({ ok: true, resume, edit_ack: { given: ackGiven, version: CUSTOMIZATION_EDIT_ACK_VERSION }, atid });
     } catch (_e) {
       return json({ ok: false, error: "unhandled" }, 500);
     }

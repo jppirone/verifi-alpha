@@ -4055,6 +4055,18 @@ a:hover{color:var(--color-accent)}
     <sc-if value="{{ tabIsProfile }}" hint-placeholder-val="{{ true }}">
       <div style="display:flex;flex-direction:column;gap:var(--space-6)">
 
+        <!-- ATID (October 19, 2026): the permanent public identifier, shown to every account type. A pointer only: it does not log anyone in. -->
+        <sc-if value="{{ hasAtid }}" hint-placeholder-val="{{ false }}">
+        <div class="card elev-sm" style="display:flex;flex-direction:column;gap:6px;padding:10px 14px">
+          <div style="display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap">
+            <span class="card-kicker" style="margin:0">Your ATID</span>
+            <span id="atid-value" style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:14px;letter-spacing:.04em;color:var(--color-neutral-200)">{{ atidDisplay }}</span>
+            <button type="button" class="btn btn-ghost" style="font-size:12px;padding:2px 10px" sc-camel-on-click="{{ copyAtid }}">Copy</button>
+          </div>
+          <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">ATID stands for Applitrust ID. It is yours for the life of your account and never changes when you upload a new resume.</div>
+        </div>
+        </sc-if>
+
         <div class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-4)">
           <div class="card-kicker">Basic info</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-4)">
@@ -4639,6 +4651,15 @@ a:hover{color:var(--color-accent)}
           <a href="#" sc-camel-on-click="{{ exportVerifiedDataLink }}" style="font-size:12px">Export my data</a>
           <span style="font-size:11px;color:var(--color-neutral-600)">(everything stored for your account, JSON Resume format, with each item's current verification status as shown above; available anytime on every tier)</span>
         </div>
+        <!-- ATID (October 19, 2026): optional, off every time this screen loads, not stored. Read when the link above is clicked. -->
+        <sc-if value="{{ hasAtid }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:4px;padding-left:2px">
+          <label style="display:flex;gap:8px;align-items:center;font-size:12px;color:var(--color-neutral-300);cursor:pointer">
+            <input type="checkbox" id="atid-json-switch" style="margin:0"> <span>Include my ATID in the JSON file</span>
+          </label>
+          <div style="font-size:11px;color:var(--color-neutral-600);line-height:1.5">An ATID printed on a resume can be copied by anyone, so include it only when you want a recipient to be able to send information back to you.</div>
+        </div>
+        </sc-if>
       </div>
       </sc-if>
 
@@ -5066,6 +5087,18 @@ a:hover{color:var(--color-accent)}
 
       <div style="display:flex;flex-direction:column;gap:var(--space-3)">
         <div id="pdf-preview-container" style="width:100%;min-height:70vh;max-height:80vh;overflow:auto;background:var(--color-neutral-900);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:16px;display:flex;flex-direction:column;align-items:center;gap:16px"></div>
+        <!-- ATID (October 19, 2026): optional, both off every time this screen loads, not stored. The preview and the download follow what is ticked here. -->
+        <sc-if value="{{ hasAtid }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <label style="display:flex;gap:8px;align-items:center;font-size:12px;color:var(--color-neutral-300);cursor:pointer">
+            <input type="checkbox" id="atid-pdf-line-switch" style="margin:0" sc-camel-on-change="{{ atidPdfSwitchChanged }}"> <span>Include my ATID as a line at the end of the PDF</span>
+          </label>
+          <label style="display:flex;gap:8px;align-items:center;font-size:12px;color:var(--color-neutral-300);cursor:pointer">
+            <input type="checkbox" id="atid-pdf-meta-switch" style="margin:0" sc-camel-on-change="{{ atidPdfSwitchChanged }}"> <span>Include my ATID in the PDF's hidden information</span>
+          </label>
+          <div style="font-size:11px;color:var(--color-neutral-600);line-height:1.5">An ATID printed on a resume can be copied by anyone, so include it only when you want a recipient to be able to send information back to you.</div>
+        </div>
+        </sc-if>
         <button type="button" class="btn btn-secondary" style="align-self:flex-start" sc-camel-on-click="{{ downloadPdf }}">Download PDF</button>
       </div>
 
@@ -7768,7 +7801,76 @@ class Component extends DCLogic {
     });
   }
 
-  buildAtsPdfBytes(lines) {
+  // ---- ATID (Applitrust ID), October 19, 2026 ----
+  // The same format as supabase/functions/_shared/resume-atid.ts and the SQL functions (tools/resume/atid-vectors.json is run against all three):
+  // stored "ATID" + 11 random characters + 1 check character (Luhn mod 32); displayed "ATID-XXXX-XXXX-XXXX". A pointer only: it never logs anyone in.
+  atidIsStored(v) {
+    const A = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+    if (typeof v !== 'string' || !/^ATID[0-9A-HJKMNP-TV-Z]{12}$/.test(v)) return false;
+    const code = v.slice(4);
+    let factor = 1, sum = 0;
+    for (let i = 11; i >= 0; i--) {
+      let add = factor * A.indexOf(code[i]);
+      factor = factor === 2 ? 1 : 2;
+      add = Math.floor(add / 32) + (add % 32);
+      sum += add;
+    }
+    return sum % 32 === 0;
+  }
+  atidDisplayForm(v) {
+    if (!this.atidIsStored(v)) return '';
+    return 'ATID-' + v.slice(4, 8) + '-' + v.slice(8, 12) + '-' + v.slice(12, 16);
+  }
+  // The three export switches are plain checkboxes on the screen, never in state and never stored; each load of the screen starts with all three off.
+  atidSwitchOn(id) { const el = document.getElementById(id); return !!(el && el.checked); }
+  // what the PDF should carry right now: {} (nothing) unless the candidate ticked a switch AND there is a valid ATID
+  atidPdfOpts() {
+    const shown = this.atidDisplayForm(this.state.atid);
+    if (!shown) return {};
+    const opts = {};
+    if (this.atidSwitchOn('atid-pdf-line-switch')) opts.atidLine = shown;
+    if (this.atidSwitchOn('atid-pdf-meta-switch')) opts.atidMeta = shown;
+    return opts;
+  }
+  atidPdfSwitchChanged() {
+    if (this._pdfSrc) this.renderPdfPreviewFrom(this._pdfSrc.delivered, this._pdfSrc.editor);
+  }
+  // the download must match what is ticked at the moment of the click, even if the screen was redrawn since the preview was built
+  syncPdfBlobToAtidSwitches() {
+    if (!this._pdfSrc) return;
+    const key = JSON.stringify(this.atidPdfOpts());
+    if (key === this._pdfOptsKey) return;
+    try {
+      const pdfText = this.buildAtsPdfBytes(this.buildResumeLines(this._pdfSrc.delivered, this._pdfSrc.editor), JSON.parse(key));
+      const bytes = new Uint8Array(pdfText.length);
+      for (let i = 0; i < pdfText.length; i++) bytes[i] = pdfText.charCodeAt(i);
+      if (this._pdfBlobUrl) URL.revokeObjectURL(this._pdfBlobUrl);
+      this._pdfBlobUrl = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+      this._pdfOptsKey = key;
+    } catch (e) { console.error('pdf atid sync error', String(e)); }
+  }
+  copyAtid(e) {
+    const text = this.atidDisplayForm(this.state.atid);
+    if (!text) return;
+    const btn = e && e.currentTarget;
+    const done = () => { if (btn) { btn.textContent = 'Copied'; setTimeout(() => { btn.textContent = 'Copy'; }, 1500); } };
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text).then(done, () => {}); return; }
+    } catch (_e) { /* fall through to the selection fallback */ }
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;left:-9999px';
+      document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); done();
+    } catch (_e2) { /* nothing more to try; the value is on screen to select */ }
+  }
+
+  // opts (ATID, October 19, 2026) is optional and defaults to nothing: with no opts the bytes are exactly what this function produced before the ATID existed.
+  //   opts.atidLine : the DISPLAY form of the ATID, drawn as ONE small line on the LAST page, below the text area (baseline 36 pt, the bottom margin is 54 pt),
+  //                   so it never takes one of the 45 lines of a page and never moves a page break.
+  //   opts.atidMeta : the DISPLAY form again, written to a PDF Info dictionary as /Keywords (an extra object after the page objects, a /Info entry in the trailer).
+  buildAtsPdfBytes(lines, opts) {
+    const atidLine = opts && opts.atidLine ? this.sanitizeAts(String(opts.atidLine)) : '';
+    const atidMeta = opts && opts.atidMeta ? this.sanitizeAts(String(opts.atidMeta)) : '';
     const pageWidth = 612, pageHeight = 792, marginX = 54, marginTop = 54, marginBottom = 54;
     const fontSize = 11, leading = 15;
     const linesPerPage = Math.max(1, Math.floor((pageHeight - marginTop - marginBottom) / leading));
@@ -7780,7 +7882,8 @@ class Component extends DCLogic {
     let nextNum = 5;
     const pageObjNums = [], contentObjNums = [];
     pages.forEach(() => { pageObjNums.push(nextNum++); contentObjNums.push(nextNum++); });
-    const pageBodies = pages.map(pageLines => {
+    const infoObjNum = atidMeta ? nextNum++ : 0;
+    const pageBodies = pages.map((pageLines, pageIdx) => {
       let y = pageHeight - marginTop;
       let body = 'BT\n';
       let curFont = null;
@@ -7792,6 +7895,7 @@ class Component extends DCLogic {
         y -= leading;
       });
       body += 'ET';
+      if (atidLine && pageIdx === pages.length - 1) body += '\nBT\n/F1 8 Tf\n1 0 0 1 ' + marginX + ' 36.00 Tm\n(' + esc(atidLine) + ') Tj\nET';
       return body;
     });
     let out = '%PDF-1.4\n';
@@ -7808,11 +7912,12 @@ class Component extends DCLogic {
       const streamData = content + '\n';
       push(cnum + ' 0 obj\n<< /Length ' + streamData.length + ' >>\nstream\n' + streamData + 'endstream\nendobj\n');
     });
+    if (infoObjNum) push(infoObjNum + ' 0 obj\n<< /Keywords (' + esc(atidMeta) + ') >>\nendobj\n');
     const xrefStart = out.length;
-    const totalObjs = 4 + pages.length * 2;
+    const totalObjs = 4 + pages.length * 2 + (infoObjNum ? 1 : 0);
     out += 'xref\n0 ' + (totalObjs + 1) + '\n0000000000 65535 f \n';
     offsets.forEach(off => { out += String(off).padStart(10, '0') + ' 00000 n \n'; });
-    out += 'trailer\n<< /Size ' + (totalObjs + 1) + ' /Root 1 0 R >>\nstartxref\n' + xrefStart + '\n%%EOF';
+    out += 'trailer\n<< /Size ' + (totalObjs + 1) + ' /Root 1 0 R' + (infoObjNum ? ' /Info ' + infoObjNum + ' 0 R' : '') + ' >>\nstartxref\n' + xrefStart + '\n%%EOF';
     return out;
   }
 
@@ -7839,7 +7944,10 @@ class Component extends DCLogic {
     if (!container) return;
     try {
       const lines = this.buildResumeLines(delivered, editor);
-      const pdfText = this.buildAtsPdfBytes(lines);
+      this._pdfSrc = { delivered, editor };
+      const atidOpts = this.atidPdfOpts();
+      this._pdfOptsKey = JSON.stringify(atidOpts);
+      const pdfText = this.buildAtsPdfBytes(lines, atidOpts);
       const bytes = new Uint8Array(pdfText.length);
       for (let i = 0; i < pdfText.length; i++) bytes[i] = pdfText.charCodeAt(i);
       const blob = new Blob([bytes], { type: 'application/pdf' });
@@ -8106,6 +8214,8 @@ class Component extends DCLogic {
     // freshly-loaded one agree before any real session response ever lands.
     headerDisplayMode: 'printed', personalLocation: '',
     savedHeaderDisplayMode: 'printed', savedPersonalLocation: '',
+    // ATID (October 19, 2026): the candidate's own permanent public identifier, stored form (ATID + 12 characters), from the session responses. A pointer only.
+    atid: '',
     headerPrefsSavePending: false, headerPrefsSaveError: null, headerPrefsSaved: false,
     profileNameSavePending: false, profileNameError: '', profileNameNotice: '',
     optInWorkHistory: false, optInEducation: false, optInCertifications: false,
@@ -8948,6 +9058,8 @@ class Component extends DCLogic {
       $schema: 'https://raw.githubusercontent.com/jsonresume/resume-schema/master/schema.json',
       basics: clean({
         name, email: profile.email, phone: profile.phone,
+        // ATID (October 19, 2026): present only when the candidate ticked "Include my ATID in the JSON file" (profile.atid is then the display form); otherwise undefined, which clean() drops, so the file is exactly what it was before.
+        applitrustId: profile.atid || undefined,
         summary: summaryRow ? summaryRow.content : undefined,
         location: profile.location ? { address: profile.location } : undefined,
         // Same honesty as the in-app banners: the phone and identity steps are simulated in this alpha (no code is sent or checked, no identity check runs)
@@ -8976,6 +9088,7 @@ class Component extends DCLogic {
   async exportVerifiedData() {
     const s = this.state;
     const id = s.resumeCandidateId;
+    const wantAtid = this.atidSwitchOn('atid-json-switch');   // read at the click, before any waiting; never stored
     const fail = () => window.alert("We couldn't load your data to build the export, so nothing was downloaded. Please try again.");
     if (!id) { fail(); return; }
     const post = async (fn) => {
@@ -8999,6 +9112,7 @@ class Component extends DCLogic {
     try { [ex, ver, sums] = await Promise.all([exSource, post('list-candidate-verification-items'), post('list-candidate-summaries')]); } catch (e) { fail(); return; }
     const data = this.buildDataExport(ex, Object.assign({}, ver, { summaries: sums.summaries || [] }), {
       first: s.savedFirst, last: s.savedLast, email: s.email, phone: s.confirmedPhoneNumber || s.printedPhone, phoneConfirmed: !!s.confirmedPhoneNumber, kycVerifiedAt: s.kycVerifiedAt, location: s.savedPersonalLocation,
+      atid: wantAtid ? (this.atidDisplayForm(s.atid) || undefined) : undefined,
     });
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -10072,6 +10186,7 @@ class Component extends DCLogic {
       // flows through here identically to any other value.
       headerDisplayMode: (profile && profile.header_display_mode) || this.state.headerDisplayMode,
       personalLocation: (profile && profile.personal_location) || this.state.personalLocation,
+      atid: (profile && typeof profile.atid === 'string' && profile.atid) || this.state.atid,
       // Same "seed both the live and saved copy together" shape as savedFirst/savedLast above —
       // without this, isDirty() would read this tab as having unsaved changes immediately after a
       // fresh session load, comparing a just-loaded real value against the stale initial-state
@@ -12462,6 +12577,12 @@ class Component extends DCLogic {
       selectHeaderModeAccount: () => this.setState({ headerDisplayMode: 'account' }),
       personalLocation: s.personalLocation,
       setPersonalLocation: (e) => this.setState({ personalLocation: e.target.value }),
+      // ATID (October 19, 2026): the row on Profile and the export switches. The three export switches are plain unchecked boxes read from the screen at the moment
+      // of the action; they are not in state and not stored anywhere, so every load of the screen starts with all three off.
+      hasAtid: !!s.atid,
+      atidDisplay: this.atidDisplayForm(s.atid),
+      copyAtid: (e) => this.copyAtid(e),
+      atidPdfSwitchChanged: () => this.atidPdfSwitchChanged(),
       headerPrefsSaveError: s.headerPrefsSaveError,
       hasProfileNameError: !!s.profileNameError,
       profileNameError: s.profileNameError,
@@ -12809,6 +12930,7 @@ class Component extends DCLogic {
       selectTabViews: () => this.enterTab('views'),
       downloadPdf: () => {
         if (!this._pdfBlobUrl) return;
+        this.syncPdfBlobToAtidSwitches();
         const a = document.createElement('a');
         a.href = this._pdfBlobUrl;
         a.download = this._pdfFilename || 'resume.pdf';
