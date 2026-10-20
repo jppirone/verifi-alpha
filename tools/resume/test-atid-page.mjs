@@ -63,21 +63,21 @@ t("PDF off: byte for byte the same as the writer before the ATID, for " + LINESE
     assert.ok(now.buildAtsPdfBytes(lines, { atidLine: "", atidMeta: null }) === base, "empty values");
   }
 });
-t("PDF off: the switches really are read from the screen: all unchecked gives {} even though the account has an ATID; nothing ticked, nothing added", () => {
-  setSwitches({ "atid-pdf-line-switch": false, "atid-pdf-meta-switch": false });
+t("PDF off: (AU) the stored choices live in page state, not the DOM: all off gives {} even though the account has an ATID; a choice with no or an invalid ATID prints nothing", () => {
+  now.state = { atid: "ATID7K3MQ9XP2WD2", atidExportPdfLine: false, atidExportPdfHidden: false, atidExportJson: false };
   assert.deepEqual(now.atidPdfOpts(), {});
-  setSwitches({});   // the boxes are not on the screen at all
+  now.state = { atid: "ATID7K3MQ9XP2WD2" };   // flags never loaded at all: still off
   assert.deepEqual(now.atidPdfOpts(), {});
-  now.state = { atid: "" }; setSwitches({ "atid-pdf-line-switch": true, "atid-pdf-meta-switch": true });
-  assert.deepEqual(now.atidPdfOpts(), {}, "ticked but no ATID: nothing");
-  now.state = { atid: "ATID7K3MQ9XP2WD3" };
+  now.state = { atid: "", atidExportPdfLine: true, atidExportPdfHidden: true };
+  assert.deepEqual(now.atidPdfOpts(), {}, "chosen but no ATID: nothing");
+  now.state = { atid: "ATID7K3MQ9XP2WD3", atidExportPdfLine: true, atidExportPdfHidden: true };
   assert.deepEqual(now.atidPdfOpts(), {}, "an invalid ATID is never printed");
-  now.state = { atid: "ATID7K3MQ9XP2WD2" };
-  setSwitches({ "atid-pdf-line-switch": true, "atid-pdf-meta-switch": false });
+  now.state = { atid: "ATID7K3MQ9XP2WD2", atidExportPdfLine: true, atidExportPdfHidden: false };
   assert.deepEqual(now.atidPdfOpts(), { atidLine: DISP });
-  setSwitches({ "atid-pdf-line-switch": false, "atid-pdf-meta-switch": true });
+  now.state = { atid: "ATID7K3MQ9XP2WD2", atidExportPdfLine: false, atidExportPdfHidden: true };
   assert.deepEqual(now.atidPdfOpts(), { atidMeta: DISP });
-  setSwitches({});
+  now.state = { atid: "ATID7K3MQ9XP2WD2" };
+  assert.equal(/document\.getElementById\('atid-/.test(NOW), false, "no part of the page reads an ATID checkbox back out of the DOM");
 });
 
 // ---------- PDF: visible line ----------
@@ -195,10 +195,12 @@ t("the screen: three checkboxes with the exact labels, none checked by default, 
   // (AR added a fourth ATID checkbox, atid-employer-visible-switch, which IS stored; it is not one of the three export switches and is tested in test-atid-lookup-page.mjs)
   const boxes = [...NOW.matchAll(/<input type="checkbox" id="(atid-[a-z-]+)"([^>]*)>/g)].filter((m) => m[1] !== "atid-employer-visible-switch");
   assert.deepEqual(boxes.map((m) => m[1]), ["atid-json-switch", "atid-pdf-line-switch", "atid-pdf-meta-switch"]);
-  for (const m of boxes) assert.doesNotMatch(m[2], /checked/, m[1]);
+  // AU: they are now STORED on the account: each box is bound to saved page state (never a literal checked attribute), saves on change, and the screen says so
+  const want = { "atid-json-switch": "atidExportJson", "atid-pdf-line-switch": "atidExportPdfLine", "atid-pdf-meta-switch": "atidExportPdfHidden" };
+  for (const m of boxes) assert.ok(m[2].includes(`checked="{{ ${want[m[1]]} }}"`) && m[2].includes('disabled="{{ atidFlagSaving }}"'), m[1] + ": " + m[2]);
   assert.equal([...NOW.matchAll(/An ATID printed on a resume can be copied by anyone, so include it only when you want a recipient to be able to send information back to you\./g)].length, 2, "the explanation under the JSON switch and under the two PDF switches");
-  assert.equal(/(localStorage|sessionStorage)[^\n]*atid-(json|pdf)|atid-(json|pdf)[^\n]*(localStorage|sessionStorage)/.test(NOW), false);
-  assert.equal(/setState\([^)]*atid(Json|Pdf)/.test(NOW), false, "the switch values are not put into state");
+  assert.equal([...NOW.matchAll(/Your choices here are saved to your account\./g)].length, 2, "and the saved line under both groups");
+  assert.equal(/(localStorage|sessionStorage|document\.cookie)[^\n]*atid-(json|pdf)|atid-(json|pdf)[^\n]*(localStorage|sessionStorage|document\.cookie)/.test(NOW), false);
 });
 t("the screen: the Profile row shows the display form, a Copy button and the agreed sentence, for every account type (not inside the full-resume gate)", () => {
   assert.ok(NOW.includes("ATID stands for Applitrust ID. It is yours for the life of your account and never changes when you upload a new resume."));
@@ -207,10 +209,10 @@ t("the screen: the Profile row shows the display form, a Copy button and the agr
   assert.ok(NOW.slice(i, j).includes("{{ atidDisplay }}") && NOW.slice(i, j).includes("{{ copyAtid }}"));
   assert.equal(NOW.slice(i, j).includes("isFullResumeAccount"), false);
 });
-t("the session profile is mapped into state, and the JSON export reads its switch at the click, before any fetch", () => {
+t("the session profile is mapped into state, and the JSON export reads its stored choice from page state at the click, before any fetch", () => {
   assert.ok(NOW.includes("atid: (profile && typeof profile.atid === 'string' && profile.atid) || this.state.atid,"));
   const ex = method(NOW, "async exportVerifiedData") || NOW.slice(NOW.indexOf("  async exportVerifiedData()"));
-  const a = ex.indexOf("const wantAtid = this.atidSwitchOn('atid-json-switch')"), f = ex.indexOf("await ");
+  const a = ex.indexOf("const wantAtid = !!s.atidExportJson"), f = ex.indexOf("await ");
   assert.ok(a > 0 && f > a);
 });
 t("nothing else in the page changed in a way that matters: buildResumeLines, sanitizeAts and the PDF preview text builder are identical to the base commit", () => {

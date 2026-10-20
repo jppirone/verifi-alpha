@@ -2898,6 +2898,11 @@ a:hover{color:var(--color-accent)}
   <h1 style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:22px;margin:0">Confirm your resume data</h1>
   <p style="margin:0;color:var(--color-neutral-400);font-size:13px;line-height:1.5">We read this off the document you uploaded. Check it against the original on the left and correct anything that's wrong — you're fixing our reading of it, not typing from scratch.</p>
 
+  <!-- AU: ONE brief note or warning when the uploaded resume carried an ATID line. The server sends one word; the ATID itself is never sent, shown or kept. -->
+  <sc-if value="{{ hasAtidUploadNote }}" hint-placeholder-val="{{ false }}">
+    <div id="atid-upload-note" class="card elev-sm" style="font-size:13px;color:var(--color-neutral-200);line-height:1.6;padding:10px 14px">{{ atidUploadNote }}</div>
+  </sc-if>
+
   <!-- Item F (2026-09-26): threshold nudge (3+ edited fields) toward the existing start-over action,
        surfaced near the top of the screen rather than only inside the submit-time acknowledgment modal
        below. Links to the same rejectResumeModalOpen flow "This isn't right — start over" already uses
@@ -4064,9 +4069,9 @@ a:hover{color:var(--color-accent)}
             <button type="button" class="btn btn-ghost" style="font-size:12px;padding:2px 10px" sc-camel-on-click="{{ copyAtid }}">Copy</button>
           </div>
           <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">ATID stands for Applitrust ID. It is yours for the life of your account and never changes when you upload a new resume.</div>
-          <!-- AR: stored switch (a server column, default off), shown from the session and saved with the other privacy settings. Not one of the three export switches. -->
+          <!-- AR/AU: stored switch (a server column, default off), shown from the session and saved by set-atid-preferences like the three export choices. -->
           <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;color:var(--color-neutral-300);cursor:pointer;border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
-            <input type="checkbox" id="atid-employer-visible-switch" checked="{{ atidEmployerVisible }}" disabled="{{ discoverableProfileDisabled }}" sc-camel-on-change="{{ toggleAtidEmployerVisible }}" style="margin-top:2px">
+            <input type="checkbox" id="atid-employer-visible-switch" checked="{{ atidEmployerVisible }}" disabled="{{ atidEmployerSaving }}" sc-camel-on-change="{{ toggleAtidEmployerVisible }}" style="margin-top:2px">
             <span>Let employers use my ATID</span>
           </label>
           <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">When this is on, an employer who knows your name and your ATID can find you, and your ATID appears on comparison documents. This only works while "Let employers confirm I have an account here" is also on. You still approve every request. When this is off, employers cannot use your ATID at all.</div>
@@ -4074,8 +4079,8 @@ a:hover{color:var(--color-accent)}
           <sc-if value="{{ atidLookupIsOff }}" hint-placeholder-val="{{ false }}">
             <div id="atid-lookup-off-note" style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">Employers cannot find you by ATID until "Let employers confirm I have an account here" is turned on.</div>
           </sc-if>
-          <sc-if value="{{ discoverableProfileError }}" hint-placeholder-val="{{ false }}">
-            <div style="font-size:12px;color:#e2735c">{{ discoverableProfileError }}</div>
+          <sc-if value="{{ atidFlagErrorCard }}" hint-placeholder-val="{{ false }}">
+            <div id="atid-card-error" style="font-size:12px;color:#e2735c">{{ atidFlagErrorCard }}</div>
           </sc-if>
         </div>
         </sc-if>
@@ -4664,13 +4669,17 @@ a:hover{color:var(--color-accent)}
           <a href="#" sc-camel-on-click="{{ exportVerifiedDataLink }}" style="font-size:12px">Export my data</a>
           <span style="font-size:11px;color:var(--color-neutral-600)">(everything stored for your account, JSON Resume format, with each item's current verification status as shown above; available anytime on every tier)</span>
         </div>
-        <!-- ATID (October 19, 2026): optional, off every time this screen loads, not stored. Read when the link above is clicked. -->
+        <!-- ATID (October 19, 2026): optional, off for everyone until they choose. AU: stored on the account, so it keeps its value across tabs, reloads and devices. -->
         <sc-if value="{{ hasAtid }}" hint-placeholder-val="{{ false }}">
         <div style="display:flex;flex-direction:column;gap:4px;padding-left:2px">
           <label style="display:flex;gap:8px;align-items:center;font-size:12px;color:var(--color-neutral-300);cursor:pointer">
-            <input type="checkbox" id="atid-json-switch" style="margin:0"> <span>Include my ATID in the JSON file</span>
+            <input type="checkbox" id="atid-json-switch" checked="{{ atidExportJson }}" disabled="{{ atidFlagSaving }}" sc-camel-on-change="{{ toggleAtidExportJson }}" style="margin:0"> <span>Include my ATID in the JSON file</span>
           </label>
           <div style="font-size:11px;color:var(--color-neutral-600);line-height:1.5">An ATID printed on a resume can be copied by anyone, so include it only when you want a recipient to be able to send information back to you.</div>
+          <div style="font-size:11px;color:var(--color-neutral-600);line-height:1.5">Your choices here are saved to your account.</div>
+          <sc-if value="{{ atidFlagErrorJson }}" hint-placeholder-val="{{ false }}">
+            <div id="atid-json-error" style="font-size:12px;color:#e2735c">{{ atidFlagErrorJson }}</div>
+          </sc-if>
         </div>
         </sc-if>
       </div>
@@ -5100,16 +5109,20 @@ a:hover{color:var(--color-accent)}
 
       <div style="display:flex;flex-direction:column;gap:var(--space-3)">
         <div id="pdf-preview-container" style="width:100%;min-height:70vh;max-height:80vh;overflow:auto;background:var(--color-neutral-900);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:16px;display:flex;flex-direction:column;align-items:center;gap:16px"></div>
-        <!-- ATID (October 19, 2026): optional, both off every time this screen loads, not stored. The preview and the download follow what is ticked here. -->
+        <!-- ATID (October 19, 2026): optional, both off for everyone until they choose. AU: stored on the account; the preview and the download follow the saved choices. -->
         <sc-if value="{{ hasAtid }}" hint-placeholder-val="{{ false }}">
         <div style="display:flex;flex-direction:column;gap:4px">
           <label style="display:flex;gap:8px;align-items:center;font-size:12px;color:var(--color-neutral-300);cursor:pointer">
-            <input type="checkbox" id="atid-pdf-line-switch" style="margin:0" sc-camel-on-change="{{ atidPdfSwitchChanged }}"> <span>Include my ATID as a line at the end of the PDF</span>
+            <input type="checkbox" id="atid-pdf-line-switch" checked="{{ atidExportPdfLine }}" disabled="{{ atidFlagSaving }}" sc-camel-on-change="{{ toggleAtidExportPdfLine }}" style="margin:0"> <span>Include my ATID as a line at the end of the PDF</span>
           </label>
           <label style="display:flex;gap:8px;align-items:center;font-size:12px;color:var(--color-neutral-300);cursor:pointer">
-            <input type="checkbox" id="atid-pdf-meta-switch" style="margin:0" sc-camel-on-change="{{ atidPdfSwitchChanged }}"> <span>Include my ATID in the PDF's hidden information</span>
+            <input type="checkbox" id="atid-pdf-meta-switch" checked="{{ atidExportPdfHidden }}" disabled="{{ atidFlagSaving }}" sc-camel-on-change="{{ toggleAtidExportPdfHidden }}" style="margin:0"> <span>Include my ATID in the PDF's hidden information</span>
           </label>
           <div style="font-size:11px;color:var(--color-neutral-600);line-height:1.5">An ATID printed on a resume can be copied by anyone, so include it only when you want a recipient to be able to send information back to you.</div>
+          <div style="font-size:11px;color:var(--color-neutral-600);line-height:1.5">Your choices here are saved to your account.</div>
+          <sc-if value="{{ atidFlagErrorPdf }}" hint-placeholder-val="{{ false }}">
+            <div id="atid-pdf-error" style="font-size:12px;color:#e2735c">{{ atidFlagErrorPdf }}</div>
+          </sc-if>
         </div>
         </sc-if>
         <button type="button" class="btn btn-secondary" style="align-self:flex-start" sc-camel-on-click="{{ downloadPdf }}">Download PDF</button>
@@ -7834,19 +7847,52 @@ class Component extends DCLogic {
     if (!this.atidIsStored(v)) return '';
     return 'ATID-' + v.slice(4, 8) + '-' + v.slice(8, 12) + '-' + v.slice(12, 16);
   }
-  // The three export switches are plain checkboxes on the screen, never in state and never stored; each load of the screen starts with all three off.
-  atidSwitchOn(id) { const el = document.getElementById(id); return !!(el && el.checked); }
-  // what the PDF should carry right now: {} (nothing) unless the candidate ticked a switch AND there is a valid ATID
+  // AU (October 19, 2026): the three export choices (atidExportPdfLine, atidExportPdfHidden, atidExportJson) and the employer switch (atidEmployerVisible) are STORED ON THE ACCOUNT, off for
+  // everyone until they choose. The ONE place each lives in the page is this.state, loaded from the profile response (applySession) and written only after a successful save
+  // (saveAtidFlag). Nothing here reads a checkbox back out of the DOM, so a tab switch, a re-render or a PDF preview redraw cannot change them; and nothing uses localStorage,
+  // sessionStorage or a cookie. (This replaces the AQ design, where the three export boxes were plain unchecked boxes read at the action.)
+  // what the PDF should carry right now: {} (nothing) unless the candidate chose it AND there is a valid ATID
   atidPdfOpts() {
     const shown = this.atidDisplayForm(this.state.atid);
     if (!shown) return {};
-    const opts = {};
-    if (this.atidSwitchOn('atid-pdf-line-switch')) opts.atidLine = shown;
-    if (this.atidSwitchOn('atid-pdf-meta-switch')) opts.atidMeta = shown;
+    const s = this.state, opts = {};
+    if (s.atidExportPdfLine) opts.atidLine = shown;
+    if (s.atidExportPdfHidden) opts.atidMeta = shown;
     return opts;
   }
   atidPdfSwitchChanged() {
     if (this._pdfSrc) this.renderPdfPreviewFrom(this._pdfSrc.delivered, this._pdfSrc.editor);
+  }
+  // Save one of the four choices straight away. The box shows the new value at once; if the save does not come back as saved, it goes back to what it was and a short plain message
+  // appears next to it. On success the page shows the value the server answers with (the server is the truth), and a changed PDF choice redraws the preview.
+  // AU: the one brief note or warning about an ATID printed on the uploaded resume. The server sends ONE WORD (match / mismatch / nothing) on the resume document, never the ATID.
+  atidUploadNoteText(resumeExtraction) {
+    const w = resumeExtraction && resumeExtraction.resume_document ? resumeExtraction.resume_document.atid_on_upload : null;
+    if (w === 'match') return 'We found your ATID on this resume. We keep using the one already on your account, so it was left out of your content.';
+    if (w === 'mismatch') return 'The ATID on this resume is not the one on your account. We ignore ATIDs on uploads and keep using yours, so nothing was changed.';
+    return '';
+  }
+  async saveAtidFlag(stateKey, serverKey, checked, where) {
+    const s = this.state, id = s.resumeCandidateId, previous = !!s[stateKey];
+    const MSG = "We couldn't save that change, so it's back to what it was. Please try again.";
+    if (!id || s.atidFlagSaving) {
+      this.setState({ [stateKey]: !!checked });
+      this.setState({ [stateKey]: previous, atidFlagError: MSG, atidFlagErrorWhere: where });
+      return;
+    }
+    this.setState({ [stateKey]: !!checked, atidFlagSaving: true, atidFlagError: null, atidFlagErrorWhere: '' });
+    let saved = null;
+    try {
+      const res = await fetch(this.SUPABASE_FN_URL + '/set-atid-preferences', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: id, [serverKey]: !!checked }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data && data.ok && typeof data[serverKey] === 'boolean') saved = data[serverKey];
+    } catch (e) { saved = null; }
+    if (saved === null) { this.setState({ [stateKey]: previous, atidFlagSaving: false, atidFlagError: MSG, atidFlagErrorWhere: where }); return; }
+    this.setState({ [stateKey]: saved, atidFlagSaving: false }, () => { if (serverKey === 'atid_export_pdf_line' || serverKey === 'atid_export_pdf_hidden') this.atidPdfSwitchChanged(); });
   }
   // the download must match what is ticked at the moment of the click, even if the screen was redrawn since the preview was built
   syncPdfBlobToAtidSwitches() {
@@ -8229,9 +8275,12 @@ class Component extends DCLogic {
     savedHeaderDisplayMode: 'printed', savedPersonalLocation: '',
     // ATID (October 19, 2026): the candidate's own permanent public identifier, stored form (ATID + 12 characters), from the session responses. A pointer only.
     atid: '',
-    // AR (October 19, 2026): "Let employers use my ATID". Unlike the three export switches (unchecked on every load, never stored), this one IS stored: it is a
-    // server column (candidates.atid_employer_visible, default off) that decides what employers can do, so it is loaded with the session and saved through set-discoverable.
+    // AR (October 19, 2026): "Let employers use my ATID", a server column (candidates.atid_employer_visible, default off) that decides what employers can do.
+    // AU: it and the three export choices are all stored on the account (columns atid_export_pdf_line, atid_export_pdf_hidden, atid_export_json, default off), loaded with the
+    // session (applySession) and saved through set-atid-preferences (saveAtidFlag). atidFlagSaving / atidFlagError(Where) belong to those four boxes only.
     atidEmployerVisible: false,
+    atidExportPdfLine: false, atidExportPdfHidden: false, atidExportJson: false,
+    atidFlagSaving: false, atidFlagError: null, atidFlagErrorWhere: '',
     headerPrefsSavePending: false, headerPrefsSaveError: null, headerPrefsSaved: false,
     profileNameSavePending: false, profileNameError: '', profileNameNotice: '',
     optInWorkHistory: false, optInEducation: false, optInCertifications: false,
@@ -9104,7 +9153,7 @@ class Component extends DCLogic {
   async exportVerifiedData() {
     const s = this.state;
     const id = s.resumeCandidateId;
-    const wantAtid = this.atidSwitchOn('atid-json-switch');   // read at the click, before any waiting; never stored
+    const wantAtid = !!s.atidExportJson;   // AU: the stored choice, read from page state (loaded from the account) at the click, before any waiting
     const fail = () => window.alert("We couldn't load your data to build the export, so nothing was downloaded. Please try again.");
     if (!id) { fail(); return; }
     const post = async (fn) => {
@@ -9784,21 +9833,16 @@ class Component extends DCLogic {
     const previous = s[field];
     const nextDiscoverable = field === 'discoverable' ? checked : s.discoverable;
     const nextAllow = field === 'allowComparisonRequests' ? checked : s.allowComparisonRequests;
-    // AR: the ATID switch is named in the call only when it is the one being changed, so toggling the other two can never write a stale copy of it
-    const atidPart = field === 'atidEmployerVisible' ? { atid_employer_visible: checked } : {};
     this.setState({ [field]: checked, discoverableProfileSaving: true, discoverableProfileError: null, discoverableProfileSaved: false });
     let saved = false;
     try {
       const res = await fetch(this.SUPABASE_FN_URL + '/set-discoverable', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + this.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: id, discoverable: nextDiscoverable, allow_comparison_requests: nextAllow, ...atidPart }),
+        body: JSON.stringify({ session_token: this.candidateSessionToken(), candidate_id: id, discoverable: nextDiscoverable, allow_comparison_requests: nextAllow }),
       });
       const data = await res.json().catch(() => ({}));
-      saved = res.ok && !!data.ok;
-      // show what the server holds (it answers with the saved value), not what was assumed
-      if (saved && field === 'atidEmployerVisible' && typeof data.atid_employer_visible === 'boolean') this.setState({ atidEmployerVisible: data.atid_employer_visible });
-    } catch (e) { saved = false; }
+      saved = res.ok && !!data.ok;    } catch (e) { saved = false; }
     if (!saved) {
       this.setState({ [field]: previous, discoverableProfileSaving: false, discoverableProfileError: "We couldn't save that change, so it's back to what it was. Please try again." });
       return;
@@ -9807,7 +9851,9 @@ class Component extends DCLogic {
   }
   toggleDiscoverableProfile(checked) { return this.savePrivacySetting('discoverable', checked); }
   toggleAllowComparisonRequestsProfile(checked) { return this.savePrivacySetting('allowComparisonRequests', checked); }
-  toggleAtidEmployerVisible(checked) { return this.savePrivacySetting('atidEmployerVisible', checked); }
+  // AU: the employer switch is saved by set-atid-preferences (like the three export choices), not by set-discoverable: that call has to carry the Allow lookup value too, so it could only be made
+  // after the privacy settings had loaded and could write a stale Allow lookup. This one needs neither.
+  toggleAtidEmployerVisible(checked) { return this.saveAtidFlag('atidEmployerVisible', 'atid_employer_visible', checked, 'card'); }
 
   ensureLicenseActivityLoaded(force) {
     const s = this.state;
@@ -10209,6 +10255,9 @@ class Component extends DCLogic {
       personalLocation: (profile && profile.personal_location) || this.state.personalLocation,
       atid: (profile && typeof profile.atid === 'string' && profile.atid) || this.state.atid,
       atidEmployerVisible: (profile && typeof profile.atid_employer_visible === 'boolean') ? profile.atid_employer_visible : this.state.atidEmployerVisible,
+      atidExportPdfLine: (profile && typeof profile.atid_export_pdf_line === 'boolean') ? profile.atid_export_pdf_line : this.state.atidExportPdfLine,
+      atidExportPdfHidden: (profile && typeof profile.atid_export_pdf_hidden === 'boolean') ? profile.atid_export_pdf_hidden : this.state.atidExportPdfHidden,
+      atidExportJson: (profile && typeof profile.atid_export_json === 'boolean') ? profile.atid_export_json : this.state.atidExportJson,
       // Same "seed both the live and saved copy together" shape as savedFirst/savedLast above —
       // without this, isDirty() would read this tab as having unsaved changes immediately after a
       // fresh session load, comparing a just-loaded real value against the stale initial-state
@@ -12599,12 +12648,23 @@ class Component extends DCLogic {
       selectHeaderModeAccount: () => this.setState({ headerDisplayMode: 'account' }),
       personalLocation: s.personalLocation,
       setPersonalLocation: (e) => this.setState({ personalLocation: e.target.value }),
-      // ATID (October 19, 2026): the row on Profile and the export switches. The three export switches are plain unchecked boxes read from the screen at the moment
-      // of the action; they are not in state and not stored anywhere, so every load of the screen starts with all three off.
+      // ATID (October 19, 2026): the row on Profile and the export choices. AU: the three export choices are stored on the account like the employer switch; each box shows the value in
+      // page state (loaded with the session, written after a successful save) and is disabled only while one of the four is saving.
       hasAtid: !!s.atid,
       atidDisplay: this.atidDisplayForm(s.atid),
       copyAtid: (e) => this.copyAtid(e),
-      atidPdfSwitchChanged: () => this.atidPdfSwitchChanged(),
+      atidExportPdfLine: s.atidExportPdfLine, atidExportPdfHidden: s.atidExportPdfHidden, atidExportJson: s.atidExportJson,
+      atidFlagSaving: s.atidFlagSaving,
+      toggleAtidExportPdfLine: (e) => this.saveAtidFlag('atidExportPdfLine', 'atid_export_pdf_line', !!e.target.checked, 'pdf'),
+      toggleAtidExportPdfHidden: (e) => this.saveAtidFlag('atidExportPdfHidden', 'atid_export_pdf_hidden', !!e.target.checked, 'pdf'),
+      toggleAtidExportJson: (e) => this.saveAtidFlag('atidExportJson', 'atid_export_json', !!e.target.checked, 'json'),
+      atidFlagErrorCard: s.atidFlagErrorWhere === 'card' ? s.atidFlagError : '',
+      atidFlagErrorPdf: s.atidFlagErrorWhere === 'pdf' ? s.atidFlagError : '',
+      atidFlagErrorJson: s.atidFlagErrorWhere === 'json' ? s.atidFlagError : '',
+      // AU: the note / warning about an ATID printed on the last uploaded resume (one word from the server; never the ATID)
+      atidUploadNote: this.atidUploadNoteText(s.resumeExtraction),
+      atidUploadNoteIsWarning: !!(s.resumeExtraction && s.resumeExtraction.resume_document && s.resumeExtraction.resume_document.atid_on_upload === 'mismatch'),
+      hasAtidUploadNote: !!this.atidUploadNoteText(s.resumeExtraction),
       headerPrefsSaveError: s.headerPrefsSaveError,
       hasProfileNameError: !!s.profileNameError,
       profileNameError: s.profileNameError,
@@ -13231,6 +13291,7 @@ class Component extends DCLogic {
       toggleDiscoverableProfile: (e) => this.toggleDiscoverableProfile(!!e.target.checked),
       toggleAllowComparisonRequestsProfile: (e) => this.toggleAllowComparisonRequestsProfile(!!e.target.checked),
       atidEmployerVisible: s.atidEmployerVisible,
+      atidEmployerSaving: s.atidFlagSaving,
       // AS: computed from state on every render, so it follows the Allow lookup box live (that box saves instantly) and never guesses before the settings have loaded
       atidLookupIsOff: s.discoverableLoadedFor === s.resumeCandidateId && !!s.resumeCandidateId && !s.discoverable,
       toggleAtidEmployerVisible: (e) => this.toggleAtidEmployerVisible(!!e.target.checked),

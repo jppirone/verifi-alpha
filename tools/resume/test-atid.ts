@@ -114,18 +114,19 @@ t("the result never carries the removed value (only text and a count)", () => {
 // ---------- wiring in rasterize-pdf-page (read from the source) ----------
 t("rasterize-pdf-page strips right after the OCR text is rebuilt, before the boundary call, fails open and logs the page only", () => {
   const src = fs.readFileSync(new URL("../../supabase/functions/rasterize-pdf-page/index.ts", import.meta.url), "utf8").replace(/\r\n/g, "\n");
-  assert.ok(src.includes('import { stripATIDLines } from "../_shared/resume-atid.ts";'));
+  // AU: the strip is now classifyAtidLines (same removal, plus one word about it); the order, the try/catch and the log lines are unchanged
+  assert.ok(src.includes('import { classifyAtidLines, stripAtidFromExtraction, atidIsStored, type AtidFound } from "../_shared/resume-atid.ts";'));
   const rec = src.indexOf("ocrText = reconstructByWordClustering(gap.words);");
-  const strip = src.indexOf("stripATIDLines(ocrText)");
+  const strip = src.indexOf("classifyAtidLines(ocrText, ownAtid)");
   const boundary = src.indexOf("runBoundaryDetectionHaiku(ocrText, trailingContext, modelCalls)", rec);
   assert.ok(rec > 0 && strip > rec && boundary > strip, "order: rebuild, strip, boundary");
-  assert.ok(strip - rec < 400, "right after the rebuild");
+  assert.ok(strip - rec < 900, "right after the rebuild");
   const block = src.slice(rec, boundary);
-  assert.ok(/try \{[\s\S]*stripATIDLines\(ocrText\)[\s\S]*\} catch \(stripErr\)/.test(block), "inside try/catch");
+  assert.ok(/try \{[\s\S]*classifyAtidLines\(ocrText, ownAtid\)[\s\S]*\} catch \(stripErr\)/.test(block), "inside try/catch");
   assert.ok(block.includes("ATID line stripped - page ${pageNum}`"), "log line");
   assert.ok(block.includes("ATID line strip FAILED, text unchanged"), "failure line");
   assert.equal(/ATID line stripped[^`]*\$\{(?!pageNum)/.test(block), false, "the stripped log line interpolates only the page number");
-  assert.equal([...src.matchAll(/stripATIDLines\(/g)].length, 1, "one call site");
+  assert.equal([...src.matchAll(/classifyAtidLines\(/g)].length, 1, "one OCR call site");
 });
 t("the strip rule never touches an account: the shared module imports nothing and reads no table", () => {
   const src = fs.readFileSync(new URL("../../supabase/functions/_shared/resume-atid.ts", import.meta.url), "utf8");

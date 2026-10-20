@@ -110,6 +110,7 @@ export default {
       let candidatePersonalLocation: string | null = null;
       let candidateAtid: string | null = null;
       let candidateAtidEmployerVisible = false;
+      let candidateAtidExport = { atid_export_pdf_line: false, atid_export_pdf_hidden: false, atid_export_json: false };   // AU
       let candidateAccountType: string | null = null;
       let candidateKycVerifiedAt: string | null = null;
       let candidatePhoneVerifiedAt: string | null = null;
@@ -141,7 +142,7 @@ export default {
           sessionToken = rpcRows?.[0]?.session_token ?? null;
           // Item 6 (2026-09-12 live-testing session, follow-up build): see confirm-verification's
           // own comment on this same select addition.
-          const candRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=tier,header_display_mode,personal_location,atid,atid_employer_visible,account_type,kyc_verified_at,phone_verified_at,cross_validation_completed_at,verified_phone_number,email,phone,first_name,last_name,deletion_scheduled_at,tour_completed_at,license_subscription_started_at`, {
+          const candRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=tier,header_display_mode,personal_location,atid,atid_employer_visible,atid_export_pdf_line,atid_export_pdf_hidden,atid_export_json,account_type,kyc_verified_at,phone_verified_at,cross_validation_completed_at,verified_phone_number,email,phone,first_name,last_name,deletion_scheduled_at,tour_completed_at,license_subscription_started_at`, {
             headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
           });
           const candRows = candRes.ok ? await candRes.json() : [];
@@ -151,6 +152,7 @@ export default {
           candidatePersonalLocation = candRows[0]?.personal_location ?? null;
           candidateAtid = candRows[0]?.atid ?? null;
           candidateAtidEmployerVisible = candRows[0]?.atid_employer_visible === true;
+          candidateAtidExport = { atid_export_pdf_line: candRows[0]?.atid_export_pdf_line === true, atid_export_pdf_hidden: candRows[0]?.atid_export_pdf_hidden === true, atid_export_json: candRows[0]?.atid_export_json === true };
           candidateAccountType = candRows[0]?.account_type ?? null;
           candidateKycVerifiedAt = candRows[0]?.kyc_verified_at ?? null;
           candidatePhoneVerifiedAt = candRows[0]?.phone_verified_at ?? null;
@@ -187,6 +189,10 @@ export default {
         atid: candidateAtid,
         // AR: whether the candidate lets employers use the ATID (default false); the page shows and saves this switch.
         atid_employer_visible: candidateAtidEmployerVisible,
+        // AU: the candidate's own stored "include my ATID" export choices (default false). Their own session only.
+        atid_export_pdf_line: candidateAtidExport.atid_export_pdf_line,
+        atid_export_pdf_hidden: candidateAtidExport.atid_export_pdf_hidden,
+        atid_export_json: candidateAtidExport.atid_export_json,
         account_type: candidateAccountType,
         kyc_verified_at: candidateKycVerifiedAt,
         phone_verified_at: candidatePhoneVerifiedAt,

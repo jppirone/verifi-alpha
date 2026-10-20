@@ -44,7 +44,8 @@ t("get-customization: the atid is selected from the candidate row, returned BESI
 // AR (October 19, 2026) added the employer lookup and the comparison document on purpose: check-existence, send-lookup-confirmation, candidate-comparison-requests; and the
 // candidate's own save path set-discoverable. Every other function must still never mention it.
 const EMPLOYER_SIDE_AR = ["check-existence", "send-lookup-confirmation", "candidate-comparison-requests"];
-const ALLOWED_FUNCTIONS = new Set([...FIVE, "get-customization", "rasterize-pdf-page", "set-discoverable", ...EMPLOYER_SIDE_AR]);
+// AU added: set-atid-preferences (the candidate's own save path for the four ATID choices), upload-resume and get-resume-extraction (the one-word note about an ATID on an upload).
+const ALLOWED_FUNCTIONS = new Set([...FIVE, "get-customization", "rasterize-pdf-page", "set-discoverable", "set-atid-preferences", "upload-resume", "get-resume-extraction", ...EMPLOYER_SIDE_AR]);
 t("only the allowed function files mention atid (the 5 session functions, get-customization, rasterize-pdf-page, set-discoverable, and the 3 employer-side AR functions) plus the shared helper", () => {
   const dirs = fs.readdirSync(new URL("functions/", root), { withFileTypes: true }).filter((d) => d.isDirectory());
   const hits: string[] = [];
@@ -71,7 +72,7 @@ t("every other employer-facing function never mentions atid: employer-*, send-* 
 t("no migration other than the two ATID ones mentions atid: assemble_customized_resume, the comparison snapshots and the employer views are unchanged", () => {
   const dir = new URL("migrations/", root);
   const hits = fs.readdirSync(dir).filter((f) => /atid/i.test(fs.readFileSync(new URL(f, dir), "utf8")));
-  assert.deepEqual(hits, ["20261019010000_atid.sql", "20261019020000_atid_employer_visible.sql"]);
+  assert.deepEqual(hits, ["20261019010000_atid.sql", "20261019020000_atid_employer_visible.sql", "20261019030000_atid_export_prefs.sql", "20261019040000_atid_upload_notice.sql"]);
 });
 t("no function logs the atid: no console line in the 7 files interpolates or names it", () => {
   for (const n of [...ALLOWED_FUNCTIONS]) {

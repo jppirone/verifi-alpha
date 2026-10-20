@@ -66,7 +66,7 @@ export default {
       }
 
       const candRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/candidates?id=eq.${session.candidate_id}&select=id,email,phone,full_name,first_name,last_name,deletion_scheduled_at,tier,tour_completed_at,header_display_mode,personal_location,atid,atid_employer_visible,account_type,kyc_verified_at,license_subscription_started_at,phone_verified_at,cross_validation_completed_at,verified_phone_number,stripe_subscription_cancelled_at`,
+        `${SUPABASE_URL}/rest/v1/candidates?id=eq.${session.candidate_id}&select=id,email,phone,full_name,first_name,last_name,deletion_scheduled_at,tier,tour_completed_at,header_display_mode,personal_location,atid,atid_employer_visible,atid_export_pdf_line,atid_export_pdf_hidden,atid_export_json,account_type,kyc_verified_at,license_subscription_started_at,phone_verified_at,cross_validation_completed_at,verified_phone_number,stripe_subscription_cancelled_at`,
         { headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } },
       );
       const candRows = candRes.ok ? await candRes.json() : [];
@@ -126,6 +126,10 @@ export default {
         atid: candidate.atid ?? null,
         // AR: whether the candidate lets employers use the ATID (default false); the page shows and saves this switch.
         atid_employer_visible: candidate.atid_employer_visible === true,
+        // AU: the candidate's own stored "include my ATID" export choices (default false). Their own session only.
+        atid_export_pdf_line: candidate.atid_export_pdf_line === true,
+        atid_export_pdf_hidden: candidate.atid_export_pdf_hidden === true,
+        atid_export_json: candidate.atid_export_json === true,
         // Items 9/10/11 (2026-09-13 live-testing session): account_type is what candidate.html
         // branches the whole reduced-account-experience decision on (see ACCOUNT_TABS gating) — same
         // "all session-establishing paths return it uniformly" reasoning as everything else on this

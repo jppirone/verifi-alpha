@@ -339,6 +339,7 @@ export default {
       let candidatePersonalLocation: string | null = null;
       let candidateAtid: string | null = null;
       let candidateAtidEmployerVisible = false;
+      let candidateAtidExport = { atid_export_pdf_line: false, atid_export_pdf_hidden: false, atid_export_json: false };   // AU
       let candidateAccountType: string | null = null;
       let candidateKycVerifiedAt: string | null = null;
       let candidatePhoneVerifiedAt: string | null = null;
@@ -366,7 +367,7 @@ export default {
           // paths return it uniformly" reasoning as resolve-session's own header explains, and this
           // is really a fourth such path (see the first_name/last_name comment on this response
           // below). A brand-new candidate just gets the DB defaults ('printed', null).
-          const candRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=tier,header_display_mode,personal_location,atid,atid_employer_visible,account_type,kyc_verified_at,phone_verified_at,cross_validation_completed_at,verified_phone_number,email,phone,first_name,last_name,deletion_scheduled_at,tour_completed_at,license_subscription_started_at`, {
+          const candRes = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=tier,header_display_mode,personal_location,atid,atid_employer_visible,atid_export_pdf_line,atid_export_pdf_hidden,atid_export_json,account_type,kyc_verified_at,phone_verified_at,cross_validation_completed_at,verified_phone_number,email,phone,first_name,last_name,deletion_scheduled_at,tour_completed_at,license_subscription_started_at`, {
             headers: { "apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
           });
           const candRows = candRes.ok ? await candRes.json() : [];
@@ -376,6 +377,7 @@ export default {
           candidatePersonalLocation = candRows[0]?.personal_location ?? null;
           candidateAtid = candRows[0]?.atid ?? null;
           candidateAtidEmployerVisible = candRows[0]?.atid_employer_visible === true;
+          candidateAtidExport = { atid_export_pdf_line: candRows[0]?.atid_export_pdf_line === true, atid_export_pdf_hidden: candRows[0]?.atid_export_pdf_hidden === true, atid_export_json: candRows[0]?.atid_export_json === true };
           // Read back rather than trusted from `record` directly — the duplicate-email race-recovery
           // path above can reach this point with candidateId set from a PRIOR insert attempt, whose
           // account_type may not match this request's own record if the two ever disagreed.
@@ -426,6 +428,10 @@ export default {
         atid: candidateAtid,
         // AR: whether the candidate lets employers use the ATID (default false); the page shows and saves this switch.
         atid_employer_visible: candidateAtidEmployerVisible,
+        // AU: the candidate's own stored "include my ATID" export choices (default false). Their own session only.
+        atid_export_pdf_line: candidateAtidExport.atid_export_pdf_line,
+        atid_export_pdf_hidden: candidateAtidExport.atid_export_pdf_hidden,
+        atid_export_json: candidateAtidExport.atid_export_json,
         account_type: candidateAccountType,
         kyc_verified_at: candidateKycVerifiedAt,
         phone_verified_at: candidatePhoneVerifiedAt,

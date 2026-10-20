@@ -4,7 +4,7 @@ import { withSupabase } from "jsr:@supabase/server@1";
 import { createOCREngine } from "npm:tesseract-wasm@0.11.0";
 import { findOcrGaps, MAX_GAP_REGIONS, plausibleTranscription, transcriptionToWords, type GapRegion } from "../_shared/resume-ocr-gaps.ts";
 import { guardSelfReferentialHeadings, clearBoundaryHeadings } from "../_shared/resume-heading-guard.ts";
-import { stripATIDLines } from "../_shared/resume-atid.ts";
+import { classifyAtidLines, stripAtidFromExtraction, atidIsStored, type AtidFound } from "../_shared/resume-atid.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -2034,7 +2034,10 @@ export default {
     const caller = await authenticateStaffOrService(req, authBody, { staff: false, service: true });
     if (!caller) return UNAUTHORIZED();
     try {
-      const { storage_path, page_number, target_dpi, force_vision, previous_page_context } = await req.json();
+      const { storage_path, page_number, target_dpi, force_vision, previous_page_context, own_atid } = await req.json();
+      // AU: the signed-in candidate's OWN stored ATID, from upload-resume (the only caller that knows the candidate); anything that is not a valid stored ATID counts as "no account yet".
+      const ownAtid: string | null = typeof own_atid === "string" && atidIsStored(own_atid) ? own_atid : null;
+      let atidFound: AtidFound = "none";
       if (!storage_path || typeof storage_path !== "string") {
         return new Response(JSON.stringify({ ok: false, error: "storage_path_required" }), {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -2259,9 +2262,11 @@ export default {
         if (gap.report.detected > 0) console.log(`rasterize-pdf-page: page ${pageNum} OCR gaps ${JSON.stringify(gap.report)}`);
         ocrText = reconstructByWordClustering(gap.words);
         // ATID (October 19, 2026): a line that is essentially just the candidate's printed ATID is not resume content. Removed before the boundary and extraction steps; the value is never logged or compared with anything (fails open).
+        // AU: the line is still removed exactly as before, and the page also learns ONE WORD about it (none / match / mismatch), compared only with the signed-in candidate's own ATID that
+        // the caller hands in. The value read off the page is never returned, logged or stored, and nothing is looked up.
         try {
-          const atidStrip = stripATIDLines(ocrText);
-          if (atidStrip.stripped > 0) { ocrText = atidStrip.text; console.log(`rasterize-pdf-page: ATID line stripped - page ${pageNum}`); }
+          const atidStrip = classifyAtidLines(ocrText, ownAtid);
+          if (atidStrip.stripped > 0) { ocrText = atidStrip.text; atidFound = atidStrip.found; console.log(`rasterize-pdf-page: ATID line stripped - page ${pageNum}`); }
         } catch (stripErr) {
           console.log(`rasterize-pdf-page: ATID line strip FAILED, text unchanged - page ${pageNum}: ${String(stripErr)}`);
         }
@@ -2289,6 +2294,16 @@ export default {
           const haikuStart = Date.now();
           extraction = await runHaikuExtraction(ocrText, trailingContext, sectionBoundaries, modelCalls);
           extractionMs = Date.now() - haikuStart;
+        }
+      }
+      // AU: the vision route (chosen up front, or reached after an OCR escalation or a retry) never has OCR text to strip, so the same rule is applied to what the model sent back: ATID-shaped
+      // lines are removed from the extraction. Plain post-processing: no model call, no prompt change. Fails open.
+      if (usedVision) {
+        try {
+          const vs = stripAtidFromExtraction(extraction, ownAtid);
+          if (vs.stripped > 0) { atidFound = vs.found === "mismatch" || atidFound === "mismatch" ? "mismatch" : vs.found === "match" || atidFound === "match" ? "match" : "none"; console.log(`rasterize-pdf-page: ATID line stripped (vision) - page ${pageNum}`); }
+        } catch (visionStripErr) {
+          console.log(`rasterize-pdf-page: ATID line strip FAILED (vision), extraction unchanged - page ${pageNum}: ${String(visionStripErr)}`);
         }
       }
       extraction.skills_heading = resolveSkillsHeading(sectionBoundaries, extraction);
@@ -2325,6 +2340,7 @@ export default {
         ocr_strips: { count: ocrStripCount, strips: ocrStripTiming },
         ocr_gaps: gapReport,
         heading_guard: headingRejections,
+        ...(atidFound !== "none" ? { atid_check: atidFound } : {}),   // AU: one word, only when an ATID line was on the page; never the value
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: "unhandled", detail: String(e) }), {

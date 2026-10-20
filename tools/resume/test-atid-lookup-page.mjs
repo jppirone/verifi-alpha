@@ -25,7 +25,7 @@ const tests = []; const t = (n, f) => tests.push([n, f]);
 const CARD_START = CAND.indexOf("Let employers use my ATID</span>");
 const CARD = CAND.slice(CAND.lastIndexOf('<sc-if value="{{ hasAtid }}"', CARD_START), CAND.indexOf("Basic info", CARD_START));
 t("candidate page: the switch sits on the ATID card, with the agreed wording, bound to saved state (not a plain unchecked box), disabled while loading or saving", () => {
-  assert.ok(CARD.includes('id="atid-employer-visible-switch" checked="{{ atidEmployerVisible }}" disabled="{{ discoverableProfileDisabled }}" sc-camel-on-change="{{ toggleAtidEmployerVisible }}"'));
+  assert.ok(CARD.includes('id="atid-employer-visible-switch" checked="{{ atidEmployerVisible }}" disabled="{{ atidEmployerSaving }}" sc-camel-on-change="{{ toggleAtidEmployerVisible }}"'));
   assert.ok(CARD.includes("<span>Let employers use my ATID</span>"));
   assert.ok(CARD.includes('When this is on, an employer who knows your name and your ATID can find you, and your ATID appears on comparison documents. This only works while "Let employers confirm I have an account here" is also on. You still approve every request. When this is off, employers cannot use your ATID at all.'));
   assert.equal(CARD.includes("can look you up"), false, "the old, over-promising wording is gone");
@@ -51,11 +51,11 @@ t("candidate page (AS): the real label of Allow lookup is quoted, and a note bes
 t("candidate page: no em dash and no 'verified' in the new copy", () => {
   assert.equal(CARD.includes("—"), false); assert.equal(/verified/i.test(CARD), false);
 });
-t("candidate page: it is not one of the three export switches: those stay unchecked boxes read at the action; this one is bound to state and saved (the code comment says why)", () => {
-  assert.ok(CAND.includes("Unlike the three export switches (unchecked on every load, never stored), this one IS stored"));
+t("candidate page (AU): the employer switch and the three export choices are all stored on the account, bound to saved page state, and say so in a code comment", () => {
+  assert.ok(CAND.includes("are all stored on the account (columns atid_export_pdf_line, atid_export_pdf_hidden, atid_export_json, default off)"));
   assert.ok(CAND.includes("atidEmployerVisible: s.atidEmployerVisible,"));
   assert.equal(/id="atid-employer-visible-switch"[^>]*>/.exec(CARD)[0].includes("checked=\"{{"), true);
-  for (const id of ["atid-json-switch", "atid-pdf-line-switch", "atid-pdf-meta-switch"]) assert.equal(new RegExp(`id="${id}"[^>]*checked`).test(CAND), false, id);
+  for (const id of ["atid-json-switch", "atid-pdf-line-switch", "atid-pdf-meta-switch"]) assert.equal(new RegExp(`id="${id}"[^>]*checked="\\{\\{`).test(CAND), true, id);
 });
 t("candidate page: the saved state is loaded from every session response and never guessed: true/false from the server wins, anything else keeps the current value (default off)", () => {
   const expr = /atidEmployerVisible: (\(profile && typeof profile\.atid_employer_visible === 'boolean'\) \? profile\.atid_employer_visible : this\.state\.atidEmployerVisible),/.exec(CAND);
@@ -67,10 +67,10 @@ t("candidate page: the saved state is loaded from every session response and nev
   assert.ok(/\n    atidEmployerVisible: false,/.test(CAND), "the initial state is off");
 });
 function savingClass() {
-  const P = makeClass(CAND, ["savePrivacySetting", "toggleAtidEmployerVisible", "toggleDiscoverableProfile", "toggleAllowComparisonRequestsProfile"]);
+  const P = makeClass(CAND, ["savePrivacySetting", "saveAtidFlag", "atidPdfSwitchChanged", "toggleAtidEmployerVisible", "toggleDiscoverableProfile", "toggleAllowComparisonRequestsProfile"]);
   const make = (state, reply) => {
     const p = new P(); p.state = { resumeCandidateId: "cid", discoverableLoadedFor: "cid", discoverableProfileSaving: false, discoverable: true, allowComparisonRequests: true, atidEmployerVisible: false, ...state };
-    p.setState = (patch) => { Object.assign(p.state, typeof patch === "function" ? patch(p.state) : patch); };
+    p.setState = (patch, cb) => { Object.assign(p.state, typeof patch === "function" ? patch(p.state) : patch); if (cb) cb(); };
     p.SUPABASE_FN_URL = "http://fn.test"; p.SUPABASE_ANON_KEY = "anon"; p.candidateSessionToken = () => "tok";
     p.requests = [];
     globalThis.fetch = async (url, init) => { p.requests.push({ url, body: JSON.parse(init.body) }); if (reply === "throw") throw new Error("net"); return { ok: reply.ok, json: async () => reply.json }; };
@@ -78,31 +78,31 @@ function savingClass() {
   };
   return make;
 }
-t("candidate page: ticking the switch saves through set-discoverable with the session, names atid_employer_visible, and shows the value the server answers", async () => {
-  const p = savingClass()({}, { ok: true, json: { ok: true, discoverable: true, allow_comparison_requests: true, atid_employer_visible: true } });
+t("candidate page (AU): ticking the employer switch saves through set-atid-preferences with the session, sends ONLY that flag, and shows the value the server answers", async () => {
+  const p = savingClass()({}, { ok: true, json: { ok: true, atid_export_pdf_line: false, atid_export_pdf_hidden: false, atid_export_json: false, atid_employer_visible: true } });
   await p.toggleAtidEmployerVisible(true);
-  assert.equal(p.requests.length, 1); assert.equal(p.requests[0].url, "http://fn.test/set-discoverable");
-  assert.deepEqual(p.requests[0].body, { session_token: "tok", candidate_id: "cid", discoverable: true, allow_comparison_requests: true, atid_employer_visible: true });
-  assert.equal(p.state.atidEmployerVisible, true); assert.equal(p.state.discoverableProfileSaved, true); assert.equal(p.state.discoverableProfileError, null);
+  assert.equal(p.requests.length, 1); assert.equal(p.requests[0].url, "http://fn.test/set-atid-preferences");
+  assert.deepEqual(p.requests[0].body, { session_token: "tok", candidate_id: "cid", atid_employer_visible: true });
+  assert.equal(p.state.atidEmployerVisible, true); assert.equal(p.state.atidFlagSaving, false); assert.equal(p.state.atidFlagError, null);
   // the server is the truth: if it answers false the box shows false
   const q = savingClass()({}, { ok: true, json: { ok: true, atid_employer_visible: false } }); await q.toggleAtidEmployerVisible(true);
   assert.equal(q.state.atidEmployerVisible, false);
 });
-t("candidate page: a failed save puts the box back to what it was (off stays off, on stays on) and says so, in plain words", async () => {
-  for (const [start, reply] of [[false, { ok: false, json: { ok: false } }], [false, "throw"], [true, { ok: true, json: { ok: false } }]]) {
+t("candidate page (AU): a failed save puts the employer switch back to what it was (off stays off, on stays on) and says so, in plain words", async () => {
+  for (const [start, reply] of [[false, { ok: false, json: { ok: false } }], [false, "throw"], [true, { ok: true, json: { ok: false } }], [true, { ok: true, json: { ok: true } }]]) {
     const p = savingClass()({ atidEmployerVisible: start }, reply);
     await p.toggleAtidEmployerVisible(!start);
-    assert.equal(p.state.atidEmployerVisible, start); assert.match(p.state.discoverableProfileError, /couldn't save that change/); assert.equal(p.state.discoverableProfileSaving, false);
+    assert.equal(p.state.atidEmployerVisible, start); assert.match(p.state.atidFlagError, /couldn't save that change/); assert.equal(p.state.atidFlagErrorWhere, "card"); assert.equal(p.state.atidFlagSaving, false);
   }
 });
-t("candidate page: the other two privacy toggles never write the ATID switch (no stale copy can overwrite it); and nothing is sent before the settings have loaded", async () => {
+t("candidate page (AU): the employer switch no longer depends on the privacy settings having loaded, and the other two privacy toggles never carry it", async () => {
   for (const which of ["toggleDiscoverableProfile", "toggleAllowComparisonRequestsProfile"]) {
     const p = savingClass()({ atidEmployerVisible: true }, { ok: true, json: { ok: true } });
     await p[which](false);
     assert.equal("atid_employer_visible" in p.requests[0].body, false, which);
   }
-  const p = savingClass()({ discoverableLoadedFor: null }, { ok: true, json: { ok: true } }); await p.toggleAtidEmployerVisible(true);
-  assert.equal(p.requests.length, 0); assert.equal(p.state.atidEmployerVisible, false);
+  const p = savingClass()({ discoverableLoadedFor: null }, { ok: true, json: { ok: true, atid_employer_visible: true } }); await p.toggleAtidEmployerVisible(true);
+  assert.equal(p.requests.length, 1, "saved even though Allow lookup has not loaded"); assert.equal("discoverable" in p.requests[0].body, false, "and it never carries a Allow lookup value"); assert.equal(p.state.atidEmployerVisible, true);
 });
 t("candidate page: the switch is not kept in browser storage", () => {
   assert.equal(/(localStorage|sessionStorage)[^\n]*atidEmployerVisible|atidEmployerVisible[^\n]*(localStorage|sessionStorage)/.test(CAND), false);

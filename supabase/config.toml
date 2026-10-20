@@ -177,6 +177,9 @@ verify_jwt = true
 [functions.send-verification]
 verify_jwt = true
 
+[functions.set-atid-preferences]
+verify_jwt = true
+
 [functions.set-candidate-tier]
 verify_jwt = true
 

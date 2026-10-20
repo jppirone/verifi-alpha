@@ -8,6 +8,7 @@ import { summarizeGapReport, type GapSummary } from "../_shared/resume-ocr-gaps.
 import { repairRoleBuckets, orderRoleGroupsLatestFirst } from "../_shared/resume-role-buckets.ts";
 import { restoreSkillText } from "../_shared/resume-skill-text.ts";
 import { normalizeExtractionDates } from "../_shared/resume-date-normalize.ts";
+import { classifyAtidLines, stripAtidFromExtraction, type AtidFound } from "../_shared/resume-atid.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -1463,8 +1464,9 @@ type RasterizePageResult = {
 type AttemptLog = { dpi: number; force_vision: boolean; ms: number; status: number; code?: string; relay_calls: number };
 type RasterizeOutcome = RasterizePageResult & { attempts: AttemptLog[] };
 
-async function callRasterizePage(storagePath: string, pageNumber: number, opts?: { targetDpi?: number; forceVision?: boolean; previousPageContext?: TrailingItemContext }, signal?: AbortSignal): Promise<RasterizePageResult> {
+async function callRasterizePage(storagePath: string, pageNumber: number, opts?: { targetDpi?: number; forceVision?: boolean; previousPageContext?: TrailingItemContext; ownAtid?: string | null }, signal?: AbortSignal): Promise<RasterizePageResult> {
   const body: Record<string, unknown> = { storage_path: storagePath, page_number: pageNumber };
+  if (opts?.ownAtid) body.own_atid = opts.ownAtid;   // AU: the signed-in candidate's OWN ATID, so the page can answer match / mismatch without ever returning what it read
   if (opts?.targetDpi) body.target_dpi = opts.targetDpi;
   if (opts?.forceVision) body.force_vision = true;
   if (opts?.previousPageContext) body.previous_page_context = opts.previousPageContext;
@@ -1503,13 +1505,13 @@ async function callRasterizePage(storagePath: string, pageNumber: number, opts?:
 //    actually works. When the previous page in this document needed that last-resort vision route, the next one
 //    goes straight to it (at RASTERIZE_RETRY_DPI). If the earlier failure was transient contention rather than a
 //    property of this document, that costs the faster tesseract route on the later pages — slower, never wrong.
-async function rasterizePageWithRetry(storagePath: string, pageNumber: number, previousPageContext: TrailingItemContext | undefined, opts: { deadline: number; startWithVision?: boolean }): Promise<RasterizeOutcome> {
+async function rasterizePageWithRetry(storagePath: string, pageNumber: number, previousPageContext: TrailingItemContext | undefined, opts: { deadline: number; startWithVision?: boolean; ownAtid?: string | null }): Promise<RasterizeOutcome> {
   const attempts: AttemptLog[] = [];
   const run = async (o: { targetDpi?: number; forceVision?: boolean }): Promise<RasterizePageResult> => {
     const t = Date.now();
     const remaining = opts.deadline - t;
     if (remaining < 5_000) throw new Error("invocation_budget_exhausted");
-    const r = await callRasterizePage(storagePath, pageNumber, { ...o, previousPageContext }, AbortSignal.timeout(remaining));
+    const r = await callRasterizePage(storagePath, pageNumber, { ...o, previousPageContext, ownAtid: opts.ownAtid }, AbortSignal.timeout(remaining));
     // Relay calls this attempt cost the trace: the call itself, plus one per OCR strip rasterize-pdf-page fanned out to
     // (and any retry/split of a strip). See the RELAY BUDGET note in the resumable-extraction header.
     const strips = (r.data as { ocr_strips?: { count?: number; strips?: Array<{ attempts?: number }> } })?.ocr_strips;
@@ -2832,8 +2834,28 @@ type PageTiming = {
   model_calls?: unknown;
   ocr_gaps?: GapSummary; // rows the OCR dropped and the vision crop recovered (absent when the page had none)
   heading_guard?: unknown; // section headings cleared because they equalled an item's own name (absent when none)
+  atid?: "match" | "mismatch"; // AU: an ATID line was on this page: ONE WORD about it (never the value); absent when there was none
   qa: { fired: boolean; deferred: boolean; skipped?: "vision_route" | "no_measured_benefit"; issues_before?: number; issues_after?: number; retry_ms?: number; kept?: "retry" | "original" };
 };
+
+// AU: the signed-in candidate's OWN stored ATID, read by their own candidate id (never by anything found on an upload). null when there is no candidate yet (a first upload) or the read fails.
+async function loadOwnAtid(supabase: any, candidateId: unknown): Promise<string | null> {
+  if (typeof candidateId !== "string" || !candidateId) return null;
+  try {
+    const { data } = await supabase.from("candidates").select("atid").eq("id", candidateId).maybeSingle();
+    return typeof data?.atid === "string" ? data.atid : null;
+  } catch (_e) { return null; }
+}
+// one word for the whole upload from the per-page words: any mismatch wins, then match, else none
+function atidWordFor(pages: Array<{ timing: { atid?: string } | null }>): AtidFound {
+  let out: AtidFound = "none";
+  for (const p of pages) {
+    const a = p.timing?.atid;
+    if (a === "mismatch") return "mismatch";
+    if (a === "match") out = "match";
+  }
+  return out;
+}
 
 function jsonResponse(obj: unknown, status = 200): Response {
   return new Response(JSON.stringify(obj), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -2876,6 +2898,8 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
 
   const { data: docMeta } = await supabase.from("resume_documents").select("extraction_page_count, candidate_id").eq("id", docId).maybeSingle();
   let pageCount: number | null = docMeta?.extraction_page_count ?? null;
+  // AU: the signed-in candidate's OWN ATID (one read of their own row by id; null on a first upload, before any account exists). Nothing else is ever looked up.
+  const ownAtid = await loadOwnAtid(supabase, docMeta?.candidate_id);
   const { data: rowsData } = await supabase.from("resume_extraction_pages")
     .select("page_number, extraction, ocr_text, qa_retry, timing, section_boundaries").eq("resume_document_id", docId).order("page_number", { ascending: true });
   const rows = new Map<number, { page_number: number; extraction: ExtractionResult; ocr_text: string | null; qa_retry: string; timing: PageTiming | null; sectionBoundaries: BoundaryResult | null }>();
@@ -2906,7 +2930,7 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
       if (rows.has(pn)) continue;
       if (unitsDone > 0 && !canStartAnotherPage()) return await continueResponse();
       unitsDone++;
-      const outcome = await rasterizePageWithRetry(originalPath, pn, contextFor(pn), { deadline: pageDeadline, startWithVision: hintFor(pn) });
+      const outcome = await rasterizePageWithRetry(originalPath, pn, contextFor(pn), { deadline: pageDeadline, startWithVision: hintFor(pn), ownAtid });
       const pageMs = outcome.attempts.reduce((n, a) => n + a.ms, 0);
       const pageCalls = outcome.attempts.reduce((n, a) => n + a.relay_calls, 0);
       relayCalls += pageCalls;
@@ -2937,6 +2961,8 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
       if (gapSummary) timing.ocr_gaps = gapSummary;
       const guardCleared = (d as { heading_guard?: unknown }).heading_guard;
       if (Array.isArray(guardCleared) && guardCleared.length > 0) timing.heading_guard = guardCleared.slice(0, 16);
+      const atidWord = (d as { atid_check?: unknown }).atid_check;
+      if (atidWord === "match" || atidWord === "mismatch") timing.atid = atidWord;
 
       // STRUCTURAL QA CHECK — RETRY REMOVED (2026-09-19). findStructuralIssues still runs and its flag is still
       // recorded in the page timing, but it no longer triggers a second read of the page. That retry (one bounded,
@@ -3076,6 +3102,13 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
     extraction_timing: { pages: ordered.map((r) => ({ page: r.page_number, ...(r.timing ?? {}) })), finished_at: new Date().toISOString() },
   }).eq("id", docId);
 
+  // AU: what the pages said about an ATID line, as one word (never the value). Stored on the document row so the confirm screen can show it whenever it loads; its own best-effort
+  // update, so it can never take the extraction timing above down with it.
+  const atidOnUpload = atidWordFor(ordered);
+  if (atidOnUpload !== "none") {
+    try { await supabase.from("resume_documents").update({ atid_on_upload: atidOnUpload }).eq("id", docId); } catch (_e) { /* the note is optional */ }
+  }
+
   const { error: pdfStatusErr } = await supabase.from("resume_documents")
     .update({ extraction_status: "extracted", extracted_at: new Date().toISOString(), extraction_lease_until: null }).eq("id", docId);
   if (pdfStatusErr) return jsonResponse({ ok: false, error: "status_update_failed", detail: pdfStatusErr.message }, 500);
@@ -3093,6 +3126,7 @@ async function processPdfPages(supabase: any, docId: string, originalPath: strin
     extraction_status: "extracted",
     extraction_method: "pdf_rasterize",
     page_count: pageCount ?? 1,
+    ...(atidOnUpload !== "none" ? { atid_on_upload: atidOnUpload } : {}),
     original_signed_url: signedPdf?.signedUrl ?? null,
     continue: false,
     timing: { invocation_ms: Date.now() - invocationStart, pages: ordered.map((r) => ({ page: r.page_number, ...(r.timing ?? {}) })) },
@@ -3348,6 +3382,11 @@ export default {
       const w = Number(width), h = Number(height);
       const aspectRatio = Math.max(w, h) / Math.min(w, h);
       const useVisionFallback = aspectRatio > STITCHED_ASPECT_RATIO_THRESHOLD;
+      let imageAtidWord: AtidFound = "none";   // AU: what an image upload said about an ATID line (one word, never the value)
+      const noteImageAtid = async () => {
+        if (imageAtidWord === "none") return;
+        try { await supabase.from("resume_documents").update({ atid_on_upload: imageAtidWord }).eq("id", docId); } catch (_e) { /* the note is optional */ }
+      };
 
       if (useVisionFallback) {
         console.log(`upload-resume: ${docId} routed to vision fallback (${w}x${h}, ratio ${aspectRatio.toFixed(2)})`);
@@ -3381,6 +3420,12 @@ export default {
           extraction.skills_heading = resolveSkillsHeading(sectionBoundaries, extraction);
           // Same self-referential-heading guard as the PDF path (rasterize-pdf-page): a heading identical to one of its own items is cleared.
           guardSelfReferentialHeadings(extraction as unknown as Parameters<typeof guardSelfReferentialHeadings>[0]);
+          // AU: the image-vision path has no OCR text to strip, so the ATID rule is applied to what the model sent back (no model call, no prompt change): ATID-shaped lines are removed from the
+          // extraction and the upload gets one word about it. The value read is not returned, logged or stored; the only comparison is with the signed-in candidate's own ATID. Fails open.
+          try {
+            const vs = stripAtidFromExtraction(extraction, await loadOwnAtid(supabase, hasCand ? candidate_id : null));
+            if (vs.stripped > 0) { imageAtidWord = vs.found; console.log(`upload-resume: ${docId} ATID line stripped (image vision)`); }
+          } catch (stripErr) { console.log(`upload-resume: ${docId} ATID line strip FAILED (image vision), extraction unchanged: ${String(stripErr)}`); }
         } catch (visionErr) {
           await supabase.from("resume_documents").update({ extraction_status: "failed" }).eq("id", docId);
           return new Response(JSON.stringify({ ok: false, error: "vision_extraction_failed", detail: String(visionErr), resume_document_id: docId }), {
@@ -3438,12 +3483,14 @@ export default {
           });
         }
 
+        await noteImageAtid();
         const { data: signedVision } = await supabase.storage.from(BUCKET).createSignedUrl(originalPath, 3600);
         return new Response(JSON.stringify({
           ok: true,
           resume_document_id: docId,
           extraction_status: "extracted",
           extraction_method: "vision",
+          ...(imageAtidWord !== "none" ? { atid_on_upload: imageAtidWord } : {}),
           original_signed_url: signedVision?.signedUrl ?? null,
         }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
@@ -3452,6 +3499,12 @@ export default {
       try {
         const rgbaBytes = base64ToBytes(rgba_base64);
         ocrText = await runOcr(rgbaBytes, w, h);
+        // AU: same rule as the PDF path: ATID-shaped lines are removed from the OCR text before anything reads it, and the upload gets one word about it
+        // (none / match / mismatch against the signed-in candidate's own ATID; nothing else is looked up; the value is not returned, logged or stored). Fails open.
+        try {
+          const st = classifyAtidLines(ocrText, await loadOwnAtid(supabase, hasCand ? candidate_id : null));
+          if (st.stripped > 0) { ocrText = st.text; imageAtidWord = st.found; console.log(`upload-resume: ${docId} ATID line stripped (image)`); }
+        } catch (stripErr) { console.log(`upload-resume: ${docId} ATID line strip FAILED (image), text unchanged: ${String(stripErr)}`); }
       } catch (ocrErr) {
         await supabase.from("resume_documents").update({ extraction_status: "failed" }).eq("id", docId);
         return new Response(JSON.stringify({ ok: false, error: "ocr_failed", detail: String(ocrErr), resume_document_id: docId }), {
@@ -3471,12 +3524,14 @@ export default {
 
       // Short-lived signed URL so the client can render the original immediately on the confirm
       // screen without the bucket being public.
+      await noteImageAtid();
       const { data: signed } = await supabase.storage.from(BUCKET).createSignedUrl(originalPath, 3600);
 
       return new Response(JSON.stringify({
         ok: true,
         resume_document_id: docId,
         extraction_status: "ocr_done",
+        ...(imageAtidWord !== "none" ? { atid_on_upload: imageAtidWord } : {}),
         original_signed_url: signed?.signedUrl ?? null,
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     } catch (e) {
