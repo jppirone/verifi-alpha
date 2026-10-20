@@ -1,6 +1,7 @@
 // Setup type definitions for built-in Supabase Runtime APIs
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { withSupabase } from "jsr:@supabase/server@1";
+import { attachPrintedHeadings as attachPrintedHeadingsFor } from "../_shared/resume-heading-line.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -45,6 +46,20 @@ async function isCandidateSession(body: any, candidateId: string): Promise<boole
   const sess = r.ok ? (await r.json())[0] : null;
   return !!sess && !sess.revoked_at && new Date(sess.expires_at).getTime() > Date.now() && sess.candidate_id === candidateId;
 }
+// Reads, never writes: the work rows' source document ids and those documents' stored page text, then runs the shared finder over them. Mutates `resume.work` in place.
+async function attachPrintedHeadings(resume: any): Promise<void> {
+  const work: any[] = Array.isArray(resume?.work) ? resume.work : [];
+  const ids = work.map((w) => w?.id).filter((x) => typeof x === "string" && UUID_RE.test(x));
+  if (!ids.length) return;
+  const rows = await fetch(`${SUPABASE_URL}/rest/v1/work_history_items?id=in.(${ids.join(",")})&select=id,resume_document_id`, { headers: REST }).then((x) => (x.ok ? x.json() : []));
+  const docOf = new Map<string, string>((rows as any[]).filter((x) => x?.resume_document_id).map((x) => [x.id, x.resume_document_id]));
+  const docIds = [...new Set(docOf.values())].filter((d) => UUID_RE.test(d));
+  if (!docIds.length) return;
+  const docs = await fetch(`${SUPABASE_URL}/rest/v1/resume_documents?id=in.(${docIds.join(",")})&select=id,ocr_raw_text`, { headers: REST }).then((x) => (x.ok ? x.json() : []));
+  const ocrOf = new Map<string, string>((docs as any[]).filter((d) => typeof d?.ocr_raw_text === "string").map((d) => [d.id, d.ocr_raw_text]));
+  const found = attachPrintedHeadingsFor(work, (w: any) => ocrOf.get(docOf.get(w.id) ?? ""));
+  for (const w of work) { const h = found.get(w.id); if (h && h.length) w.printed_heading = h; }
+}
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
 export default {
@@ -63,6 +78,9 @@ export default {
       });
       if (!r.ok) return json({ ok: false, error: "assemble_failed" }, 500);
       const resume = await r.json();
+      // AW (October 20, 2026): each job's heading line as the candidate's own resume printed it (resume.work[].printed_heading), found again in the stored page text by a plain rule.
+      // The generated PDF prints it instead of rebuilding "Company, Title, Location (years)". Best effort: any problem leaves the field off and the PDF falls back to the pipe heading.
+      try { await attachPrintedHeadings(resume); } catch (_e) { /* fallback heading */ }
       const ackRow = await fetch(`${SUPABASE_URL}/rest/v1/candidates?id=eq.${candidateId}&select=customization_edit_ack_at,customization_edit_ack_text_version,atid`, { headers: REST })
         .then((res) => res.ok ? res.json() : null).then((a) => (a && a[0]) || null).catch(() => null);
       const ackGiven = !!(ackRow && ackRow.customization_edit_ack_at && ackRow.customization_edit_ack_text_version === CUSTOMIZATION_EDIT_ACK_VERSION);
