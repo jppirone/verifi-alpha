@@ -83,6 +83,22 @@ type Action = { access: "any" | "orgless" | "member" | "owner" | "plain_member";
 
 const ok = (body: Record<string, unknown> = {}): Out => ({ body: { ok: true, ...body } });
 const fail = (status: number, error: string, extra: Record<string, unknown> = {}): Out => ({ status, body: { ok: false, error, ...extra } });
+// BA, Part 5b (October 21, 2026): when does an open request stop blocking a new one from the same employer for the same candidate? Exactly when expire_comparison_requests moves it out of
+// pending/approved (20260923030000): a pending request at its expires_at (72 hours after it was made); an approved one never opened at its snapshot_expires_at (7 days after approval); an opened
+// one at the end of its window (a guest's view_window_ends_at; an organization's first open plus 90 days for a resume comparison, 30 for a license report). The sweep runs hourly, so the real
+// moment can be up to an hour later. Reads one row; null (no date shown) when it cannot be worked out.
+async function openRequestBlockEnds(requestId: unknown): Promise<string | null> {
+  if (typeof requestId !== "string" || !UUID.test(requestId)) return null;
+  try {
+    const r = (await rows(`comparison_requests?id=eq.${requestId}&select=status,expires_at,snapshot_expires_at,first_delivered_at,view_window_ends_at,access_method,kind`))?.[0];
+    if (!r) return null;
+    if (r.status === "pending") return r.expires_at || null;
+    if (r.status !== "approved") return null;
+    if (!r.first_delivered_at) return r.snapshot_expires_at || null;
+    if (r.access_method === "guest") return r.view_window_ends_at || null;
+    return new Date(new Date(r.first_delivered_at).getTime() + (r.kind === "license_report" ? 30 : 90) * 86400000).toISOString();
+  } catch (_e) { return null; }
+}
 
 async function sha256Hex(raw: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw));
@@ -699,7 +715,7 @@ const ACTIONS: Record<string, Action> = {
         if (res.reason === "document_invalid") return fail(400, "document_invalid");
         if (res.reason === "subscription_required") return fail(402, (await hasPaymentProblem(user.org_id!)) ? "payment_problem" : "subscription_required");
         if (res.reason === "rate_limited") return fail(429, "rate_limited");
-        if (res.reason === "already_open") return fail(409, "already_requested", { request_id: res.request_id });
+        if (res.reason === "already_open") return fail(409, "already_requested", { request_id: res.request_id, available_after: await openRequestBlockEnds(res.request_id) });
         // Gap #22: existence is already known on this lookup-first path, so this is told apart from the
         // generic "unavailable" below -- see create_comparison_request's own header.
         if (res.reason === "comparison_not_allowed") return fail(409, "not_accepting");
@@ -887,7 +903,7 @@ const ACTIONS: Record<string, Action> = {
         if (res.reason === "document_required") return fail(400, "document_required");
         if (res.reason === "document_invalid") return fail(400, "document_invalid");
         if (res.reason === "rate_limited") return fail(429, "rate_limited");
-        if (res.reason === "already_open") return fail(409, "already_requested", { request_id: res.request_id });
+        if (res.reason === "already_open") return fail(409, "already_requested", { request_id: res.request_id, available_after: await openRequestBlockEnds(res.request_id) });
         // not_accepting was already told apart above, before this RPC was ever called -- everything else
         // (subscription_required only applies to p_method:"org", so is unreachable here; a race where the
         // candidate's own row changed between the check above and this insert) is the generic bucket.
@@ -1145,7 +1161,7 @@ const ACTIONS: Record<string, Action> = {
         if (res.reason === "document_invalid") return fail(400, "document_invalid");
         if (res.reason === "rate_limited") return fail(429, "rate_limited");
         if (res.reason === "subscription_required") return fail(402, "subscription_required");
-        if (res.reason === "already_open") return fail(409, "already_requested", { request_id: res.request_id });
+        if (res.reason === "already_open") return fail(409, "already_requested", { request_id: res.request_id, available_after: await openRequestBlockEnds(res.request_id) });
         return fail(409, "unavailable");
       }
       let notified = false;

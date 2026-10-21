@@ -3852,6 +3852,10 @@ a:hover{color:var(--color-accent)}
 
         <sc-if value="{{ resubStageReview }}" hint-placeholder-val="{{ false }}">
           <div style="display:flex;flex-direction:column;gap:var(--space-4);min-width:0" id="resub-review">
+            <!-- BA, Part 5d: the update screen warns when the uploaded file carries an ATID that is not this account's (the saved record says mismatch). Never the ATID itself. -->
+            <sc-if value="{{ resubAtidMismatch }}" hint-placeholder-val="{{ false }}">
+              <div id="resub-atid-note" class="card elev-sm" style="font-size:13px;color:var(--color-neutral-200);line-height:1.6;padding:10px 14px">This file shows an ATID that is not yours. We ignored it.</div>
+            </sc-if>
             <div style="font-size:14px;line-height:1.6">Nothing has changed yet. This is exactly what will happen if you confirm: <b id="resub-summary">{{ rvSummary }}</b></div>
 
             <sc-if value="{{ resubNoticeInReview }}" hint-placeholder-val="{{ false }}">
@@ -4074,7 +4078,7 @@ a:hover{color:var(--color-accent)}
             <input type="checkbox" id="atid-employer-visible-switch" checked="{{ atidEmployerVisible }}" disabled="{{ atidEmployerSaving }}" sc-camel-on-change="{{ toggleAtidEmployerVisible }}" style="margin-top:2px">
             <span>Let employers use my ATID</span>
           </label>
-          <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">When this is on, an employer who knows your name and your ATID can find you, and your ATID appears on comparison documents. This only works while "Let employers confirm I have an account here" is also on. You still approve every request. When this is off, employers cannot use your ATID at all.</div>
+          <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">When this is on, an employer who types your name and your ATID can find your account (while "Let employers confirm I have an account here" is also on), and your ATID is shown on the comparison document that employer receives. You approve every request. Turn it off and your ATID does not work for lookup and is not shown to employers.</div>
           <!-- AS: shown only once the privacy settings have loaded and "Let employers confirm I have an account here" (Allow lookup) is really off; the switch above is never disabled by it -->
           <sc-if value="{{ atidLookupIsOff }}" hint-placeholder-val="{{ false }}">
             <div id="atid-lookup-off-note" style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">Employers cannot find you by ATID until "Let employers confirm I have an account here" is turned on.</div>
@@ -5472,7 +5476,7 @@ a:hover{color:var(--color-accent)}
             </sc-for>
           </div>
           <sc-if value="{{ empConfirmOpen }}" hint-placeholder-val="{{ false }}">
-            <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3);border:1px solid var(--color-accent-700)">
+            <div class="card elev-md" data-emp-confirm="1" tabindex="-1" style="display:flex;flex-direction:column;gap:var(--space-3);border:1px solid var(--color-accent-700);outline:none">
               <div class="card-kicker">Confirm</div>
               <div style="font-size:13px;color:var(--color-neutral-200);line-height:1.6">{{ empConfirmText }}</div>
               <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.6"><b>How they say they got your information:</b> {{ empConfirmSource }}</div>
@@ -5619,7 +5623,7 @@ a:hover{color:var(--color-accent)}
           </div>
 
           <sc-if value="{{ empConfirmOpen }}" hint-placeholder-val="{{ false }}">
-            <div class="card elev-md" style="display:flex;flex-direction:column;gap:var(--space-3);border:1px solid var(--color-accent-700)">
+            <div class="card elev-md" data-emp-confirm="1" tabindex="-1" style="display:flex;flex-direction:column;gap:var(--space-3);border:1px solid var(--color-accent-700);outline:none">
               <div class="card-kicker">Confirm</div>
               <div style="font-size:13px;color:var(--color-neutral-200);line-height:1.6">{{ empConfirmText }}</div>
               <div style="font-size:12px;color:var(--color-neutral-300);line-height:1.6"><b>How they say they got your information:</b> {{ empConfirmSource }}</div>
@@ -7948,6 +7952,12 @@ class Component extends DCLogic {
     if (w === 'mismatch') return 'The ATID on this resume is not the one on your account. We ignore ATIDs on uploads and keep using yours, so nothing was changed.';
     return '';
   }
+  // BA, Part 5d: true only when the saved record of the newly uploaded file says 'mismatch' (the upload answer, or the extraction record of a resubmission). 'match' and empty show nothing.
+  resubAtidIsMismatch(s) {
+    if (s.resubAtidWord === 'mismatch') return true;
+    const d = s.resumeExtraction && s.resumeExtraction.resume_document;
+    return !!d && d.kind === 'resubmission' && d.atid_on_upload === 'mismatch';
+  }
   async saveAtidFlag(stateKey, serverKey, checked, where) {
     const s = this.state, id = s.resumeCandidateId, previous = !!s[stateKey];
     const MSG = "We couldn't save that change, so it's back to what it was. Please try again.";
@@ -8391,7 +8401,7 @@ class Component extends DCLogic {
     resub: { attempt: null, contactPending: null, loaded: false }, resubAckOpen: false, resubStage: 'idle', resubBusy: false, resubError: null, resubNotice: null, resubNoticeInReview: null,
     resubPlan: null, resubPlanHash: null, resubOptIn: null, resubTrades: {}, resubExpanded: {}, resubResult: null, resubContactVals: {}, resubWorkingText: 'Reading your resume…', resubFailedText: '',
     resumeEmailVerificationId: null, resumeDocumentId: null,
-    resumeCandidateId: null, resumeExtraction: null, resumeExtractionLoading: false,
+    resumeCandidateId: null, resumeExtraction: null, resumeExtractionLoading: false, resubAtidWord: '',
     // Item 9 (2026-09-12 live-testing session): pdfViewerScale/pdfViewerFitScale replace the old
     // hardcoded pdfViewerScale:1.3 default — see renderOriginalPdfViewerInto's own header for why a
     // fixed initial scale was never genuinely "100%" of anything real. Both null until the first
@@ -8684,7 +8694,7 @@ class Component extends DCLogic {
         documentUntil: r.document && r.document.available_until ? this.empDateLabel(r.document.available_until) : '',
         onViewDocument: (ev) => { if (ev && ev.preventDefault) ev.preventDefault(); this.viewEmployerDocument(r.id); },
         isPending: r.status === 'pending', isApproved: r.status === 'approved' && r.snapshot_available,
-        onApprove: () => (r.kind === 'license_report' ? this.startLicenseApprove(r.id) : this.setState({ empConfirmId: r.id })),
+        onApprove: () => (r.kind === 'license_report' ? this.startLicenseApprove(r.id) : this.openEmpConfirm(r.id)),
         onDecline: () => this.respondToRequest(r.id, 'decline'),
         onOpenSnapshot: (ev) => { if (ev && ev.preventDefault) ev.preventDefault(); this.openSnapshot(r); },
       };
@@ -8731,8 +8741,21 @@ class Component extends DCLogic {
 
   // Approve on a license report: first a LIVE preview (the server re-checks each verified license against the registry), so the candidate approves
   // exactly what the employer will get. If the preview cannot be made the candidate cannot approve blind: the card says so.
+  // BA, Part 5c (October 21, 2026): opening a Confirm box (a) clears any earlier result banner, so an old "Approved..." never sits above a new Confirm, and (b) scrolls the Confirm box into view
+  // and moves focus to it, because the Approve button is in the table row, often far from the box.
+  openEmpConfirm(id) {
+    this.setState({ empConfirmId: id, empNotice: null });
+    this.focusEmpConfirm(0);
+  }
+  focusEmpConfirm(tries) {
+    const el = Array.from(document.querySelectorAll('[data-emp-confirm]')).find(x => x.offsetParent !== null);
+    if (!el) { if (tries < 30) requestAnimationFrame(() => this.focusEmpConfirm(tries + 1)); return; }
+    try { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); el.focus({ preventScroll: true }); } catch (e) { /* the box is still open */ }
+  }
+
   async startLicenseApprove(id) {
     this.setState({ empConfirmId: id, empPreview: { id, loading: true, error: false, would: null }, empNotice: null });
+    this.focusEmpConfirm(0);
     const res = await this.comparisonCall({ action: 'preview' });
     if (this.state.empConfirmId !== id) return; // cancelled while the check ran
     this.setState({ empPreview: { id, loading: false, error: !res.data.ok, would: res.data.ok ? res.data.would_share : null } });
@@ -8776,7 +8799,10 @@ class Component extends DCLogic {
 
   empItemSummaryText(w) {
     const part = (n, one, many) => (n ? n + ' ' + (n === 1 ? one : many) : '');
-    return [part(w.work.total, 'job', 'jobs'), part(w.education.total, 'education entry', 'education entries'), part(w.certifications.total, 'certification or license', 'certifications and licenses')].filter(Boolean).join(', ');
+    // BA, Part 5c: the server's would_share carries the item LISTS under work, education and certifications (they replace the counts of the same names when it is built), so a count is the list's
+    // length; a plain { total } count object is read too. Before this every part came out empty and the text read "(),".
+    const n = (x) => (Array.isArray(x) ? x.length : (x && Number(x.total)) || 0);
+    return [part(n(w.work), 'job', 'jobs'), part(n(w.education), 'education entry', 'education entries'), part(n(w.certifications), 'certification or license', 'certifications and licenses')].filter(Boolean).join(', ');
   }
 
   async respondToRequest(id, decision) {
@@ -12318,7 +12344,7 @@ class Component extends DCLogic {
       return;
     }
     try { input.value = ''; } catch (e2) {}
-    this.setState({ resubStage: 'working', resubBusy: false, resubWorkingText: 'Uploading your resume…' });
+    this.setState({ resubStage: 'working', resubBusy: false, resubWorkingText: 'Uploading your resume…', resubAtidWord: '' });
     let res, data;
     try {
       res = await this.fetchWithTimeout(this.SUPABASE_FN_URL + '/upload-resume', {
@@ -12341,7 +12367,7 @@ class Component extends DCLogic {
       return;
     }
     if (data.continue) this.continueResumeExtraction(data.resume_document_id);
-    this.setState(st => ({ resub: { ...st.resub, attempt: { ...st.resub.attempt, status: 'extracting' } }, resubWorkingText: 'Reading your resume…' }));
+    this.setState(st => ({ resub: { ...st.resub, attempt: { ...st.resub.attempt, status: 'extracting' } }, resubWorkingText: 'Reading your resume…', resubAtidWord: data.atid_on_upload === 'mismatch' ? 'mismatch' : '' }));
     this.pollResub(false);
   }
 
@@ -12486,6 +12512,7 @@ class Component extends DCLogic {
       continueResub: () => this.continueResub(), cancelResubFromCard: () => this.cancelResub(),
       tabIsResumeUpdate: s.accountTab === 'resumeUpdate',
       resubBackToProfile: () => this.resubBackToProfile(),
+      resubAtidMismatch: this.resubAtidIsMismatch(s),
       resubStageChoose: stage === 'choose', resubStageWorking: stage === 'working', resubStageFailed: stage === 'failed', resubStageReview: stage === 'review',
       resubStageDone: stage === 'done', resubStageContact: stage === 'contact',
       onPickResubFile: (e) => this.onPickResubFile(e), cancelResub: () => this.cancelResub(), resubStartOver: () => this.resubStartOver(),

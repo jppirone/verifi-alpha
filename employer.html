@@ -3142,6 +3142,7 @@ const __ds_scope = {};
         <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Have an organization plan instead? <a href="#" sc-camel-on-click="{{ goSigninFromAccess }}">Sign in</a>. Its lookups cover these requests with no per-view charge.</div>
       </sc-if>
       <sc-if value="{{ accessPaidForm }}" hint-placeholder-val="{{ false }}">
+        <div id="price-line-request" style="font-size:13px;color:var(--color-neutral-200);line-height:1.6"><b>A one-off comparison costs {{ guestPriceLabel }}.</b> Your card is only charged when you open the document, after the candidate approves. Organizations can set up a corporate account instead; its owner starts one under Billing.</div>
         <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">The candidate is asked to approve, and a request that is declined or not answered costs nothing. Sending this request saves your card now, but places <b>no hold yet</b>. If the candidate approves, we automatically place a {{ guestPriceLabel }} hold on that saved card the moment they do &mdash; no second card prompt from us. The <b>real charge only happens when you open the result</b>, which you can do any time in the <b>7 days after the candidate approves</b>. If the candidate declines, doesn't answer within 72 hours, or you don't open it within that window, the hold quietly expires and you're never charged. Once you open it, it stays available from your account for 21 days.</div>
         <div class="field">
           <label for="rq-att-p">How did you obtain this candidate's information?</label>
@@ -3244,7 +3245,7 @@ const __ds_scope = {};
           <sc-if value="{{ confirmIsPaid }}" hint-placeholder-val="{{ false }}">
             <div class="dialog-title" id="req-confirm-title" style="font-size:22px;line-height:1.3">This saves your card. It does not charge it.</div>
             <div style="display:flex;flex-direction:column;gap:var(--space-3);font-size:14px;line-height:1.6;color:var(--color-text)">
-              <div><b>Nothing is charged now.</b> Sending this request only saves your card for later; no hold is placed yet.</div>
+              <div><b>Nothing is charged now.</b> Sending this request only saves your card for later; no hold is placed yet. You enter your card details with Stripe, not on this site.</div>
               <div>If the candidate approves, we automatically place a <b>{{ confirmPriceLabel }} hold</b> on that saved card the moment they do &mdash; you won't be asked for it again. The <b>real charge only happens when you open the result</b>, any time in the <b>7 days after that approval</b>, not from today.</div>
               <div>If the candidate declines, does not answer within 72 hours, or you do not open it within that 7-day window, the hold quietly expires and <b>you are never charged</b>.</div>
             </div>
@@ -3847,6 +3848,7 @@ class Component extends DCLogic {
       real: me.data, realMembers: members, realOrgInvites: invites, billing: billing,
       acctNameDraft: (me.data.user && me.data.user.name) || '', orgNameDraft: (me.data.org && me.data.org.name) || '',
     }, cmp, myPaid));
+    if (!this.state.guestPrice) this.loadGuestPrice();   // BA, Part 5f: the "Clicking Open charges your card [amount] now" line needs the price (read from employer_pricing through the existing price call)
     return true;
   }
 
@@ -4238,7 +4240,7 @@ class Component extends DCLogic {
         reqBusy: false,
         reqErr: this.reqDocErrorFor(code) || (code === 'attestation_invalid' ? 'Please say how you obtained the candidate\u2019s information (10 to 500 characters).'
           : code === 'rate_limited' ? 'You have sent several requests today. Please try again tomorrow.'
-          : code === 'already_requested' ? 'You already have a request open for this candidate. It is listed in your account.'
+          : code === 'already_requested' ? this.alreadyRequestedMsg(r.data, 'You already have a request open for this candidate. It is listed in your account.')
           : code === 'not_accepting' ? "This candidate has an account, but isn't accepting comparison requests right now. Nothing was charged and nothing was sent to them."
           : "This request can't be made right now."),
       });
@@ -4260,7 +4262,7 @@ class Component extends DCLogic {
       reqBusy: false,
       reqErr: this.reqDocErrorFor(code) || (code === 'attestation_invalid' ? 'Please say how you obtained the candidate\u2019s information (10 to 500 characters).'
         : code === 'rate_limited' ? 'You have sent several requests today. Please try again tomorrow.'
-        : code === 'already_requested' ? 'You already have a request open for this candidate. Check your email for the link if it was approved.'
+        : code === 'already_requested' ? this.alreadyRequestedMsg(r.data, 'You already have a request open for this candidate. Check your email for the link if it was approved.')
         : code === 'not_accepting' ? "This candidate has an account, but isn't accepting comparison requests right now. Nothing was charged and nothing was sent to them."
         : "This request can't be made right now."),
     });
@@ -4301,7 +4303,7 @@ class Component extends DCLogic {
           : code === 'attestation_invalid' ? 'Please say a bit more about how you obtained this candidate’s information (10 to 500 characters).'
           : code === 'rate_limited' ? 'You have sent several requests recently. Please try again in an hour.'
           : code === 'subscription_required' ? 'Your organization has no active subscription right now.'
-          : code === 'already_requested' ? 'You already have a request open for this candidate.'
+          : code === 'already_requested' ? this.alreadyRequestedMsg(r.data, 'You already have a request open for this candidate.')
           : "That didn't work. Please try again."),
       });
       return;
@@ -4487,7 +4489,7 @@ class Component extends DCLogic {
         : code === 'payment_problem' ? "Your organization's latest payment failed, so new requests are paused until it is paid. The owner can update the payment method under Billing; nothing was sent to the candidate."
         : code === 'subscription_required' ? "Your organization needs an active subscription to request verified records. The owner can start one under Billing."
         : code === 'rate_limited' ? 'You have sent several requests today. Please try again tomorrow.'
-        : code === 'already_requested' ? 'You already have a request open for this candidate. It is listed in your account.'
+        : code === 'already_requested' ? this.alreadyRequestedMsg(r.data, 'You already have a request open for this candidate. It is listed in your account.')
         : code === 'forbidden' ? 'Requests need an organization account.'
         : code === 'not_accepting' ? "This candidate has an account, but isn't accepting comparison requests right now. Nothing was used from your plan and nothing was sent to them."
         : "This request can't be made right now."),
@@ -4517,6 +4519,14 @@ class Component extends DCLogic {
         : "We couldn't open that " + noun + ". Please try again.",
     });
     await this.loadComparisons();
+  }
+
+  // BA, Part 5b: the "already open" message says plainly when a new request can be made, using the date the server worked out from the open request (employer-api openRequestBlockEnds).
+  // No date from the server means the plain message with no invented date.
+  alreadyRequestedMsg(d, base) {
+    const t = d && d.available_after ? new Date(d.available_after) : null;
+    if (!t || isNaN(t.getTime())) return base;
+    return base + ' You can make a new request after ' + t.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) + '.';
   }
 
   // ---- System-generated document (2026-09-22) ----
@@ -4921,7 +4931,8 @@ class Component extends DCLogic {
     }
     if (c.status === 'not_authorized') return 'Not authorized. Nothing was ever charged.';
     if (c.status === 'ready') {
-      if (c.hold_state === 'holding') return 'Approved. Ready to open until ' + this.fmtDate(c.available_until) + '. Opening it charges the hold now.';
+      // BA, Part 5f: say how much and when. The amount is the comparison price from the same source as the request screens (employer_pricing, through loadGuestPrice); never typed in here.
+      if (c.hold_state === 'holding') return 'Approved. Ready to open until ' + this.fmtDate(c.available_until) + '. Clicking Open charges your card ' + (this.state.guestPrice ? this.money(this.state.guestPrice) : 'the comparison price') + ' now.';
       if (c.hold_state === 'failed') return 'Approved, but the automatic hold failed. Opening it will ask you for a card.';
       return 'Approved. No hold is on file, so opening it will ask you for a card.';
     }

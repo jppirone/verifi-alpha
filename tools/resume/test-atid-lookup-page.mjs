@@ -27,7 +27,8 @@ const CARD = CAND.slice(CAND.lastIndexOf('<sc-if value="{{ hasAtid }}"', CARD_ST
 t("candidate page: the switch sits on the ATID card, with the agreed wording, bound to saved state (not a plain unchecked box), disabled while loading or saving", () => {
   assert.ok(CARD.includes('id="atid-employer-visible-switch" checked="{{ atidEmployerVisible }}" disabled="{{ atidEmployerSaving }}" sc-camel-on-change="{{ toggleAtidEmployerVisible }}"'));
   assert.ok(CARD.includes("<span>Let employers use my ATID</span>"));
-  assert.ok(CARD.includes('When this is on, an employer who knows your name and your ATID can find you, and your ATID appears on comparison documents. This only works while "Let employers confirm I have an account here" is also on. You still approve every request. When this is off, employers cannot use your ATID at all.'));
+  // BA Part 5e (October 21, 2026): John merged "one switch covers lookup by name plus ATID and the ATID on the comparison document" into this note; the lookup still also needs "Allow lookup", so that condition stays in the sentence.
+  assert.ok(CARD.includes('When this is on, an employer who types your name and your ATID can find your account (while "Let employers confirm I have an account here" is also on), and your ATID is shown on the comparison document that employer receives. You approve every request. Turn it off and your ATID does not work for lookup and is not shown to employers.'));
   assert.equal(CARD.includes("can look you up"), false, "the old, over-promising wording is gone");
   assert.ok(CARD.includes("{{ atidDisplay }}") && CARD.includes("{{ copyAtid }}"), "it is the same card as the ATID row");
 });

@@ -72,6 +72,19 @@ async function rows(path: string): Promise<any[]> {
   const j = await r.json();
   return Array.isArray(j) ? j : [];
 }
+// BA, Part 5b: the same "a new request is possible after" date as employer-api's openRequestBlockEnds (see its comment for the rule), for the guest path.
+async function openRequestBlockEnds(requestId: unknown): Promise<string | null> {
+  if (typeof requestId !== "string" || !UUID.test(requestId)) return null;
+  try {
+    const r = (await rows(`comparison_requests?id=eq.${requestId}&select=status,expires_at,snapshot_expires_at,first_delivered_at,view_window_ends_at,access_method,kind`))[0];
+    if (!r) return null;
+    if (r.status === "pending") return r.expires_at || null;
+    if (r.status !== "approved") return null;
+    if (!r.first_delivered_at) return r.snapshot_expires_at || null;
+    if (r.access_method === "guest") return r.view_window_ends_at || null;
+    return new Date(new Date(r.first_delivered_at).getTime() + (r.kind === "license_report" ? 30 : 90) * 86400000).toISOString();
+  } catch (_e) { return null; }
+}
 async function sha256Hex(raw: string): Promise<string> {
   const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw));
   return Array.from(new Uint8Array(d)).map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -261,7 +274,7 @@ export default {
           if (res.reason === "document_required") return json({ ok: false, error: "document_required" }, 400);
           if (res.reason === "document_invalid") return json({ ok: false, error: "document_invalid" }, 400);
           if (res.reason === "rate_limited") return json({ ok: false, error: "rate_limited" }, 429);
-          if (res.reason === "already_open") return json({ ok: false, error: "already_requested" }, 409);
+          if (res.reason === "already_open") return json({ ok: false, error: "already_requested", available_after: await openRequestBlockEnds(res.request_id) }, 409);
           // Gap #22: existence is already known on this lookup-first path (create_comparison_request's own
           // header), so this is told apart from the generic "unavailable" below.
           if (res.reason === "comparison_not_allowed") return json({ ok: false, error: "not_accepting" }, 409);

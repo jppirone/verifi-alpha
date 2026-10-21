@@ -331,9 +331,12 @@ t("the employer-facing pass-through functions are unchanged from the base commit
   // BA Part 1: the only change in the pass-through functions is that the assemble_plain_document call also sends the comparison request's id (so the ATID follows the decision recorded at approval)
   for (const f of ["supabase/functions/employer-api/index.ts", "supabase/functions/employer-comparison/index.ts"]) {
     const d = execFileSync("git", ["diff", "-U0", BASE, "--", f], { cwd: repo }).toString().split("\n").filter((l) => /^[+-]/.test(l) && !/^(\+\+\+|---)/.test(l));
-    assert.ok(d.length > 0 && d.length % 2 === 0, f);
-    for (const l of d) assert.match(l, /action: "assemble_plain_document", candidate_id: (r\.candidate_id|candidateId)(, request_id: (r\.id|requestId))? \}\),/, f);
-    assert.equal(d.filter((l) => l[0] === "+").length, d.filter((l) => l[0] === "-").length, f);
+    // BA Part 5b adds a read-only helper (openRequestBlockEnds) and a date on the already_requested answer. So: every REMOVED line is one of the two replaced lines, and no ADDED line writes (PATCH/POST/DELETE).
+    const removed = d.filter((l) => l[0] === "-"), added = d.filter((l) => l[0] === "+");
+    assert.ok(removed.length > 0, f);
+    for (const l of removed) assert.match(l, /action: "assemble_plain_document", candidate_id: (r\.candidate_id|candidateId) \}\),|error: "already_requested"|"already_requested", \{ request_id: res\.request_id \}\);/, f);
+    assert.equal(added.some((l) => /method: "(PATCH|POST|DELETE)"|rest\(/.test(l)), false, f);
+    assert.ok(added.some((l) => /request_id: (r\.id|requestId) \}\),/.test(l)), f + " sends the request id");
   }
   // BA Part 1: the gating now lives in two places (the decision recorded at approval, and the live-switch fallback) and the page draws the line through comparisonAtidLine
   const ccr = fs.readFileSync(new URL("supabase/functions/candidate-comparison-requests/index.ts", repo), "utf8");
