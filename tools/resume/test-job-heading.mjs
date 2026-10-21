@@ -328,9 +328,17 @@ t("get-customization: still refuses anyone but the candidate's own session; prin
 // BA: the AW assertion that employer.html and candidate-comparison-requests are byte-identical to the base commit cannot hold once the employer document changes on purpose. What stays guarded here: the
 // pass-through employer functions are still identical to the base, and the ATID gating on the employer document (AR) is still in both files.
 t("the employer-facing pass-through functions are unchanged from the base commit, and the AR ATID gating on the employer document is still present", () => {
-  for (const f of ["supabase/functions/employer-api/index.ts", "supabase/functions/employer-comparison/index.ts"]) assert.equal(execFileSync("git", ["diff", "--stat", BASE, "--", f], { cwd: repo }).toString().trim(), "", f);
-  assert.match(fs.readFileSync(new URL("supabase/functions/candidate-comparison-requests/index.ts", repo), "utf8"), /cand\.atid_employer_visible === true && atidIsStored\(cand\.atid\)/);
-  assert.match(fs.readFileSync(new URL("employer.html", repo), "utf8"), /push\('Applitrust ID: ' \+ R\.atid\)/);
+  // BA Part 1: the only change in the pass-through functions is that the assemble_plain_document call also sends the comparison request's id (so the ATID follows the decision recorded at approval)
+  for (const f of ["supabase/functions/employer-api/index.ts", "supabase/functions/employer-comparison/index.ts"]) {
+    const d = execFileSync("git", ["diff", "-U0", BASE, "--", f], { cwd: repo }).toString().split("\n").filter((l) => /^[+-]/.test(l) && !/^(\+\+\+|---)/.test(l));
+    assert.ok(d.length > 0 && d.length % 2 === 0, f);
+    for (const l of d) assert.match(l, /action: "assemble_plain_document", candidate_id: (r\.candidate_id|candidateId)(, request_id: (r\.id|requestId))? \}\),/, f);
+    assert.equal(d.filter((l) => l[0] === "+").length, d.filter((l) => l[0] === "-").length, f);
+  }
+  // BA Part 1: the gating now lives in two places (the decision recorded at approval, and the live-switch fallback) and the page draws the line through comparisonAtidLine
+  const ccr = fs.readFileSync(new URL("supabase/functions/candidate-comparison-requests/index.ts", repo), "utf8");
+  assert.match(ccr, /c\.atid_employer_visible === true && atidIsStored\(c\.atid\)/); assert.match(ccr, /allowed = !!cand && cand\.atid_employer_visible === true/);
+  assert.match(fs.readFileSync(new URL("employer.html", repo), "utf8"), /'Applitrust ID: ' \+ R\.atid/);
 });
 
 let failed = 0;

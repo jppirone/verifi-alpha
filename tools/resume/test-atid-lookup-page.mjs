@@ -166,11 +166,13 @@ t("employer page: the comparison document has no ATID line unless the data carri
   const before = lines(NewC, RES);
   assert.ok(before.length > 3);
   for (const atid of [undefined, null, "", "ATID7K3MQ9XP2WD2", "ATID-7K3M-Q9XP-2WD", "atid-7k3m-q9xp-2wd2", "ATID-7K3M-Q9XP-2WU2", 12345, { x: 1 }]) assert.deepEqual(lines(NewC, { ...RES, atid }), before, JSON.stringify(atid));
+  // BA, Part 1: the ATID is no longer a text line in the header; the PDF writer draws it at the bottom of the last page (comparisonAtidLine). So the lines never change with an ATID, and the
+  // line text exists only for a well-formed ATID.
   const on = lines(NewC, { ...RES, atid: "ATID-7K3M-Q9XP-2WD2" });
-  assert.equal(on.length, before.length + 1);
-  const i = on.findIndex((l) => l.text === "Applitrust ID: ATID-7K3M-Q9XP-2WD2");
-  assert.ok(i > 0 && i <= 4, "right after the header block, at index " + i);
-  assert.deepEqual([...on.slice(0, i), ...on.slice(i + 1)], before, "everything else is identical");
+  assert.deepEqual(on, before, "an ATID adds no text line");
+  const P0 = new (makeClass(EMP, [...NAMES, "comparisonAtidLine"]))();
+  assert.equal(P0.comparisonAtidLine({ atid: "ATID-7K3M-Q9XP-2WD2" }), "Applitrust ID: ATID-7K3M-Q9XP-2WD2");
+  for (const atid of [undefined, null, "", "ATID7K3MQ9XP2WD2", "ATID-7K3M-Q9XP-2WD", "atid-7k3m-q9xp-2wd2", "ATID-7K3M-Q9XP-2WU2", 12345, { x: 1 }]) assert.equal(P0.comparisonAtidLine({ atid }), "", JSON.stringify(atid));
   // printed-header mode too
   const printed = { ...RES, header: { mode: "printed", printed_header: "Jane Doe\nAustin" } };
   assert.deepEqual(lines(NewC, { ...printed, atid: undefined }), lines(NewC, printed));
@@ -199,7 +201,7 @@ t("document paths, page: there is one opener (showCompare, called from 4 places 
   assert.equal(/window\.print|\.print\(\)|download\s*=|a\.download|exportCompar|saveAs\(/i.test(EMP.slice(EMP.indexOf("renderGeneratedDocument()"), EMP.indexOf("renderGeneratedDocument()") + 2500)), false, "no print / download code beside the document");
 });
 t("document paths, behaviour: for each of the four openers' payload, the document the employer is shown has the Applitrust ID line only when the server sent an atid (switch on), and nothing else changes", () => {
-  const P = makeClass(EMP, ["showCompare", "buildComparisonLines", "sanitizeAts", "czWorkLabel", "czEduLabel", "czCertLabel", "czRange", "czPartialLabel", "groupByLiteralHeading", "wrapText", "workHeadingLines", "wrapHeadingRuns", "helvWidth", "czDatesText"]);
+  const P = makeClass(EMP, ["showCompare", "comparisonAtidLine", "buildComparisonLines", "sanitizeAts", "czWorkLabel", "czEduLabel", "czCertLabel", "czRange", "czPartialLabel", "groupByLiteralHeading", "wrapText", "workHeadingLines", "wrapHeadingRuns", "helvWidth", "czDatesText"]);
   const RES = { available: true, candidate: { name: "Jane Doe" }, header: { mode: "account" }, contact: {}, work: [{ employer: "Acme", title: "Analyst", start: "2019-01", end: "2022-03" }], education: [], skills: [] };
   const openers = { "org / request": { cmpBusy: false, compareFrom: "request" }, "guest link": { guestBusy: false }, "account compare": { compareFrom: "acct" }, "paid, payment history": { myPaidBusy: false, compareFrom: "acct" } };
   for (const [name, state] of Object.entries(openers)) {
@@ -207,12 +209,13 @@ t("document paths, behaviour: for each of the four openers' payload, the documen
       const p = new P(); p.state = {}; p.setState = (patch) => Object.assign(p.state, typeof patch === "function" ? patch(p.state) : patch); p.renderComparisonDocuments = () => {};
       const d = { content: { kind: "resume" }, assembled_at: "x", first_open: true, document: null, generated_document: atid ? { ...RES, atid } : RES };
       p.showCompare(state, d, { id: "1", label: "Candidate" });
-      return p.buildComparisonLines(p.state.compare.generatedDocument).map((l) => l.text);
+      return { text: p.buildComparisonLines(p.state.compare.generatedDocument).map((l) => l.text), atidLine: p.comparisonAtidLine(p.state.compare.generatedDocument) };
     };
     const off = run(undefined), on = run("ATID-7K3M-Q9XP-2WD2");
-    assert.equal(off.some((l) => /ATID|Applitrust ID/.test(l)), false, name + " off");
-    assert.deepEqual(on.filter((l) => l !== "Applitrust ID: ATID-7K3M-Q9XP-2WD2"), off, name + " on = off + one line");
-    assert.equal(on.length, off.length + 1, name);
+    assert.equal(off.text.some((l) => /ATID|Applitrust ID/.test(l)), false, name + " off");
+    assert.equal(off.atidLine, "", name + " off: no ATID line for the writer");
+    assert.deepEqual(on.text, off.text, name + " on: the text lines are the same (BA: the ATID is drawn by the writer)");
+    assert.equal(on.atidLine, "Applitrust ID: ATID-7K3M-Q9XP-2WD2", name);
   }
 });
 

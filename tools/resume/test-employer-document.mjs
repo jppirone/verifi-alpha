@@ -106,9 +106,9 @@ t("job headings: the printed heading is used as written; the fallback is the pip
 });
 t("employer only items are kept: the gated ATID line is drawn only for a well-formed ATID; education, skills and the header are as before; the status labels are not in the document", () => {
   const e = new (EmpC())(); const base = e.buildComparisonLines(LISA());
+  // BA Part 1: the ATID is drawn by the writer at the bottom of the last page, not as a header line
   const withAtid = e.buildComparisonLines({ ...LISA(), atid: "ATID-7K3M-Q9XP-2WD2" });
-  assert.equal(withAtid.length, base.length + 1); assert.ok(withAtid.some((l) => l.text === "Applitrust ID: ATID-7K3M-Q9XP-2WD2"));
-  assert.equal(base.some((l) => /Applitrust ID/.test(l.text)), false);
+  assert.deepEqual(withAtid, base); assert.equal(base.some((l) => /Applitrust ID/.test(l.text)), false);
   assert.ok(base.some((l) => l.text === "BA, State U (2008-2012)") || base.some((l) => /State U/.test(l.text)));
   assert.equal(/\.verification\b/.test(method(EMP, "buildComparisonLines")), false, "never reads the verification object");
 });
@@ -184,7 +184,7 @@ t("server: candidate-comparison-requests attaches printed_heading to each work r
   await runAttach(ATTACH_SRC, { work: [] }, tables); await runAttach(ATTACH_SRC, { work: [{ id: "not-a-uuid" }] }, tables); await runAttach(ATTACH_SRC, {}, tables);
   assert.match(CCR, /try \{ await attachPrintedHeadings\(resume\); \} catch \(_e\) \{ \/\* fallback heading \*\/ \}/);
   assert.ok(CCR.indexOf("await attachPrintedHeadings(resume)") > CCR.indexOf('rpc/assemble_customized_resume'), "after the assembler");
-  assert.ok(CCR.indexOf("await attachPrintedHeadings(resume)") < CCR.indexOf("cand && cand.atid_employer_visible === true"), "before the ATID step, which is untouched");
+  assert.ok(CCR.indexOf("await attachPrintedHeadings(resume)") < CCR.indexOf("BA, Part 1 (October 21, 2026): when the caller names"), "before the ATID step");
 });
 t("server: it only SELECTs (work_history_items id and resume_document_id; resume_documents id and ocr_raw_text); no write, no other table, and no new field reaches the employer path", () => {
   const body = ATTACH_SRC;
@@ -204,6 +204,72 @@ t("control: a planted attach that returns the page text, or writes, or skips the
     assert.ok(work.some((w) => typeof w.ocr === "string" && w.ocr.length > 100), "the planted leak puts the page text on a row");
     assert.ok(Object.keys(work.find((w) => w.printed_heading)).includes("ocr"));
   });
+});
+
+// ------------------------------------------------------------------ Part 1 (page side): the ATID line is drawn like the candidate PDF's; Part 3f: consistent object numbers
+const WRITER = ["comparisonAtidLine", "buildComparisonPdfBytes"];
+const EmpW = (src = EMP) => makeClass(src, [...SHARED, "buildComparisonLines", ...WRITER]);
+const LINE = "Applitrust ID: ATID-7K3M-Q9XP-2WD2";
+t("Part 1: the ATID line is drawn by the writer exactly as the candidate's PDF draws its line (8 pt, 54/36 pt, below the text area, last page only), and a document without an ATID is byte for byte the document without one", () => {
+  const E = new (EmpW())(), C = new (CandC())();
+  const lines = E.buildComparisonLines(LISA()); for (let i = 0; i < 3; i++) lines.push(...E.buildComparisonLines(LISA()));   // several pages
+  const withLine = streams(E.buildComparisonPdfBytes(lines, { atidLine: LINE })), without = streams(E.buildComparisonPdfBytes(lines)), cand = streams(C.buildAtsPdfBytes(lines, { atidLine: LINE }));
+  assert.ok(withLine.length >= 2); assert.deepEqual(withLine, cand, "the page content equals the candidate writer's, ATID line included");
+  withLine.forEach((s, i) => assert.equal(s.includes("/F1 8 Tf\n1 0 0 1 54 36.00 Tm\n(" + LINE + ") Tj"), i === withLine.length - 1, "page " + i));
+  assert.deepEqual(without, streams(E.buildComparisonPdfBytes(lines, { atidLine: "" })));
+  assert.equal(without.some((s) => s.includes("Applitrust ID")), false);
+  assert.equal(E.comparisonAtidLine({ atid: "ATID-7K3M-Q9XP-2WD2" }), LINE); assert.equal(E.comparisonAtidLine({ atid: "junk" }), "");
+  assert.match(EMP, /buildComparisonPdfBytes\(lines, \{ atidLine: this\.comparisonAtidLine\(resume\) \}\)/);
+});
+t("control (Part 1): a writer that draws the line on every page, or at 10 pt, or leaves it out, is caught", () => {
+  const lines = new (EmpW())().buildComparisonLines(LISA()); for (let i = 0; i < 3; i++) lines.push(...new (EmpW())().buildComparisonLines(LISA()));
+  const C = new (CandC())(), want = streams(C.buildAtsPdfBytes(lines, { atidLine: LINE }));
+  for (const [from, to] of [["pageIdx === pages.length - 1", "true"], ["/F1 8 Tf", "/F1 10 Tf"], ["if (atidLine && pageIdx", "if (false && pageIdx"]]) {
+    const p = EMP.replace(from, to); assert.notEqual(p, EMP, from);
+    assert.notDeepEqual(streams(new (EmpW(p))().buildComparisonPdfBytes(lines, { atidLine: LINE })), want, from);
+  }
+});
+function pdfObjects(pdf) {   // object number -> body, plus the xref offsets, parsed from the file text
+  const objs = new Map(), offs = new Map();
+  for (const m of pdf.matchAll(/(\d+) 0 obj\n([\s\S]*?)\nendobj\n/g)) { objs.set(Number(m[1]), m[2]); offs.set(Number(m[1]), m.index); }
+  const xs = /xref\n0 (\d+)\n([\s\S]*?)trailer/.exec(pdf), entries = xs[2].trim().split("\n").slice(1).map((l) => Number(l.slice(0, 10)));
+  return { objs, offs, entries, count: Number(xs[1]), startxref: Number(/startxref\n(\d+)/.exec(pdf)[1]), xrefAt: pdf.indexOf("xref\n0 ") };
+}
+const pdfProblems = (pdf) => {
+  const { objs, offs, entries, count, startxref, xrefAt } = pdfObjects(pdf), bad = [];
+  const pagesNums = [...objs].filter(([, b]) => /\/Type \/Pages/.test(b)).map(([n]) => n);
+  if (pagesNums.length !== 1) bad.push("expected one Pages object, found " + pagesNums.length);
+  const kids = [...(/\/Kids \[([^\]]*)\]/.exec(objs.get(pagesNums[0]) || "") || [, ""])[1].matchAll(/(\d+) 0 R/g)].map((m) => Number(m[1]));
+  for (const [n, b] of objs) if (/\/Type \/Page /.test(b)) { const par = Number(/\/Parent (\d+) 0 R/.exec(b)[1]); if (par !== pagesNums[0]) bad.push("page object " + n + " has Parent " + par + ", the Pages object is " + pagesNums[0]); if (!kids.includes(n)) bad.push("page " + n + " is not in Kids"); const c = Number(/\/Contents (\d+) 0 R/.exec(b)[1]); if (!objs.has(c)) bad.push("missing contents " + c); }
+  for (const k of kids) if (!/\/Type \/Page /.test(objs.get(k) || "")) bad.push("Kids entry " + k + " is not a page");
+  if (count !== objs.size + 1) bad.push("xref size " + count + " vs " + (objs.size + 1) + " objects");
+  for (const [n, o] of offs) if (entries[n - 1] !== o) bad.push("xref offset of object " + n);
+  if (startxref !== xrefAt) bad.push("startxref");
+  return bad;
+};
+t("Part 3f: the employer PDF's object numbers are consistent: every page's Parent is the Pages object, Kids lists exactly the pages, contents exist, the xref offsets are right (1, 2 and 5 pages); a real PDF reader opens it with no repair message", async () => {
+  const E = new (EmpW())();
+  for (const reps of [0, 1, 4]) {
+    const lines = E.buildComparisonLines(LISA()); for (let i = 0; i < reps * 6; i++) lines.push(...E.buildComparisonLines(LISA()));
+    const pdf = E.buildComparisonPdfBytes(lines, { atidLine: LINE }); assert.deepEqual(pdfProblems(pdf), [], "reps " + reps);
+  }
+  const MUPDF = "C:/Users/jpiro/AppData/Local/Temp/ocr-repro/node_modules/mupdf/dist/mupdf.js";
+  if (fs.existsSync(MUPDF)) {
+    const { spawnSync } = await import("node:child_process"), os = await import("node:os"), path = await import("node:path");
+    const lines = E.buildComparisonLines(LISA()); for (let i = 0; i < 10; i++) lines.push(...E.buildComparisonLines(LISA()));
+    const tmp = path.join(os.tmpdir(), "emp-doc-" + process.pid + ".pdf"); fs.writeFileSync(tmp, Buffer.from(E.buildComparisonPdfBytes(lines, { atidLine: LINE }), "latin1"));
+    try {
+      const r = spawnSync(process.execPath, ["-e", `const m=await import(${JSON.stringify("file:///" + MUPDF)});const d=m.Document.openDocument(new Uint8Array(require("fs").readFileSync(${JSON.stringify(tmp)})),"application/pdf");console.log("pages",d.countPages());let t="";d.loadPage(d.countPages()-1).toStructuredText("preserve-whitespace").walk({onChar(c){t+=c}});console.log(t.includes("Applitrust ID: ATID-7K3M"))`.replace("require(\"fs\")", "(await import(\"node:fs\"))"), "--input-type=module"], { encoding: "utf8" });
+      assert.equal(/Fixing bad parent|warning|error/i.test(r.stderr + r.stdout), false, "no repair message: " + r.stderr.slice(0, 120));
+      assert.match(r.stdout, /pages [2-9]/); assert.match(r.stdout, /true/);
+    } finally { try { fs.unlinkSync(tmp); } catch (_e) { /* gone */ } }
+  }
+});
+t("control (Part 3f): the old Parent number (the first page object) and a wrong xref are caught by the object check", () => {
+  const lines = new (EmpW())().buildComparisonLines(LISA());
+  const old = EMP.replace("objects.length + pages.length + 1;", "objects.length + 1;"); assert.notEqual(old, EMP);
+  assert.ok(pdfProblems(new (EmpW(old))().buildComparisonPdfBytes(lines)).some((p) => /has Parent/.test(p)));
+  const pdf = new (EmpW())().buildComparisonPdfBytes(lines); assert.ok(pdfProblems(pdf.replace(/\nstartxref\n\d+/, "\nstartxref\n1")).includes("startxref"));
 });
 
 let pass = 0, fail = 0;

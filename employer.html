@@ -4679,9 +4679,8 @@ class Component extends DCLogic {
       const contactLine = [c.phone && c.phone.value, c.email && c.email.value].filter(Boolean).join(' · ');
       if (contactLine) push(contactLine);
     }
-    // AR (October 19, 2026): the candidate's ATID, present in the server's data ONLY while the candidate has chosen to let employers use it (candidates.atid_employer_visible).
-    // No key, no line: with the switch off this document is exactly what it was. Only the ATID shape is drawn.
-    if (typeof R.atid === 'string' && /^ATID-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/.test(R.atid)) push('Applitrust ID: ' + R.atid);
+    // BA, Part 1 (October 21, 2026): the ATID is no longer a text line in the header. It is drawn by the PDF writer as a small line at the bottom of the last page, like the candidate's own PDF
+    // (comparisonAtidLine below, passed to buildComparisonPdfBytes). The server sends R.atid only when the candidate's "Let employers use my ATID" switch was on when they approved this request.
     // Gap #18 (2026-09-25, John's explicit requirement — see that requirement doc's own header):
     // "Everything else should match what the candidate view and the print output show, not a
     // separately-drifting render path" — with exactly ONE approved exception, the Professional
@@ -4755,7 +4754,12 @@ class Component extends DCLogic {
 
   // Verbatim port of candidate.html's buildAtsPdfBytes -- a plain, dependency-free PDF byte writer
   // (Helvetica/Helvetica-Bold text only, no images, no annotations of any kind).
-  buildComparisonPdfBytes(lines) {
+  // The ATID line for the bottom of the last page: only the ATID shape is drawn, and only when the server sent one.
+  comparisonAtidLine(R) {
+    return (R && typeof R.atid === 'string' && /^ATID-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/.test(R.atid)) ? 'Applitrust ID: ' + R.atid : '';
+  }
+  buildComparisonPdfBytes(lines, opts) {
+    const atidLine = opts && opts.atidLine ? this.sanitizeAts(String(opts.atidLine)) : '';
     const pageWidth = 612, pageHeight = 792, margin = 54, fontSize = 11, leading = 15;   // BA: 11 pt and 15 pt leading, as the candidate's PDF (the job heading widths are measured at 11 pt)
     const usableHeight = pageHeight - margin * 2;
     const linesPerPage = Math.max(1, Math.floor(usableHeight / leading));
@@ -4769,7 +4773,7 @@ class Component extends DCLogic {
     const fontBoldNum = addObj('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>');
     const pageObjNums = [];
     const contentObjNums = [];
-    pages.forEach((pageLines) => {
+    pages.forEach((pageLines, pageIdx) => {
       let y = pageHeight - margin;
       let content = 'BT\n';
       let curFont = null;
@@ -4792,10 +4796,13 @@ class Component extends DCLogic {
         y -= leading;
       });
       content += 'ET';
+      // BA, Part 1: the ATID line, drawn as the candidate's PDF draws it (8 pt, 36 pt from the bottom edge, below the text area, last page only)
+      if (atidLine && pageIdx === pages.length - 1) content += '\nBT\n/F1 8 Tf\n1 0 0 1 ' + margin + ' 36.00 Tm\n(' + esc(atidLine) + ') Tj\nET';
       const contentNum = addObj('<< /Length ' + content.length + ' >>\nstream\n' + content + '\nendstream');
       contentObjNums.push(contentNum);
     });
-    const pagesObjIndexPlaceholder = objects.length + 1;
+    // BA, Part 3f: the Pages object is added AFTER the page objects, so its number is the next one after all of them (it used to point at the first page object, which readers repaired)
+    const pagesObjIndexPlaceholder = objects.length + pages.length + 1;
     pages.forEach((pageLines, i) => {
       const pageNum = addObj('<< /Type /Page /Parent ' + pagesObjIndexPlaceholder + ' 0 R /MediaBox [0 0 ' + pageWidth + ' ' + pageHeight + '] /Resources << /Font << /F1 ' + fontRegNum + ' 0 R /F2 ' + fontBoldNum + ' 0 R >> >> /Contents ' + contentObjNums[i] + ' 0 R >>');
       pageObjNums.push(pageNum);
@@ -4855,7 +4862,7 @@ class Component extends DCLogic {
     if (!resume || !resume.available) { fail(); return; }
     try {
       const lines = this.buildComparisonLines(resume);
-      const pdfText = this.buildComparisonPdfBytes(lines);
+      const pdfText = this.buildComparisonPdfBytes(lines, { atidLine: this.comparisonAtidLine(resume) });
       const bytes = new Uint8Array(pdfText.length);
       for (let i = 0; i < pdfText.length; i++) bytes[i] = pdfText.charCodeAt(i) & 0xff;
       const blob = new Blob([bytes], { type: 'application/pdf' });

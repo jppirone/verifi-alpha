@@ -143,7 +143,7 @@ async function documentAndGenerated(requestId: string, candidateId: string): Pro
   let generatedDocument: unknown = null;
   const gen = await fetch(`${SUPABASE_URL}/functions/v1/candidate-comparison-requests`, {
     method: "POST", headers: { "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "assemble_plain_document", candidate_id: candidateId }),
+    body: JSON.stringify({ action: "assemble_plain_document", candidate_id: candidateId, request_id: requestId }),
   });
   const genJson = gen.ok ? await gen.json().catch(() => null) : null;
   if (genJson && genJson.ok) generatedDocument = genJson.resume;
