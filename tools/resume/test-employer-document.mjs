@@ -21,7 +21,7 @@ const SHARED = ["sanitizeAts", "wrapText", "czPartialLabel", "czRange", "czWorkL
 const EmpC = (src = EMP) => makeClass(src, [...SHARED, "buildComparisonLines", "buildComparisonPdfBytes"]);
 const CandC = () => makeClass(CAND, [...SHARED, "buildResumeLines", "buildAtsPdfBytes"]);
 
-const PARAGRAPH = "The professional summary (also called an executive summary or profile) is not included in this document. Candidates can write and change their own summaries at any time and may keep more than one version, so we cannot tell which one went with the resume you hold. Anything a candidate states about themselves in a summary is their own content and is not part of what is registered here.";
+const PARAGRAPH = "The professional summary (also called an executive summary or profile) is not included in this document. Candidates can write and change their own summaries at any time and may keep more than one version, so we cannot tell which one went with the resume you hold. Anything a candidate states about themselves in a summary is their own content and is not part of what is verified here.";
 const EXISTING_NOTICE = "Every job, education entry and certification the candidate has submitted is shown below, with its current status. Job descriptions are not part of what is verified, so they are not shown. This report covers only these three categories — skills, summaries, and other resume content shown in the document below are the candidate's own stated content, not independently verified.";
 const STYLE = 'style="font-size:12px;color:var(--color-neutral-400);line-height:1.6"';
 
@@ -54,7 +54,7 @@ const noticeOk = (html) => {
 t("the comparison screen notice: the existing notice is unchanged and the summary paragraph follows it directly, word for word, in the same style", () => {
   assert.equal(noticeOk(EMP), null);
   assert.equal([...EMP.matchAll(/professional summary \(also called an executive summary or profile\)/g)].length, 1, "the notice text is built in one place only");
-  assert.equal(/—/.test(PARAGRAPH), false); assert.equal(/verified/i.test(PARAGRAPH), false);
+  assert.equal(/—/.test(PARAGRAPH), false); assert.ok(PARAGRAPH.endsWith("is not part of what is verified here."), "John's wording: record verification is 'verified'");
 });
 t("control: the notice guard catches a missing paragraph, a changed word, the paragraph moved before the notice, and a changed existing sentence", () => {
   assert.match(noticeOk(EMP.replace(PARAGRAPH, "")), /not directly after/);
