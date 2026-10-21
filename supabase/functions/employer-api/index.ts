@@ -137,6 +137,15 @@ async function stripe(method: string, path: string, form?: Record<string, string
   });
   return { ok: r.ok, status: r.status, data: await r.json().catch(() => ({})) };
 }
+// BE (October 21, 2026): the short text Stripe's card save page shows beside its button (custom_text.submit). The amount is the guest_comparison row of employer_pricing, the same row the
+// hold and the charge use; it is never typed here. With no price the words stand in, never a number. Stripe renders Markdown bold.
+function chargeMoney(cents: number, currency?: string | null): string {
+  try { return new Intl.NumberFormat("en-US", { style: "currency", currency: String(currency || "usd").toUpperCase() }).format(cents / 100); } catch (_e) { return (cents / 100).toFixed(2); }
+}
+function setupChargeText(price: { amount_cents?: number | null; currency?: string | null } | null | undefined): string {
+  const amt = price && Number(price.amount_cents) > 0 ? chargeMoney(Number(price.amount_cents), price.currency) : "the comparison price";
+  return `**No charge now.** ${amt} is held on your card when the candidate approves. It is charged when you open the document.`;
+}
 // The real charge: capture an authorized, capturable hold. Deliberately the same shape as employer-comparison.ts's
 // own captureGuestHold (that file's own comment explains the idempotency/race handling in full) -- duplicated
 // rather than cross-called, matching how every other small helper (sha256Hex, stripe(), rest()...) in this project
@@ -941,14 +950,22 @@ const ACTIONS: Record<string, Action> = {
         await rest(`comparison_requests?id=eq.${p.request_id}&stripe_customer_id=is.null`, { method: "PATCH", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ stripe_customer_id: customerId }) });
       }
 
-      const sess = await stripe("POST", "/v1/checkout/sessions", {
+      const price = (await rows("employer_pricing?key=eq.guest_comparison&select=amount_cents,currency"))?.[0];
+      const setupForm: Record<string, string> = {
         mode: "setup", customer: customerId!, client_reference_id: p.request_id,
         "payment_method_types[0]": "card",
+        "custom_text[submit][message]": setupChargeText(price),
         success_url: `${RETURN_BASE}?comparison_setup=${p.request_id}&setup=success`,
         cancel_url: `${RETURN_BASE}?comparison_setup=${p.request_id}&setup=cancel`,
         "metadata[product]": "employer_card_setup", "metadata[comparison_request_id]": p.request_id, "metadata[employer_user_id]": user.id,
         "setup_intent_data[metadata][product]": "employer_card_setup", "setup_intent_data[metadata][comparison_request_id]": p.request_id,
-      });
+      };
+      let sess = await stripe("POST", "/v1/checkout/sessions", setupForm);
+      // BE: the custom text is a courtesy line; if Stripe ever refuses it for this mode, the card save must still work, so ask again without it (only when the refusal names it).
+      if (!sess.ok && sess.status === 400 && JSON.stringify(sess.data || {}).includes("custom_text")) {
+        delete setupForm["custom_text[submit][message]"];
+        sess = await stripe("POST", "/v1/checkout/sessions", setupForm);
+      }
       if (!sess.ok || !sess.data.url) return fail(502, "stripe_error");
       return ok({ url: sess.data.url });
     },

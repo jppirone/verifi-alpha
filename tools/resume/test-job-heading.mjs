@@ -337,7 +337,9 @@ t("the employer-facing pass-through functions are unchanged from the base commit
     // Lookup split (October 21, 2026) also rewrites the one insert of the staged row in request_comparison_direct (it now carries created_for_request, with a retry without it), so the
     // lines of that insert may be removed and re-added; no other write may be added.
     const STAGED = /insRes|employer_lookup_requests|token: crypto\.randomUUID|requester_company: requesterCompany|candidate_phone: candidatePhoneRaw|method: "POST", headers: \{ "Prefer": "return=representation" \}|body: JSON\.stringify\(\{$|^-\s+\}\),$|^-\s+\}\);$/;
-    for (const l of removed) assert.match(l, new RegExp(/action: "assemble_plain_document", candidate_id: (r\.candidate_id|candidateId) \}\),|error: "already_requested"|"already_requested", \{ request_id: res\.request_id \}\);/.source + "|" + STAGED.source), f);
+    // BE (October 21, 2026) turns the one Stripe setup session call of start_card_setup into a variable (so its custom text can be left out if Stripe refuses it): only that call's opening line is replaced.
+    const BE_SETUP = /^-\s+const sess = await stripe\("POST", "\/v1\/checkout\/sessions", \{$/;
+    for (const l of removed) assert.match(l, new RegExp(/action: "assemble_plain_document", candidate_id: (r\.candidate_id|candidateId) \}\),|error: "already_requested"|"already_requested", \{ request_id: res\.request_id \}\);/.source + "|" + STAGED.source + "|" + BE_SETUP.source), f);
     assert.equal(added.filter((l) => /method: "(PATCH|POST|DELETE)"|rest\(/.test(l) && !/employer_lookup_requests/.test(l)).length, 0, f);
     assert.ok(added.some((l) => /request_id: (r\.id|requestId) \}\),/.test(l)), f + " sends the request id");
   }

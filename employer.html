@@ -2383,6 +2383,9 @@ const __ds_scope = {};
               </sc-if>
             </div>
           </div>
+          <sc-if value="{{ row.hasChargeNote }}" hint-placeholder-val="{{ false }}">
+            <div data-charge-notice="my-comparisons" style="font-size:14px;font-weight:700;color:var(--color-text);line-height:1.5">{{ row.chargeNote }}</div>
+          </sc-if>
           <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">{{ row.statusLabel }}</div>
         </div>
       </sc-for>
@@ -2786,7 +2789,32 @@ const __ds_scope = {};
     <sc-if value="{{ reqError }}" hint-placeholder-val="{{ false }}">
       <div style="font-size:12px;color:#e2735c;line-height:1.6">{{ reqError }}</div>
     </sc-if>
+    <sc-if value="{{ directUsesGuest }}" hint-placeholder-val="{{ true }}">
+      <!-- BE: the charge notice (pay per use only). Tagged data-charge-notice so the later text trimming pass keeps it. The amount is chargeAmountLabel (employer_pricing through loadGuestPrice), never typed here. -->
+      <div id="charge-notice-request" data-charge-notice="request" role="note" style="border:2px solid var(--color-accent);background:color-mix(in srgb,var(--color-accent) 12%,transparent);border-radius:var(--radius-md);padding:var(--space-4);display:flex;flex-direction:column;gap:var(--space-2)">
+        <div data-charge-notice-lead style="font-size:17px;font-weight:700;line-height:1.4;color:var(--color-text)">{{ chargeLeadLine }}</div>
+        <div style="font-size:14px;line-height:1.6;color:var(--color-text)">Your card is only charged when you open the document, after the candidate approves. The next screen is Stripe, where you save your card. Nothing is charged when you save it. When the candidate approves, {{ chargeAmountLabel }} is held on your card. When you open the document, the hold is captured and your card is charged {{ chargeAmountLabel }}.</div>
+      </div>
+    </sc-if>
     <button type="button" id="request-lookup-submit" class="btn btn-primary btn-block" disabled="{{ directIncomplete }}" sc-camel-on-click="{{ sendDirectRequest }}">{{ sendDirectLabel }}</button>
+
+    <sc-if value="{{ directConfirmOpen }}" hint-placeholder-val="{{ false }}">
+      <div class="dialog-backdrop" style="z-index:50">
+        <div class="dialog" id="direct-confirm" data-charge-notice="confirm-direct" role="dialog" aria-modal="true" aria-labelledby="direct-confirm-title" style="width:min(500px,100%);border-top:5px solid var(--color-accent);gap:var(--space-4)">
+          <div class="dialog-title" id="direct-confirm-title" data-charge-notice-lead style="font-size:22px;line-height:1.3">{{ confirmLeadLine }}</div>
+          <div style="display:flex;flex-direction:column;gap:var(--space-3);font-size:14px;line-height:1.6;color:var(--color-text)">
+            <div><b>This saves your card. It does not charge it.</b></div>
+            <div><b>Nothing is charged now.</b> Sending this request only saves your card for later; no hold is placed yet. You enter your card details with Stripe, not on this site.</div>
+            <div>If the candidate approves, we automatically place a <b>{{ chargeAmountLabel }} hold</b> on that saved card the moment they do &mdash; you won't be asked for it again. The <b>real charge only happens when you open the result</b>, any time in the <b>7 days after that approval</b>, not from today.</div>
+            <div>If the candidate declines, does not answer within 72 hours, or you do not open it within that 7-day window, the hold quietly expires and <b>you are never charged</b>.</div>
+          </div>
+          <div class="dialog-actions" style="justify-content:space-between;flex-wrap:wrap">
+            <button type="button" id="direct-confirm-cancel" class="btn btn-secondary" sc-camel-on-click="{{ directConfirmCancel }}">Back to the form</button>
+            <button type="button" id="direct-confirm-send" class="btn btn-primary" disabled="{{ confirmProceedDisabled }}" sc-camel-on-click="{{ directConfirmSend }}">{{ confirmProceedLabel }}</button>
+          </div>
+        </div>
+      </div>
+    </sc-if>
 
     <sc-if value="{{ acctHasOrg }}" hint-placeholder-val="{{ false }}">
       <div id="request-lists" class="card elev-sm" style="display:flex;flex-direction:column;gap:var(--space-3)">
@@ -3142,7 +3170,7 @@ const __ds_scope = {};
         <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">Have an organization plan instead? <a href="#" sc-camel-on-click="{{ goSigninFromAccess }}">Sign in</a>. Its lookups cover these requests with no per-view charge.</div>
       </sc-if>
       <sc-if value="{{ accessPaidForm }}" hint-placeholder-val="{{ false }}">
-        <div id="price-line-request" style="font-size:13px;color:var(--color-neutral-200);line-height:1.6"><b>A one-off comparison costs {{ guestPriceLabel }}.</b> Your card is only charged when you open the document, after the candidate approves. Organizations can set up a corporate account instead; its owner starts one under Billing.</div>
+        <div id="corporate-account-line" style="font-size:13px;color:var(--color-neutral-200);line-height:1.6">Organizations can set up a corporate account instead; its owner starts one under Billing.</div>
         <div style="font-size:13px;color:var(--color-neutral-300);line-height:1.6">The candidate is asked to approve, and a request that is declined or not answered costs nothing. Sending this request saves your card now, but places <b>no hold yet</b>. If the candidate approves, we automatically place a {{ guestPriceLabel }} hold on that saved card the moment they do &mdash; no second card prompt from us. The <b>real charge only happens when you open the result</b>, which you can do any time in the <b>7 days after the candidate approves</b>. If the candidate declines, doesn't answer within 72 hours, or you don't open it within that window, the hold quietly expires and you're never charged. Once you open it, it stays available from your account for 21 days.</div>
         <div class="field">
           <label for="rq-att-p">How did you obtain this candidate's information?</label>
@@ -3175,6 +3203,11 @@ const __ds_scope = {};
         <sc-if value="{{ reqError }}" hint-placeholder-val="{{ false }}">
           <div style="font-size:12px;color:#e2735c;line-height:1.6">{{ reqError }}</div>
         </sc-if>
+        <!-- BE: the charge notice (pay per use only), the same wording as the Request a comparison screen. data-charge-notice keeps it findable for the text trimming pass. -->
+        <div id="charge-notice-access" data-charge-notice="request" role="note" style="border:2px solid var(--color-accent);background:color-mix(in srgb,var(--color-accent) 12%,transparent);border-radius:var(--radius-md);padding:var(--space-4);display:flex;flex-direction:column;gap:var(--space-2)">
+          <div data-charge-notice-lead style="font-size:17px;font-weight:700;line-height:1.4;color:var(--color-text)">{{ chargeLeadLine }}</div>
+          <div style="font-size:14px;line-height:1.6;color:var(--color-text)">Your card is only charged when you open the document, after the candidate approves. The next screen is Stripe, where you save your card. Nothing is charged when you save it. When the candidate approves, {{ chargeAmountLabel }} is held on your card. When you open the document, the hold is captured and your card is charged {{ chargeAmountLabel }}.</div>
+        </div>
         <button type="button" class="btn btn-primary" style="align-self:flex-start" disabled="{{ sendRequestDisabled }}" sc-camel-on-click="{{ sendRequest }}">{{ sendRequestLabel }}</button>
       </sc-if>
       <sc-if value="{{ accessNoOption }}" hint-placeholder-val="{{ false }}">
@@ -3235,16 +3268,18 @@ const __ds_scope = {};
             </div>
           </sc-if>
           <sc-if value="{{ confirmIsGuest }}" hint-placeholder-val="{{ false }}">
-            <div class="dialog-title" id="req-confirm-title" style="font-size:22px;line-height:1.3">You place a {{ confirmPriceLabel }} hold, not a charge, when you pay</div>
+            <div class="dialog-title" id="req-confirm-title" data-charge-notice="confirm-guest" data-charge-notice-lead style="font-size:22px;line-height:1.3">{{ confirmLeadLine }}</div>
             <div style="display:flex;flex-direction:column;gap:var(--space-3);font-size:14px;line-height:1.6;color:var(--color-text)">
+              <div><b>You place a {{ confirmPriceLabel }} hold, not a charge, when you pay.</b></div>
               <div><b>Nothing is charged now.</b> Sending this request is free.</div>
               <div>If the candidate approves, we email you a link. From it you enter your card once on Stripe's own page: that places a <b>{{ confirmPriceLabel }} hold</b>, not a charge. The <b>real charge only happens the moment you are actually shown the result</b> &mdash; it opens by itself at that moment and stays open, reopenable for free, for 21 days.</div>
               <div>If the candidate declines or does not answer within 72 hours, nothing is ever placed on your card. If you place a hold but never come back to the link, the hold simply expires on its own within about a week and <b>you are never charged</b>.</div>
             </div>
           </sc-if>
           <sc-if value="{{ confirmIsPaid }}" hint-placeholder-val="{{ false }}">
-            <div class="dialog-title" id="req-confirm-title" style="font-size:22px;line-height:1.3">This saves your card. It does not charge it.</div>
+            <div class="dialog-title" id="req-confirm-title" data-charge-notice="confirm-paid" data-charge-notice-lead style="font-size:22px;line-height:1.3">{{ confirmLeadLine }}</div>
             <div style="display:flex;flex-direction:column;gap:var(--space-3);font-size:14px;line-height:1.6;color:var(--color-text)">
+              <div><b>This saves your card. It does not charge it.</b></div>
               <div><b>Nothing is charged now.</b> Sending this request only saves your card for later; no hold is placed yet. You enter your card details with Stripe, not on this site.</div>
               <div>If the candidate approves, we automatically place a <b>{{ confirmPriceLabel }} hold</b> on that saved card the moment they do &mdash; you won't be asked for it again. The <b>real charge only happens when you open the result</b>, any time in the <b>7 days after that approval</b>, not from today.</div>
               <div>If the candidate declines, does not answer within 72 hours, or you do not open it within that 7-day window, the hold quietly expires and <b>you are never charged</b>.</div>
@@ -4276,15 +4311,38 @@ class Component extends DCLogic {
   // an honest different answer since existence is already knowable), or sent (identical acknowledgment either
   // way, so a successful submission itself never reveals Lookup state -- only the candidate's own later
   // approve/decline can, and only because they opted into exactly that by leaving Comparison on).
+  // BE: the pay per use button no longer sends at once: it opens the charge box (directConfirmOpen), and only that box's own button sends. The organization path sends as before.
+  // The same field checks run first so a mistake is told before the box, not after it.
+  requestDirectSend() {
+    const s = this.state;
+    if (s.reqBusy) return;
+    if (this.orgFormOk()) { this.sendDirectRequest(); return; }
+    const bad = this.directInputError();
+    if (bad === 'stop') return;
+    if (bad) { this.setState({ reqErr: bad }); return; }
+    if (!s.guestPrice) this.loadGuestPrice();
+    this.setState({ reqErr: null, reqConfirmOpen: true });
+  }
+
+  directInputError() {
+    const s = this.state;
+    const name = (s.candNameInput || '').trim();
+    if (name.split(/\s+/).filter(Boolean).length < 2) return 'Please enter the candidate’s first and last name.';
+    const email = (s.candEmailInput || '').trim();
+    const phoneDigits = (s.candPhoneInput || '').replace(/\D/g, '');
+    if (!email && phoneDigits.length < 10) return 'Give the candidate’s email address or a 10-digit phone number.';
+    if ((s.reqAttestation || '').trim().length < 10 || !s.reqDocName || !s.reqConsent) return 'stop';
+    return null;
+  }
+
   async sendDirectRequest() {
     const s = this.state;
     if (s.reqBusy) return;
     const name = (s.candNameInput || '').trim();
-    if (name.split(/\s+/).filter(Boolean).length < 2) { this.setState({ reqErr: 'Please enter the candidate’s first and last name.' }); return; }
     const email = (s.candEmailInput || '').trim();
-    const phoneDigits = (s.candPhoneInput || '').replace(/\D/g, '');
-    if (!email && phoneDigits.length < 10) { this.setState({ reqErr: 'Give the candidate’s email address or a 10-digit phone number.' }); return; }
-    if ((s.reqAttestation || '').trim().length < 10 || !s.reqDocName || !s.reqConsent) return;
+    const bad = this.directInputError();
+    if (bad === 'stop') return;
+    if (bad) { this.setState({ reqErr: bad }); return; }
     this.setState({ reqBusy: true, reqErr: null });
     const up = await this.uploadRequestDocument('employer');
     if (up.error) { this.setState({ reqBusy: false, reqErr: up.error }); return; }
@@ -4932,12 +4990,21 @@ class Component extends DCLogic {
     if (c.status === 'not_authorized') return 'Not authorized. Nothing was ever charged.';
     if (c.status === 'ready') {
       // BA, Part 5f: say how much and when. The amount is the comparison price from the same source as the request screens (employer_pricing, through loadGuestPrice); never typed in here.
-      if (c.hold_state === 'holding') return 'Approved. Ready to open until ' + this.fmtDate(c.available_until) + '. Clicking Open charges your card ' + (this.state.guestPrice ? this.money(this.state.guestPrice) : 'the comparison price') + ' now.';
+      if (c.hold_state === 'holding') return 'Approved. Ready to open until ' + this.fmtDate(c.available_until) + '.';   // BE: the charge sentence moved to paidComparisonChargeNote (bold, next to the Open button)
       if (c.hold_state === 'failed') return 'Approved, but the automatic hold failed. Opening it will ask you for a card.';
       return 'Approved. No hold is on file, so opening it will ask you for a card.';
     }
     if (c.status === 'opened') return 'Opened ' + this.fmtDate(c.opened_at) + '. You can reopen it free' + (c.window_ends_at ? ' until ' + this.fmtDateTime(c.window_ends_at) : '') + '.';
     return 'Access has ended.';
+  }
+
+  // BE: the bold line next to a row's Open button. The amount is the comparison price from the same source as the request screens (employer_pricing, through loadGuestPrice); never typed in here.
+  paidComparisonChargeNote(c) {
+    if (c.status !== 'ready') return '';
+    const amt = this.state.guestPrice ? this.money(this.state.guestPrice) : 'the comparison price';
+    if (c.hold_state === 'holding') return 'Clicking Open charges your card ' + amt + ' now.';
+    if (c.hold_state === 'held') return '';
+    return 'Opening it charges ' + amt + ' once a card is on file.';
   }
 
   async openMyPaidComparison(id, labelHint) {
@@ -5209,8 +5276,16 @@ class Component extends DCLogic {
         || (s.candNameInput || '').trim().split(/\s+/).filter(Boolean).length < 2
         || !((s.candEmailInput || '').trim() || (s.candPhoneInput || '').trim())
         || (s.reqAttestation || '').trim().length < 10 || !s.reqDocName || !s.reqConsent,
-      sendDirectLabel: s.reqBusy ? 'Sending…' : 'Send request',
-      sendDirectRequest: () => this.sendDirectRequest(),
+      // BE: the pay per use button names the next step honestly; the organization button keeps its plain label.
+      sendDirectLabel: s.reqBusy ? 'Sending…' : (this.orgFormOk() ? 'Send request' : 'Send request and continue to save card'),
+      sendDirectRequest: () => this.requestDirectSend(),
+      // BE: the charge notice. The amount is the loaded comparison price (employer_pricing through loadGuestPrice); with no price loaded the words stand in, never a number.
+      chargeAmountLabel: s.guestPrice ? this.money(s.guestPrice) : 'the comparison price',
+      chargeLeadLine: s.guestPrice ? 'This costs ' + this.money(s.guestPrice) + '.' : 'This is a paid request. The amount is shown in the next box, before anything is sent.',
+      confirmLeadLine: 'You will be charged ' + (s.guestPrice ? this.money(s.guestPrice) : 'the comparison price') + ' when you open this comparison.',
+      directConfirmOpen: !!s.reqConfirmOpen && s.screen === 'request' && !this.orgFormOk(),
+      directConfirmCancel: () => this.setState({ reqConfirmOpen: false }),
+      directConfirmSend: () => { this.setState({ reqConfirmOpen: false }); this.sendDirectRequest(); },
       isRequestNotAccepted: s.screen === 'requestNotAccepted',
       noop: (e) => { if (e && e.preventDefault) e.preventDefault(); },
       startOver: (e) => {
@@ -5295,7 +5370,7 @@ class Component extends DCLogic {
         return 'Your organization has no active subscription right now, so this request cannot be sent until the owner starts one.';
       })(),
       confirmProceedDisabled: !!s.reqBusy || (!this.orgFormOk() && !s.guestPrice),
-      confirmProceedLabel: this.orgFormOk() ? 'Send request' : (s.guestPrice ? 'Send request. Nothing is charged now' : 'Checking the price\u2026'),
+      confirmProceedLabel: this.orgFormOk() ? 'Send request' : (s.guestPrice ? (s.real ? 'Continue to Stripe to save your card' : 'Send request. Nothing is charged now') : 'Checking the price\u2026'),
       confirmSend: () => { this.setState({ reqConfirmOpen: false }); if (this.orgFormOk()) this.sendComparisonRequest(); else this.sendGuestRequest(); },
       confirmCancel: (e) => {
         if (e && e.preventDefault) e.preventDefault();
@@ -5363,6 +5438,7 @@ class Component extends DCLogic {
       myPaidRows: (s.myPaidComparisons || []).map((c) => ({
         id: c.id, label: c.candidate_label, requestedLabel: this.fmtDate(c.requested_at),
         statusLabel: this.paidComparisonStatusLabel(c),
+        chargeNote: this.paidComparisonChargeNote(c), hasChargeNote: !!this.paidComparisonChargeNote(c),
         canOpen: !!c.can_open,
         // Item 17 fix (2026-09-27): was pre-approval only, which stranded an approved request with no
         // successful hold (never saved a card in time, or the one automatic attempt failed) -- clicking
