@@ -21,7 +21,8 @@ const read = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8");
 const constOf = (src, name) => (src.match(new RegExp(`${name} = "([^"]+)"`)) || [])[1];
 
 // ---- a minimal fake page ---------------------------------------------------------------------------------------------------------------
-function makeEnv(gateSource, { stored = {}, search = "?login_token=abc123&other=1" } = {}) {
+const DAY = 24 * 60 * 60 * 1000, T0 = Date.UTC(2026, 9, 21, 12, 0, 0);   // a fixed "now" so the 30 day memory is tested exactly
+function makeEnv(gateSource, { stored = {}, search = "?login_token=abc123&other=1", now = T0, blocked = false } = {}) {
   const mk = (tag) => ({
     tag, children: [], attrs: {}, listeners: {}, textContent: "", value: "", disabled: false, id: "", className: "", parentNode: null,
     appendChild(c) { this.children.push(c); c.parentNode = this; return c; },
@@ -32,13 +33,19 @@ function makeEnv(gateSource, { stored = {}, search = "?login_token=abc123&other=
   const root = mk("html"), head = mk("head"), body = mk("body");
   const location = { search, href: "https://alpha.example/candidate.html" + search, pathname: "/candidate.html", hostname: "alpha.example" };
   const store = { ...stored };
-  const sessionStorage = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: (k) => { delete store[k]; } };
+  const blockedFn = () => { throw new Error("storage is blocked"); };
+  const mkStore = () => (blocked ? { getItem: blockedFn, setItem: blockedFn, removeItem: blockedFn } : { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: (k) => { delete store[k]; } });
+  const localStorage = mkStore();
+  // sessionStorage is given too, as a TRAP: a gate that still remembers per tab would find its own memory there, and the "new tab asks again" check would show it
+  const sstore = {};   // per tab: empty in every new page, which is exactly what a per-tab gate would see in a new tab
+  const sessionStorage = blocked ? mkStore() : { getItem: (k) => (k in sstore ? sstore[k] : null), setItem: (k, v) => { sstore[k] = String(v); }, removeItem: (k) => { delete sstore[k]; } };
+  const FakeDate = { now: () => now };
   const document = {
     documentElement: root, head, body,
     createElement: mk, getElementById: (id) => body.children.find((c) => c.id === id) || null, addEventListener() {},
   };
   const window = { crypto: crypto.webcrypto, location };
-  const ctx = vm.createContext({ document, window, sessionStorage, TextEncoder, atob, btoa, Uint8Array, Promise, console });
+  const ctx = vm.createContext({ document, window, localStorage, sessionStorage, Date: FakeDate, isFinite, Number, String, TextEncoder, atob, btoa, Uint8Array, Promise, console });
   vm.runInContext(gateSource, ctx, { filename: "alpha-gate.js" });
   return { root, head, body, location, store, locationBefore: JSON.stringify(location) };
 }
@@ -68,7 +75,8 @@ async function runChecks({ gate, pages }) {
   ok(!!salt && Buffer.from(salt, "base64").length === 16 && !!hash && Buffer.from(hash, "base64").length === 32, "the gate stores a 16 byte salt and a 32 byte PBKDF2 hash (base64)");
   ok(/ITER = 310000/.test(gate), "310000 PBKDF2 rounds");
   ok(!/\blocation\b|\bhistory\b/.test(gate), "the gate never reads, writes or replaces the address (no location or history use)");
-  ok(!/localStorage|document\.cookie|fetch\(|XMLHttpRequest/.test(gate), "the gate uses sessionStorage only and makes no network request");
+  ok(!/sessionStorage|document\.cookie|fetch\(|XMLHttpRequest/.test(gate) && /localStorage/.test(gate), "the gate remembers in localStorage (shared by every tab), not per tab, and makes no network request");
+  ok(/REMEMBER_MS = 30 \* 24 \* 60 \* 60 \* 1000/.test(gate), "the memory lasts 30 days");
   ok(!/\bverified\b|\bcompliant\b|\bcertified\b/i.test(gate), "no verified, compliant or certified wording");
   ok(!/—/.test(gate), "no em dash in the gate wording");
 
@@ -90,12 +98,25 @@ async function runChecks({ gate, pages }) {
   const wrong = await submit(e1, "not-the-right-phrase");
   ok(wrong === "That phrase did not match." && e1.root.attrs["data-alpha-gate"] === "locked" && Object.keys(e1.store).length === 0, "a wrong phrase is refused and nothing is remembered");
   const right = await submit(e1, TEST_PHRASE);
-  ok(!e1.root.attrs["data-alpha-gate"] && !formOf(e1) && e1.store.applitrust_alpha_gate === "open", "the right phrase opens the page and is remembered for the session");
+  ok(!e1.root.attrs["data-alpha-gate"] && !formOf(e1) && e1.store.applitrust_alpha_gate === "open" && e1.store.applitrust_alpha_gate_until === String(T0 + 30 * DAY), "the right phrase opens the page and is remembered, with an expiry exactly 30 days ahead");
+  const eTab = makeEnv(variant, { stored: e1.store });
+  ok(!eTab.root.attrs["data-alpha-gate"] && !formOf(eTab), "a NEW TAB (same browser storage, nothing else carried over) opens without asking");
+  const eDay29 = makeEnv(variant, { stored: e1.store, now: T0 + 29 * DAY + 23 * 60 * 60 * 1000 });
+  ok(!eDay29.root.attrs["data-alpha-gate"], "still remembered 29 days and 23 hours later");
+  const eDay30 = makeEnv(variant, { stored: { ...e1.store }, now: T0 + 30 * DAY + 1000 });
+  ok(eDay30.root.attrs["data-alpha-gate"] === "locked" && !!formOf(eDay30) && eDay30.store.applitrust_alpha_gate === undefined, "after 30 days it asks again and clears the old memory");
+  const eFar = makeEnv(variant, { stored: { ...e1.store, applitrust_alpha_gate_until: String(T0 + 400 * DAY) } });
+  ok(eFar.root.attrs["data-alpha-gate"] === "locked", "an expiry edited to be far in the future is not believed");
+  const eNoUntil = makeEnv(variant, { stored: { applitrust_alpha_gate: "open", applitrust_alpha_gate_v: TEST_HASH.slice(0, 16) } });
+  ok(eNoUntil.root.attrs["data-alpha-gate"] === "locked", "a memory with no expiry is not believed");
+  let blockedOk = false, blockedOpens = false;
+  try { const eb = makeEnv(variant, { blocked: true }); blockedOk = eb.root.attrs["data-alpha-gate"] === "locked" && !!formOf(eb); blockedOpens = (await submit(eb, TEST_PHRASE)) === "" || !eb.root.attrs["data-alpha-gate"]; } catch (err) { blockedOk = false; }
+  ok(blockedOk, "storage blocked or throwing: the gate asks (no crash)"); ok(blockedOpens, "storage blocked: the right phrase still opens the page for this load");
   ok(JSON.stringify(e1.location) === e1.locationBefore && e1.location.search.includes("login_token=abc123"), "the address and its sign in token are untouched after the phrase is accepted");
-  const e2 = makeEnv(variant, { stored: { applitrust_alpha_gate: "open", applitrust_alpha_gate_v: TEST_HASH.slice(0, 16) } });
-  ok(!e2.root.attrs["data-alpha-gate"] && !formOf(e2), "an already unlocked session loads the page without asking again");
-  const e2b = makeEnv(variant, { stored: { applitrust_alpha_gate: "open", applitrust_alpha_gate_v: "oldversion0000000" } });
-  ok(e2b.root.attrs["data-alpha-gate"] === "locked", "a session unlocked with an older phrase is asked again");
+  const e2 = makeEnv(variant, { stored: { applitrust_alpha_gate: "open", applitrust_alpha_gate_v: TEST_HASH.slice(0, 16), applitrust_alpha_gate_until: String(T0 + DAY) } });
+  ok(!e2.root.attrs["data-alpha-gate"] && !formOf(e2), "an already unlocked browser loads the page without asking again");
+  const e2b = makeEnv(variant, { stored: { applitrust_alpha_gate: "open", applitrust_alpha_gate_v: "oldversion0000000", applitrust_alpha_gate_until: String(T0 + DAY) } });
+  ok(e2b.root.attrs["data-alpha-gate"] === "locked", "a browser unlocked with an older phrase (a changed phrase version tag) is asked again");
   const e3 = makeEnv(variant.replace("var GATE_ENABLED = true;", "var GATE_ENABLED = false;"));
   ok(!e3.root.attrs["data-alpha-gate"] && e3.body.children.length === 0 && e3.head.children.length === 0, "GATE_ENABLED = false loads the page with no gate at all");
   if (process.env.ALPHA_GATE_PHRASE) {   // optional, never required: John's real phrase checked in memory only
@@ -113,6 +134,11 @@ const PLANTS = [
   { name: "plant 3: the check always returns true", expect: "fail", make: () => ({ ...base, gate: base.gate.replace("return toB64(bits) === HASH;", "return true;") }) },
   { name: "plant 4: the gate shipped switched off", expect: "fail", make: () => ({ ...base, gate: base.gate.replace("var GATE_ENABLED = true;", "var GATE_ENABLED = false;") }) },
   { name: "plant 5: the gate script moved after another script (staff.html)", expect: "fail", make: () => ({ ...base, pages: { ...base.pages, "staff.html": dropTag(base.pages["staff.html"]).replace("</script>", "</script>\n" + GATE_TAG) } }) },
+  { name: "plant 7: remembered per tab again (sessionStorage), so every new tab asks", expect: "fail", make: () => ({ ...base, gate: base.gate.replace(/localStorage/g, "sessionStorage") }) },
+  { name: "plant 8: the 30 days never run out (the expiry is not checked)", expect: "fail", make: () => ({ ...base, gate: base.gate.replace("until > now && ", "") }) },
+  { name: "plant 9: a changed phrase is not noticed (the version tag is ignored)", expect: "fail", make: () => ({ ...base, gate: base.gate.replace(' && localStorage.getItem(TAG) === VER', "") }) },
+  { name: "plant 10: a blocked browser crashes the gate (the storage read is not guarded)", expect: "fail", make: () => ({ ...base, gate: base.gate.replace("} catch (e) { open = false; }", "} finally { }") }) },
+  { name: "plant 11: remembered for 90 days instead of 30", expect: "fail", make: () => ({ ...base, gate: base.gate.replace("REMEMBER_MS = 30 *", "REMEMBER_MS = 90 *") }) },
   { name: "plant 6: pointed at nothing (text that is not in the file)", expect: "pass", make: () => ({ ...base, gate: base.gate.replace("THIS TEXT IS NOT IN THE FILE", "x") }) },
 ];
 

@@ -1,7 +1,8 @@
 // ============================================================================================================
 // js/alpha-gate.js - a front page gate for the Applitrust alpha pages. A quick deterrent, NOT security.
 //
-// What it does: hides the page until a shared access phrase is typed once per browser session (sessionStorage, so closing the tab asks again).
+// What it does: hides the page until a shared access phrase is typed once; the browser then remembers it for 30 days (localStorage, shared by every tab, so a new tab or an emailed
+// sign-in link does not ask again). It asks again after 30 days, or when the phrase has been changed, or when the browser will not let the page store anything.
 // The phrase itself is NOT in this file: only a salted PBKDF2-SHA256 hash of it (310000 rounds), so reading this file does not reveal it.
 // What it does not do: it covers the PAGES only. The backend functions can still be called directly by anyone who knows their addresses,
 // and anyone who reads the page source can load the page's own scripts. It never touches the address, so the sign in links keep working.
@@ -15,11 +16,16 @@ var GATE_ENABLED = true;
   "use strict";
   if (!GATE_ENABLED) return;
   var KEY = "applitrust_alpha_gate", SALT = "+Dxl6APLwLwYAwxhTJ2N7w==", HASH = "OBb25NVE+uIjUpfmFcVK7HBLA02kmSOcVpioqLi8FLo=", ITER = 310000;
-  var TAG = KEY + "_v", VER = HASH.slice(0, 16);
+  var TAG = KEY + "_v", VER = HASH.slice(0, 16), UNTIL = KEY + "_until", REMEMBER_MS = 30 * 24 * 60 * 60 * 1000;
 
-  // unlocked only if it was unlocked with THIS phrase: a browser session that entered an older phrase is asked again
+  // unlocked only if it was unlocked with THIS phrase (a browser that entered an older phrase is asked again) and the 30 days have not passed. An expiry further ahead than 30 days
+  // (a stored value that was edited) is not believed. Any storage problem means: ask.
   var open = false;
-  try { open = sessionStorage.getItem(KEY) === "open" && sessionStorage.getItem(TAG) === VER; } catch (e) { open = false; }
+  try {
+    var until = Number(localStorage.getItem(UNTIL)), now = Date.now();
+    open = localStorage.getItem(KEY) === "open" && localStorage.getItem(TAG) === VER && isFinite(until) && until > now && until <= now + REMEMBER_MS + 60000;
+    if (!open) { localStorage.removeItem(KEY); localStorage.removeItem(TAG); localStorage.removeItem(UNTIL); }
+  } catch (e) { open = false; }
   if (open) return;
 
   var root = document.documentElement;
@@ -59,7 +65,7 @@ var GATE_ENABLED = true;
       button.disabled = true; msg.textContent = "Checking...";
       matches(input.value).then(function (ok) {
         if (ok) {
-          try { sessionStorage.setItem(KEY, "open"); sessionStorage.setItem(TAG, VER); } catch (e2) { /* the page opens for this load anyway */ }
+          try { localStorage.setItem(KEY, "open"); localStorage.setItem(TAG, VER); localStorage.setItem(UNTIL, String(Date.now() + REMEMBER_MS)); } catch (e2) { /* the page opens for this load anyway; the next load asks again */ }
           root.removeAttribute("data-alpha-gate");
           form.parentNode.removeChild(form);
         } else {
