@@ -26,6 +26,39 @@ export function restoreRangeDash(line: string): string {
   return line.replace(/(\b(?:[A-Za-z]{3,9}\.? )?\d{4}) ((?:[A-Za-z]{3,9}\.? )?\d{4}|Present|Current)(\)?)\s*$/, "$1 - $2$3");
 }
 
+// BD (October 21, 2026): a printed heading whose place runs straight into the dates ("..., Baltimore, MD March 2021 - Present") gets " | " at that one boundary, so a parser does not have to
+// guess where the place ends. This is the ONLY edit made to a candidate's own heading, and only when the boundary is certain:
+//   * the stored place (row.location) is found in the line (spaces and commas read loosely), and EVERYTHING after it is a date range and nothing else;
+//   * the date range is a recognised shape: a year, "Month YYYY", an abbreviated month with a full stop, "MM/YYYY", or a season and year, as the start, optionally followed by " - ", an en or
+//     em dash, or "to" and the same kinds of end or Present/Current; and it carries the stored start year, and the stored end year or a Present word when the job is current;
+//   * no separator (a pipe, comma, semicolon, colon, dash, bullet or bracket) is already between the place and the dates.
+// Anything else is returned byte for byte unchanged. Nothing is removed or reworded; one space becomes " | ". The title and company text are never touched.
+const MONTH = "(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\\.?";
+const SEASON = "(?:spring|summer|fall|autumn|winter)";
+const DATE_PART = `(?:(?:${MONTH}|${SEASON})\\s+)?\\d{4}|\\d{1,2}\\/\\d{4}`;
+const DATE_RANGE = new RegExp(`^(?:${DATE_PART})(?:\\s*(?:-|\\u2013|\\u2014|to)\\s*(?:${DATE_PART}|present|current|now))?$`, "i");
+const escRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+export function insertPipeBeforeDates(line: string, row: HeadingRow): string {
+  const loc = String(row.location ?? "").trim();
+  if (!loc || typeof line !== "string") return line;
+  // the stored place, with spaces and commas read loosely ("Baltimore, MD" matches "Baltimore,MD" and "Baltimore , MD")
+  const placeRe = new RegExp(loc.split(/\s*,\s*|\s+/).filter(Boolean).map(escRe).join("\\s*,?\\s*"), "ig");
+  let m: RegExpExecArray | null, hit: { end: number } | null = null;
+  while ((m = placeRe.exec(line)) !== null) {
+    const tail = line.slice(m.index + m[0].length);
+    if (!/^\s+\S/.test(tail)) continue;                 // no gap, or nothing after the place: not this one (a separator character right after the place also fails here)
+    const dates = tail.trim();
+    if (!DATE_RANGE.test(dates)) continue;               // the rest is not only a date range
+    const sy = yearOf(row.start), ey = yearOf(row.end), low = dates.toLowerCase();
+    if (sy && !new RegExp(`(^|\\D)${sy}(\\D|$)`).test(dates)) continue;
+    if (row.current) { if (!/\b(present|current|now)\b/.test(low)) continue; }
+    else if (ey && !new RegExp(`(^|\\D)${ey}(\\D|$)`).test(dates)) continue;
+    if (!sy && !ey && !row.current) continue;
+    hit = { end: m.index + m[0].length };
+  }
+  return hit ? line.slice(0, hit.end).replace(/\s+$/, "") + " | " + line.slice(hit.end).trim() : line;
+}
+
 function accepts(text: string, row: HeadingRow): { ok: boolean; titleSeen: boolean } {
   // a sentence is not a heading: headings end in a year, a bracket, a place or a title, never in a full stop after a word
   if (/[.!?]\s*$/.test(text.trim()) && text.trim().split(/\s+/).length >= 8) return { ok: false, titleSeen: false };
@@ -93,7 +126,8 @@ export function attachPrintedHeadings<T extends HeadingRow & { id?: string; posi
     const key = String(ocr.length) + ":" + ocr.slice(0, 40);
     if (!usedByDoc.has(key)) usedByDoc.set(key, new Set());
     const found = findPrintedHeading(ocr, r, usedByDoc.get(key)!);
-    if (found) out.set(r.id, found);
+    // BD: the one allowed edit of a printed heading (see insertPipeBeforeDates): a pipe at the certain boundary between the place and the dates; findPrintedHeading itself still returns the heading as written
+    if (found) out.set(r.id, found.map((l) => insertPipeBeforeDates(l, r)));
   }
   return out;
 }
