@@ -1,0 +1,208 @@
+{
+  "_about": "AW (October 20, 2026): the six test resumes, built from what is STORED on the live project (read only, test data): the heading lines and their neighbours from resume_documents.ocr_raw_text, and the stored work rows as get-customization hands them to the page (employer, title, location, start, end, current). Document ids used are in 'doc'. 'printed' is what the finder must return; 'null' means the heading is not on the page as a heading (the fallback pipe heading is printed).",
+  "docs": {
+    "PironeSimple": {
+      "doc": "3607dea7-1130-4f98-84c6-34c67458c6de (PironeSimpletest.pdf, uploaded 2026-10-20)",
+      "ocr": [
+        "PROFESSIONAL EXPERIENCE",
+        "Associate Dean of Discipline | School District of Indian River County | Sebastian, FL | 2025 2026",
+        "—",
+        "Role transition; retained Business Education Teacher title of record per district process",
+        "* Took on discipline administration responsibilities with no formal job description or existing process in place; built the role's",
+        "Business Education Teacher | School District of Indian River County | Sebastian, FL | 2018 2025",
+        "—",
+        "Designed and delivered curriculum across three instructional tracks Microsoft Office, WordPress, and foundational",
+        "—",
+        "computer skills and administered annual certification testing for all three.",
+        "Business Integration Manager | Truven Health Analytics (IBM Watson Health) | Ann Arbor, MI | 2008 2016",
+        "—",
+        "+ Led integration efforts for 5 enterprise acquisitions over 8 years, coordinating cross-functional teams ranging from 50 to",
+        "Technical Project Manager | QPharma | Summit, NJ | 2007 — 2008",
+        "+ Led business analysis and project delivery for a drug sample disbursement platform supporting approximately 25",
+        "Handheld Product Support Specialist / Project Manager | WorkWave | Tinton Falls, NJ | 2006 2007",
+        "—",
+        "+ Led customer implementations for a large-scale field platform rollout following an acquisition, growing the active customer",
+        "Manager of Handheld Application Development | Thomson Healthcare | Montvale, NJ | 2001 2003",
+        "—",
+        "+ Designed the initial architecture for a mobile product delivery platform (Palm, PocketPC) built for rapid deployment: once",
+        "Manager of Business Analysis and Publishing Systems | Thomson Reuters | Montvale, NJ | 1996 1998",
+        "—",
+        "Promoted mid-year from Desktop Publishing Manager (1996-1997)",
+        "+ Led cross-functional discovery across 15 professional medical journals, aligning a core decision-making team of 45-50",
+        "Project Manager | Letraset | Paramus, NJ | 1995 — 1996",
+        "+ Managed delivery of an HTML-based CD-ROM product platform to a customer base in the thousands, including vendor"
+      ],
+      "rows": [
+        { "id": "s1", "position": 2, "employer": "School District of Indian River County", "title": "Associate Dean of Discipline", "location": "Sebastian, FL", "start": "2025", "end": "2026" },
+        { "id": "s2", "position": 3, "employer": "School District of Indian River County", "title": "Business Education Teacher", "location": "Sebastian, FL", "start": "2018", "end": "2025" },
+        { "id": "s3", "position": 4, "employer": "Truven Health Analytics (IBM Watson Health)", "title": "Business Integration Manager", "location": "Ann Arbor, MI", "start": "2008", "end": "2016" },
+        { "id": "s4", "position": 5, "employer": "QPharma", "title": "Technical Project Manager", "location": "Summit, NJ", "start": "2007", "end": "2008" },
+        { "id": "s5", "position": 6, "employer": "WorkWave", "title": "Handheld Product Support Specialist / Project Manager", "location": "Tinton Falls, NJ", "start": "2006", "end": "2007" },
+        { "id": "s6", "position": 7, "employer": "Thomson Healthcare", "title": "Manager of Handheld Application Development", "location": "Montvale, NJ", "start": "2001", "end": "2003" },
+        { "id": "s7", "position": 8, "employer": "Thomson Reuters", "title": "Manager of Business Analysis and Publishing Systems", "location": "Montvale, NJ", "start": "1996", "end": "1998" },
+        { "id": "s8", "position": 9, "employer": "Thomson Reuters", "title": "Desktop Publishing Manager", "location": "Montvale, NJ", "start": "1996", "end": "1997" },
+        { "id": "s9", "position": 10, "employer": "Letraset", "title": "Project Manager", "location": "Paramus, NJ", "start": "1995", "end": "1996" }
+      ],
+      "printed": {
+        "s1": ["Associate Dean of Discipline | School District of Indian River County | Sebastian, FL | 2025 - 2026"],
+        "s2": ["Business Education Teacher | School District of Indian River County | Sebastian, FL | 2018 - 2025"],
+        "s3": ["Business Integration Manager | Truven Health Analytics (IBM Watson Health) | Ann Arbor, MI | 2008 - 2016"],
+        "s4": ["Technical Project Manager | QPharma | Summit, NJ | 2007 — 2008"],
+        "s5": ["Handheld Product Support Specialist / Project Manager | WorkWave | Tinton Falls, NJ | 2006 - 2007"],
+        "s6": ["Manager of Handheld Application Development | Thomson Healthcare | Montvale, NJ | 2001 - 2003"],
+        "s7": ["Manager of Business Analysis and Publishing Systems | Thomson Reuters | Montvale, NJ | 1996 - 1998"],
+        "s8": null,
+        "s9": ["Project Manager | Letraset | Paramus, NJ | 1995 — 1996"]
+      }
+    },
+    "PironeBeast": {
+      "doc": "6590c24c-42e3-4f58-8755-5c5548c670d9 (PironeBeasttest.pdf, uploaded 2026-10-18)",
+      "ocr": [
+        "PROFESSIONAL EXPERIENCE",
+        "AI Solutions Consultant & Customer Success Advisor",
+        "Independent / Freelance | 2023—Present | Sebastian, FL",
+        "Deliver AI tool evaluations, implementation roadmaps, and adoption playbooks for SMB and enterprise clients",
+        "content, compressing production timelines by 40%+ and reducing third-party content costs.",
+        "Technical Training & Digital Skills Enablement Specialist",
+        "School District of Indian River County, Florida 2019 2023",
+        "—",
+        "© Designed and delivered digital literacy and technology training curricula for diverse adult learner populations,",
+        "insights, ensuring alignment between training objectives and measurable skill acquisition outcomes.",
+        "Business Operations & Portfolio Manager",
+        "Thomson Healthcare/Truven Health 2014 2019",
+        "—",
+        "© —Oversaw end-to-end portfolio and program management across multiple concurrent initiatives, coordinating"
+      ],
+      "rows": [
+        { "id": "b1", "position": 15, "employer": "Independent / Freelance", "title": "AI Solutions Consultant & Customer Success Advisor", "location": "Sebastian, FL", "start": "2023", "current": true },
+        { "id": "b2", "position": 16, "employer": "School District of Indian River County, Florida", "title": "Technical Training & Digital Skills Enablement Specialist", "start": "2019", "end": "2023" },
+        { "id": "b3", "position": 17, "employer": "Thomson Healthcare/Truven Health", "title": "Business Operations & Portfolio Manager", "start": "2014", "end": "2019" }
+      ],
+      "printed": {
+        "b1": ["AI Solutions Consultant & Customer Success Advisor", "Independent / Freelance | 2023—Present | Sebastian, FL"],
+        "b2": ["Technical Training & Digital Skills Enablement Specialist", "School District of Indian River County, Florida 2019 - 2023"],
+        "b3": ["Business Operations & Portfolio Manager", "Thomson Healthcare/Truven Health 2014 - 2019"]
+      }
+    },
+    "PironeBeastHybrid": {
+      "doc": "92e75c4f-9216-4b82-82a5-0251460e5241 (PironeBeastHybridTest10-17.pdf, uploaded 2026-10-18)",
+      "ocr": [
+        "--- page 1 ---",
+        "Technical Training & Digital Skills Enablement",
+        "Business Operations & Process Optimization",
+        "--- page 3 ---",
+        "PROFESSIONAL EXPERIENCE",
+        "Technical Training & Digital Skills Enablement Specialist (2019-2023)",
+        "Designed and delivered digital literacy and technology training curricula for diverse",
+        "Business Operations & Portfolio Manager (2014-2019)",
+        "Oversaw end-to-end portfolio and program management across multiple concurrent"
+      ],
+      "rows": [
+        { "id": "h1", "position": 17, "title": "Technical Training & Digital Skills Enablement Specialist", "start": "2019", "end": "2023" },
+        { "id": "h2", "position": 18, "title": "Business Operations & Portfolio Manager", "start": "2014", "end": "2019" }
+      ],
+      "printed": {
+        "h1": ["Technical Training & Digital Skills Enablement Specialist (2019-2023)"],
+        "h2": ["Business Operations & Portfolio Manager (2014-2019)"]
+      }
+    },
+    "Aclark": {
+      "doc": "6fc77af5-1c15-48df-a849-68a7fd7746fd (aclarktest1017.pdf, uploaded 2026-10-18)",
+      "ocr": [
+        "WESTCX, Senior Recruiter, Remote (Jul 2024-Aug 2026)",
+        "WestCx is a cloud-based technology partner that delivers AI-powered solutions for",
+        "WESTCX, Recruiter, Remote (Sep 2023-Jun 2024)",
+        "Recruited solely for the TeleVox business segment, a patient engagement platform.",
+        "CONTRACT ENGAGEMENTS, Sourcing Recruiter, Remote (Nov 2020-May 2023)",
+        "Various short term contracts allowing flexibility while caring for my mother in her final",
+        "CDW, Senior Talent Acquisition Specialist, Remote (Nov 2015-Sep 2020)",
+        "CDW is a major provider of information technology (IT) hardware, software, and services.",
+        "Owned the complete hiring life cycle for CDW’s prestigious Associate Consulting Engineer",
+        "ALLEGIS GLOBAL SOLUTIONS, Senior Technical Recruiter, Remote (Jan 2011-Nov 2015)",
+        "AGS is a global provider of workforce solutions",
+        "RANDSTAD STAFFING (FORMERLY SPHERION), Senior Recruiter, Remote (Oct 2006-Dec 2010)",
+        "Randstad is a global human resources consulting and recruitment firm."
+      ],
+      "rows": [
+        { "id": "a1", "position": 3, "employer": "WESTCX", "title": "Senior Recruiter", "location": "Remote", "start": "2024-07", "end": "2026-08" },
+        { "id": "a2", "position": 4, "employer": "WESTCX", "title": "Recruiter to Senior Recruiter", "location": "Remote", "start": "2023-09", "end": "2024-06" },
+        { "id": "a3", "position": 5, "employer": "CONTRACT ENGAGEMENTS", "title": "Sourcing Recruiter", "location": "Remote", "start": "2020-11", "end": "2023-05" },
+        { "id": "a4", "position": 6, "employer": "CDW", "title": "Senior Talent Acquisition Specialist", "location": "Remote", "start": "2015-11", "end": "2020-09" },
+        { "id": "a5", "position": 7, "employer": "ALLEGIS GLOBAL SOLUTIONS", "title": "Senior Technical Recruiter", "location": "Remote", "start": "2011-01", "end": "2015-11" },
+        { "id": "a6", "position": 8, "employer": "RANDSTAD STAFFING (FORMERLY SPHERION)", "title": "Senior Recruiter", "location": "Remote", "start": "2006-10", "end": "2010-12" }
+      ],
+      "printed": {
+        "a1": ["WESTCX, Senior Recruiter, Remote (Jul 2024-Aug 2026)"],
+        "a2": ["WESTCX, Recruiter, Remote (Sep 2023-Jun 2024)"],
+        "a3": ["CONTRACT ENGAGEMENTS, Sourcing Recruiter, Remote (Nov 2020-May 2023)"],
+        "a4": ["CDW, Senior Talent Acquisition Specialist, Remote (Nov 2015-Sep 2020)"],
+        "a5": ["ALLEGIS GLOBAL SOLUTIONS, Senior Technical Recruiter, Remote (Jan 2011-Nov 2015)"],
+        "a6": ["RANDSTAD STAFFING (FORMERLY SPHERION), Senior Recruiter, Remote (Oct 2006-Dec 2010)"]
+      }
+    },
+    "Donofrio": {
+      "doc": "4833c981-feb6-401d-8d91-47744853001d (donofriotest1017.pdf, uploaded 2026-10-18)",
+      "ocr": [
+        "Veritext LLC, Chief Technology Officer, Livingston, NJ (Sep 2015-Present)",
+        "Transitioned all internal and external systems and products to a secure cloud hosting",
+        "Truven Health Analytics, Senior VP, Chief Technology Officer, New York, NY (Apr 2011-Aug",
+        "2015)",
+        "Thomson Reuters Healthcare & Science, Sr. VP Solution Operations, Philadelphia, PA (Oct",
+        "2008-Mar 2011)",
+        "Thomson Healthcare PDR, Vice President Technology, Montvale, NJ (Sep 2006-Oct 2008)",
+        "Design of a data warehouse containing practitioner data covering most active physicians in",
+        "Thomson Scientific & Healthcare, Vice President Technology Operations, Stamford, CT (Jun",
+        "2003-Oct 2006)",
+        "Thomson Healthcare, Vice President Technology, Montvale, NJ (Nov 1998-Jun 2003)",
+        "Design and delivery of an editorial and web-publication system for reference and media",
+        "FAME Information Systems, Director, Data Product Development, New York, NY (Oct 1996-Nov",
+        "1998)",
+        "Corning Life Sciences, Director, Technical Services, Teterboro, NJ (Jan 1993-Oct 1996)",
+        "Notable Experiences:",
+        "Chase Manhattan Bank NA, Systems Programmer, Lake Success, NY (Mar 1986-Apr 1987)",
+        "Notable Experiences:"
+      ],
+      "rows": [
+        { "id": "d1", "position": 2, "employer": "Veritext LLC", "title": "Chief Technology Officer", "location": "Livingston, NJ", "start": "2015-09", "current": true },
+        { "id": "d2", "position": 3, "employer": "Truven Health Analytics", "title": "Senior VP, Chief Technology Officer", "location": "New York, NY", "start": "2011-04", "end": "2015-08" },
+        { "id": "d3", "position": 4, "employer": "Thomson Reuters Healthcare & Science", "title": "Sr. VP Solution Operations", "location": "Philadelphia, PA", "start": "2008-10", "end": "2011-03" },
+        { "id": "d4", "position": 5, "employer": "Thomson Healthcare PDR", "title": "Vice President Technology", "location": "Montvale, NJ", "start": "2006-09", "end": "2008-10" },
+        { "id": "d5", "position": 6, "employer": "Thomson Scientific & Healthcare", "title": "Vice President Technology Operations", "location": "Stamford, CT", "start": "2003-06", "end": "2006-10" },
+        { "id": "d6", "position": 7, "employer": "Thomson Healthcare", "title": "Vice President Technology", "location": "Montvale, NJ", "start": "1998-11", "end": "2003-06" },
+        { "id": "d7", "position": 8, "employer": "FAME Information Systems", "title": "Director, Data Product Development", "location": "New York, NY", "start": "1996-10", "end": "1998-11" },
+        { "id": "d8", "position": 9, "employer": "Corning Life Sciences", "title": "Director, Technical Services", "location": "Teterboro, NJ", "start": "1993-01", "end": "1996-10" },
+        { "id": "d9", "position": 10, "employer": "Chase Manhattan Bank NA", "title": "Systems Programmer", "location": "Lake Success, NY", "start": "1986-03", "end": "1987-04" }
+      ],
+      "printed": {
+        "d1": ["Veritext LLC, Chief Technology Officer, Livingston, NJ (Sep 2015-Present)"],
+        "d2": ["Truven Health Analytics, Senior VP, Chief Technology Officer, New York, NY (Apr 2011-Aug 2015)"],
+        "d3": ["Thomson Reuters Healthcare & Science, Sr. VP Solution Operations, Philadelphia, PA (Oct 2008-Mar 2011)"],
+        "d4": ["Thomson Healthcare PDR, Vice President Technology, Montvale, NJ (Sep 2006-Oct 2008)"],
+        "d5": ["Thomson Scientific & Healthcare, Vice President Technology Operations, Stamford, CT (Jun 2003-Oct 2006)"],
+        "d6": ["Thomson Healthcare, Vice President Technology, Montvale, NJ (Nov 1998-Jun 2003)"],
+        "d7": ["FAME Information Systems, Director, Data Product Development, New York, NY (Oct 1996-Nov 1998)"],
+        "d8": ["Corning Life Sciences, Director, Technical Services, Teterboro, NJ (Jan 1993-Oct 1996)"],
+        "d9": ["Chase Manhattan Bank NA, Systems Programmer, Lake Success, NY (Mar 1986-Apr 1987)"]
+      }
+    },
+    "LisaTom": {
+      "doc": "8801c32b-2408-4b70-9274-0a813785f61b (ltomtest10-17.pdf, uploaded 2026-10-18)",
+      "ocr": [
+        "Luminary Labs, VP, People & Talent Strategy, Baltimore, MD (Mar 2021-Present)",
+        "Recruited by rapidly scaling SaaS startup to build and operationalize the company’s first",
+        "NorthBridge Technologies, Director of Talent Acquisition, Annapolis, MD (Jun 2014-Mar",
+        "2021)",
+        "SHRM-SCP Certification (2020)",
+        "Prosci Change Management Certification (2019)"
+      ],
+      "rows": [
+        { "id": "l1", "position": 2, "employer": "Luminary Labs", "title": "VP, People & Talent Strategy", "location": "Baltimore, MD", "start": "2021-03", "current": true },
+        { "id": "l2", "position": 3, "employer": "NorthBridge Technologies", "title": "Director of Talent Acquisition", "location": "Annapolis, MD", "start": "2014-06", "end": "2021-03" }
+      ],
+      "printed": {
+        "l1": ["Luminary Labs, VP, People & Talent Strategy, Baltimore, MD (Mar 2021-Present)"],
+        "l2": ["NorthBridge Technologies, Director of Talent Acquisition, Annapolis, MD (Jun 2014-Mar 2021)"]
+      }
+    }
+  }
+}

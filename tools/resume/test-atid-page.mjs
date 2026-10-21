@@ -215,8 +215,8 @@ t("the session profile is mapped into state, and the JSON export reads its store
   const a = ex.indexOf("const wantAtid = !!s.atidExportJson"), f = ex.indexOf("await ");
   assert.ok(a > 0 && f > a);
 });
-t("nothing else in the page changed in a way that matters: buildResumeLines, sanitizeAts and the PDF preview text builder are identical to the base commit", () => {
-  for (const n of ["buildResumeLines", "sanitizeAts", "isoPartialDate"]) assert.equal(method(NOW, n), method(OLD, n), n);
+t("nothing else in the page changed in a way that matters: sanitizeAts and isoPartialDate are identical to the base commit (buildResumeLines changed on purpose in AW, the job heading; test-job-heading.mjs proves every other line is unchanged)", () => {
+  for (const n of ["sanitizeAts", "isoPartialDate"]) assert.equal(method(NOW, n), method(OLD, n), n);
 });
 
 let failed = 0;
