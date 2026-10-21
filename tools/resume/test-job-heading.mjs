@@ -334,8 +334,11 @@ t("the employer-facing pass-through functions are unchanged from the base commit
     // BA Part 5b adds a read-only helper (openRequestBlockEnds) and a date on the already_requested answer. So: every REMOVED line is one of the two replaced lines, and no ADDED line writes (PATCH/POST/DELETE).
     const removed = d.filter((l) => l[0] === "-"), added = d.filter((l) => l[0] === "+");
     assert.ok(removed.length > 0, f);
-    for (const l of removed) assert.match(l, /action: "assemble_plain_document", candidate_id: (r\.candidate_id|candidateId) \}\),|error: "already_requested"|"already_requested", \{ request_id: res\.request_id \}\);/, f);
-    assert.equal(added.some((l) => /method: "(PATCH|POST|DELETE)"|rest\(/.test(l)), false, f);
+    // Lookup split (October 21, 2026) also rewrites the one insert of the staged row in request_comparison_direct (it now carries created_for_request, with a retry without it), so the
+    // lines of that insert may be removed and re-added; no other write may be added.
+    const STAGED = /insRes|employer_lookup_requests|token: crypto\.randomUUID|requester_company: requesterCompany|candidate_phone: candidatePhoneRaw|method: "POST", headers: \{ "Prefer": "return=representation" \}|body: JSON\.stringify\(\{$|^-\s+\}\),$|^-\s+\}\);$/;
+    for (const l of removed) assert.match(l, new RegExp(/action: "assemble_plain_document", candidate_id: (r\.candidate_id|candidateId) \}\),|error: "already_requested"|"already_requested", \{ request_id: res\.request_id \}\);/.source + "|" + STAGED.source), f);
+    assert.equal(added.filter((l) => /method: "(PATCH|POST|DELETE)"|rest\(/.test(l) && !/employer_lookup_requests/.test(l)).length, 0, f);
     assert.ok(added.some((l) => /request_id: (r\.id|requestId) \}\),/.test(l)), f + " sends the request id");
   }
   // BA Part 1: the gating now lives in two places (the decision recorded at approval, and the live-switch fallback) and the page draws the line through comparisonAtidLine
