@@ -22,6 +22,12 @@ const repo = new URL("../../", import.meta.url);
 const BASE = process.env.AW_BASE || "9c243b2";
 const NOW = fs.readFileSync(new URL("candidate.html", repo), "utf8").replace(/\r\n/g, "\n");
 const OLD = execFileSync("git", ["show", `${BASE}:candidate.html`], { cwd: repo, maxBuffer: 1 << 28 }).toString("utf8").replace(/\r\n/g, "\n");
+// AU (commit 75c8eab, tag ap9au-before-merge-oct20 while it exists locally) owns exportVerifiedData and atidPdfOpts: it rewrote them to read the stored export choices. The commit hash is used
+// because it stays reachable once AU is merged, which a local tag does not.
+const AU_REF = process.env.AW_AU_REF || "75c8eab";
+const AU_OWNED = ["exportVerifiedData", "atidPdfOpts"];
+const AU_SRC = execFileSync("git", ["show", `${AU_REF}:candidate.html`], { cwd: repo, maxBuffer: 1 << 28 }).toString("utf8").replace(/\r\n/g, "\n");
+function differingFromAu(src, names) { return names.filter((n) => method(src, n) !== method(AU_SRC, n)); }
 const FX = JSON.parse(fs.readFileSync(new URL("fixtures/job-heading-six.json", import.meta.url), "utf8"));
 function method(src, name) {
   let start = src.indexOf("\n  " + name + "(");
@@ -199,7 +205,21 @@ t("nothing else moved: for 56 generated resumes (the 6 test resumes + 50 random)
 t("nothing else moved: the writer is untouched for every line without runs (a run-free resume is the same bytes), and the ATID line and hidden information are unchanged", () => {
   const lines = Array.from({ length: 130 }, (_, i) => ({ text: `line ${i} (with) back\\slash`, bold: i % 9 === 0 }));
   for (const o of [undefined, {}, { atidLine: "ATID-7K3M-Q9XP-2WD2" }, { atidMeta: "ATID-7K3M-Q9XP-2WD2" }, { atidLine: "ATID-7K3M-Q9XP-2WD2", atidMeta: "ATID-7K3M-Q9XP-2WD2" }]) assert.ok(now.buildAtsPdfBytes(lines, o) === old.buildAtsPdfBytes(lines, o), JSON.stringify(o));
-  for (const n of ["sanitizeAts", "wrapText", "czPartialLabel", "czRange", "czWorkLabel", "czEduLabel", "czCertLabel", "groupByLiteralHeading", "buildDataExport", "exportVerifiedData", "atidPdfOpts", "isoPartialDate"]) assert.equal(method(NOW, n), method(OLD, n), n);
+  for (const n of ["sanitizeAts", "wrapText", "czPartialLabel", "czRange", "czWorkLabel", "czEduLabel", "czCertLabel", "groupByLiteralHeading", "buildDataExport", "isoPartialDate"]) assert.equal(method(NOW, n), method(OLD, n), n);
+  // exportVerifiedData and atidPdfOpts belong to AU (they read the stored export choices instead of the page). The purpose here is unchanged: prove AW did not alter them, so they are
+  // compared with the AU version, not with master.
+  assert.deepEqual(differingFromAu(NOW, AU_OWNED), [], "AW must not alter the AU-owned export functions");
+});
+// control for the guard above: the same comparison, fed a copy of the page in which one AU-owned function has been altered, must report exactly that function
+t("control: the AU-owned guard still fails when a function it protects is altered relative to AU (planted change in a copy of the page text)", () => {
+  assert.deepEqual(differingFromAu(NOW, AU_OWNED), []);
+  const plantedOpts = NOW.replace("if (s.atidExportPdfLine) opts.atidLine = shown;", "if (s.atidExportPdfLine) opts.atidLine = shown + ' ';");
+  assert.notEqual(plantedOpts, NOW, "the plant landed");
+  assert.deepEqual(differingFromAu(plantedOpts, AU_OWNED), ["atidPdfOpts"]);
+  const plantedExport = NOW.replace("const wantAtid = !!s.atidExportJson;", "const wantAtid = !!s.atidExportJson || false;");
+  assert.notEqual(plantedExport, NOW, "the plant landed");
+  assert.deepEqual(differingFromAu(plantedExport, AU_OWNED), ["exportVerifiedData"]);
+  assert.deepEqual(differingFromAu(NOW.replace("async exportVerifiedData() {", "async exportVerifiedDataX() {"), AU_OWNED), ["exportVerifiedData"], "a missing function counts as different");
 });
 
 // ---------------------------------------------------------------- real PDFs
