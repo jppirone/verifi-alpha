@@ -709,7 +709,10 @@ export default {
         const [reqs, snaps, tier1, share] = await Promise.all([
           rows(`comparison_requests?candidate_id=eq.${candidateId}&select=id,requester_email,requester_name,requester_company,requester_domain_type,attestation,status,created_at,expires_at,responded_at,approved_at,first_delivered_at,snapshot_expires_at,kind,access_method,document_required,lookup_id&order=created_at.desc&limit=100`),
           rows(`comparison_snapshots?candidate_id=eq.${candidateId}&select=request_id`),
-          rows(`employer_lookup_requests?matched_candidate_id=eq.${candidateId}&result_exists=eq.true&select=id,requester_email,requester_company,used_at&order=used_at.desc&limit=100`),
+          // Lookup split (October 21, 2026): also read the marker created_for_request (a row staged by a comparison request is never an existence lookup); repeated without it if the
+          // column does not exist yet (this function deployed before migration 20261021010000_lookup_split).
+          rows(`employer_lookup_requests?matched_candidate_id=eq.${candidateId}&result_exists=eq.true&select=id,requester_email,requester_company,used_at,created_for_request&order=used_at.desc&limit=100`)
+            .catch(() => rows(`employer_lookup_requests?matched_candidate_id=eq.${candidateId}&result_exists=eq.true&select=id,requester_email,requester_company,used_at&order=used_at.desc&limit=100`)),
           assembleSnapshot(candidateId),
         ]);
         const hasSnap = new Set(snaps.map((s) => s.request_id));
@@ -741,7 +744,7 @@ export default {
           // A lookup that a comparison request was created from is the first step of that request, not a separate
           // event (2026-09-29, user-reported: the same employer, same day, showed as both a "Comparison request" and a
           // detail-less "Existence lookup"). Only lookups that never became a request are listed on their own.
-          tier1: tier1.filter((t) => !reqs.some((r) => r.lookup_id === t.id))
+          tier1: tier1.filter((t) => t.created_for_request !== true && !reqs.some((r) => r.lookup_id === t.id))
             .map((t) => ({ id: t.id, domain: String(t.requester_email).split("@")[1] || "", company: t.requester_company, date: t.used_at })),
           would_share: wouldShare(share, "stored"),
         });

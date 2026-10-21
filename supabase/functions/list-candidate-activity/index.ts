@@ -123,13 +123,16 @@ export default {
       const [licenses, nameChanges, allLookups, linkedReqs] = await Promise.all([
         rest(`license_items?candidate_id=eq.${cid}&candidate_confirmed=eq.true&select=id,linked_certification_id,state,verified_at,queue_item_id,correction_status,correction_requested_at,correction_notified_at,created_at`),
         rest(`candidate_name_changes?candidate_id=eq.${cid}&select=old_first_name,old_last_name,new_first_name,new_last_name,changed_at&order=changed_at.desc&limit=100`),
-        rest(`employer_lookup_requests?matched_candidate_id=eq.${cid}&result_exists=eq.true&used_at=not.is.null&select=id,used_at,requester_email,requester_company&order=used_at.desc&limit=200`),
+        // Lookup split (October 21, 2026): also read the marker created_for_request (a row staged by a comparison request is never an existence lookup). If the column does not exist yet
+        // (this function deployed before migration 20261021010000_lookup_split) the read is repeated without it.
+        rest(`employer_lookup_requests?matched_candidate_id=eq.${cid}&result_exists=eq.true&used_at=not.is.null&select=id,used_at,requester_email,requester_company,created_for_request&order=used_at.desc&limit=200`)
+          .catch(() => rest(`employer_lookup_requests?matched_candidate_id=eq.${cid}&result_exists=eq.true&used_at=not.is.null&select=id,used_at,requester_email,requester_company&order=used_at.desc&limit=200`)),
         rest(`comparison_requests?candidate_id=eq.${cid}&lookup_id=not.is.null&select=lookup_id&limit=500`),
       ]);
       // A lookup a comparison request was created from is that request's first step, not a separate event
       // (2026-09-29): only lookups that never became a request are listed on their own.
       const linkedLookupIds = new Set(linkedReqs.map((r) => r.lookup_id));
-      const lookups = allLookups.filter((l) => !linkedLookupIds.has(l.id));
+      const lookups = allLookups.filter((l) => !linkedLookupIds.has(l.id) && l.created_for_request !== true);
 
       const certIds = licenses.map((l) => l.linked_certification_id).filter(Boolean);
       const queueIds = licenses.map((l) => l.queue_item_id).filter(Boolean);

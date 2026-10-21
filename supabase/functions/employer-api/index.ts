@@ -1093,14 +1093,16 @@ const ACTIONS: Record<string, Action> = {
       if (!recent) return fail(500, "request_failed");
       if (recent.length >= 5) return fail(429, "rate_limited");
 
-      const insRes = await rest("employer_lookup_requests", {
-        method: "POST", headers: { "Prefer": "return=representation" },
-        body: JSON.stringify({
-          token: crypto.randomUUID(), requester_email: user.email, requester_name: user.name || user.email,
-          requester_company: requesterCompany || null, candidate_name: candidateName, candidate_email: candidateEmail || null,
-          candidate_phone: candidatePhoneRaw || null, expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
-        }),
-      });
+      // Lookup split (October 21, 2026): this staged row exists for the rate limit and the candidate label of a COMPARISON REQUEST; it is not an existence lookup, so it is marked
+      // (created_for_request) and no lookup list shows it. If the column does not exist yet (this function deployed before migration 20261021010000_lookup_split), the insert is
+      // retried once without the marker so comparison requests keep working; the order of deploy is still migration first.
+      const stagedRow = {
+        token: crypto.randomUUID(), requester_email: user.email, requester_name: user.name || user.email,
+        requester_company: requesterCompany || null, candidate_name: candidateName, candidate_email: candidateEmail || null,
+        candidate_phone: candidatePhoneRaw || null, expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+      };
+      let insRes = await rest("employer_lookup_requests", { method: "POST", headers: { "Prefer": "return=representation" }, body: JSON.stringify({ ...stagedRow, created_for_request: true }) });
+      if (!insRes.ok) insRes = await rest("employer_lookup_requests", { method: "POST", headers: { "Prefer": "return=representation" }, body: JSON.stringify(stagedRow) });
       if (!insRes.ok) return fail(500, "request_failed");
       const staged = (await insRes.json())?.[0];
       if (!staged) return fail(500, "request_failed");
