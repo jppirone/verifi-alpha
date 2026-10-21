@@ -154,13 +154,16 @@ t("employer page: the submit button needs a name of two words plus an ATID in th
 });
 
 // ---------------------------------------------------------------- employer.html: the comparison document
-const NAMES = ["buildComparisonLines", "sanitizeAts", "czWorkLabel", "czEduLabel", "czCertLabel", "czRange", "czPartialLabel", "groupByLiteralHeading", "wrapText"];
+// BA (October 21, 2026): the employer document's job heading now uses the candidate-PDF heading methods, so they are cut out too.
+const NAMES = ["buildComparisonLines", "sanitizeAts", "czWorkLabel", "czEduLabel", "czCertLabel", "czRange", "czPartialLabel", "groupByLiteralHeading", "wrapText", "workHeadingLines", "wrapHeadingRuns", "helvWidth", "czDatesText"];
 t("employer page: the comparison document has no ATID line unless the data carries a well-formed ATID; with none it is exactly the old document, line for line", () => {
   const NewC = makeClass(EMP, NAMES), OldC = makeClass(EMP_OLD, NAMES);
   const RES = { available: true, candidate: { name: "Jane Doe" }, header: { mode: "account", location: "Austin, TX" }, contact: { email: { value: "jane@example.test" }, phone: { value: "512-555-0101" } },
     work: [{ employer: "Acme", title: "Analyst", start: "2019-01", end: "2022-03", bullets: [{ text: "Built reports" }] }], education: [], skills: [{ text: "SQL" }] };
   const lines = (C, r) => new C().buildComparisonLines(r);
-  const before = lines(OldC, RES);
+  // BA (October 21, 2026): the job heading changed on purpose (it is now generated like the candidate's PDF), so the baseline is the current builder with no ATID key; what this test guards, that an
+  // ATID adds exactly one line and nothing else moves, is unchanged. (The old-builder comparison cannot hold for the job heading any more.)
+  const before = lines(NewC, RES);
   assert.ok(before.length > 3);
   for (const atid of [undefined, null, "", "ATID7K3MQ9XP2WD2", "ATID-7K3M-Q9XP-2WD", "atid-7k3m-q9xp-2wd2", "ATID-7K3M-Q9XP-2WU2", 12345, { x: 1 }]) assert.deepEqual(lines(NewC, { ...RES, atid }), before, JSON.stringify(atid));
   const on = lines(NewC, { ...RES, atid: "ATID-7K3M-Q9XP-2WD2" });
@@ -170,7 +173,7 @@ t("employer page: the comparison document has no ATID line unless the data carri
   assert.deepEqual([...on.slice(0, i), ...on.slice(i + 1)], before, "everything else is identical");
   // printed-header mode too
   const printed = { ...RES, header: { mode: "printed", printed_header: "Jane Doe\nAustin" } };
-  assert.deepEqual(lines(NewC, { ...printed, atid: undefined }), lines(OldC, printed));
+  assert.deepEqual(lines(NewC, { ...printed, atid: undefined }), lines(NewC, printed));
 });
 
 // ---------------------------------------------------------------- AS: every way the comparison document can reach the employer's screen
@@ -196,7 +199,7 @@ t("document paths, page: there is one opener (showCompare, called from 4 places 
   assert.equal(/window\.print|\.print\(\)|download\s*=|a\.download|exportCompar|saveAs\(/i.test(EMP.slice(EMP.indexOf("renderGeneratedDocument()"), EMP.indexOf("renderGeneratedDocument()") + 2500)), false, "no print / download code beside the document");
 });
 t("document paths, behaviour: for each of the four openers' payload, the document the employer is shown has the Applitrust ID line only when the server sent an atid (switch on), and nothing else changes", () => {
-  const P = makeClass(EMP, ["showCompare", "buildComparisonLines", "sanitizeAts", "czWorkLabel", "czEduLabel", "czCertLabel", "czRange", "czPartialLabel", "groupByLiteralHeading", "wrapText"]);
+  const P = makeClass(EMP, ["showCompare", "buildComparisonLines", "sanitizeAts", "czWorkLabel", "czEduLabel", "czCertLabel", "czRange", "czPartialLabel", "groupByLiteralHeading", "wrapText", "workHeadingLines", "wrapHeadingRuns", "helvWidth", "czDatesText"]);
   const RES = { available: true, candidate: { name: "Jane Doe" }, header: { mode: "account" }, contact: {}, work: [{ employer: "Acme", title: "Analyst", start: "2019-01", end: "2022-03" }], education: [], skills: [] };
   const openers = { "org / request": { cmpBusy: false, compareFrom: "request" }, "guest link": { guestBusy: false }, "account compare": { compareFrom: "acct" }, "paid, payment history": { myPaidBusy: false, compareFrom: "acct" } };
   for (const [name, state] of Object.entries(openers)) {

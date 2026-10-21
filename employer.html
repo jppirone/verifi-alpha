@@ -2986,7 +2986,7 @@ const __ds_scope = {};
       <div>No record exists for the credentials supplied.</div>
       <div style="color:var(--color-neutral-500);margin-top:6px">A candidate may also choose not to show proof of an account.</div>
     </div>
-    <button type="button" class="btn btn-primary" style="align-self:flex-start" sc-camel-on-click="{{ startOver }}">Start another lookup</button>
+    <button type="button" class="btn btn-primary" style="align-self:flex-start" sc-camel-on-click="{{ startOverHome }}">Start another lookup</button>
   </div>
   </sc-if>
 
@@ -3377,6 +3377,7 @@ const __ds_scope = {};
         <div style="font-size:15px;line-height:1.6">{{ line }}</div>
       </sc-for>
       <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">Every job, education entry and certification the candidate has submitted is shown below, with its current status. Job descriptions are not part of what is verified, so they are not shown. This report covers only these three categories — skills, summaries, and other resume content shown in the document below are the candidate's own stated content, not independently verified.</div>
+      <div style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">The professional summary (also called an executive summary or profile) is not included in this document. Candidates can write and change their own summaries at any time and may keep more than one version, so we cannot tell which one went with the resume you hold. Anything a candidate states about themselves in a summary is their own content and is not part of what is registered here.</div>
       <div style="display:grid;grid-template-columns:auto 1fr;gap:var(--space-2) var(--space-4);font-size:12px;align-items:baseline;border-top:1px solid var(--color-divider);padding-top:var(--space-3)">
         <div style="color:var(--color-neutral-500)">Record as of</div><div>{{ compareAsOf }}</div>
         <div style="color:var(--color-neutral-500)">Approved</div><div>{{ compareApproved }}</div>
@@ -4545,6 +4546,73 @@ class Component extends DCLogic {
   // candidate.html's czWorkLabel/czCertLabel for the full explanation.
   czWorkLabel(w) { return [w.title, w.employer].filter(Boolean).join(' at ') + (w.location ? ', ' + w.location : '') + this.czRange(w.start, w.end, w.current); }
   czEduLabel(e) { return [e.degree, e.field_of_study, [e.institution, e.location].filter(Boolean).join(', ')].filter(Boolean).join(', ') + this.czRange(e.start, e.end, false); }
+  // BA (October 21, 2026): the job heading is generated like the candidate's own PDF (candidate.html workHeadingLines and its helpers, ported unchanged): the line(s) the candidate's own
+  // resume printed (R.work[].printed_heading, supplied by candidate-comparison-requests), or the pipe heading "Title | Company | Location | Dates" with the title in bold when that cannot be
+  // recovered. czWorkLabel above is no longer used for the document.
+  czDatesText(w) { return [this.czPartialLabel(w.start), w.current ? 'Present' : this.czPartialLabel(w.end)].filter(Boolean).join('-'); }
+  // The width of ASCII text in Helvetica (or Helvetica-Bold) at the PDF's 11 pt, in points (standard Helvetica font metrics, 1/1000 em for characters 32 to 126).
+  helvWidth(s, bold) {
+    const R = [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584];
+    const B = [278,333,474,556,556,889,722,238,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,333,333,584,584,584,611,975,722,722,722,722,667,611,778,722,278,556,722,611,833,722,778,667,778,722,667,611,722,667,944,667,667,611,333,278,333,584,556,333,556,611,556,611,556,333,611,611,278,278,556,278,889,611,611,611,611,389,556,333,611,556,778,556,556,500,389,280,389,584];
+    const W = bold ? B : R;
+    let n = 0;
+    for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); n += (c >= 32 && c <= 126) ? W[c - 32] : 556; }
+    return n * 11 / 1000;
+  }
+  // A heading is broken at its " | " separators, so a field (above all the dates) is never split across two lines; the separator stays at the end of the line it follows. Only a field that is
+  // itself wider than a line is broken on spaces. A line is only broken when it is wider than maxWidth points. Nothing is dropped: joining the lines with a space gives the heading back.
+  // The first boldText.length characters are bold; a line that mixes fonts carries `runs`.
+  wrapHeadingRuns(boldText, restText, maxWidth) {
+    const full = boldText + restText;
+    if (!full) return [];
+    const textOf = (parts) => parts.map((pc) => pc.s + (pc.pipe ? ' |' : '')).join(' ');
+    const boldIn = (parts) => Math.min(textOf(parts).length, parts.reduce((n, pc) => n + Math.max(0, Math.min(pc.s.length, boldText.length - pc.start)), 0));
+    const widthOf = (parts) => { const s = textOf(parts), b = boldIn(parts); return this.helvWidth(s.slice(0, b), true) + this.helvWidth(s.slice(b), false); };
+    const pieces = [];
+    let pos = 0;
+    full.split(' | ').forEach((seg, i, all) => {
+      const segStart = pos; pos += seg.length + 3;
+      const pipe = i < all.length - 1;
+      if (widthOf([{ s: seg, start: segStart, pipe: true }]) <= maxWidth) { pieces.push({ s: seg, start: segStart, pipe }); return; }
+      let cur = '', cs = segStart, p = segStart;
+      seg.split(' ').forEach((w) => {
+        const nx = cur ? cur + ' ' + w : w;
+        if (cur && widthOf([{ s: nx, start: cs, pipe: true }]) > maxWidth) { pieces.push({ s: cur, start: cs, pipe: false }); cur = w; cs = p; } else { if (!cur) cs = p; cur = nx; }
+        p += w.length + 1;
+      });
+      if (cur) pieces.push({ s: cur, start: cs, pipe });
+    });
+    const rows = [];
+    pieces.forEach((pc) => {
+      const last = rows[rows.length - 1];
+      if (last && last.open && widthOf([...last.parts, pc]) <= maxWidth) last.parts.push(pc);
+      else rows.push({ parts: [pc] });
+      rows[rows.length - 1].open = pc.pipe;
+    });
+    return rows.map(({ parts }) => {
+      const s = textOf(parts), b = boldIn(parts);
+      if (b <= 0) return { text: s, bold: false };
+      if (b >= s.length) return { text: s, bold: true };
+      return { text: s, bold: false, runs: [{ text: s.slice(0, b), bold: true }, { text: s.slice(b), bold: false }] };
+    });
+  }
+  workHeadingLines(w) {
+    if (Array.isArray(w.printed_heading) && w.printed_heading.some(x => typeof x === 'string' && x.trim())) {
+      const out = [];
+      w.printed_heading.forEach(x => {
+        if (typeof x !== 'string' || !x.trim()) return;
+        const s = this.sanitizeAts(x.trim());
+        // kept on ONE line when it fits between the margins (measured in Helvetica 11 pt, 500 pt of the 504 available); otherwise a pipe heading is broken at its pipes (the dates stay whole)
+        // and a comma heading on spaces. Nothing is dropped.
+        this.wrapHeadingRuns('', s, 500).forEach(l => out.push({ text: l.text, bold: false }));
+      });
+      return out;
+    }
+    const one = (v) => this.sanitizeAts(String(v == null ? '' : v)).replace(/\s+/g, ' ').trim();
+    const title = one(w.title);
+    const rest = [one(w.employer), one(w.location), one(this.czDatesText(w))].filter(Boolean);
+    return this.wrapHeadingRuns(title, (title && rest.length ? ' | ' : '') + rest.join(' | '), 500);
+  }
   czCertLabel(c) { const lic = c.license_number ? [c.license_state, 'Lic #' + c.license_number].filter(Boolean).join(' ') : (c.license_state || ''); return [c.name, c.issuer, lic].filter(Boolean).join(', ') + (c.issued ? ' (' + this.czPartialLabel(c.issued) + ')' : ''); }
 
   sanitizeAts(text) {
@@ -4620,6 +4688,8 @@ class Component extends DCLogic {
     // Summary, deliberately suppressed on the employer side only. Every other section (work,
     // education, certifications, skills, other_sections) is untouched below, still a verbatim port of
     // candidate.html's buildResumeLines — this is the one intentional divergence between the two.
+    // John confirmed on October 21, 2026 that the omission STAYS: a candidate can keep several summaries, so we cannot tell which one went with the resume the employer holds. The comparison
+    // screen's notice now says so (the "professional summary ... is not included in this document" paragraph). Do not restore the summary lines here.
     push('');
 
     const other = (kind) => {
@@ -4632,7 +4702,7 @@ class Component extends DCLogic {
     const posOf = (x) => (typeof x.position === 'number' ? x.position : Infinity);
     const grouped = [];
     const groupKind = (rows, kind, mk, key) => {
-      const items = (rows || []).map(x => ({ position: posOf(x), heading: x.heading || '', label: mk(x), body: kind === 'experience' ? (x.description || '') : '' }));
+      const items = (rows || []).map(x => ({ position: posOf(x), heading: x.heading || '', label: mk(x), body: kind === 'experience' ? (x.description || '') : '', src: x }));
       items.sort((a, b) => a.position - b.position);
       this.groupByLiteralHeading(items, other(key)).forEach(g => grouped.push({ kind, position: g.position, heading: g.heading, items: g.items }));
     };
@@ -4658,7 +4728,9 @@ class Component extends DCLogic {
         if (heading && heading !== lastHeading) push(heading, true);
         lastHeading = heading || null;
         g.items.forEach(b => {
-          this.wrapText(b.label, 90).forEach(w => push(w));
+          // BA: a job heading is generated like the candidate's PDF (the candidate's own printed heading, else the bold-title pipe heading); education and certifications keep their labels
+          if (g.kind === 'experience') this.workHeadingLines(b.src).forEach(l => lines.push(l));
+          else this.wrapText(b.label, 90).forEach(w => push(w));
           if (b.body) this.wrapText(b.body, 90).forEach(w => push(w));
           push('');
         });
@@ -4684,7 +4756,7 @@ class Component extends DCLogic {
   // Verbatim port of candidate.html's buildAtsPdfBytes -- a plain, dependency-free PDF byte writer
   // (Helvetica/Helvetica-Bold text only, no images, no annotations of any kind).
   buildComparisonPdfBytes(lines) {
-    const pageWidth = 612, pageHeight = 792, margin = 54, fontSize = 10, leading = 14;
+    const pageWidth = 612, pageHeight = 792, margin = 54, fontSize = 11, leading = 15;   // BA: 11 pt and 15 pt leading, as the candidate's PDF (the job heading widths are measured at 11 pt)
     const usableHeight = pageHeight - margin * 2;
     const linesPerPage = Math.max(1, Math.floor(usableHeight / leading));
     const pages = [];
@@ -4702,6 +4774,17 @@ class Component extends DCLogic {
       let content = 'BT\n';
       let curFont = null;
       pageLines.forEach((ln) => {
+        if (Array.isArray(ln.runs) && ln.runs.length) {
+          // BA: a line made of runs in different fonts (the pipe job heading: title in bold, the rest regular), written as the candidate's PDF writer does: one Tm, then each run in its own font
+          content += '1 0 0 1 ' + margin + ' ' + y.toFixed(2) + ' Tm\n';
+          ln.runs.forEach((run) => {
+            const rf = run.bold ? '/F2' : '/F1';
+            if (rf !== curFont) { content += rf + ' ' + fontSize + ' Tf\n'; curFont = rf; }
+            content += '(' + esc(run.text) + ') Tj\n';
+          });
+          y -= leading;
+          return;
+        }
         const font = ln.bold ? '/F2' : '/F1';
         if (font !== curFont) { content += font + ' ' + fontSize + ' Tf\n'; curFont = font; }
         content += '1 0 0 1 ' + margin + ' ' + y.toFixed(2) + ' Tm\n';
@@ -5116,6 +5199,12 @@ class Component extends DCLogic {
         if (e && e.preventDefault) e.preventDefault();
         this.clearTokenFromUrl();
         this.setState(this.blank());
+      },
+      // The "No record exists" result returns to the home screen, where the employer chooses between the lookup types (startOver, used by the other two buttons, returns to the base lookup form).
+      startOverHome: (e) => {
+        if (e && e.preventDefault) e.preventDefault();
+        this.clearTokenFromUrl();
+        this.setState(Object.assign(this.blank(), { screen: 'landing' }));
       },
       abandonConfirmation: () => { this.clearTokenFromUrl(); this.setState({ screen: (s.lookupOrigin === 'request' && s.real) ? 'request' : 'lookup', pendingEmail: '', lookupResult: null, lookup: null, request: null, lookupToken: null }); },
       requestAccess: () => this.requestAccess(),

@@ -47,7 +47,8 @@ async function load(fn) {
   const src = fs.readFileSync(new URL(`supabase/functions/${fn}/index.ts`, repo), "utf8").replace(/\r\n/g, "\n")
     .replace(/^import "jsr:@supabase\/functions-js\/edge-runtime\.d\.ts";\n/m, "")
     .replace(/^import \{ withSupabase \} from "jsr:@supabase\/server@[^"]*";\n/m, "const withSupabase = (_o: any, h: any) => h;\n")
-    .replace(/from "\.\.\/_shared\/resume-atid\.ts"/g, `from "${new URL("supabase/functions/_shared/resume-atid.ts", repo).href}"`);
+    .replace(/from "\.\.\/_shared\/resume-atid\.ts"/g, `from "${new URL("supabase/functions/_shared/resume-atid.ts", repo).href}"`)
+    .replace(/from "\.\.\/_shared\/resume-heading-line\.ts"/g, `from "${new URL("supabase/functions/_shared/resume-heading-line.ts", repo).href}"`);   // BA: candidate-comparison-requests now imports the heading finder
   const file = path.join(TMP, `${fn}-${++n}.ts`); fs.writeFileSync(file, src);
   return (await import(pathToFileURL(file).href)).default.fetch;
 }

@@ -315,15 +315,22 @@ t("get-customization: it only READS (work_history_items and resume_documents), a
   await seedServer(null); const r2 = await call({ candidate_id: CID, session_token: TOKEN }); assert.equal(r2.j.ok, true); assert.equal(r2.j.resume.work.some((w) => "printed_heading" in w), false);
   await seedServer(); DB.__rpc.work = []; assert.equal((await call({ candidate_id: CID, session_token: TOKEN })).j.ok, true);
 });
-t("get-customization: still refuses anyone but the candidate's own session, and the employer-facing document never carries the field (only get-customization and the page mention printed_heading)", async () => {
+// BA (October 21, 2026): John decided the employer's document is generated like the candidate's PDF, so the employer path now carries printed_heading too. This guard (AW: "only get-customization and the
+// page mention it") is updated on purpose to name the one server file BA added (candidate-comparison-requests, which supplies it to the employer's generated document). The pass-through functions
+// (employer-api, employer-comparison) still must not mention it. test-employer-document.mjs proves the new path.
+t("get-customization: still refuses anyone but the candidate's own session; printed_heading is mentioned only by get-customization and (BA) candidate-comparison-requests, never by the pass-through employer functions", async () => {
   await seedServer(); const r = await call({ candidate_id: CID, session_token: "x".repeat(40) }); assert.equal(r.status, 401);
   const dir = new URL("supabase/functions/", repo); const hits = [];
   for (const d of fs.readdirSync(dir, { withFileTypes: true })) if (d.isDirectory()) for (const f of fs.readdirSync(new URL(d.name + "/", dir))) { const p = new URL(`${d.name}/${f}`, dir); if (fs.statSync(p).isFile() && /printed_heading/.test(fs.readFileSync(p, "utf8"))) hits.push(d.name + "/" + f); }
-  assert.deepEqual(hits.sort(), ["get-customization/index.ts"]);
-  const emp = fs.readFileSync(new URL("employer.html", repo), "utf8"); assert.equal(/printed_heading/.test(emp), false);
+  assert.deepEqual(hits.sort(), ["candidate-comparison-requests/index.ts", "get-customization/index.ts"]);
+  const emp = fs.readFileSync(new URL("employer.html", repo), "utf8"); assert.equal(/printed_heading/.test(emp), true, "the employer page reads the field (BA)");
 });
-t("the employer-facing generated document is unchanged by this work (employer.html and candidate-comparison-requests are the same as at the base commit)", () => {
-  for (const f of ["employer.html", "supabase/functions/candidate-comparison-requests/index.ts"]) assert.equal(execFileSync("git", ["diff", "--stat", BASE, "--", f], { cwd: repo }).toString().trim(), "", f);
+// BA: the AW assertion that employer.html and candidate-comparison-requests are byte-identical to the base commit cannot hold once the employer document changes on purpose. What stays guarded here: the
+// pass-through employer functions are still identical to the base, and the ATID gating on the employer document (AR) is still in both files.
+t("the employer-facing pass-through functions are unchanged from the base commit, and the AR ATID gating on the employer document is still present", () => {
+  for (const f of ["supabase/functions/employer-api/index.ts", "supabase/functions/employer-comparison/index.ts"]) assert.equal(execFileSync("git", ["diff", "--stat", BASE, "--", f], { cwd: repo }).toString().trim(), "", f);
+  assert.match(fs.readFileSync(new URL("supabase/functions/candidate-comparison-requests/index.ts", repo), "utf8"), /cand\.atid_employer_visible === true && atidIsStored\(cand\.atid\)/);
+  assert.match(fs.readFileSync(new URL("employer.html", repo), "utf8"), /push\('Applitrust ID: ' \+ R\.atid\)/);
 });
 
 let failed = 0;

@@ -2,6 +2,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { withSupabase } from "jsr:@supabase/server@^1";
 import { atidIsStored, atidDisplay } from "../_shared/resume-atid.ts";
+import { attachPrintedHeadings as attachPrintedHeadingsFor } from "../_shared/resume-heading-line.ts";
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -124,6 +125,22 @@ async function rows(path: string): Promise<any[]> {
   if (!r.ok) throw new Error(`db ${path.split("?")[0]} ${r.status}`);
   const j = await r.json();
   return Array.isArray(j) ? j : [];
+}
+// BA (October 21, 2026): each job's heading as the candidate's own resume printed it, for the employer's generated document (same rule as get-customization's attachPrintedHeadings, AW).
+// Reads, never writes: the work rows' source document ids and those documents' stored page text, then runs the shared finder. Mutates `resume.work` in place; only the heading lines are
+// added to a row (the page text itself is never returned). Best effort: the caller ignores any failure and the document falls back to the plain pipe heading.
+async function attachPrintedHeadings(resume: any): Promise<void> {
+  const work: any[] = Array.isArray(resume?.work) ? resume.work : [];
+  const ids = work.map((w) => w?.id).filter((x) => typeof x === "string" && UUID.test(x));
+  if (!ids.length) return;
+  const wrows = await rows(`work_history_items?id=in.(${ids.join(",")})&select=id,resume_document_id`);
+  const docOf = new Map<string, string>(wrows.filter((x) => x?.resume_document_id).map((x) => [x.id, x.resume_document_id]));
+  const docIds = [...new Set(docOf.values())].filter((d) => UUID.test(d));
+  if (!docIds.length) return;
+  const docs = await rows(`resume_documents?id=in.(${docIds.join(",")})&select=id,ocr_raw_text`);
+  const ocrOf = new Map<string, string>(docs.filter((d) => typeof d?.ocr_raw_text === "string").map((d) => [d.id, d.ocr_raw_text]));
+  const found = attachPrintedHeadingsFor(work, (w: any) => ocrOf.get(docOf.get(w.id) ?? ""));
+  for (const w of work) { const h = found.get(w.id); if (h && h.length) w.printed_heading = h; }
 }
 const esc = (s: unknown) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -660,6 +677,9 @@ export default {
         if (!r.ok) return json({ ok: false, error: "assemble_failed" }, 500);
         const resume = await r.json();
         if (!resume || !resume.available) return json({ ok: false, error: "unavailable" }, 409);
+        // BA (October 21, 2026): the employer's document prints each job heading the way the candidate's own PDF does, so each work row also carries printed_heading (the heading line(s) of
+        // the candidate's own resume), found by the shared AW finder. Best effort: any problem leaves the field off and the document falls back to the pipe heading.
+        try { await attachPrintedHeadings(resume); } catch (_e) { /* fallback heading */ }
         // ATID (AR, October 19, 2026): the candidate's ATID goes on the employer's document ONLY while their atid_employer_visible switch is on (default off). Read fresh on every
         // assembly, so turning the switch off removes it from the next open. Any problem reading the switch means no ATID. With the switch off the response is exactly what it was
         // before this existed (the same object, no extra key). assemble_customized_resume itself is unchanged and never carries the ATID.
