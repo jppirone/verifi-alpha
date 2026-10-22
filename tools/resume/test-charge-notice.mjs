@@ -49,8 +49,10 @@ function noticeProblems(html) {
     if (st.includes("details")) out.push(sc.id + " sits inside a collapse");
     const tag = html.slice(idx, html.indexOf(">", idx));
     if (/hidden|display:\s*none/.test(tag)) out.push(sc.id + " is hidden");
-    if (!/\{\{ chargeLeadLine \}\}/.test(html.slice(idx, idx + 900))) out.push(sc.id + " does not carry the lead line");
-    if ((html.slice(idx, idx + 1400).match(/\{\{ chargeAmountLabel \}\}/g) || []).length < 2) out.push(sc.id + " does not carry the loaded amount twice");
+    // BM: the box holds ONLY the one sentence (and the small "How the charge works" link): no long paragraph
+    const box = html.slice(idx, idx + 700);
+    if (!/\{\{ chargeSentence \}\}/.test(box)) out.push(sc.id + " does not carry the sentence");
+    if (/Your card is only charged|The next screen is Stripe/.test(html.slice(idx, idx + 1200))) out.push(sc.id + " still holds the long paragraph");
   }
   return out;
 }
@@ -65,7 +67,7 @@ t("1 request screen: the boxed notice is on both pay per use request screens, on
   // (b) in a collapse
   { const [a, b, blk] = cut(EMP, "charge-notice-request"); const bad = EMP.slice(0, a) + "<details><summary>Cost</summary>" + blk + "</details>" + EMP.slice(b); assert.ok(noticeProblems(bad).some((p) => /collapse/.test(p)), "a collapse is caught"); }
   // (c) shown for organizations too (the gate removed)
-  { const bad = EMP.replace('<sc-if value="{{ directUsesGuest }}" hint-placeholder-val="{{ true }}">\n      <!-- BE: the charge notice', '<sc-if value="{{ true }}" hint-placeholder-val="{{ true }}">\n      <!-- BE: the charge notice'); assert.notEqual(bad, EMP); assert.ok(noticeProblems(bad).some((p) => /not gated/.test(p)), "an ungated notice is caught"); }
+  { const bad = EMP.replace('<sc-if value="{{ directUsesGuest }}" hint-placeholder-val="{{ true }}">\n      <!-- BE/BM: the charge notice', '<sc-if value="{{ true }}" hint-placeholder-val="{{ true }}">\n      <!-- BE/BM: the charge notice'); assert.notEqual(bad, EMP); assert.ok(noticeProblems(bad).some((p) => /not gated/.test(p)), "an ungated notice is caught"); }
   // (d) twice
   { const [a, b, blk] = cut(EMP, "charge-notice-request"); const bad = EMP.slice(0, b) + "\n" + blk.replace('id="charge-notice-request"', 'id="charge-notice-request2"').replace('data-charge-notice="request"', 'data-charge-notice="request"') + EMP.slice(b); assert.ok(noticeProblems(bad).length > 0, "a second copy is caught"); }
   // (e) hidden
@@ -79,7 +81,7 @@ t("1b who sees it: pay per use only. The gates are computed from the same test t
   assert.equal(paid(true, { org: { id: "o1" } }, "L1"), false, "an organization subscription employer does not");
   // the direct screen: the org branch carries none of the new text
   const orgBlock = EMP.slice(EMP.indexOf('<sc-if value="{{ directUsesOrg }}"'), EMP.indexOf("</sc-if>", EMP.indexOf('<sc-if value="{{ directUsesOrg }}"')));
-  assert.equal(/charge-notice|chargeAmountLabel|chargeLeadLine/.test(orgBlock), false);
+  assert.equal(/charge-notice|chargeSentence/.test(orgBlock), false);
   // the direct confirm box is never open for an organization; its button keeps the plain label and sends at once
   assert.equal(evalProp(EMP, "directConfirmOpen", { reqConfirmOpen: true, screen: "request" }, { orgFormOk: () => true }), false);
   assert.equal(evalProp(EMP, "directConfirmOpen", { reqConfirmOpen: true, screen: "request" }, { orgFormOk: () => false }), true);
@@ -90,35 +92,38 @@ t("1b who sees it: pay per use only. The gates are computed from the same test t
 // ------------------------------------------------------------------ 2
 t("2 the amount comes from the loaded price and is never typed in: it shows as the loaded figure, follows a changed price, and with no price loaded the words 'the comparison price' stand in (no number); planted: a typed in amount anywhere is caught", () => {
   const s10 = { guestPrice: { cents: 1000, currency: "usd" } }, s1250 = { guestPrice: { cents: 1250, currency: "usd" } }, none = { guestPrice: null };
-  assert.equal(evalProp(EMP, "chargeAmountLabel", s10), "$10.00"); assert.equal(evalProp(EMP, "chargeAmountLabel", s1250), "$12.50");
-  assert.equal(evalProp(EMP, "chargeLeadLine", s1250), "This costs $12.50.");
-  assert.equal(evalProp(EMP, "confirmLeadLine", s1250), "You will be charged $12.50 when you open this comparison.");
-  assert.equal(evalProp(EMP, "chargeAmountLabel", none), "the comparison price");
-  assert.equal(evalProp(EMP, "confirmLeadLine", none), "You will be charged the comparison price when you open this comparison.");
-  const lead = evalProp(EMP, "chargeLeadLine", none); assert.equal(AMOUNT.test(lead) || /\d/.test(lead), false, "no number without a price: " + lead); assert.match(lead, /shown in the next box, before anything is sent/);
+  // BM: the one sentence (chargeSentence), built from the loaded price
+  const sentence = (state) => { const C = makeClass(EMP, ["money", "chargeSentence"]); const p = new C(); p.state = state; return p.chargeSentence(); };
+  assert.equal(sentence(s10), "$10.00 is charged only when you open the comparison. Nothing is charged now.");
+  assert.equal(sentence(s1250), "$12.50 is charged only when you open the comparison. Nothing is charged now.");
+  assert.equal(sentence(none), "the comparison price is charged only when you open the comparison. Nothing is charged now.");
+  assert.equal(/\d/.test(sentence(none)), false, "no number without a price");
   // the added lines of the page and of the edge function hold no amount
   const added = (f) => execFileSync("git", ["diff", "-U0", BASE, "--", f], { cwd: repo }).toString().split("\n").filter((l) => l[0] === "+" && !l.startsWith("+++"));
   for (const f of ["employer.html", "supabase/functions/employer-api/index.ts"]) { const bad = added(f).filter((l) => AMOUNT.test(l)); assert.deepEqual(bad, [], f + " has a typed in amount"); }
   // planted
-  const hard = EMP.replace("chargeLeadLine: s.guestPrice ? 'This costs ' + this.money(s.guestPrice) + '.'", "chargeLeadLine: s.guestPrice ? 'This costs $10.00.'"); assert.notEqual(hard, EMP);
-  assert.equal(AMOUNT.test(propExpr(hard, "chargeLeadLine")), true, "planted: a typed in amount is caught by the scan");
-  assert.equal(evalProp(hard, "chargeLeadLine", s1250), "This costs $10.00.", "and the changed price case shows the wrong figure");
-  const hardNone = EMP.replace("'the comparison price' : 'the comparison price'", "x"); // no-op guard
-  const noFallback = EMP.replace("chargeAmountLabel: s.guestPrice ? this.money(s.guestPrice) : 'the comparison price'", "chargeAmountLabel: s.guestPrice ? this.money(s.guestPrice) : '$0.00'"); assert.notEqual(noFallback, EMP);
-  assert.notEqual(evalProp(noFallback, "chargeAmountLabel", none), "the comparison price", "planted: a number as the fallback is caught");
+  const hard = EMP.replace("return (this.state.guestPrice ? this.money(this.state.guestPrice) : 'the comparison price') + ' is charged only", "return '$10.00' + ' is charged only"); assert.notEqual(hard, EMP);
+  const hardSentence = (() => { const C = makeClass(hard, ["money", "chargeSentence"]); const p = new C(); p.state = s1250; return p.chargeSentence(); })();
+  assert.equal(AMOUNT.test(hardSentence), true, "planted: a typed in amount is caught by the scan"); assert.notEqual(hardSentence, sentence(s1250), "and the changed price case shows the wrong figure");
+  const noFallback = EMP.replace(": 'the comparison price') + ' is charged only", ": '$0.00') + ' is charged only"); assert.notEqual(noFallback, EMP);
+  assert.notEqual((() => { const C = makeClass(noFallback, ["money", "chargeSentence"]); const p = new C(); p.state = none; return p.chargeSentence(); })(), sentence(none), "planted: a number as the fallback is caught");
   // the notice text itself has no digit-amount
   const blk = EMP.slice(EMP.indexOf('id="charge-notice-request"'), EMP.indexOf("</div>\n      </div>", EMP.indexOf('id="charge-notice-request"'))); assert.equal(AMOUNT.test(blk), false);
 });
 
 // ------------------------------------------------------------------ 3
-t("3 confirm boxes: both lead with 'You will be charged [amount] when you open this comparison.' as their first line, keep every existing true line, and the pay per use button says 'Continue to Stripe to save your card'; planted: lead removed, true line removed, old button label are caught", () => {
+t("3 confirm boxes (BM): the direct, paid and claim token boxes lead with the one sentence, then exactly ONE short line ('If the candidate declines, does not answer, or you do not open it in time, you are never charged.'), then the two buttons; the hold mechanics lines are gone; the pay per use button says 'Continue to Stripe to save your card'; planted: lead removed, the short line removed, a long line back, old button label are caught", () => {
   const dlg = (html, id) => { const a = html.indexOf(`id="${id}"`); return html.slice(a, html.indexOf("</sc-if>", a)); };
-  const TRUE_LINES = [/<b>This saves your card\. It does not charge it\.<\/b>/, /<b>Nothing is charged now\.<\/b> Sending this request only saves your card for later; no hold is placed yet\. You enter your card details with Stripe, not on this site\./, /automatically place a <b>\{\{ (confirmPriceLabel|chargeAmountLabel) \}\} hold<\/b> on that saved card the moment they do/, /<b>real charge only happens when you open the result<\/b>, any time in the <b>7 days after that approval<\/b>, not from today\./, /the hold quietly expires and <b>you are never charged<\/b>/];
-  const check = (html) => { const out = []; for (const id of ["direct-confirm", "req-confirm-title\" data-charge-notice=\"confirm-paid"]) { void id; }
-    const d = dlg(html, "direct-confirm"); if (!/\{\{ confirmLeadLine \}\}/.test(d.slice(0, 700))) out.push("direct box: no lead line"); for (const re of TRUE_LINES) if (!re.test(d)) out.push("direct box: missing " + re);
-    const pa = html.indexOf('data-charge-notice="confirm-paid"'), pb = html.indexOf("</sc-if>", pa), p = html.slice(pa, pb); if (!/\{\{ confirmLeadLine \}\}/.test(p.slice(0, 200))) out.push("paid box: no lead line"); for (const re of TRUE_LINES) if (!re.test(p)) out.push("paid box: missing " + re);
-    const ga = html.indexOf('data-charge-notice="confirm-guest"'), gb = html.indexOf("</sc-if>", ga), g = html.slice(ga, gb); if (!/\{\{ confirmLeadLine \}\}/.test(g.slice(0, 200))) out.push("guest box: no lead line"); if (!/Nothing is charged now\.<\/b> Sending this request is free\./.test(g) || !/you are never charged/.test(g) || !/You place a \{\{ confirmPriceLabel \}\} hold, not a charge, when you pay\./.test(g)) out.push("guest box: a true line is missing");
-    if (!/\{\{ confirmProceedLabel \}\}/.test(d)) out.push("direct box: button label");
+  const NEVER = /<div data-charge-notice="never-charged">If the candidate declines, does not answer, or you do not open it in time, you are never charged\.<\/div>/;
+  const check = (html) => { const out = [];
+    const boxes = [["direct", dlg(html, "direct-confirm")], ["paid", (() => { const pa = html.indexOf('data-charge-notice="confirm-paid"'); return html.slice(pa, html.indexOf("</sc-if>", pa)); })()], ["guest", (() => { const ga = html.indexOf('data-charge-notice="confirm-guest"'); return html.slice(ga, html.indexOf("</sc-if>", ga)); })()]];
+    for (const [name, b] of boxes) {
+      if (!/\{\{ chargeSentence \}\}/.test(b.slice(0, 420))) out.push(name + " box: no sentence as the first line");
+      if (!NEVER.test(b)) out.push(name + " box: the short line is missing");
+      if ((b.match(/never-charged/g) || []).length !== 1) out.push(name + " box: the short line is not there exactly once");
+      if (/7 days after|real charge only happens|hold<\/b>|place a|&mdash;|hold quietly|saves your card/.test(b)) out.push(name + " box: a long hold line is still there");
+    }
+    if (!/\{\{ confirmProceedLabel \}\}/.test(boxes[0][1])) out.push("direct box: button label");
     return out; };
   assert.deepEqual(check(EMP), []);
   const s = (real) => ({ guestPrice: { cents: 1000, currency: "usd" }, real });
@@ -128,8 +133,10 @@ t("3 confirm boxes: both lead with 'You will be charged [amount] when you open t
   assert.equal(evalProp(EMP, "confirmProceedLabel", s({ org: null }), { orgFormOk: () => true }), "Send request");
   assert.match(propExpr(EMP, "confirmProceedDisabled"), /\(!this\.orgFormOk\(\) && !s\.guestPrice\)/, "the button stays disabled with no price");
   // planted
-  { const bad = EMP.replace('data-charge-notice="confirm-paid" data-charge-notice-lead style="font-size:22px;line-height:1.3">{{ confirmLeadLine }}', 'data-charge-notice="confirm-paid" data-charge-notice-lead style="font-size:22px;line-height:1.3">This saves your card.'); assert.notEqual(bad, EMP); assert.ok(check(bad).some((p) => /paid box: no lead/.test(p))); }
-  { const bad = EMP.replace("<b>you are never charged</b>", "<b>you pay nothing</b>"); assert.ok(check(bad).length > 0, "a removed true line is caught"); }
+  { const bad = EMP.replace('data-charge-notice="confirm-paid" data-charge-notice-lead style="font-size:22px;line-height:1.3;font-weight:700">{{ chargeSentence }}', 'data-charge-notice="confirm-paid" data-charge-notice-lead style="font-size:22px;line-height:1.3;font-weight:700">This saves your card.'); assert.notEqual(bad, EMP); assert.ok(check(bad).some((p) => /paid box: no sentence/.test(p))); }
+  const after = (html, anchor, from, to) => { const i = html.indexOf(anchor); assert.ok(i > 0, "anchor " + anchor); const j = html.indexOf(from, i); assert.ok(j > 0, "text " + from); return html.slice(0, j) + to + html.slice(j + from.length); };
+  { const bad = after(EMP, 'data-charge-notice="confirm-guest"', "you are never charged.", "you pay nothing."); assert.notEqual(bad, EMP); assert.ok(check(bad).some((p) => /guest box: the short line/.test(p)), "a changed short line is caught"); }
+  { const bad = after(EMP, 'id="direct-confirm"', "you are never charged.</div>", "you are never charged.</div><div>The real charge only happens when you open the result, any time in the 7 days after that approval.</div>"); assert.notEqual(bad, EMP); assert.ok(check(bad).some((p) => /long hold line/.test(p)), "a long line back is caught"); }
   { const bad = EMP.replace("(s.real ? 'Continue to Stripe to save your card' : 'Send request. Nothing is charged now')", "'Send request. Nothing is charged now'"); assert.notEqual(bad, EMP); assert.notEqual(evalProp(bad, "confirmProceedLabel", s({ org: null })), "Continue to Stripe to save your card"); }
 });
 t("3b flow: on the pay per use request screen the button opens the charge box and only the box's own button sends; the organization button still sends at once; field mistakes are told before the box; planted: a button that sends at once is caught", async () => {
@@ -188,10 +195,10 @@ t("4 Stripe page: the card save session (setup mode) carries custom text built f
   const f = await load(API_SRC);
   await seed(); let r = await setup(f); assert.equal(r.status, 200); assert.equal(r.body.url, "https://checkout.stripe.test/c/cs_stub");
   let c = sessionCalls(); assert.equal(c.length, 1); assert.equal(c[0].form.mode, "setup");
-  assert.equal(c[0].form["custom_text[submit][message]"], "**No charge now.** $12.50 is held on your card when the candidate approves. It is charged when you open the document.");
+  assert.equal(c[0].form["custom_text[submit][message]"], "**$12.50 is charged only when you open the comparison. Nothing is charged now.**");   // BM: the one sentence, in bold
   assert.equal(c[0].form.customer, "cus_existing"); assert.equal(c[0].form["payment_method_types[0]"], "card"); assert.match(c[0].form.success_url, /setup=success$/); assert.equal(c[0].form["metadata[product]"], "employer_card_setup", "the rest of the session is unchanged");
-  await seed({ amount_cents: 2000, currency: "usd" }); await setup(f); assert.match(sessionCalls()[0].form["custom_text[submit][message]"], /^\*\*No charge now\.\*\* \$20\.00 is held/, "the amount follows the price");
-  await seed(null); r = await setup(f); assert.equal(r.status, 200); const none = sessionCalls()[0].form["custom_text[submit][message]"]; assert.match(none, /^\*\*No charge now\.\*\* the comparison price is held/); assert.equal(/\d/.test(none), false, "no number without a price");
+  await seed({ amount_cents: 2000, currency: "usd" }); await setup(f); assert.match(sessionCalls()[0].form["custom_text[submit][message]"], /^\*\*\$20\.00 is charged only when you open the comparison\./, "the amount follows the price");
+  await seed(null); r = await setup(f); assert.equal(r.status, 200); const none = sessionCalls()[0].form["custom_text[submit][message]"]; assert.match(none, /^\*\*the comparison price is charged only when you open the comparison\./); assert.equal(/\d/.test(none), false, "no number without a price");
   assert.deepEqual(EXTERNAL, [], "nothing but the stand-ins was called; no Stripe call was made");
 });
 t("4b if Stripe ever refuses the custom text, the card save is asked again without it and still works; any other refusal is not retried; planted: no retry, and a retry that never drops the text, are caught", async () => {
@@ -206,7 +213,7 @@ t("4b if Stripe ever refuses the custom text, the card save is asked again witho
 t("4c planted: the session without the custom text, with a typed in amount, or with the wrong price source is caught", async () => {
   const none = API_SRC.replace('        "custom_text[submit][message]": setupChargeText(price),\n', ""); assert.notEqual(none, API_SRC);
   await seed(); await setup(await load(none)); assert.equal("custom_text[submit][message]" in sessionCalls()[0].form, false, "planted: removed, which the check in 4 would reject");
-  const typed = API_SRC.replace("  return `**No charge now.** ${amt} is held", "  return `**No charge now.** $10.00 is held"); assert.notEqual(typed, API_SRC);
+  const typed = API_SRC.replace("  return `**${amt} is charged only", "  return `**$10.00 is charged only"); assert.notEqual(typed, API_SRC);
   await seed(); await setup(await load(typed)); assert.doesNotMatch(sessionCalls()[0].form["custom_text[submit][message]"], /\$12\.50/, "planted: a typed in amount does not follow the price, caught by the changed price case");
   const wrong = API_SRC.replace('employer_pricing?key=eq.guest_comparison&select=amount_cents,currency")\)?.[0];\n      const sess', 'employer_pricing?key=eq.org_subscription_monthly&select=amount_cents,currency"))?.[0];\n      const sess'); void wrong;
   const src = API_SRC.slice(API_SRC.indexOf("start_card_setup: {")); assert.match(src, /const price = \(await rows\("employer_pricing\?key=eq\.guest_comparison&select=amount_cents,currency"\)\)\?\.\[0\];\n      let sess|const price = \(await rows\("employer_pricing\?key=eq\.guest_comparison&select=amount_cents,currency"\)\)\?\.\[0\];\n      const setupForm/, "the price is the same guest_comparison row the hold and the charge use");
@@ -242,21 +249,24 @@ t("6 My comparisons: the charge sentence is a bold 14px line next to the Open bu
   const Emp = makeClass(EMP, ["money", "paidComparisonStatusLabel", "paidComparisonChargeNote", "fmtDate"]); const P = new Emp(); P.fmtDate = () => "Oct 28, 2026";
   const hold = { status: "ready", hold_state: "holding", available_until: "x" };
   P.state = { guestPrice: { cents: 1250, currency: "usd" } };
-  assert.equal(P.paidComparisonChargeNote(hold), "Clicking Open charges your card $12.50 now."); assert.equal(P.paidComparisonStatusLabel(hold), "Approved. Ready to open until Oct 28, 2026.");
+  // BM: the approved state is ONE bold line with the open by date; the grey line is empty for it
+  assert.equal(P.paidComparisonChargeNote(hold), "Opening charges your card $12.50. Open by Oct 28, 2026, or the hold expires and you are not charged."); assert.equal(P.paidComparisonStatusLabel(hold), "");
   assert.equal(P.paidComparisonChargeNote({ status: "ready", hold_state: "none" }), "Opening it charges $12.50 once a card is on file.");
   assert.equal(P.paidComparisonChargeNote({ status: "awaiting_candidate" }), ""); assert.equal(P.paidComparisonChargeNote({ status: "opened" }), ""); assert.equal(P.paidComparisonChargeNote({ status: "ready", hold_state: "held" }), "");
-  P.state = { guestPrice: null }; assert.equal(P.paidComparisonChargeNote(hold), "Clicking Open charges your card the comparison price now.");
+  P.state = { guestPrice: null }; assert.match(P.paidComparisonChargeNote(hold), /^Opening charges your card the comparison price\. Open by Oct 28, 2026,/);
   const a = EMP.indexOf('data-charge-notice="my-comparisons"'), tag = EMP.slice(EMP.lastIndexOf("<div", a), EMP.indexOf(">", a));
   assert.match(tag, /font-size:14px;font-weight:700;color:var\(--color-text\)/); assert.ok(a > EMP.indexOf("{{ row.onOpen }}") && a < EMP.indexOf("{{ row.statusLabel }}"), "after the Open button, before the small status line");
   const hard = EMP.replace("const amt = this.state.guestPrice ? this.money(this.state.guestPrice) : 'the comparison price';", "const amt = '$10.00';"); assert.notEqual(hard, EMP);
-  const Q = new (makeClass(hard, ["money", "paidComparisonChargeNote"]))(); Q.state = { guestPrice: { cents: 1250, currency: "usd" } }; assert.doesNotMatch(Q.paidComparisonChargeNote(hold), /12\.50/, "planted: typed in amount");
+  const Q = new (makeClass(hard, ["money", "paidComparisonChargeNote"]))(); Q.fmtDate = () => "Oct 28, 2026"; Q.state = { guestPrice: { cents: 1250, currency: "usd" } }; assert.doesNotMatch(Q.paidComparisonChargeNote(hold), /12\.50/, "planted: typed in amount");
   assert.equal(AMOUNT.test(method(EMP, "paidComparisonChargeNote")), false);
-  const dup = EMP.replace("return 'Approved. Ready to open until ' + this.fmtDate(c.available_until) + '.';", "return 'Approved. Ready to open until ' + this.fmtDate(c.available_until) + '. Clicking Open charges your card now.';"); assert.notEqual(dup, EMP);
-  const D = new (makeClass(dup, ["money", "paidComparisonStatusLabel", "fmtDate"]))(); D.fmtDate = () => "x"; D.state = { guestPrice: null }; assert.match(D.paidComparisonStatusLabel(hold), /charges your card/, "planted: the sentence back in the small line, which the exact status text check above rejects");
+  const dup = EMP.replace("if (c.hold_state === 'holding') return '';", "if (c.hold_state === 'holding') return 'Approved. Ready to open until ' + this.fmtDate(c.available_until) + '.';"); assert.notEqual(dup, EMP);
+  const D = new (makeClass(dup, ["money", "paidComparisonStatusLabel", "fmtDate"]))(); D.fmtDate = () => "x"; D.state = { guestPrice: null }; assert.notEqual(D.paidComparisonStatusLabel(hold), "", "planted: a grey line back next to the bold one, which the exact check above rejects");
 });
 t("6b the stable tags for the text trimming pass are all present, and no em dash was added", () => {
   const tags = [...EMP.matchAll(/data-charge-notice="([a-z-]+)"/g)].map((m) => m[1]).sort();
-  assert.deepEqual(tags, ["confirm-direct", "confirm-guest", "confirm-paid", "my-comparisons", "request", "request"]);
+  const count = (k) => tags.filter((x) => x === k).length;
+  // BM: the tags for the text trimming pass (the sentence everywhere, the short line, the help, the pop-up, the rows, the lookup label)
+  for (const [k, nn] of [["confirm-direct", 1], ["confirm-guest", 1], ["confirm-paid", 1], ["my-comparisons", 1], ["my-comparisons-status", 1], ["request", 2], ["request-sent", 1], ["never-charged", 3], ["how-it-works", 1], ["how-it-works-link", 3], ["charged-popup", 1], ["lookup-status", 3]]) assert.equal(count(k), nn, "tag " + k);
   assert.equal((EMP.match(/data-charge-notice-lead/g) || []).length, 5, "five lead lines: two request notices and three confirm boxes");
   for (const f of ["employer.html", "supabase/functions/employer-api/index.ts", "tools/resume/test-charge-notice.mjs"]) { const added = f.startsWith("tools") ? rd(f).split("\n") : execFileSync("git", ["diff", "-U0", BASE, "--", f], { cwd: repo }).toString().split("\n").filter((l) => l[0] === "+" && !l.startsWith("+++")); assert.deepEqual(added.filter((l) => l.includes(String.fromCharCode(0x2014))), [], f + " has an em dash in added text"); }
   assert.equal(/fetch\(["'`]https:\/\/api\.stripe/.test(fs.readFileSync(new URL("tools/resume/test-charge-notice.mjs", repo), "utf8").replace(/\/\/.*$/gm, "").replace(/globalThis\.fetch[\s\S]*?\n\};/, "")), false, "this test file calls no Stripe address itself");

@@ -144,7 +144,7 @@ function chargeMoney(cents: number, currency?: string | null): string {
 }
 function setupChargeText(price: { amount_cents?: number | null; currency?: string | null } | null | undefined): string {
   const amt = price && Number(price.amount_cents) > 0 ? chargeMoney(Number(price.amount_cents), price.currency) : "the comparison price";
-  return `**No charge now.** ${amt} is held on your card when the candidate approves. It is charged when you open the document.`;
+  return `**${amt} is charged only when you open the comparison. Nothing is charged now.**`;   // BM: the same sentence as chargeSentence in employer.html, in bold
 }
 // The real charge: capture an authorized, capturable hold. Deliberately the same shape as employer-comparison.ts's
 // own captureGuestHold (that file's own comment explains the idempotency/race handling in full) -- duplicated
@@ -1018,14 +1018,15 @@ const ACTIONS: Record<string, Action> = {
       if (!r) return fail(404, "not_found");
       const now = Date.now();
       const windowOpen = !!r.first_delivered_at && r.status === "approved" && !!r.view_window_ends_at && new Date(r.view_window_ends_at).getTime() > now;
+      let chargedNow = false;   // BM: only whether THIS call took the charge (the return value of the two existing calls below); the charge logic itself is unchanged
       if (!windowOpen && !r.first_delivered_at) {
         const ps = await rows(`employer_payments?comparison_request_id=eq.${r.id}&select=id,status,stripe_payment_intent_id,refunded_at&order=created_at.desc`);
         const authorized = ps.find((py) => py.status === "authorized" && !py.refunded_at);
-        if (authorized) await captureGuestHoldLocal(authorized);
+        if (authorized) chargedNow = await captureGuestHoldLocal(authorized);
         // Item 17: no hold exists at all (never placed, or a prior attempt failed) -- if a card is on file
         // now, charge directly rather than leaving this stuck (see chargeGuestNow's own header comment).
         else if (r.status === "approved" && !ps.some((py) => py.status === "paid" && !py.refunded_at)) {
-          await chargeGuestNow(r.id, r);
+          chargedNow = await chargeGuestNow(r.id, r);
         }
       }
       const rr = await rest("rpc/open_paid_comparison", { method: "POST", body: JSON.stringify({ p_request_id: p.request_id, p_employer_user: user.id }) });
@@ -1060,7 +1061,13 @@ const ACTIONS: Record<string, Action> = {
       const genJson = gen.ok ? await gen.json().catch(() => null) : null;
       if (genJson && genJson.ok) generatedDocument = genJson.resume;
 
-      return ok({ content: liveJson.content, assembled_at: liveJson.assembled_at, window_ends_at: res.window_ends_at, first_open: !!res.first_open, document, generated_document: generatedDocument });
+      // BM: the amount actually charged on THIS call, read back from the payment row the charge just made (a SELECT only); null when this call did not charge (a free reopen) or no paid row is found.
+      let charged: { amount_cents: number; currency: string } | null = null;
+      if (chargedNow && res.first_open) {
+        const pr = (await rows(`employer_payments?comparison_request_id=eq.${r.id}&status=eq.paid&select=amount_cents,currency&order=paid_at.desc.nullslast&limit=1`))?.[0];
+        if (pr && Number(pr.amount_cents) > 0) charged = { amount_cents: Number(pr.amount_cents), currency: String(pr.currency || "usd") };
+      }
+      return ok({ content: liveJson.content, assembled_at: liveJson.assembled_at, window_ends_at: res.window_ends_at, first_open: !!res.first_open, document, generated_document: generatedDocument, charged_now: charged !== null, charged_amount_cents: charged ? charged.amount_cents : null, charged_currency: charged ? charged.currency : null });
     },
   },
 

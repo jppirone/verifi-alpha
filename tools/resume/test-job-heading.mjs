@@ -339,7 +339,10 @@ t("the employer-facing pass-through functions are unchanged from the base commit
     const STAGED = /insRes|employer_lookup_requests|token: crypto\.randomUUID|requester_company: requesterCompany|candidate_phone: candidatePhoneRaw|method: "POST", headers: \{ "Prefer": "return=representation" \}|body: JSON\.stringify\(\{$|^-\s+\}\),$|^-\s+\}\);$/;
     // BE (October 21, 2026) turns the one Stripe setup session call of start_card_setup into a variable (so its custom text can be left out if Stripe refuses it): only that call's opening line is replaced.
     const BE_SETUP = /^-\s+const sess = await stripe\("POST", "\/v1\/checkout\/sessions", \{$/;
-    for (const l of removed) assert.match(l, new RegExp(/action: "assemble_plain_document", candidate_id: (r\.candidate_id|candidateId) \}\),|error: "already_requested"|"already_requested", \{ request_id: res\.request_id \}\);/.source + "|" + STAGED.source + "|" + BE_SETUP.source), f);
+    // BM (October 21, 2026) lets open_paid_comparison say whether THIS call took the charge: the two existing charge calls keep their arguments and only their result is kept, and the answer gains three fields
+    // (test-charge-wording.mjs proves nothing else of the charge path moved). Only those three lines are replaced.
+    const BM_OPEN = /^-\s+if \(authorized\) await captureGuestHoldLocal\(authorized\);$|^-\s+await chargeGuestNow\(r\.id, r\);$|^-\s+return ok\(\{ content: liveJson\.content, assembled_at: liveJson\.assembled_at, window_ends_at: res\.window_ends_at, first_open: !!res\.first_open, document, generated_document: generatedDocument \}\);$/;
+    for (const l of removed) assert.match(l, new RegExp(/action: "assemble_plain_document", candidate_id: (r\.candidate_id|candidateId) \}\),|error: "already_requested"|"already_requested", \{ request_id: res\.request_id \}\);/.source + "|" + STAGED.source + "|" + BE_SETUP.source + "|" + BM_OPEN.source), f);
     assert.equal(added.filter((l) => /method: "(PATCH|POST|DELETE)"|rest\(/.test(l) && !/employer_lookup_requests/.test(l)).length, 0, f);
     assert.ok(added.some((l) => /request_id: (r\.id|requestId) \}\),/.test(l)), f + " sends the request id");
   }

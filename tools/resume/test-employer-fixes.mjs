@@ -109,24 +109,26 @@ t("5f: 'My comparisons' says Clicking Open charges your card [amount] now, with 
   const P = new (Emp())(); P.fmtDate = (d) => "Oct 28, 2026";
   const c = { status: "ready", hold_state: "holding", available_until: "2026-10-28T00:00:00Z" };
   P.state = { guestPrice: { cents: 1000, currency: "usd" } };
-  // BE: the charge sentence moved out of the grey status line into a bold note next to the Open button (paidComparisonChargeNote); the status line keeps the date.
-  assert.equal(P.paidComparisonStatusLabel(c), "Approved. Ready to open until Oct 28, 2026.");
-  assert.equal(P.paidComparisonChargeNote(c), "Clicking Open charges your card $10.00 now.");
-  P.state = { guestPrice: { cents: 1250, currency: "usd" } }; assert.match(P.paidComparisonChargeNote(c), /\$12\.50 now\.$/);
-  P.state = { guestPrice: null }; assert.match(P.paidComparisonChargeNote(c), /Clicking Open charges your card the comparison price now\.$/);
+  // BE: the charge sentence moved out of the grey status line into a bold note next to the Open button (paidComparisonChargeNote). BM (October 21, 2026): the approved state is ONE bold line
+  // that also holds the open by date, so the grey line is empty for a held request.
+  assert.equal(P.paidComparisonStatusLabel(c), "");
+  assert.equal(P.paidComparisonChargeNote(c), "Opening charges your card $10.00. Open by Oct 28, 2026, or the hold expires and you are not charged.");
+  P.state = { guestPrice: { cents: 1250, currency: "usd" } }; assert.match(P.paidComparisonChargeNote(c), /^Opening charges your card \$12\.50\. Open by /);
+  P.state = { guestPrice: null }; assert.match(P.paidComparisonChargeNote(c), /^Opening charges your card the comparison price\. Open by /);
   assert.equal(/Opening it charges the hold now/.test(EMP), false);
   const addedMoney = [...method(EMP, "paidComparisonStatusLabel").matchAll(/\$\s?\d/g), ...method(EMP, "paidComparisonChargeNote").matchAll(/\$\s?\d/g)]; assert.equal(addedMoney.length, 0, "no amount typed into the status text");
   // BE: the small price line of the paid request form became the boxed notice (test-charge-notice.mjs); what is left of it is the corporate account pointer
   const line = EMP.slice(EMP.indexOf('id="corporate-account-line"'), EMP.indexOf("</div>", EMP.indexOf('id="corporate-account-line"')));
   assert.match(line, /Organizations can set up a corporate account instead/); assert.equal(/\$\s?\d/.test(line), false);
   assert.ok(EMP.indexOf('id="corporate-account-line"') > EMP.indexOf('<sc-if value="{{ accessPaidForm }}"'), "inside the paid request form");
-  assert.match(EMP, /Sending this request only saves your card for later; no hold is placed yet\. You enter your card details with Stripe, not on this site\./);
+  // BM: the confirm box lost its long lines; the Stripe line now lives behind "How the charge works" (test-charge-wording.mjs proves each statement)
+  assert.match(EMP, /'Card details are entered with Stripe, not on this site\.'/);
   assert.match(EMP, /if \(!this\.state\.guestPrice\) this\.loadGuestPrice\(\);   \/\/ BA, Part 5f/);
   assert.equal(/[—]/.test(line), false);
   const hard = EMP.replace("this.money(this.state.guestPrice) : 'the comparison price'", "'$10.00' : 'the comparison price'"); assert.notEqual(hard, EMP);
   const hard2 = EMP.replace("this.money(this.state.guestPrice) : 'the comparison price';\n    if (c.hold_state === 'holding')", "'$10.00' : 'the comparison price';\n    if (c.hold_state === 'holding')");
   assert.notEqual(hard2, EMP, "the plant applies");
-  const Q = new (makeClass(hard2, ["paidComparisonChargeNote", "money"]))(); Q.state = { guestPrice: { cents: 1250, currency: "usd" } };
+  const Q = new (makeClass(hard2, ["paidComparisonChargeNote", "money"]))(); Q.fmtDate = () => "Oct 28, 2026"; Q.state = { guestPrice: { cents: 1250, currency: "usd" } };
   assert.doesNotMatch(Q.paidComparisonChargeNote(c), /\$12\.50/, "planted: a typed-in amount is caught by the changed-price case above");
 });
 
