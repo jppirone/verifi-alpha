@@ -34,7 +34,7 @@ const serverRule = {
 // a work row as the page holds it
 const row = (id: string, company: string | null | undefined, title: string, sd: string, ed: string | null, ep = "year"): any => ({ id, company, title, start_date: sd, end_date: ed, start_date_precision: "year", end_date_precision: ep });
 const flagged = (rows: any[]) => B.detectWorkOverlaps(rows).map((p: any) => [p.a.id, p.b.id, p.days]);
-const serverFlagged = (rows: any[]) => [serverRule.confirm, serverRule.resub].map((f) => f(rows.map((r) => ({ id: r.id, company: r.company, start: r.start_date, end: r.end_date }))).map((p: any) => [p.a, p.b, p.days]));
+const serverFlagged = (rows: any[]) => [serverRule.confirm, serverRule.resub].map((f) => f(rows.map((r) => ({ id: r.id, company: r.company, start: r.start_date, end: r.end_date, startPrecision: r.start_date_precision, endPrecision: r.end_date_precision }))).map((p: any) => [p.a, p.b, p.days]));
 
 t("the browser rule text is the server rule text (same key function, same skip line)", () => {
   const server = fs.readFileSync(new URL("../../supabase/functions/confirm-resume-data/index.ts", import.meta.url), "utf8");
@@ -74,7 +74,7 @@ t("the Indian River pair (2018 to 2025 and 2025 to 2026): not flagged, and it ne
 });
 
 t("the 30 and 31 day boundary behaves exactly as before (different companies)", () => {
-  const mkp = (days: number) => [row("a", "A Co", "X", "2020-01-01", "2020-01-01"), row("b", "B Co", "Y", "2020-01-01", "2020-01-01")].map((r, i) => ({ ...r, start_date: "2020-01-01", end_date: i === 0 ? "2020-12-31" : new Date(Date.parse("2020-01-01") + days * 86400000).toISOString().slice(0, 10) }));
+  const mkp = (days: number) => [row("a", "A Co", "X", "2020-01-01", "2020-01-01"), row("b", "B Co", "Y", "2020-01-01", "2020-01-01")].map((r, i) => ({ ...r, start_date_precision: "day", end_date_precision: "day", start_date: "2020-01-01", end_date: i === 0 ? "2020-12-31" : new Date(Date.parse("2020-01-01") + days * 86400000).toISOString().slice(0, 10) }));
   assert.equal(flagged(mkp(30)).length, 0); // exactly 30 days overlap: not flagged
   assert.equal(flagged(mkp(31)).length, 1); // 31 days: flagged
   assert.deepEqual(flagged(mkp(31)), Old.detectWorkOverlaps(mkp(31)).map((p: any) => [p.a.id, p.b.id, p.days]));
@@ -83,10 +83,15 @@ t("the 30 and 31 day boundary behaves exactly as before (different companies)", 
   assert.equal(flagged(same).length, 0);
 });
 
-t("the exact Thomson Reuters pair of document 13537c49 (1996 to 1998 and 1996 to 1997): not flagged now, flagged (366 days) by the old page", () => {
+// BH (October 21, 2026): these dates are year only, so under the certain overlap rule the pair is no longer flagged even WITHOUT the same company exemption (the smallest overlap is 1 day).
+// The exemption's own negative control now uses the same dates at day precision, where the old page's 366 days is still real.
+t("the exact Thomson Reuters pair of document 13537c49 (1996 to 1998 and 1996 to 1997): not flagged; year only dates are not flagged even without the exemption; at day precision the page without the exemption flags 366 days", () => {
   const rows = [row("m", "Thomson Reuters", "Manager of Business Analysis and Publishing Systems", "1996-01-01", "1998-01-01"), row("d", "Thomson Reuters", "Desktop Publishing Manager", "1996-01-01", "1997-01-01")];
   assert.deepEqual(flagged(rows), []);
-  const old = Old.detectWorkOverlaps(rows);
+  assert.deepEqual(Old.detectWorkOverlaps(rows), []);
+  const day = rows.map((r) => ({ ...r, start_date_precision: "day", end_date_precision: "day" }));
+  assert.deepEqual(flagged(day), []);
+  const old = Old.detectWorkOverlaps(day);
   assert.equal(old.length, 1); assert.equal(old[0].days, 366);
 });
 
@@ -102,10 +107,13 @@ const SIMPLE9 = [
   row("8", "Thomson Reuters", "Desktop Publishing Manager", "1996-01-01", "1997-01-01"),
   row("9", "Letraset", "Project Manager", "1995-01-01", "1996-01-01"),
 ];
-t("a PironeSimple shaped set of all 9 entries with the stored company values: nothing flagged (the old page flagged exactly the Thomson Reuters pair)", () => {
+t("a PironeSimple shaped set of all 9 entries with the stored company values: nothing flagged (BH: with year only dates even the page without the exemption flags nothing; at day precision it flags exactly the Thomson Reuters pair, 366 days)", () => {
   assert.equal(SIMPLE9.length, 9);
   assert.deepEqual(flagged(SIMPLE9), []);
-  const old = Old.detectWorkOverlaps(SIMPLE9);
+  assert.deepEqual(Old.detectWorkOverlaps(SIMPLE9), []);
+  const day = SIMPLE9.map((r) => ({ ...r, start_date_precision: "day", end_date_precision: "day" }));
+  assert.deepEqual(flagged(day), []);
+  const old = Old.detectWorkOverlaps(day);
   assert.deepEqual(old.map((p: any) => [p.a.id, p.b.id, p.days]), [["7", "8", 366]]);
 });
 

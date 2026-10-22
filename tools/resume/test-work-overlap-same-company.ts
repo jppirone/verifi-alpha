@@ -48,8 +48,10 @@ for (const file of ["confirm-resume-data", "resume-resubmission"]) {
     assert.equal(detect(items).length, 1);
   });
   t(`${file}: exactly 30 days still does not trigger, 31 does (unchanged rule)`, () => {
-    assert.equal(detect([{ id: "a", company: "X", start: "2020-01-01", end: "2020-02-01" }, { id: "b", company: "Y", start: "2020-01-01", end: "2020-03-01" }]).length, 1); // 31 days
-    assert.equal(detect([{ id: "a", company: "X", start: "2020-01-01", end: "2020-01-31" }, { id: "b", company: "Y", start: "2020-01-01", end: "2020-03-01" }]).length, 0); // 30 days
+    // BH (October 21, 2026): day precision stated explicitly, so these stay the boundary of the plain 30 day rule (a year only date would be judged by the certain overlap rule instead)
+    const D = { startPrecision: "day", endPrecision: "day" };
+    assert.equal(detect([{ id: "a", company: "X", start: "2020-01-01", end: "2020-02-01", ...D }, { id: "b", company: "Y", start: "2020-01-01", end: "2020-03-01", ...D }]).length, 1); // 31 days
+    assert.equal(detect([{ id: "a", company: "X", start: "2020-01-01", end: "2020-01-31", ...D }, { id: "b", company: "Y", start: "2020-01-01", end: "2020-03-01", ...D }]).length, 0); // 30 days
   });
 }
 console.log(`\n${n} tests passed`);

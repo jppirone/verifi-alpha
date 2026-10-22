@@ -3428,7 +3428,7 @@ a:hover{color:var(--color-accent)}
             <div style="border:1px solid var(--color-divider);border-radius:8px;padding:var(--space-2);font-size:13px;display:flex;flex-direction:column;gap:2px">
               <div><b>{{ row.label }}</b></div>
               <div><b>{{ row.labelB }}</b></div>
-              <div style="font-size:12px;color:var(--color-neutral-500)">Overlap: {{ row.days }} days</div>
+              <div style="font-size:12px;color:var(--color-neutral-500)">Overlap: {{ row.daysLabel }} days</div>
             </div>
           </sc-for>
           <div>This explanation applies to all periods listed above — you don't need to address them one at a time.</div>
@@ -11676,8 +11676,19 @@ class Component extends DCLogic {
   // company never matches) is never flagged. Identical to overlapCompanyKey in confirm-resume-data and
   // resume-resubmission, which must stay in step with this.
   overlapCompanyKey(c) { return typeof c === 'string' ? c.toLowerCase().replace(/[^a-z0-9]+/g, '') : ''; }
+  // Certain overlap rule (October 21, 2026): a year only start or end may fall on any day of that year, so a pair is judged on the SMALLEST overlap those choices allow; month, day,
+  // present and unmarked dates count as stored. "2018 - 2020" with "2019 - 2021": smallest overlap 1 day, not flagged. "2018 - 2020" with "Mar 2019 - 2020": at least 306 days, flagged.
+  certainOverlap(a, b) {
+    const t = (d) => Date.parse(d);
+    const edge = (d, p, month, day) => (p === 'year' ? Date.UTC(new Date(t(d)).getUTCFullYear(), month, day) : t(d));
+    const earliestStart = (x) => edge(x.start, x.startPrecision, 0, 1), latestStart = (x) => edge(x.start, x.startPrecision, 11, 31);
+    const earliestEnd = (x) => edge(x.end, x.endPrecision, 0, 1), latestEnd = (x) => edge(x.end, x.endPrecision, 11, 31);
+    const least = Math.max(0, Math.min(earliestEnd(a) - latestStart(b), earliestEnd(b) - latestStart(a), earliestEnd(a) - latestStart(a), earliestEnd(b) - latestStart(b)));
+    const most = Math.max(0, Math.min(latestEnd(a), latestEnd(b)) - Math.max(earliestStart(a), earliestStart(b)));
+    return { days: Math.round(least / 86400000), atLeast: most !== least };
+  }
   detectWorkOverlaps(workHistory) {
-    const items = (workHistory || []).map(w => ({ item: w, start: w.start_date || null, end: this.effectiveWorkEndForOverlap(w.end_date, w.end_date_precision) }));
+    const items = (workHistory || []).map(w => ({ item: w, start: w.start_date || null, end: this.effectiveWorkEndForOverlap(w.end_date, w.end_date_precision), startPrecision: w.start_date_precision || null, endPrecision: w.end_date_precision || null }));
     const pairs = [];
     for (let i = 0; i < items.length; i++) {
       for (let j = i + 1; j < items.length; j++) {
@@ -11686,10 +11697,8 @@ class Component extends DCLogic {
         if (this.overlapCompanyKey(a.item.company) && this.overlapCompanyKey(a.item.company) === this.overlapCompanyKey(b.item.company)) continue;
         const aS = Date.parse(a.start), aE = Date.parse(a.end), bS = Date.parse(b.start), bE = Date.parse(b.end);
         if (![aS, aE, bS, bE].every(Number.isFinite)) continue;
-        const overlapStart = Math.max(aS, bS), overlapEnd = Math.min(aE, bE);
-        if (overlapEnd <= overlapStart) continue;
-        const days = Math.round((overlapEnd - overlapStart) / 86400000);
-        if (days > 30) pairs.push({ a: a.item, b: b.item, days });
+        const o = this.certainOverlap(a, b);
+        if (o.days > 30) pairs.push({ a: a.item, b: b.item, days: o.days, ...(o.atLeast ? { atLeast: true } : {}) });
       }
     }
     return pairs;
@@ -11710,7 +11719,7 @@ class Component extends DCLogic {
   hydrateOverlapPairs(rawPairs) {
     const ex = this.state.resumeExtraction;
     const byId = new Map(((ex && ex.work_history) || []).map(w => [w.id, w]));
-    return (rawPairs || []).map(p => ({ a: byId.get(p.a) || { id: p.a, title: null, company: null }, b: byId.get(p.b) || { id: p.b, title: null, company: null }, days: p.days }));
+    return (rawPairs || []).map(p => ({ a: byId.get(p.a) || { id: p.a, title: null, company: null }, b: byId.get(p.b) || { id: p.b, title: null, company: null }, days: p.days, ...(p.atLeast ? { atLeast: true } : {}) }));
   }
   // Whatever gate opened the overlap modal was about to do once no unresolved overlap stands in the
   // way -- resumeConfirm's own edit-acknowledgment gate/submit, or a resubmission's real apply.
@@ -14136,13 +14145,14 @@ class Component extends DCLogic {
       // work_history draft rows), and a resubmission's plan.overlaps (a/b are plain ids, with the
       // date range already folded into aLabel/bLabel server-side via label.work) -- see resubApplyGated.
       overlapPairRows: (s.overlapPairs || []).map(p => {
-        if (typeof p.a === 'string') return { label: p.aLabel, labelB: p.bLabel, days: p.days };
+        // the figure is the SMALLEST overlap that is certain; "at least" when a year only date affects it (p.atLeast)
+        if (typeof p.a === 'string') return { label: p.aLabel, labelB: p.bLabel, days: p.days, daysLabel: (p.atLeast ? 'at least ' : '') + p.days };
         const dates = [this.dateLabel(p.a.start_date, p.a.start_date_precision), this.dateLabel(p.a.end_date, p.a.end_date_precision)].filter(Boolean).join(' – ');
         const datesB = [this.dateLabel(p.b.start_date, p.b.start_date_precision), this.dateLabel(p.b.end_date, p.b.end_date_precision)].filter(Boolean).join(' – ');
         return {
           label: ([p.a.title, p.a.company].filter(Boolean).join(' at ') || '(untitled job)') + (dates ? ' (' + dates + ')' : ''),
           labelB: ([p.b.title, p.b.company].filter(Boolean).join(' at ') || '(untitled job)') + (datesB ? ' (' + datesB + ')' : ''),
-          days: p.days,
+          days: p.days, daysLabel: (p.atLeast ? 'at least ' : '') + p.days,
         };
       }),
       overlapExplanationValue: s.overlapExplanationDraft,

@@ -622,15 +622,26 @@ function effectiveWorkEnd(endDate: string | null | undefined, endPrecision: unkn
   if (endPrecision === "present") return new Date().toISOString().slice(0, 10);
   return typeof endDate === "string" && endDate ? endDate : null;
 }
-type OverlapItem = { id: string; start: string | null; end: string | null; company?: string | null };
+type OverlapItem = { id: string; start: string | null; end: string | null; company?: string | null; startPrecision?: string | null; endPrecision?: string | null };
 // AP9 (2026-10-16, John's rule 11): roles of the SAME company are one tenure with several dated roles, not two
 // jobs held at once, so a pair with the same company (case, spacing and punctuation ignored) is never flagged.
 const overlapCompanyKey = (c: unknown): string => (typeof c === "string" ? c.toLowerCase().replace(/[^a-z0-9]+/g, "") : "");
+// Certain overlap rule (October 21, 2026): a year only start or end may fall on any day of that year, so a pair is judged on the SMALLEST overlap those choices allow; month, day,
+// present and unmarked dates count as stored. "2018 - 2020" with "2019 - 2021": smallest overlap 1 day, not flagged. "2018 - 2020" with "Mar 2019 - 2020": at least 306 days, flagged.
+function certainOverlap(a: OverlapItem, b: OverlapItem): { days: number; atLeast: boolean } {
+  const t = (d: string | null) => Date.parse(d as string);
+  const edge = (d: string | null, p: unknown, month: number, day: number) => (p === "year" ? Date.UTC(new Date(t(d)).getUTCFullYear(), month, day) : t(d));
+  const earliestStart = (x: OverlapItem) => edge(x.start, x.startPrecision, 0, 1), latestStart = (x: OverlapItem) => edge(x.start, x.startPrecision, 11, 31);
+  const earliestEnd = (x: OverlapItem) => edge(x.end, x.endPrecision, 0, 1), latestEnd = (x: OverlapItem) => edge(x.end, x.endPrecision, 11, 31);
+  const least = Math.max(0, Math.min(earliestEnd(a) - latestStart(b), earliestEnd(b) - latestStart(a), earliestEnd(a) - latestStart(a), earliestEnd(b) - latestStart(b)));
+  const most = Math.max(0, Math.min(latestEnd(a), latestEnd(b)) - Math.max(earliestStart(a), earliestStart(b)));
+  return { days: Math.round(least / 86400000), atLeast: most !== least };
+}
 // A pair is flagged when the overlapping span exceeds 30 days -- exactly 30 does not trigger (spec's own
 // test case), 31+ does. Every pair is returned in one pass; one hold per detection RUN, however many
 // pairs it finds (never one hold per pair).
-function detectWorkOverlaps(items: OverlapItem[]): Array<{ a: string; b: string; days: number }> {
-  const out: Array<{ a: string; b: string; days: number }> = [];
+function detectWorkOverlaps(items: OverlapItem[]): Array<{ a: string; b: string; days: number; atLeast?: boolean }> {
+  const out: Array<{ a: string; b: string; days: number; atLeast?: boolean }> = [];
   for (let i = 0; i < items.length; i++) {
     for (let j = i + 1; j < items.length; j++) {
       const a = items[i], b = items[j];
@@ -638,10 +649,8 @@ function detectWorkOverlaps(items: OverlapItem[]): Array<{ a: string; b: string;
       if (overlapCompanyKey(a.company) && overlapCompanyKey(a.company) === overlapCompanyKey(b.company)) continue;
       const aS = Date.parse(a.start), aE = Date.parse(a.end), bS = Date.parse(b.start), bE = Date.parse(b.end);
       if (!Number.isFinite(aS) || !Number.isFinite(aE) || !Number.isFinite(bS) || !Number.isFinite(bE)) continue;
-      const overlapStart = Math.max(aS, bS), overlapEnd = Math.min(aE, bE);
-      if (overlapEnd <= overlapStart) continue;
-      const days = Math.round((overlapEnd - overlapStart) / 86400000);
-      if (days > 30) out.push({ a: a.id, b: b.id, days });
+      const o = certainOverlap(a, b);
+      if (o.days > 30) out.push({ a: a.id, b: b.id, days: o.days, ...(o.atLeast ? { atLeast: true } : {}) });
     }
   }
   return out;
@@ -657,11 +666,11 @@ function postApplyWorkItems(ctx: any): (OverlapItem & { row: Rec })[] {
   for (const p of W.pairs) {
     const o = aW[p.oldIdx], n = sW[p.newIdx];
     const r = p.cls === "kept" ? o : mergeFacts("work", o, n, p.changes).merged;
-    out.push({ id: o.id, start: typeof r.start_date === "string" ? r.start_date : null, end: effectiveWorkEnd(r.end_date, r.end_date_precision), company: r.company, row: r });
+    out.push({ id: o.id, start: typeof r.start_date === "string" ? r.start_date : null, end: effectiveWorkEnd(r.end_date, r.end_date_precision), startPrecision: r.start_date_precision ?? null, endPrecision: r.end_date_precision ?? null, company: r.company, row: r });
   }
   for (const j of W.added) {
     const n = sW[j];
-    out.push({ id: n.id, start: typeof n.start_date === "string" ? n.start_date : null, end: effectiveWorkEnd(n.end_date, n.end_date_precision), company: n.company, row: n });
+    out.push({ id: n.id, start: typeof n.start_date === "string" ? n.start_date : null, end: effectiveWorkEnd(n.end_date, n.end_date_precision), startPrecision: n.start_date_precision ?? null, endPrecision: n.end_date_precision ?? null, company: n.company, row: n });
   }
   return out;
 }
