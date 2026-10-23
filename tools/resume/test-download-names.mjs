@@ -181,7 +181,7 @@ t("8. the only changed file besides this test is candidate.html, and the changed
   assert.ok(added.some((l) => l.startsWith("a.download = this.downloadFileName('pdf', this.state.savedFirst, this.state.savedLast, new Date());")));
 });
 t("9. no em dash and no spaced double hyphen was added", () => {
-  const added = git("diff", "-U0", BASE).split("\n").filter((l) => l[0] === "+" && !l.startsWith("+++"));
+  const added = git("diff", "-U0", BASE, "--", "candidate.html").split("\n").filter((l) => l[0] === "+" && !l.startsWith("+++"));
   const DASH2 = String.fromCharCode(32, 45, 45, 32), EM = String.fromCharCode(0x2014);
   for (const l of added) { assert.equal(l.includes(EM), false, l.slice(0, 80)); assert.equal(l.includes(DASH2), false, l.slice(0, 80)); }
   const self = fs.readFileSync(new URL("tools/resume/test-download-names.mjs", repo), "utf8");
@@ -200,7 +200,7 @@ t("12. the name function uses no this, no state, no clock of its own besides the
   assert.equal(NAMEFN.includes("Date.now"), false);
 });
 t("13. the page text never describes the name or the download with a guarantee, score or percent in the added lines", () => {
-  const added = git("diff", "-U0", BASE).split("\n").filter((l) => l[0] === "+" && !l.startsWith("+++")).join("\n");
+  const added = git("diff", "-U0", BASE, "--", "candidate.html").split("\n").filter((l) => l[0] === "+" && !l.startsWith("+++")).join("\n");
   assert.equal(/guarantee|percent|score|%/i.test(added.replace(/ZZZ/g, "")), false);
 });
 t("14. employer.html is unchanged and has no download of the comparison to name (it embeds the document); the candidate's name cannot reach any employer file name", () => {
