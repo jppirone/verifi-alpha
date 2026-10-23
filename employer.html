@@ -3465,6 +3465,7 @@ const __ds_scope = {};
         <div class="card-kicker">Generated from their current record</div>
         <div style="font-size:11px;color:var(--color-neutral-500);line-height:1.6">Built just now from the candidate's current profile data. No verification marks of any kind — the report above is where that detail lives.</div>
         <div id="generated-doc-container" style="width:100%;aspect-ratio:8.5 / 11;background:#ffffff;border-radius:2px;box-shadow:var(--shadow-lg);overflow:auto"></div>
+        <button type="button" class="btn btn-secondary" style="align-self:flex-start" disabled="{{ genDocNotReady }}" sc-camel-on-click="{{ downloadComparisonPdf }}">Download PDF</button>
       </div>
     </div>
   </div>
@@ -4964,10 +4965,29 @@ class Component extends DCLogic {
       const em = document.createElement('embed');
       em.type = 'application/pdf'; em.src = this._genDocUrl; em.style.cssText = 'width:100%;height:100%;border:0';
       container.appendChild(em);
+      if (this.state.compare) this.setState({ compare: Object.assign({}, this.state.compare, { genDocReady: true }) });   // BU: the Download PDF button turns on only now; a new compare screen starts without the flag
     } catch (e) {
       console.error('renderGeneratedDocument failed', String(e));
       fail();
     }
+  }
+
+  // BR and BU (October 23, 2026): the ONE function that names a download. Pure: kind ('pdf', 'json', 'activity', 'license-activity' or 'comparison'), the saved first and last name, the moment of the click, and for the two CSVs the range text. Callers pass savedFirst and savedLast at the click, never the profile fields.
+  // Each name part: letters folded to ASCII, apostrophes dropped, spaces to single hyphens, anything else that is not a letter, digit or hyphen removed, at most 30 characters. The comparison name never uses a name part. The same function is copied byte for byte into employer.html.
+  downloadFileName(kind, first, last, when, range) {
+    const cc = String.fromCharCode;   // character codes, so the source stays plain ASCII
+    const fold = { 248: 'o', 216: 'O', 322: 'l', 321: 'L', 273: 'd', 272: 'D', 240: 'd', 208: 'D', 223: 'ss', 230: 'ae', 198: 'AE', 339: 'oe', 338: 'OE', 254: 'th', 222: 'Th', 305: 'i' };
+    const marks = new RegExp('[' + cc(0x300) + '-' + cc(0x36f) + ']', 'g'), quotes = new RegExp("['`" + cc(0x2018, 0x2019, 0x2bc) + ']', 'g');
+    const part = (v) => String(v == null ? '' : v).normalize('NFKD').replace(marks, '').replace(/[^ -~]/g, (c) => fold[c.charCodeAt(0)] || c)
+      .replace(quotes, '').replace(/\s+/g, '-').replace(/[^A-Za-z0-9-]/g, '').replace(/-+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30).replace(/-+$/, '');
+    const names = [part(first), part(last)].filter(Boolean).join('-');
+    const d = when instanceof Date ? when : new Date();
+    const day = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    const pre = names ? names + '-' : '';
+    if (kind === 'comparison') return 'Applitrust-Comparison-' + day + '.pdf';
+    if (kind === 'json') return pre + 'Applitrust-JSON-Resume-' + day + '.json';
+    if (kind === 'activity' || kind === 'license-activity') return pre + 'Applitrust-' + (kind === 'activity' ? 'Activity-' : 'License-Activity-') + (String(range == null ? '' : range).replace(/[^A-Za-z0-9-]/g, '') || day) + '.csv';
+    return pre + 'Resume-Applitrust.pdf';
   }
 
   renderComparisonDocuments() {
@@ -5612,6 +5632,17 @@ class Component extends DCLogic {
         (content.certifications || []).forEach(x => out.push(row('Certification', x.name || '', [x.issuer, x.license_number ? 'Lic #' + x.license_number : '', x.license_state, x.issued].filter(Boolean).join(' · '), x)));
         return out;
       })(),
+      // BU: Download PDF saves the bytes already built for the viewer (the same blob address); no call, no rebuild. The name is the standard comparison name with the employer's local date, nothing from the candidate.
+      genDocNotReady: !(cmp && cmp.genDocReady),
+      downloadComparisonPdf: () => {
+        if (!this._genDocUrl || !(this.state.compare && this.state.compare.genDocReady)) return;
+        const a = document.createElement('a');
+        a.href = this._genDocUrl;
+        a.download = this.downloadFileName('comparison', '', '', new Date());
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      },
       closeCompare: (e) => { if (e && e.preventDefault) e.preventDefault(); if (cmp.guest) { this.closeGuestView(); return; } if (this._genDocUrl) { try { URL.revokeObjectURL(this._genDocUrl); } catch (x) { /* ignore */ } this._genDocUrl = null; } this.setState({ screen: s.compareFrom === 'request' ? 'request' : 'acct', compare: null }); this.loadReal(); },
 
       backToLookup: (e) => { if (e && e.preventDefault) e.preventDefault(); this.setState({ screen: 'lookup', lookupResult: null, lookup: null, request: null, pendingEmail: '' }); },

@@ -204,7 +204,7 @@ t("C the ATID change touches none of this: the two assemblers' block and hold li
   const { execFileSync } = await import("node:child_process");
   const base = execFileSync("git", ["show", (process.env.BI_BASE || "cbb33f5") + ":supabase/functions/candidate-comparison-requests/index.ts"], { cwd: repo, maxBuffer: 1 << 28 }).toString().replace(/\r\n/g, "\n");
   for (const needle of ["&resume_document_id=in.(${docList})&staff_blocked_at=is.null`;", "if (heldWorkIds.size) work = work.filter((w) => !heldWorkIds.has(w.id));", "heldWorkIds = new Set(heldPairs.flatMap((p) => [p.item_a_id as string, p.item_b_id as string]));"]) { assert.ok(base.includes(needle) && CCR.includes(needle), needle); }
-  const changed = execFileSync("git", ["diff", "--name-only", process.env.BI_BASE || "cbb33f5"], { cwd: repo }).toString().split("\n").filter((x) => x && !x.startsWith("tools/")).sort();
+  const changed = execFileSync("git", ["diff", "--name-only", process.env.BI_BASE || "cbb33f5", "b1a44b0"], { cwd: repo }).toString().split("\n").filter((x) => x && !x.startsWith("tools/")).sort();
   assert.deepEqual(changed, ["candidate.html", "supabase/functions/candidate-comparison-requests/index.ts"], "no migration, no employer-api, no employer-comparison, no employer.html change");
 });
 

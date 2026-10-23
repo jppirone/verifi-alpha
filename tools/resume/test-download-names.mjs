@@ -10,6 +10,7 @@ import { execFileSync } from "node:child_process";
 const repo = new URL("../../", import.meta.url);
 const rd = (f) => fs.readFileSync(new URL(f, repo), "utf8").replace(/\r\n/g, "\n");
 const BASE = process.env.BR_BASE || "b1a44b0";
+const BR_HEAD = "8b6dbec";   // BU (October 23, 2026): the BR checks below look at the BR commits (BASE to BR_HEAD); the BU build has its own test file (test-download-names-bu.mjs)
 const git = (...a) => execFileSync("git", a, { cwd: repo, maxBuffer: 1 << 28 }).toString().replace(/\r\n/g, "\n");
 const CAND = rd("candidate.html"), EMP = rd("employer.html");
 const OLD = git("show", BASE + ":candidate.html"), OLD_EMP = git("show", BASE + ":employer.html");
@@ -66,7 +67,7 @@ const MUT = [
   ["hyphens not trimmed", (s) => s.replace(".replace(/^-+|-+$/g, '')", "")],
   ["hyphen left after the cut", (s) => s.replace(".slice(0, 30).replace(/-+$/, '')", ".slice(0, 30)")],
   ["empty parts joined", (s) => s.replace("[part(first), part(last)].filter(Boolean)", "[part(first), part(last)]")],
-  ["no fallback name", (s) => s.replace("(names ? names + '-' : '') + 'Resume-Applitrust.pdf'", "names + '-Resume-Applitrust.pdf'")],
+  ["no fallback name", (s) => s.replace("pre + 'Resume-Applitrust.pdf'", "names + '-Resume-Applitrust.pdf'")],
   ["date not padded", (s) => s.replace(".padStart(2, '0')", "").replace(".padStart(2, '0')", "")],
 ];
 for (const [label, mut] of MUT) t("2. planted bug caught: " + label, () => {
@@ -169,9 +170,9 @@ t("7. the PDF writer, the line builders and the JSON builder are the same text a
   }
 });
 t("8. the only changed file besides this test is candidate.html, and the changed lines are exactly the BR lines", () => {
-  const files = git("diff", "--name-only", BASE).split("\n").filter(Boolean).filter((f) => f !== "tools/resume/test-download-names.mjs" && f !== "tools/resume/test-job-heading.mjs");
+  const files = git("diff", "--name-only", BASE, BR_HEAD).split("\n").filter(Boolean).filter((f) => f !== "tools/resume/test-download-names.mjs" && f !== "tools/resume/test-job-heading.mjs");
   assert.deepEqual(files, ["candidate.html"]);
-  const diff = git("diff", "-U0", BASE, "--", "candidate.html").split("\n").filter((l) => /^[-+]/.test(l) && !/^(---|\+\+\+)/.test(l));
+  const diff = git("diff", "-U0", BASE, BR_HEAD, "--", "candidate.html").split("\n").filter((l) => /^[-+]/.test(l) && !/^(---|\+\+\+)/.test(l));
   const removed = diff.filter((l) => l[0] === "-").map((l) => l.slice(1).trim()), added = diff.filter((l) => l[0] === "+").map((l) => l.slice(1).trim());
   assert.deepEqual(removed.sort(), [
     "a.download = 'verifi-my-data.json';", "a.download = this._pdfFilename || 'resume.pdf';", "this._pdfFilename = 'resume.pdf';",
@@ -181,7 +182,7 @@ t("8. the only changed file besides this test is candidate.html, and the changed
   assert.ok(added.some((l) => l.startsWith("a.download = this.downloadFileName('pdf', this.state.savedFirst, this.state.savedLast, new Date());")));
 });
 t("9. no em dash and no spaced double hyphen was added", () => {
-  const added = git("diff", "-U0", BASE, "--", "candidate.html").split("\n").filter((l) => l[0] === "+" && !l.startsWith("+++"));
+  const added = git("diff", "-U0", BASE, BR_HEAD, "--", "candidate.html").split("\n").filter((l) => l[0] === "+" && !l.startsWith("+++"));
   const DASH2 = String.fromCharCode(32, 45, 45, 32), EM = String.fromCharCode(0x2014);
   for (const l of added) { assert.equal(l.includes(EM), false, l.slice(0, 80)); assert.equal(l.includes(DASH2), false, l.slice(0, 80)); }
   const self = fs.readFileSync(new URL("tools/resume/test-download-names.mjs", repo), "utf8");
@@ -191,22 +192,24 @@ t("10. nothing in the page still uses the old names", () => {
   assert.equal(/resume\.pdf'|verifi-my-data/.test(CAND.split("\n").filter((l) => !l.includes("BR")).join("\n").replace(/original_filename[^\n]*/g, "")), false);
   assert.equal(CAND.includes("_pdfFilename"), false);
 });
-t("11. the activity CSV names are unchanged on purpose (this build does not touch them)", () => {
-  assert.ok(CAND.includes("a.download = 'activity-' + s.activityStart + '-to-' + s.activityEnd + '.csv';"));
-  assert.ok(CAND.includes("a.download = 'activity' + (this.state.licActStart"));
+t("11. at the BR commit the activity CSV names were unchanged on purpose (BU changes them; see test-download-names-bu.mjs)", () => {
+  const br = git("show", BR_HEAD + ":candidate.html");
+  assert.ok(br.includes("a.download = 'activity-' + s.activityStart + '-to-' + s.activityEnd + '.csv';"));
+  assert.ok(br.includes("a.download = 'activity' + (this.state.licActStart"));
 });
 t("12. the name function uses no this, no state, no clock of its own besides the date argument (it is pure)", () => {
   assert.equal(/\bthis\b|\bstate\b/.test(NAMEFN.replace(/^\s*\/\/[^\n]*\n/gm, "").replace(/Callers pass[^\n]*/g, "")), false);
   assert.equal(NAMEFN.includes("Date.now"), false);
 });
 t("13. the page text never describes the name or the download with a guarantee, score or percent in the added lines", () => {
-  const added = git("diff", "-U0", BASE, "--", "candidate.html").split("\n").filter((l) => l[0] === "+" && !l.startsWith("+++")).join("\n");
+  const added = git("diff", "-U0", BASE, BR_HEAD, "--", "candidate.html").split("\n").filter((l) => l[0] === "+" && !l.startsWith("+++")).join("\n");
   assert.equal(/guarantee|percent|score|%/i.test(added.replace(/ZZZ/g, "")), false);
 });
-t("14. employer.html is unchanged and has no download of the comparison to name (it embeds the document); the candidate's name cannot reach any employer file name", () => {
-  assert.equal(EMP, OLD_EMP);
-  assert.equal(/\.download\s*=|download=/.test(EMP), false);
-  assert.equal(/downloadFileName/.test(EMP), false);
+t("14. at the BR commit employer.html was unchanged and had no download of the comparison to name (BU adds the Download PDF button; see test-download-names-bu.mjs)", () => {
+  const empBr = git("show", BR_HEAD + ":employer.html");
+  assert.equal(empBr, OLD_EMP);
+  assert.equal(/\.download\s*=|download=/.test(empBr), false);
+  assert.equal(/downloadFileName/.test(empBr), false);
 });
 
 let failed = 0;

@@ -5099,7 +5099,7 @@ a:hover{color:var(--color-accent)}
     </sc-if>
 
     <sc-if value="{{ tabIsViews }}" hint-placeholder-val="{{ false }}">
-      <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6;margin-bottom:var(--space-4)">A single ATS-safe PDF, built fresh from what is saved on your account: your confirmed resume content with the choices you made on Customization and Content Manager. It carries no verification marks, and it is never the originally uploaded document. To change what appears, use Customization or Content Manager; changes are saved there as you make them.</div>
+      <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6;margin-bottom:var(--space-4)">A single PDF in an ATS friendly format, built fresh from what is saved on your account: your confirmed resume content with the choices you made on Customization and Content Manager. It carries no verification marks, and it is never the originally uploaded document. To change what appears, use Customization or Content Manager; changes are saved there as you make them.</div>
 
       <!-- 2026-09-23: an informational notice only, never the content itself, shown to every tier
            (including free) so a candidate is never blindsided by content silently missing from their
@@ -9263,19 +9263,22 @@ class Component extends DCLogic {
     });
   }
 
-  // BR (October 23, 2026): the ONE function that names a download. Pure: kind ('pdf' or 'json'), the saved first and last name, and the moment of the click. Callers pass savedFirst and savedLast at the click, never the profile fields.
-  // Each name part: letters folded to ASCII, apostrophes dropped, spaces to single hyphens, anything else that is not a letter, digit or hyphen removed, at most 30 characters.
-  downloadFileName(kind, first, last, when) {
+  // BR and BU (October 23, 2026): the ONE function that names a download. Pure: kind ('pdf', 'json', 'activity', 'license-activity' or 'comparison'), the saved first and last name, the moment of the click, and for the two CSVs the range text. Callers pass savedFirst and savedLast at the click, never the profile fields.
+  // Each name part: letters folded to ASCII, apostrophes dropped, spaces to single hyphens, anything else that is not a letter, digit or hyphen removed, at most 30 characters. The comparison name never uses a name part. The same function is copied byte for byte into employer.html.
+  downloadFileName(kind, first, last, when, range) {
     const cc = String.fromCharCode;   // character codes, so the source stays plain ASCII
     const fold = { 248: 'o', 216: 'O', 322: 'l', 321: 'L', 273: 'd', 272: 'D', 240: 'd', 208: 'D', 223: 'ss', 230: 'ae', 198: 'AE', 339: 'oe', 338: 'OE', 254: 'th', 222: 'Th', 305: 'i' };
     const marks = new RegExp('[' + cc(0x300) + '-' + cc(0x36f) + ']', 'g'), quotes = new RegExp("['`" + cc(0x2018, 0x2019, 0x2bc) + ']', 'g');
     const part = (v) => String(v == null ? '' : v).normalize('NFKD').replace(marks, '').replace(/[^ -~]/g, (c) => fold[c.charCodeAt(0)] || c)
       .replace(quotes, '').replace(/\s+/g, '-').replace(/[^A-Za-z0-9-]/g, '').replace(/-+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30).replace(/-+$/, '');
     const names = [part(first), part(last)].filter(Boolean).join('-');
-    if (kind !== 'json') return (names ? names + '-' : '') + 'Resume-Applitrust.pdf';
     const d = when instanceof Date ? when : new Date();
     const day = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-    return (names ? names + '-' : '') + 'Applitrust-JSON-Resume-' + day + '.json';
+    const pre = names ? names + '-' : '';
+    if (kind === 'comparison') return 'Applitrust-Comparison-' + day + '.pdf';
+    if (kind === 'json') return pre + 'Applitrust-JSON-Resume-' + day + '.json';
+    if (kind === 'activity' || kind === 'license-activity') return pre + 'Applitrust-' + (kind === 'activity' ? 'Activity-' : 'License-Activity-') + (String(range == null ? '' : range).replace(/[^A-Za-z0-9-]/g, '') || day) + '.csv';
+    return pre + 'Resume-Applitrust.pdf';
   }
 
   async exportVerifiedData() {
@@ -9332,7 +9335,7 @@ class Component extends DCLogic {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'activity-' + s.activityStart + '-to-' + s.activityEnd + '.csv';
+    a.download = this.downloadFileName('activity', s.savedFirst, s.savedLast, new Date(), s.activityStart + '-to-' + s.activityEnd);   // BU: the range text is what the old name carried
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -10036,7 +10039,7 @@ class Component extends DCLogic {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'activity' + (this.state.licActStart ? '-from-' + this.state.licActStart : '') + (this.state.licActEnd ? '-to-' + this.state.licActEnd : '') + '.csv';
+    a.download = this.downloadFileName('license-activity', this.state.savedFirst, this.state.savedLast, new Date(), (this.state.licActStart ? 'from-' + this.state.licActStart : '') + (this.state.licActEnd ? (this.state.licActStart ? '-' : '') + 'to-' + this.state.licActEnd : ''));   // BU: the range text of the old name (from-start, to-end), the local date when there is none
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
