@@ -346,9 +346,9 @@ t("the employer-facing pass-through functions are unchanged from the base commit
     assert.equal(added.filter((l) => /method: "(PATCH|POST|DELETE)"|rest\(/.test(l) && !/employer_lookup_requests/.test(l)).length, 0, f);
     assert.ok(added.some((l) => /request_id: (r\.id|requestId) \}\),/.test(l)), f + " sends the request id");
   }
-  // BA Part 1: the gating now lives in two places (the decision recorded at approval, and the live-switch fallback) and the page draws the line through comparisonAtidLine
+  // BA Part 1 / BI: the gating is ONE live decision read at each open (the BA approval time decision was removed in BI) and the page draws the line through comparisonAtidLine
   const ccr = fs.readFileSync(new URL("supabase/functions/candidate-comparison-requests/index.ts", repo), "utf8");
-  assert.match(ccr, /c\.atid_employer_visible === true && atidIsStored\(c\.atid\)/); assert.match(ccr, /allowed = !!cand && cand\.atid_employer_visible === true/);
+  assert.match(ccr, /atidVisible = cand\.atid_employer_visible === true; atidValid = atidIsStored\(cand\.atid\);/); assert.equal(/document_atid/.test(ccr.replace(/\/\/.*$/gm, "")), false);
   assert.match(fs.readFileSync(new URL("employer.html", repo), "utf8"), /'Applitrust ID: ' \+ R\.atid/);
 });
 

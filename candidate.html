@@ -4078,7 +4078,7 @@ a:hover{color:var(--color-accent)}
             <input type="checkbox" id="atid-employer-visible-switch" checked="{{ atidEmployerVisible }}" disabled="{{ atidEmployerSaving }}" sc-camel-on-change="{{ toggleAtidEmployerVisible }}" style="margin-top:2px">
             <span>Let employers use my ATID</span>
           </label>
-          <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">When this is on, an employer who types your name and your ATID can find your account (while "Let employers confirm I have an account here" is also on), and your ATID is shown on the comparison document that employer receives. You approve every request. Turn it off and your ATID does not work for lookup and is not shown to employers.</div>
+          <div style="font-size:12px;color:var(--color-neutral-500);line-height:1.6">When this is on, an employer who types your name and your ATID can find your account (while "Let employers confirm I have an account here" is also on), and your ATID is shown on the comparison document that employer receives. You approve every request. Turn it off and your ATID does not work for lookup, and it stops appearing on an employer's comparison document the next time they open it.</div>
           <!-- AS: shown only once the privacy settings have loaded and "Let employers confirm I have an account here" (Allow lookup) is really off; the switch above is never disabled by it -->
           <sc-if value="{{ atidLookupIsOff }}" hint-placeholder-val="{{ false }}">
             <div id="atid-lookup-off-note" style="font-size:12px;color:var(--color-neutral-400);line-height:1.6">Employers cannot find you by ATID until "Let employers confirm I have an account here" is turned on.</div>

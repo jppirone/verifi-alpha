@@ -205,7 +205,8 @@ t("7b the charge path is untouched: against the base commit the only changes in 
   const bad = API.replace("chargedNow = await chargeGuestNow(r.id, r);", "chargedNow = await chargeGuestNow(r.id, { ...r, kind: 'license_report' });"); assert.notEqual(bad, API);
   assert.notDeepEqual(calls(section(bad)), calls(section(git("show", BASE + ":supabase/functions/employer-api/index.ts"))), "planted: a changed charge call is caught");
   // scope: nothing outside the charge path files changed
-  const names = git("diff", "--name-only", BASE).split("\n").filter(Boolean).filter((x) => !x.startsWith("tools/")).sort();
+  // BI: the range is BM's own commit (base to cbb33f5), so later builds on other files do not change what this check says about BM
+  const names = git("diff", "--name-only", BASE, process.env.BM_TIP || "cbb33f5").split("\n").filter(Boolean).filter((x) => !x.startsWith("tools/")).sort();
   assert.deepEqual(names, ["employer.html", "supabase/functions/employer-api/index.ts"], "candidate.html, confirm-resume-data and resume-resubmission are not touched");
 });
 

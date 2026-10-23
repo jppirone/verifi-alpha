@@ -457,44 +457,69 @@ t("planted defects are caught: switch gate removed, name check removed, early re
     "typed value echoed in the response": async () => { const f = await load("m8", mutate(chk, "(atidMode ? \"name and ATID\" : \"\")", "(atidMode ? String(matched.atid) : \"\")")); resetDb(SEED); const r = await sessionLookup(f, { candidate_name: "Jane Doe", candidate_atid: atidDisplay(ID.A) }); return !/ATID/.test(JSON.parse(r.text).contact_used) ; },
     "the click trusts the staged id without re-checking Allow lookup": async () => { const f = await load("m9", mutate(chk, "c.discoverable === true &&\n        !c.deletion_scheduled_at", "!c.deletion_scheduled_at")); resetDb(SEED); return (await sessionLookup(f, FAILS["candidate not discoverable"])).text === NOMATCH; },
     "the discoverable gate removed": async () => { const f = await load("m5", mutate(chk, "c.discoverable === true &&\n        !c.deletion_scheduled_at", "!c.deletion_scheduled_at")); resetDb(SEED); return (await sessionLookup(f, FAILS["candidate not discoverable"])).text === NOMATCH; },
-    "switch gate removed from the document": async () => { const f = await load("m6", mutate(nowSrc("candidate-comparison-requests"), "allowed = !!cand && cand.atid_employer_visible === true;", "allowed = !!cand;")); resetDb(CMPSEED({ atid_employer_visible: false })); return !/atid/i.test((await plainDoc(f)).text); },   // BA: the live-switch rule now sits in this line (used only when no request_id is sent)
+    "switch gate removed from the document": async () => { const f = await load("m6", mutate(nowSrc("candidate-comparison-requests"), "atidVisible = cand.atid_employer_visible === true; atidValid", "atidVisible = true; atidValid")); resetDb(CMPSEED({ atid_employer_visible: false })); return !/atid/i.test((await plainDoc(f)).text); },   // BI: the live-switch rule sits in this line
   };
   for (const [name, probe] of Object.entries(probes)) assert.equal(await probe(), false, "the test would NOT notice: " + name);
 });
 
-// ---------------------------------------------------------------- BA Part 1: the ATID on the employer's document follows the decision recorded at approval
+// ---------------------------------------------------------------- BI (October 22, 2026): the ATID on the employer's document is LIVE at every open (it follows the candidate's switch), not a decision recorded at approval
+// (This replaces the four BA Part 1 tests that planted "the approval decision wins"; they are changed on purpose because that rule was withdrawn.)
 const REQ = "22222222-2222-4222-8222-222222222222", CAND = "11111111-1111-4111-8111-111111111111";
 const SNAPSEED = (snapContent, candOver = {}) => ({ ...CMPSEED(candOver), comparison_snapshots: snapContent === undefined ? [] : [{ request_id: REQ, candidate_id: CAND, content: snapContent }] });
-const planDoc = (fnc, request_id = REQ) => call(fnc, { action: "assemble_plain_document", candidate_id: CAND, request_id }, { Authorization: "Bearer " + SRK });
+const planDoc = (fnc, request_id = REQ) => call(fnc, { action: "assemble_plain_document", candidate_id: CAND, ...(request_id === null ? {} : { request_id }) }, { Authorization: "Bearer " + SRK });
 const hasAtid = (r) => /"atid"/.test(r.text);
-t("Part 1: with a request_id the ATID line is decided by the switch AS RECORDED AT APPROVAL: on at approval prints (even if the switch is off now), off at approval does not (even if it is on now), whatever the export switches say", async () => {
-  for (const exp of [{}, { atid_export_pdf_line: true, atid_export_pdf_hidden: true, atid_export_json: true }, { atid_export_pdf_line: false, atid_export_pdf_hidden: false, atid_export_json: false }]) {
-    resetDb(SNAPSEED({ document_atid: true }, { atid_employer_visible: false, ...exp })); const a = await planDoc(NEW.cmp); assert.equal(a.status, 200); assert.equal(JSON.parse(a.text).resume.atid, atidDisplay(ID.A), "on at approval, off now: " + JSON.stringify(exp));
-    resetDb(SNAPSEED({ document_atid: false }, { atid_employer_visible: true, ...exp })); assert.equal(hasAtid(await planDoc(NEW.cmp)), false, "off at approval, on now: " + JSON.stringify(exp));
+const atidLog = (since) => LOG.slice(since).filter((l) => l.includes("plain document ATID"));
+const EXPORTS = [{}, { atid_export_pdf_line: true, atid_export_pdf_hidden: true, atid_export_json: true }, { atid_export_pdf_line: false, atid_export_pdf_hidden: false, atid_export_json: false }];
+t("BI: switch on at the open prints the line, switch off does not, and flipping the switch between two opens of the SAME request changes the output both ways; the export switches (pdf_line, json, pdf_hidden) do not matter", async () => {
+  for (const exp of EXPORTS) {
+    resetDb(SNAPSEED({ other: 1 }, { atid_employer_visible: true, ...exp })); const on = await planDoc(NEW.cmp); assert.equal(on.status, 200); assert.equal(JSON.parse(on.text).resume.atid, atidDisplay(ID.A), "on: " + JSON.stringify(exp));
+    DB.candidates[0].atid_employer_visible = false; const off = await planDoc(NEW.cmp); assert.equal(hasAtid(off), false, "the next open after the switch went off has no line: " + JSON.stringify(exp));
+    DB.candidates[0].atid_employer_visible = true; assert.equal((await planDoc(NEW.cmp)).text, on.text, "back on, the line returns and the document is the same bytes as the first open");
   }
 });
-t("Part 1: a delivered document never changes later: the same request gives the same answer before and after the candidate flips the switch twice; a request with no recorded decision, no snapshot, or a failed read gets no ATID", async () => {
-  resetDb(SNAPSEED({ document_atid: true }, { atid_employer_visible: true })); const first = (await planDoc(NEW.cmp)).text;
-  DB.candidates[0].atid_employer_visible = false; assert.equal((await planDoc(NEW.cmp)).text, first); DB.candidates[0].atid_employer_visible = true; assert.equal((await planDoc(NEW.cmp)).text, first);
-  resetDb(SNAPSEED({ other: 1 }, { atid_employer_visible: true })); assert.equal(hasAtid(await planDoc(NEW.cmp)), false, "an older snapshot with no recorded decision");
-  resetDb(SNAPSEED(undefined, { atid_employer_visible: true })); assert.equal(hasAtid(await planDoc(NEW.cmp)), false, "no snapshot");
-  resetDb(SNAPSEED({ document_atid: true }, { atid_employer_visible: true })); FAIL.comparison_snapshots = "GET"; assert.equal(hasAtid(await planDoc(NEW.cmp)), false, "a failed read means no ATID");
-  resetDb(SNAPSEED({ document_atid: true }, { atid_employer_visible: true, atid: "junk" })); assert.equal(hasAtid(await planDoc(NEW.cmp)), false, "an invalid stored ATID is never printed");
-  resetDb(SNAPSEED({ document_atid: true }, { atid_employer_visible: true })); assert.equal(hasAtid(await planDoc(NEW.cmp, "not-a-uuid")), false, "a request_id that is not an id gets no ATID");
+t("BI: approval time does not matter: an approval made while the switch was OFF prints the line once the switch is on, and an approval made while it was ON (the case John saw fail) does not print it once the switch is off; the snapshot row is never read", async () => {
+  for (const recorded of [{ document_atid: false }, { document_atid: true }, { other: 1 }, undefined]) {
+    resetDb(SNAPSEED(recorded, { atid_employer_visible: true })); assert.equal(JSON.parse((await planDoc(NEW.cmp)).text).resume.atid, atidDisplay(ID.A), "switch on now, whatever the row says: " + JSON.stringify(recorded));
+    resetDb(SNAPSEED(recorded, { atid_employer_visible: false })); assert.equal(hasAtid(await planDoc(NEW.cmp)), false, "switch off now, whatever the row says: " + JSON.stringify(recorded));
+  }
+  resetDb(SNAPSEED({ document_atid: true }, { atid_employer_visible: false })); FAIL.comparison_snapshots = "GET"; assert.equal(hasAtid(await planDoc(NEW.cmp)), false); resetDb(SNAPSEED({ document_atid: false }, { atid_employer_visible: true })); FAIL.comparison_snapshots = "GET";
+  assert.equal(JSON.parse((await planDoc(NEW.cmp)).text).resume.atid, atidDisplay(ID.A), "a failing snapshot read changes nothing: the row is not read");
+  assert.equal(CALLS.some((c) => /comparison_snapshots/.test(c)), false, "no read of comparison_snapshots at all");
 });
-t("Part 1: approval records the decision (source): candidate-comparison-requests writes document_atid from atid_employer_visible === true and a valid stored ATID, into the snapshot content, and the three callers send the request id; planted removals are noticed", () => {
-  const src = nowSrc("candidate-comparison-requests");
-  assert.match(src, /documentAtid = !!c && c\.atid_employer_visible === true && atidIsStored\(c\.atid\)/);
-  assert.match(src, /content: \{ \.\.\.snap\.content, document_atid: documentAtid \}/);
-  assert.ok(src.indexOf("documentAtid = !!c") < src.indexOf('rest("comparison_snapshots", { method: "POST"'), "decided before the snapshot is written");
+t("BI: an invalid or missing stored ATID gives no line, a failed read of the candidate gives no line, and a request id sent, not sent, or not an id gives the very same answer", async () => {
+  for (const over of [{ atid: "junk" }, { atid: null }, { atid: "" }, { atid: "ATID7K3MQ9XP2WD3" }]) { resetDb(SNAPSEED(undefined, { atid_employer_visible: true, ...over })); assert.equal(hasAtid(await planDoc(NEW.cmp)), false, JSON.stringify(over)); }
+  resetDb(SNAPSEED(undefined, { atid_employer_visible: true })); FAIL.candidates = "GET"; const failed = await planDoc(NEW.cmp); assert.equal(failed.status, 200); assert.equal(hasAtid(failed), false, "a failed read means no ATID");
+  resetDb(SNAPSEED({ document_atid: true }, { atid_employer_visible: true })); const withId = (await planDoc(NEW.cmp)).text, noId = (await planDoc(NEW.cmp, null)).text, badId = (await planDoc(NEW.cmp, "not-a-uuid")).text, otherId = (await planDoc(NEW.cmp, "33333333-3333-4333-8333-333333333333")).text;
+  assert.equal(noId, withId); assert.equal(badId, withId); assert.equal(otherId, withId); assert.ok(JSON.parse(withId).resume.atid);
+});
+t("BI: the diagnostic log line: one line per open, booleans and a reason word only (shown, off_switch, no_atid, invalid_atid, read_failed), never the ATID, a name or an email", async () => {
+  const cases = [["shown", { atid_employer_visible: true }, true, true], ["off_switch", { atid_employer_visible: false }, false, true], ["off_switch", { atid_employer_visible: null }, false, true], ["no_atid", { atid_employer_visible: true, atid: null }, true, false], ["invalid_atid", { atid_employer_visible: true, atid: "junk" }, true, false]];
+  for (const [word, over, vis, valid] of cases) {
+    resetDb(SNAPSEED(undefined, over)); const at = LOG.length; await planDoc(NEW.cmp); const lines = atidLog(at); assert.equal(lines.length, 1, "one line per open: " + word);
+    assert.equal(lines[0], `candidate-comparison-requests: plain document ATID - decision=${word} atid_employer_visible=${vis} atid_valid=${valid}`);
+  }
+  resetDb(SNAPSEED(undefined, { atid_employer_visible: true })); FAIL.candidates = "GET"; let at = LOG.length; await planDoc(NEW.cmp); assert.equal(atidLog(at)[0], "candidate-comparison-requests: plain document ATID - decision=read_failed atid_employer_visible=false atid_valid=false");
+  resetDb(SNAPSEED(undefined, { atid_employer_visible: true })); at = LOG.length; await planDoc(NEW.cmp); const joined = atidLog(at).join("\n");
+  assert.equal(joined.includes(ID.A), false); assert.equal(joined.includes(atidDisplay(ID.A)), false); assert.equal(/Jane|Doe|@/.test(joined), false); assert.match(joined, /^[a-z-]+: plain document ATID - decision=[a-z_]+ atid_employer_visible=(true|false) atid_valid=(true|false)$/);
+  // planted: a log line that carries the ATID is caught
+  const from = "console.log(`candidate-comparison-requests: plain document ATID - decision=${atidDecision} atid_employer_visible=${atidVisible} atid_valid=${atidValid}`);"; assert.ok(nowSrc("candidate-comparison-requests").includes(from));
+  const leaky = await load("m8", nowSrc("candidate-comparison-requests").replace(from, "console.log(`candidate-comparison-requests: plain document ATID - decision=${atidDecision} atid=${String(cand0?.atid)}`);").replace("let withAtid = resume;", "let withAtid = resume; let cand0 = null;").replace("const cand = (await rows(`candidates?id=eq.${body.candidate_id}&select=atid,atid_employer_visible`))[0];", "const cand = (await rows(`candidates?id=eq.${body.candidate_id}&select=atid,atid_employer_visible`))[0]; cand0 = cand;"));
+  resetDb(SNAPSEED(undefined, { atid_employer_visible: true })); at = LOG.length; await planDoc(leaky); assert.equal(atidLog(at).join("\n").includes(ID.A), true, "the plant leaks, so the check above would fail on it");
+  LOG.splice(at, LOG.length - at);   // the planted leaky line is not part of the real run's record
+});
+t("BI: the approval step no longer writes document_atid (and writes nothing else differently); the code reads no snapshot content for the ATID; the three callers still send the request id; planted re-additions and the old branch are caught", async () => {
+  const src = nowSrc("candidate-comparison-requests"); const code = src.replace(/\/\/.*$/gm, "");
+  assert.equal(/document_atid|documentAtid/.test(code), false, "no approval time decision anywhere in the code");
+  assert.match(code, /content: snap\.content, counts: snap\.counts \}\) \}\);/, "the approval writes the snapshot content as it is, unchanged");
+  assert.equal(/comparison_snapshots\?request_id=eq\.\$\{body\.request_id\}/.test(code), false, "assemble_plain_document does not read the snapshot row");
   assert.equal([...nowSrc("employer-api").matchAll(/request_id: r\.id \}\)/g)].length, 2); assert.equal([...nowSrc("employer-comparison").matchAll(/request_id: requestId \}\)/g)].length, 1);
-  assert.equal(/document_atid: documentAtid/.test(src.replace("document_atid: documentAtid", "")), false, "written in one place only");
-  assert.equal(/documentAtid = !!c && c\.atid_employer_visible === true/.test(src.replace("c.atid_employer_visible === true", "true")), false, "planted: the switch check removed is noticed");
-});
-t("Part 1: a planted server that reads the LIVE switch even when a request id is sent is caught by the delivered-document test", async () => {
-  const from = "if (typeof body.request_id !== \"string\") allowed = !!cand && cand.atid_employer_visible === true;"; assert.ok(nowSrc("candidate-comparison-requests").includes(from), "plant target exists");
-  const f = await load("m7", nowSrc("candidate-comparison-requests").replace(from, "allowed = !!cand && cand.atid_employer_visible === true;"));
-  resetDb(SNAPSEED({ document_atid: true }, { atid_employer_visible: false })); assert.equal(hasAtid(await planDoc(f)), false, "the plant ignores the recorded decision");
+  // planted: the approval writes the decision again
+  const re = src.replace("content: snap.content, counts: snap.counts", "content: { ...snap.content, document_atid: true }, counts: snap.counts"); assert.notEqual(re, src); assert.equal(/document_atid/.test(re.replace(/\/\/.*$/gm, "")), true, "a re-addition is seen by the scan");
+  // planted: the old approval branch back (the snapshot decides when a request id is sent) is caught by the live test
+  const from = "          const cand = (await rows(`candidates?id=eq.${body.candidate_id}&select=atid,atid_employer_visible`))[0];\n          if (cand) {"; assert.ok(src.includes(from), "plant target exists");
+  const old = await load("m9", src.replace(from, "          const sn = typeof body.request_id === \"string\" ? (await rows(`comparison_snapshots?request_id=eq.${body.request_id}&select=content`))[0] : null;\n          const cand = (await rows(`candidates?id=eq.${body.candidate_id}&select=atid,atid_employer_visible`))[0];\n          if (cand && sn && sn.content?.document_atid === true) cand.atid_employer_visible = true; else if (cand && sn) cand.atid_employer_visible = false;\n          if (cand) {"));
+  resetDb(SNAPSEED({ document_atid: true }, { atid_employer_visible: false })); assert.equal(hasAtid(await planDoc(old)), true, "the plant prints from the recorded decision");
+  resetDb(SNAPSEED({ document_atid: true }, { atid_employer_visible: false })); assert.equal(hasAtid(await planDoc(NEW.cmp)), false, "the real function does not");
 });
 
 let failed = 0;

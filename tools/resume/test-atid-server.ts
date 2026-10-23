@@ -78,7 +78,8 @@ t("no function logs the atid: no console line in the 7 files interpolates or nam
   for (const n of [...ALLOWED_FUNCTIONS]) {
     const src = stripComments(rd(`functions/${n}/index.ts`));
     for (const m of src.matchAll(/console\.(?:log|error|warn|info)\(([^;\n]*)/g)) {
-      const args = m[1].replace(/ATID line strip(ped| FAILED)/g, "");
+      // BI (October 22, 2026): the ONE allowed exception is the diagnostic line of assemble_plain_document: it names the switch and carries three variables that hold only a reason word and two booleans
+      const args = m[1].replace(/ATID line strip(ped| FAILED)/g, "").replace(/plain document ATID - decision=\$\{atidDecision\} atid_employer_visible=\$\{atidVisible\} atid_valid=\$\{atidValid\}/, "");
       assert.equal(/atid/i.test(args), false, n + ": " + m[0].slice(0, 100));
     }
   }

@@ -683,20 +683,19 @@ export default {
         // ATID (AR, October 19, 2026): the candidate's ATID goes on the employer's document ONLY while their atid_employer_visible switch is on (default off). Read fresh on every
         // assembly, so turning the switch off removes it from the next open. Any problem reading the switch means no ATID. With the switch off the response is exactly what it was
         // before this existed (the same object, no extra key). assemble_customized_resume itself is unchanged and never carries the ATID.
-        // BA, Part 1 (October 21, 2026): when the caller names the comparison request (request_id), the ATID follows the decision recorded AT APPROVAL (comparison_snapshots.content.document_atid,
-        // written from atid_employer_visible at the moment the candidate approved), never the live switch: a delivered document does not change later. A request with no recorded decision (approved
-        // before this existed) or any problem reading it gets no ATID. Without a request_id (no caller does that any more) the old live-switch rule still applies.
-        let withAtid = resume;
+        // BI (October 22, 2026): LIVE again, as John decided. The ATID line is printed exactly when, at THIS open, atid_employer_visible is true and the stored ATID is valid; nothing recorded at approval is read
+        // (the comparison_snapshots row is not read here), the export switches are not read, and body.request_id is still accepted (the callers send it) but has no effect on the line. A candidate who turns the
+        // switch off loses the line at the next open and gets it back when the switch is on again. Each open logs ONE line with booleans and a reason word only (never the ATID, a name or an email).
+        let withAtid = resume; let atidVisible = false, atidValid = false, atidDecision = "read_failed";
         try {
-          let allowed = false;
-          if (typeof body.request_id === "string" && UUID.test(body.request_id)) {
-            const sn = (await rows(`comparison_snapshots?request_id=eq.${body.request_id}&candidate_id=eq.${body.candidate_id}&select=content`))[0];
-            allowed = !!sn && sn.content?.document_atid === true;
-          }
           const cand = (await rows(`candidates?id=eq.${body.candidate_id}&select=atid,atid_employer_visible`))[0];
-          if (typeof body.request_id !== "string") allowed = !!cand && cand.atid_employer_visible === true;
-          if (allowed && cand && atidIsStored(cand.atid)) withAtid = { ...resume, atid: atidDisplay(cand.atid) };
-        } catch (_e) { withAtid = resume; }
+          if (cand) {
+            atidVisible = cand.atid_employer_visible === true; atidValid = atidIsStored(cand.atid);
+            atidDecision = !atidVisible ? "off_switch" : !cand.atid ? "no_atid" : !atidValid ? "invalid_atid" : "shown";
+            if (atidDecision === "shown") withAtid = { ...resume, atid: atidDisplay(cand.atid) };
+          }
+        } catch (_e) { withAtid = resume; atidDecision = "read_failed"; }
+        console.log(`candidate-comparison-requests: plain document ATID - decision=${atidDecision} atid_employer_visible=${atidVisible} atid_valid=${atidValid}`);
         return json({ ok: true, resume: withAtid });
       }
 
@@ -803,10 +802,8 @@ export default {
         // comparison_snapshots is still written here (unchanged) as the approval GATE and a historical "what was true when
         // approved" record — but no view of this comparison ever reads its `content` back any more (see the REDESIGN header
         // block above and view_snapshot below): every open re-assembles fresh from current data instead.
-        // BA, Part 1: record NOW whether the candidate's "Let employers use my ATID" switch is on; the employer's document prints the ATID line exactly when this is true, forever for this request.
-        let documentAtid = false;
-        try { const c = (await rows(`candidates?id=eq.${candidateId}&select=atid,atid_employer_visible`))[0]; documentAtid = !!c && c.atid_employer_visible === true && atidIsStored(c.atid); } catch (_e) { documentAtid = false; }
-        const ins = await rest("comparison_snapshots", { method: "POST", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ request_id: r.id, candidate_id: candidateId, content: { ...snap.content, document_atid: documentAtid }, counts: snap.counts }) });
+        // BI (October 22, 2026): the approval no longer records an ATID decision (BA wrote document_atid here); the employer's document follows the candidate's switch live at each open. Rows already carrying document_atid are ignored.
+        const ins = await rest("comparison_snapshots", { method: "POST", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ request_id: r.id, candidate_id: candidateId, content: snap.content, counts: snap.counts }) });
         if (ins.status === 409) return json({ ok: false, error: "not_pending" }, 409); // a simultaneous approval already stored one
         if (!ins.ok) return json({ ok: false, error: "assemble_failed" }, 500);
         const approvedAt = nowIso();

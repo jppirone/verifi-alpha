@@ -95,12 +95,13 @@ t("5d: the update (re-upload) review screen warns 'This file shows an ATID that 
 });
 
 // ------------------------------------------------------------------ 5e: the note under the switch
-const NOTE = 'When this is on, an employer who types your name and your ATID can find your account (while "Let employers confirm I have an account here" is also on), and your ATID is shown on the comparison document that employer receives. You approve every request. Turn it off and your ATID does not work for lookup and is not shown to employers.';
+const NOTE = 'When this is on, an employer who types your name and your ATID can find your account (while "Let employers confirm I have an account here" is also on), and your ATID is shown on the comparison document that employer receives. You approve every request. Turn it off and your ATID does not work for lookup, and it stops appearing on an employer\'s comparison document the next time they open it.';   // BI: the switch text now says the ATID leaves the document at the next open
 t("5e: the note under 'Let employers use my ATID' says what the one switch covers (lookup by name plus ATID, and the ATID on the comparison document), in one block, and stays true to the code (lookup also needs Allow lookup)", () => {
   assert.equal([...CAND.matchAll(/When this is on, an employer who/g)].length, 1, "one block, not two");
   assert.ok(CAND.includes(NOTE)); assert.equal(/—/.test(NOTE), false);
   const ce = rd("supabase/functions/check-existence/index.ts"); assert.match(ce, /c\.discoverable === true/); assert.match(ce, /\(!atidMode \|\| c\.atid_employer_visible === true\)/);
-  const cr = rd("supabase/functions/candidate-comparison-requests/index.ts"); assert.match(cr, /document_atid: documentAtid/);
+  // BI: the document follows the switch live at each open; the approval no longer records a decision
+  const cr = rd("supabase/functions/candidate-comparison-requests/index.ts"); assert.match(cr, /atidDecision = !atidVisible \? "off_switch"/); assert.equal(/document_atid: documentAtid/.test(cr), false);
   assert.equal(CAND.includes(NOTE.replace("types your name", "knows your name")), false);
 });
 

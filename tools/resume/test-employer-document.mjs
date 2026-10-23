@@ -184,7 +184,7 @@ t("server: candidate-comparison-requests attaches printed_heading to each work r
   await runAttach(ATTACH_SRC, { work: [] }, tables); await runAttach(ATTACH_SRC, { work: [{ id: "not-a-uuid" }] }, tables); await runAttach(ATTACH_SRC, {}, tables);
   assert.match(CCR, /try \{ await attachPrintedHeadings\(resume\); \} catch \(_e\) \{ \/\* fallback heading \*\/ \}/);
   assert.ok(CCR.indexOf("await attachPrintedHeadings(resume)") > CCR.indexOf('rpc/assemble_customized_resume'), "after the assembler");
-  assert.ok(CCR.indexOf("await attachPrintedHeadings(resume)") < CCR.indexOf("BA, Part 1 (October 21, 2026): when the caller names"), "before the ATID step");
+  assert.ok(CCR.indexOf("await attachPrintedHeadings(resume)") < CCR.indexOf("BI (October 22, 2026): LIVE again"), "before the ATID step");   // BI: the BA comment that marked the ATID step was replaced by the live rule's comment
 });
 t("server: it only SELECTs (work_history_items id and resume_document_id; resume_documents id and ocr_raw_text); no write, no other table, and no new field reaches the employer path", () => {
   const body = ATTACH_SRC;

@@ -28,7 +28,7 @@ t("candidate page: the switch sits on the ATID card, with the agreed wording, bo
   assert.ok(CARD.includes('id="atid-employer-visible-switch" checked="{{ atidEmployerVisible }}" disabled="{{ atidEmployerSaving }}" sc-camel-on-change="{{ toggleAtidEmployerVisible }}"'));
   assert.ok(CARD.includes("<span>Let employers use my ATID</span>"));
   // BA Part 5e (October 21, 2026): John merged "one switch covers lookup by name plus ATID and the ATID on the comparison document" into this note; the lookup still also needs "Allow lookup", so that condition stays in the sentence.
-  assert.ok(CARD.includes('When this is on, an employer who types your name and your ATID can find your account (while "Let employers confirm I have an account here" is also on), and your ATID is shown on the comparison document that employer receives. You approve every request. Turn it off and your ATID does not work for lookup and is not shown to employers.'));
+  assert.ok(CARD.includes('When this is on, an employer who types your name and your ATID can find your account (while "Let employers confirm I have an account here" is also on), and your ATID is shown on the comparison document that employer receives. You approve every request. Turn it off and your ATID does not work for lookup, and it stops appearing on an employer\'s comparison document the next time they open it.'));   // BI: the switch text now says the ATID leaves the document at the next open
   assert.equal(CARD.includes("can look you up"), false, "the old, over-promising wording is gone");
   assert.ok(CARD.includes("{{ atidDisplay }}") && CARD.includes("{{ copyAtid }}"), "it is the same card as the ATID row");
 });
