@@ -8,7 +8,7 @@ import { execFileSync } from "node:child_process";
 const repo = new URL("../../", import.meta.url);
 const rd = (f) => fs.readFileSync(new URL(f, repo), "utf8").replace(/\r\n/g, "\n");
 const git = (...a) => execFileSync("git", a, { cwd: repo, maxBuffer: 1 << 28 }).toString().replace(/\r\n/g, "\n");
-const BR_HEAD = "8b6dbec";
+const BR_HEAD = "8b6dbec", BU_HEAD = "c7ff604";   // the diff scans below look at the BU commit only (BR_HEAD to BU_HEAD), so later work on other branches does not fail them
 const CAND = rd("candidate.html"), EMP = rd("employer.html");
 const CAND_BR = git("show", BR_HEAD + ":candidate.html"), EMP_BR = git("show", BR_HEAD + ":employer.html");
 const tests = []; const t = (name, fn) => tests.push([name, fn]);
@@ -202,9 +202,9 @@ t("9b. planted: a sentence with a guarantee, a percent or a score is caught", ()
 });
 
 // ---------------------------------------------------------------- 8. nothing else changed
-function changed(file) { const d = git("diff", "-U0", BR_HEAD, "--", file).split("\n").filter((l) => /^[-+]/.test(l) && !/^(---|\+\+\+)/.test(l)); return { removed: d.filter((l) => l[0] === "-").map((l) => l.slice(1)), added: d.filter((l) => l[0] === "+").map((l) => l.slice(1)) }; }
+function changed(file) { const d = git("diff", "-U0", BR_HEAD, BU_HEAD, "--", file).split("\n").filter((l) => /^[-+]/.test(l) && !/^(---|\+\+\+)/.test(l)); return { removed: d.filter((l) => l[0] === "-").map((l) => l.slice(1)), added: d.filter((l) => l[0] === "+").map((l) => l.slice(1)) }; }
 t("10. only the named lines changed: candidate.html (the name function, the two CSV anchors, the ATS sentence) and employer.html (additions only)", () => {
-  const files = git("diff", "--name-only", BR_HEAD).split("\n").filter(Boolean).filter((f) => !/^tools\/resume\/test-/.test(f));
+  const files = git("diff", "--name-only", BR_HEAD, BU_HEAD).split("\n").filter(Boolean).filter((f) => !/^tools\/resume\/test-/.test(f));
   assert.deepEqual(files.sort(), ["candidate.html", "employer.html"]);
   const c = changed("candidate.html");
   const keep = (l) => !/^\s*\/\/ BR and BU|^\s*\/\/ Each name part/.test(l);

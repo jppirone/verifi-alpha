@@ -145,15 +145,98 @@ async function attachPrintedHeadings(resume: any): Promise<void> {
 const esc = (s: unknown) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
-async function sendEmail(to: string, subject: string, html: string): Promise<boolean> {
+// BS (October 23, 2026): the sender name of every email sent from this file now says Applitrust (the address stays verify@applitrust.com). A caller may pass another "from" (the open-by reminders use a no reply address).
+// sendEmailResult tells a definite rejection (the mail service answered with a non success status) from "unknown" (a network error or anything else); sendEmail keeps its old true or false answer.
+const DEFAULT_FROM = "Applitrust <verify@applitrust.com>";
+async function sendEmailResult(to: string, subject: string, html: string, from: string = DEFAULT_FROM): Promise<"sent" | "rejected" | "unknown"> {
   try {
     const r = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${RESEND_API_KEY}` },
-      body: JSON.stringify({ from: "Verifi <verify@applitrust.com>", to, subject, html }),
+      body: JSON.stringify({ from, to, subject, html }),
     });
-    return r.ok;
-  } catch (_e) { return false; }
+    return r.ok ? "sent" : "rejected";
+  } catch (_e) { return "unknown"; }
+}
+async function sendEmail(to: string, subject: string, html: string, from: string = DEFAULT_FROM): Promise<boolean> {
+  return (await sendEmailResult(to, subject, html, from)) === "sent";
+}
+
+// ---------------------------------------------------------------------------------------------------
+// OPEN-BY REMINDERS (BS, October 23, 2026). Run by the sweep after its other steps. Controlled by the edge secret REMINDER_EMAILS:
+//   off (also unset, and any other value)  nothing happens and the claim function is not called
+//   dry   the claim function is called in peek mode; counts are logged; nothing is sent and nothing is marked
+//   test  only the employer users listed in REMINDER_TEST_USER_IDS (comma separated ids; an empty list means nobody) are claimed and sent to
+//   on    everyone is claimed and sent to
+// A reminder is marked as handed out by the database BEFORE it is sent. A definite rejection by the mail service releases the mark; a network error or any other doubt keeps it (never twice).
+// Nothing in a reminder names the candidate, the company or the employer's own label; the only contact address is the support one.
+// ---------------------------------------------------------------------------------------------------
+const REMINDER_LIMIT = 20;
+const REMINDER_FROM = "Applitrust <noreply@applitrust.com>";
+const SUPPORT_EMAIL = "support@applitrust.com";
+function reminderMode(): "off" | "dry" | "test" | "on" {
+  const v = Deno.env.get("REMINDER_EMAILS");
+  return v === "dry" || v === "test" || v === "on" ? v : "off";
+}
+function reminderTestIds(): string[] {
+  return (Deno.env.get("REMINDER_TEST_USER_IDS") || "").split(",").map((s) => s.trim().toLowerCase()).filter((s) => UUID.test(s));
+}
+function reminderMoney(price: { amount_cents?: number; currency?: string } | undefined): string | null {
+  if (!price || !(Number(price.amount_cents) > 0)) return null;
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: String(price.currency || "usd").toUpperCase() }).format(Number(price.amount_cents) / 100);
+}
+function reminderDeadline(iso: string): string { return new Date(iso).toUTCString().replace(/ GMT$/, "") + " UTC"; }
+function buildReminder(which: string, r: { requester_name?: string | null; snapshot_expires_at: string }, money: string): { subject: string; html: string } {
+  const last = which === "last_day";
+  const until = reminderDeadline(r.snapshot_expires_at);
+  const name = String(r.requester_name || "").trim();
+  const subject = last ? "Last day to open your Applitrust comparison" : "2 days left to open your Applitrust comparison";
+  const html =
+    `<p>${name ? "Hi " + esc(name) + "," : "Hi,"}</p>` +
+    `<p>${last ? "Your approved comparison expires in less than 24 hours, at " + esc(until) + "." : "The candidate approved your comparison request. You have until " + esc(until) + " to open it."}</p>` +
+    `<p>${esc(money)} is charged only when you open the comparison. Nothing is charged now.</p>` +
+    `<p>Sign in and open My comparisons: <a href="${SITE}/employer.html">${SITE}/employer.html</a></p>` +
+    `<p>If you do not open it by then, it expires, any hold on your card is released and you are not charged.</p>` +
+    (last ? `<p>This is the last reminder about this request.</p>` : "") +
+    `<p>You are receiving this email because a comparison request you made in Applitrust was approved by the candidate and has not been opened yet. These reminders stop once you open the comparison.</p>` +
+    `<p>If you did not make this request, or you have a question about these emails, contact <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.</p>`;
+  return { subject, html };
+}
+async function runOpenByReminders(): Promise<{ mode: string; two_day: number; last_day: number; sent: number; released: number; kept: number; skipped_opened: number }> {
+  const out = { mode: reminderMode(), two_day: 0, last_day: 0, sent: 0, released: 0, kept: 0, skipped_opened: 0 };
+  if (out.mode === "off") return out;
+  try {
+    const dry = out.mode === "dry";
+    let only: string[] | null = null;
+    if (out.mode === "test") { only = reminderTestIds(); if (!only.length) { console.log("candidate-comparison-requests: open-by reminders mode=test allowlist=empty claimed=0"); return out; } }
+    let money: string | null = null;
+    if (!dry) {
+      money = reminderMoney((await rows("employer_pricing?key=eq.guest_comparison&select=amount_cents,currency"))[0]);
+      if (!money) { console.log("candidate-comparison-requests: open-by reminders mode=" + out.mode + " price=unreadable claimed=0"); return out; }
+    }
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/claim_open_by_reminders`, { method: "POST", headers: JSON_H, body: JSON.stringify({ p_limit: REMINDER_LIMIT, p_peek: dry, p_only_employer_user_ids: only }) });
+    const claimed: any[] = res.ok ? await res.json().catch(() => []) : [];
+    if (!Array.isArray(claimed)) return out;
+    for (const c of claimed) { if (c.which === "last_day") out.last_day++; else out.two_day++; }
+    if (!dry) {
+      for (const c of claimed) {
+        const column = c.which === "last_day" ? "reminder_last_day_sent_at" : "reminder_2d_sent_at";
+        try {
+          const now = (await rows(`comparison_requests?id=eq.${c.id}&select=first_delivered_at`))[0];
+          if (!now || now.first_delivered_at) { out.skipped_opened++; out.kept++; continue; }   // opened in the meantime: no email, and the claim stays
+          const mail = buildReminder(c.which, c, money as string);
+          const state = await sendEmailResult(c.requester_email, mail.subject, mail.html, REMINDER_FROM);
+          if (state === "sent") out.sent++;
+          else if (state === "rejected") {
+            await rest(`comparison_requests?id=eq.${c.id}`, { method: "PATCH", headers: { "Prefer": "return=minimal" }, body: JSON.stringify({ [column]: null }) });
+            out.released++;
+          } else out.kept++;
+        } catch (_e) { out.kept++; }   // any doubt keeps the claim
+      }
+    }
+  } catch (_e) { /* a reminder problem never breaks the sweep */ }
+  console.log(`candidate-comparison-requests: open-by reminders mode=${out.mode} two_day=${out.two_day} last_day=${out.last_day} sent=${out.sent} released=${out.released} kept=${out.kept} skipped_opened=${out.skipped_opened}`);
+  return out;
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -641,7 +724,9 @@ export default {
         const unlinked = await rows("comparison_requests?status=eq.approved&access_method=eq.guest&guest_link_sent_at=is.null&first_delivered_at=is.null&select=id&limit=20");
         let relinked = 0;
         for (const u of unlinked) if (await noticeRequesterApproved(u.id)) relinked++;
-        return json({ ok: true, expired: exp, requester_notices_sent: noticed, candidate_notices_retried: renotified, guest_links_sent: relinked });
+        // BS: the open-by reminders run LAST, after the expiry step above (a request that expired in this very run is never reminded). Counts only; off unless REMINDER_EMAILS says otherwise.
+        const reminders = await runOpenByReminders();
+        return json({ ok: true, expired: exp, requester_notices_sent: noticed, candidate_notices_retried: renotified, guest_links_sent: relinked, open_by_reminders: reminders });
       }
       if (action === "notify_candidate") {
         if (!isServiceCaller(req)) return UNAUTHORIZED();
