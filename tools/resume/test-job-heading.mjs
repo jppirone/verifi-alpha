@@ -27,7 +27,9 @@ const OLD = execFileSync("git", ["show", `${BASE}:candidate.html`], { cwd: repo,
 const AU_REF = process.env.AW_AU_REF || "75c8eab";
 const AU_OWNED = ["exportVerifiedData", "atidPdfOpts"];
 const AU_SRC = execFileSync("git", ["show", `${AU_REF}:candidate.html`], { cwd: repo, maxBuffer: 1 << 28 }).toString("utf8").replace(/\r\n/g, "\n");
-function differingFromAu(src, names) { return names.filter((n) => method(src, n) !== method(AU_SRC, n)); }
+// BR (October 23, 2026): exportVerifiedData was changed on purpose in exactly two places (the download name is built at the click and used by the anchor); those two are undone here before comparing with AU, so everything else in the function is still pinned.
+const undoBR = (m) => m == null ? m : m.replace(/\n    const downloadName = [^\n]*/, "").replace("a.download = downloadName;", "a.download = 'verifi-my-data.json';");
+function differingFromAu(src, names) { return names.filter((n) => undoBR(method(src, n)) !== method(AU_SRC, n)); }
 const FX = JSON.parse(fs.readFileSync(new URL("fixtures/job-heading-six.json", import.meta.url), "utf8"));
 function method(src, name) {
   let start = src.indexOf("\n  " + name + "(");

@@ -8110,7 +8110,6 @@ class Component extends DCLogic {
       const blob = new Blob([bytes], { type: 'application/pdf' });
       if (this._pdfBlobUrl) URL.revokeObjectURL(this._pdfBlobUrl);
       this._pdfBlobUrl = URL.createObjectURL(blob);
-      this._pdfFilename = 'resume.pdf';
 
       container.innerHTML = '';
       if (!window.pdfjsLib) {
@@ -9264,9 +9263,25 @@ class Component extends DCLogic {
     });
   }
 
+  // BR (October 23, 2026): the ONE function that names a download. Pure: kind ('pdf' or 'json'), the saved first and last name, and the moment of the click. Callers pass savedFirst and savedLast at the click, never the profile fields.
+  // Each name part: letters folded to ASCII, apostrophes dropped, spaces to single hyphens, anything else that is not a letter, digit or hyphen removed, at most 30 characters.
+  downloadFileName(kind, first, last, when) {
+    const cc = String.fromCharCode;   // character codes, so the source stays plain ASCII
+    const fold = { 248: 'o', 216: 'O', 322: 'l', 321: 'L', 273: 'd', 272: 'D', 240: 'd', 208: 'D', 223: 'ss', 230: 'ae', 198: 'AE', 339: 'oe', 338: 'OE', 254: 'th', 222: 'Th', 305: 'i' };
+    const marks = new RegExp('[' + cc(0x300) + '-' + cc(0x36f) + ']', 'g'), quotes = new RegExp("['`" + cc(0x2018, 0x2019, 0x2bc) + ']', 'g');
+    const part = (v) => String(v == null ? '' : v).normalize('NFKD').replace(marks, '').replace(/[^ -~]/g, (c) => fold[c.charCodeAt(0)] || c)
+      .replace(quotes, '').replace(/\s+/g, '-').replace(/[^A-Za-z0-9-]/g, '').replace(/-+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30).replace(/-+$/, '');
+    const names = [part(first), part(last)].filter(Boolean).join('-');
+    if (kind !== 'json') return (names ? names + '-' : '') + 'Resume-Applitrust.pdf';
+    const d = when instanceof Date ? when : new Date();
+    const day = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    return (names ? names + '-' : '') + 'Applitrust-JSON-Resume-' + day + '.json';
+  }
+
   async exportVerifiedData() {
     const s = this.state;
     const id = s.resumeCandidateId;
+    const downloadName = this.downloadFileName('json', s.savedFirst, s.savedLast, new Date());   // BR: named at the click, before any waiting
     const wantAtid = !!s.atidExportJson;   // AU: the stored choice, read from page state (loaded from the account) at the click, before any waiting
     const fail = () => window.alert("We couldn't load your data to build the export, so nothing was downloaded. Please try again.");
     if (!id) { fail(); return; }
@@ -9297,7 +9312,7 @@ class Component extends DCLogic {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'verifi-my-data.json';
+    a.download = downloadName;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -13139,7 +13154,7 @@ class Component extends DCLogic {
         this.syncPdfBlobToAtidSwitches();
         const a = document.createElement('a');
         a.href = this._pdfBlobUrl;
-        a.download = this._pdfFilename || 'resume.pdf';
+        a.download = this.downloadFileName('pdf', this.state.savedFirst, this.state.savedLast, new Date());   // BR: named at the click from the saved identity
         document.body.appendChild(a);
         a.click();
         a.remove();
