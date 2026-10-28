@@ -300,7 +300,12 @@ t("C3 only the migration, the rollback, the edge function and test files changed
   const files = git("diff", "--name-only", BASE).split("\n").filter(Boolean);
   const untracked = git("ls-files", "--others", "--exclude-standard").split("\n").filter(Boolean);
   const all = [...new Set([...files, ...untracked])].sort();
-  assert.deepEqual(all.filter((f) => !/^tools\/resume\/test-/.test(f)), ["supabase/functions/candidate-comparison-requests/index.ts", "supabase/migrations/20261023010000_open_by_reminders.sql", "supabase/rollback/20261023010000_open_by_reminders_rollback.sql"]);
+  // ED (October 28, 2026): the base commit is older than the EA push (the PDF bullet marks). The files that push added are listed here, and candidate.html is allowed only as that exact
+  // pushed version (its git blob hash is pinned), so any LATER change to the page still fails this check, as before.
+  const EA_FILES = ["candidate.html", "tools/resume/check-pdf-bullets.py", "tools/resume/fixtures/ea-bullet-resume.json", "tools/resume/make-pdf-bullet-pdfs.mjs", "tools/resume/pdf-bullets-lib.mjs"];
+  const EA_CANDIDATE_BLOB = "4ea9c234a0fcc3e65b17c7beb8b7790caebd7684";
+  assert.equal(git("hash-object", "candidate.html").trim(), EA_CANDIDATE_BLOB, "candidate.html is not the pushed EA version");
+  assert.deepEqual(all.filter((f) => !/^tools\/resume\/test-/.test(f) && !EA_FILES.includes(f)), ["supabase/functions/candidate-comparison-requests/index.ts", "supabase/migrations/20261023010000_open_by_reminders.sql", "supabase/rollback/20261023010000_open_by_reminders_rollback.sql"]);
 });
 t("C4 this test file contains no em dash and no spaced double hyphen", () => { const self = fs.readFileSync(new URL("tools/resume/test-open-by-reminders.mjs", repo), "utf8"); assert.equal(self.includes(EM), false); assert.equal(/[^\x00-\x7f]/.test(self), false); assert.equal(self.split("\n").some((l) => l.includes(DASH2) && !l.includes("String.fromCharCode")), false); });
 
