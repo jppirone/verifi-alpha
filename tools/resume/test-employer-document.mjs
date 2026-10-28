@@ -19,7 +19,10 @@ function method(src, name) { let s = src.indexOf("\n  " + name + "("); if (s < 0
 const makeClass = (src, names) => new Function("return class P { " + names.map((n) => method(src, n)).filter(Boolean).join("\n") + " }")();
 const SHARED = ["sanitizeAts", "wrapText", "czPartialLabel", "czRange", "czWorkLabel", "czEduLabel", "czCertLabel", "groupByLiteralHeading", "czDatesText", "workHeadingLines", "wrapHeadingRuns", "helvWidth"];
 const EmpC = (src = EMP) => makeClass(src, [...SHARED, "buildComparisonLines", "buildComparisonPdfBytes"]);
-const CandC = () => makeClass(CAND, [...SHARED, "buildResumeLines", "buildAtsPdfBytes"]);
+const CandC = () => makeClass(CAND, [...SHARED, "buildResumeLines", "buildAtsPdfBytes", "wrapBulletBlock", "pdfBullet"]);   // EA (October 28, 2026): the last two are the bullet mark helpers of the candidate PDF
+// EA: the candidate PDF now draws a bullet mark and a hanging indent on every line of a job's description block; the employer document (employer.html, not changed in EA) does not. The tests below compare the JOB HEADINGS and the
+// other blocks of the two builders, so both are given the resume with the descriptions left out; the one test after them says the difference in the description lines is the intended one.
+const noDesc = (R) => ({ ...R, work: (R.work || []).map((w) => ({ ...w, description: "" })) });
 
 const PARAGRAPH = "The professional summary (also called an executive summary or profile) is not included in this document. Candidates can write and change their own summaries at any time and may keep more than one version, so we cannot tell which one went with the resume you hold. Anything a candidate states about themselves in a summary is their own content and is not part of what is verified here.";
 const EXISTING_NOTICE = "Every job, education entry and certification the candidate has submitted is shown below, with its current status. Job descriptions are not part of what is verified, so they are not shown. This report covers only these three categories — skills, summaries, and other resume content shown in the document below are the candidate's own stated content, not independently verified.";
@@ -91,7 +94,7 @@ const candidateWithoutSummary = (c) => { const i = c.findIndex((l) => l.text ===
 t("job headings: for the printed-heading case, the fallback case and a job with no printed heading, the employer document's lines equal the candidate PDF's lines (the summary block aside)", () => {
   const e = new (EmpC())(), c = new (CandC())();
   for (const [label, R] of [["Lisa shaped (one printed, one no printed heading)", LISA()], ["PironeSimple (printed headings, includes the Desktop Publishing Manager fallback)", fixtureResume("PironeSimple")], ["Aclark", fixtureResume("Aclark")], ["Donofrio", fixtureResume("Donofrio")], ["LisaTom", fixtureResume("LisaTom")], ["PironeBeast", fixtureResume("PironeBeast")]]) {
-    const el = e.buildComparisonLines(R), cl = candidateWithoutSummary(c.buildResumeLines(R, R));
+    const el = e.buildComparisonLines(noDesc(R)), cl = candidateWithoutSummary(c.buildResumeLines(noDesc(R), noDesc(R)));
     assert.deepEqual(el, cl, label);
   }
 });
@@ -115,8 +118,14 @@ t("employer only items are kept: the gated ATID line is drawn only for a well-fo
 t("control: a planted employer builder that still builds the old 'Title at Company' label is caught by the side by side check", () => {
   const planted = EMP.replace("if (g.kind === 'experience') this.workHeadingLines(b.src).forEach(l => lines.push(l));\n          else this.wrapText(b.label, 90).forEach(w => push(w));", "this.wrapText(b.label, 90).forEach(w => push(w));");
   assert.notEqual(planted, EMP);
-  const el = new (EmpC(planted))().buildComparisonLines(LISA()), cl = candidateWithoutSummary(new (CandC())().buildResumeLines(LISA(), LISA()));
+  const el = new (EmpC(planted))().buildComparisonLines(noDesc(LISA())), cl = candidateWithoutSummary(new (CandC())().buildResumeLines(noDesc(LISA()), noDesc(LISA())));
   assert.notDeepEqual(el, cl);
+});
+t("EA: the employer document is not changed by the bullet mark: for a job with a description its lines carry no bullet flag and keep the old 90 character wrap, while the candidate PDF's description lines carry the flag (the one intended difference)", () => {
+  const R = LISA(), e = new (EmpC())().buildComparisonLines(R), c = new (CandC())().buildResumeLines(R, R);
+  assert.ok(e.every((l) => !("bullet" in l)), "employer lines have no bullet flag");
+  assert.ok(c.some((l) => l.bullet === "first") && c.filter((l) => l.bullet).length === 3, "candidate description lines: three lines of the two jobs (Led a team of five. Shipped a thing. Hired people.)");
+  assert.ok(e.some((l) => l.text === "Led a team of five.") && !c.some((l) => !l.bullet && l.text === "Led a team of five."), "the employer prints the description line plain; the candidate PDF prints it as a bullet line");
 });
 // the PDF writer: the page content stream of the employer PDF equals the candidate writer's for the same lines
 const streams = (pdf) => [...pdf.matchAll(/stream\n([\s\S]*?)\nendstream|stream\n([\s\S]*?)endstream/g)].map((m) => (m[1] ?? m[2]).replace(/\n$/, ""));

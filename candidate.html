@@ -6908,7 +6908,7 @@ class Component extends DCLogic {
   // (see groupByLiteralHeading). Nothing here reads customization, summaries, skills or contact details from local state.
   buildResumeLines(R, L) {
     const lines = [];
-    const push = (text, bold) => lines.push({ text: this.sanitizeAts(text), bold: !!bold });
+    const push = (text, bold, bullet) => { const l = { text: this.sanitizeAts(text), bold: !!bold }; if (bullet) l.bullet = bullet; lines.push(l); };   // EA: bullet is 'first' or 'cont' for a line of a job's description block (see wrapBulletBlock)
     const H = R.header || {};
     // All-or-nothing header choice (unchanged): 'printed' reproduces the verbatim captured header; anything else composes name, location and the contact
     // details the candidate chose to print. A missing printed header falls back to the composed one, never a blank.
@@ -6971,7 +6971,7 @@ class Component extends DCLogic {
           // that cannot be recovered. Education and certifications keep their labels exactly as before.
           if (g.kind === 'experience') this.workHeadingLines(b.src).forEach(l => lines.push(l));
           else this.wrapText(b.label, 90).forEach(w => push(w));
-          if (b.body) this.wrapText(b.body, 90).forEach(w => push(w));
+          if (b.body) this.wrapBulletBlock(b.body).forEach(l => push(l.text, false, l.bullet));   // EA: every line of the description block gets a bullet mark (b.body is only ever a job's description)
           push('');
         });
         return;
@@ -8009,6 +8009,33 @@ class Component extends DCLogic {
     } catch (_e2) { /* nothing more to try; the value is on screen to select */ }
   }
 
+  // ---- EA (October 28, 2026): a real bullet mark in front of every line of a job's description block ----
+  // Why: job sites that read the PDF (SmartRecruiters in particular) glue words together at line wraps and between plain lines. A real bullet mark drawn as its OWN piece of text at the left margin, with the words indented
+  // after it (a hanging indent), keeps the words apart. The data stores a job's description as plain lines with no marks, so the writer adds the mark itself.
+  // The one place the mark and the layout are set. glyph is the bullet U+2022. code is the character code written into the PDF: 267 octal (0xB7), which is the glyph "bullet" in the standard Adobe encoding that the fonts
+  // here (Helvetica and Helvetica-Bold, no /Encoding entry) use, so a reader extracts it as U+2022. (0x95 is the bullet only in WinAnsi, which these fonts do not declare; adding that encoding would change the quotes.)
+  // indent is the distance in points from the left margin to the words. wrapChars is the wrap width of a bullet line in characters: the 90 of every other line less the indent's share of the 504 points between the margins.
+  pdfBullet() { return { glyph: '\u{2022}', code: '\\267', indent: 14, wrapChars: 87 }; }
+
+  // The lines of a job's description block, wrapped for a hanging indent. `text` is the description exactly as buildResumeLines gets it (R.work[].description): one line per paragraph, separated by "\n". Every non empty line
+  // becomes one bullet: its first wrapped line is { text, bullet: 'first' } and the others { text, bullet: 'cont' }. A line the data already starts with a bullet, hyphen, dash or star mark loses that mark (the writer draws its
+  // own, so a line never gets two). A blank line stays blank and gets no mark. Text is wrapped as wrapText wraps it, at the narrower width; a line that is still wider than the space left of the indent (wide letters) is
+  // wrapped again a character narrower, down to 40, so nothing runs past the right margin (one unbroken word longer than the space cannot be wrapped, as before).
+  wrapBulletBlock(text) {
+    const B = this.pdfBullet();
+    const room = 504 - B.indent;
+    const raws = String(text).split('\n');
+    const out = [];
+    raws.forEach(raw => {
+      const t = raw.replace(/^\s*(?:[\u{2022}\u{25CF}\u{25AA}\u{25E6}\u{B7}]\s*|[*\-\u{2013}\u{2014}]\s+)/u, '').trim();   // the escapes keep this file free of the dash characters themselves
+      if (!t) { if (raw === '' && raws.length > 1) out.push({ text: '' }); return; }
+      let wrapped = this.wrapText(t, B.wrapChars);
+      for (let n = B.wrapChars - 1; n >= 40 && wrapped.some(l => this.helvWidth(this.sanitizeAts(l), false) > room); n--) wrapped = this.wrapText(t, n);
+      wrapped.forEach((l, i) => out.push({ text: l, bullet: i === 0 ? 'first' : 'cont' }));
+    });
+    return out;
+  }
+
   // opts (ATID, October 19, 2026) is optional and defaults to nothing: with no opts the bytes are exactly what this function produced before the ATID existed.
   //   opts.atidLine : the DISPLAY form of the ATID, drawn as ONE small line on the LAST page, below the text area (baseline 36 pt, the bottom margin is 54 pt),
   //                   so it never takes one of the 45 lines of a page and never moves a page break.
@@ -8042,6 +8069,18 @@ class Component extends DCLogic {
             if (rf !== curFont) { body += rf + ' ' + fontSize + ' Tf\n'; curFont = rf; }
             body += '(' + esc(run.text) + ') Tj\n';
           });
+          y -= leading;
+          return;
+        }
+        if (line.bullet) {
+          // EA: a line of a job's description block. First line: the bullet mark as its own piece at the left margin, then a space and the words drawn so that the first letter sits at margin + indent (same baseline, same text
+          // block, so a reader gets "mark words" in reading order). Wrapped lines: the words at margin + indent (hanging indent). Regular font, never bold. The mark and its first line are one line, so a mark is never alone at the bottom of a page.
+          const bl = this.pdfBullet(), spw = 0.278 * fontSize, yy = y.toFixed(2);
+          if ('/F1' !== curFont) { body += '/F1 ' + fontSize + ' Tf\n'; curFont = '/F1'; }
+          if (line.bullet === 'first') {
+            body += '1 0 0 1 ' + marginX + ' ' + yy + ' Tm\n(' + bl.code + ') Tj\n';
+            body += '1 0 0 1 ' + (marginX + bl.indent - spw).toFixed(3) + ' ' + yy + ' Tm\n( ' + esc(line.text) + ') Tj\n';
+          } else body += '1 0 0 1 ' + (marginX + bl.indent) + ' ' + yy + ' Tm\n(' + esc(line.text) + ') Tj\n';
           y -= leading;
           return;
         }

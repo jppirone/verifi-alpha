@@ -1,0 +1,59 @@
+{
+  "_notice": "INVENTED PERSON. Every name, employer, school, place, phone number and address in this file is made up for a test (prompt EA, October 28, 2026). The email is at example.com and the phone number is in the fictional 555-01xx range. No real person or employer is described.",
+  "_shape": "The 'delivered' view of the reconciled resume JSON that candidate.html reads from get-customization before it makes the PDF (the page passes the same object as the 'editor' view when nothing is excluded). A job's description is stored as plain lines with NO bullet marks, one line per paragraph, separated by a newline; job 3 on purpose has lines that start with a bullet, a hyphen, an en dash, an em dash and a star, to test that the writer never draws two marks. The bullet, en dash and em dash are written here as the placeholders {BULLET}, {ENDASH} and {EMDASH}; tools/resume/pdf-bullets-lib.mjs loadFixture() replaces them with the real characters (so this file holds no dash character).",
+  "delivered": {
+    "candidate": { "name": "Rowan Testwell" },
+    "header": { "mode": "account", "location": "Marlow Heights, OR" },
+    "contact": {
+      "phone": { "state": "stated", "value": "(503) 555-0177", "verified_on_file": false },
+      "email": { "state": "stated", "value": "rowan.testwell@example.com", "verified_on_file": false }
+    },
+    "summary": {
+      "heading": "Professional Summary",
+      "content": "Program coordinator with eleven years in schools and small offices. Known for calm schedules, clear records and teams that know what is expected of them. Comfortable with budgets, parents and spreadsheets alike."
+    },
+    "work": [
+      {
+        "id": "w1", "position": 10, "heading": "Professional Experience",
+        "employer": "Alderbrook Community Schools", "title": "Program Coordinator", "location": "Marlow Heights, OR",
+        "start": "2019-08", "current": true,
+        "description": "Role transition retained the existing program and its staff with a smooth handover per district process.\nPlanned and ran the after school program for four schools, with a monthly budget review and a yearly report to the district board and the parent council.\nTrained and coached eleven part time staff in safety, first aid and record keeping, using short monthly sessions and a shared checklist that every site kept up to date.\nReduced late pickups by 40 percent through a new sign out process. Introduced a weekly newsletter. Kept every family informed of schedule changes within one day.\nKept the supply cupboard and the shared calendar in order for the Main Office, WordPress pages and the monthly parent mailing included.\nLed the quarterly review of every site with the district office, the parent council and the staff leads, collected the numbers beforehand, wrote the summary in plain words and followed up on each action until it was closed, which kept the whole program on schedule for three school years in a row.\nPresented the program results to the board in 2024-2025."
+      },
+      {
+        "id": "w2", "position": 20, "heading": "Professional Experience",
+        "employer": "Brightwater Logistics Example Co.", "title": "Operations Analyst", "location": "Tidewell, WA",
+        "start": "2015-03", "end": "2019-06",
+        "description": "Responsibilities:\nBuilt weekly delivery reports in spreadsheets that showed late deliveries, cost per mile and empty miles by carrier for every region.\nChecked carrier invoices against the rate sheets and sent corrections the same week.\nNotable Results:\nCut late deliveries from 9 percent to under 3 percent in fourteen months by moving the cut off time and rebuilding the pick routes together with the floor leads.\nFound a recurring billing error that had cost about $120,000 over two years.\nTrained six dispatchers to read the reports and act on them before the end of the shift."
+      },
+      {
+        "id": "w3", "position": 30, "heading": "Professional Experience",
+        "employer": "Cedar Ridge Dental Example", "title": "Office Assistant", "location": "Marrow Point, OR",
+        "start": "2012-06", "end": "2015-02",
+        "description": "{BULLET} Greeted patients, confirmed appointments by phone and kept the waiting room calm during busy mornings and late afternoons.\n- Scheduled follow up visits and sent reminders two days ahead, which cut missed appointments by a quarter.\n{ENDASH} Filed insurance forms and kept the records room in order for three dentists and two hygienists.\n{EMDASH} Ordered supplies and tracked the monthly budget for the front office.\n* Answered the main phone line, took messages and passed urgent ones to the right person within minutes."
+      }
+    ],
+    "education": [
+      { "id": "e1", "position": 50, "heading": "Education", "institution": "Corvane State University Example", "degree": "Bachelor of Arts", "field_of_study": "Education", "location": "Marrow Point, OR", "start": "2008", "end": "2012" }
+    ],
+    "certifications": [
+      { "id": "c1", "position": 60, "heading": "Certifications", "name": "First Aid and CPR Instructor", "issuer": "Example Safety Council", "issued": "2021-04" },
+      { "id": "c2", "position": 60, "heading": "Certifications", "name": "Certified Program Administrator", "issuer": "Example Association of Program Leaders", "issued": "2019-11" }
+    ],
+    "skills": {
+      "heading": "Skills", "section_position": 40, "base_count": 8, "max": 15,
+      "items": [
+        { "id": "s1", "kind": "skill", "position": 40, "text": "Program scheduling", "included": true },
+        { "id": "s2", "kind": "skill", "position": 40.01, "text": "Budget tracking", "included": true },
+        { "id": "s3", "kind": "skill", "position": 40.02, "text": "Staff training and coaching", "included": true },
+        { "id": "s4", "kind": "skill", "position": 40.03, "text": "Parent communication", "included": true },
+        { "id": "s5", "kind": "skill", "position": 40.04, "text": "Spreadsheets and reports", "included": true },
+        { "id": "s6", "kind": "skill", "position": 40.05, "text": "First aid and safety", "included": true },
+        { "id": "s7", "kind": "skill", "position": 40.06, "text": "Record keeping", "included": true },
+        { "id": "s8", "kind": "skill", "position": 40.07, "text": "Calendar management", "included": true }
+      ]
+    },
+    "other_sections": [
+      { "id": "o1", "position": 70, "section_type": "hobbies", "heading": "Interests", "content": "Trail running and map reading.\nBoard games with the neighbors.\nVolunteer shifts at a community radio station." }
+    ]
+  }
+}

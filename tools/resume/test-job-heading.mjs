@@ -37,7 +37,7 @@ function method(src, name) {
   if (start < 0) return null;
   return src.slice(start + 1, src.indexOf("\n  }\n", start) + 4);
 }
-const NAMES = ["buildResumeLines", "buildAtsPdfBytes", "sanitizeAts", "wrapText", "groupByLiteralHeading", "czPartialLabel", "czRange", "czWorkLabel", "czEduLabel", "czCertLabel", "workHeadingLines", "wrapHeadingRuns", "czDatesText", "helvWidth"];
+const NAMES = ["buildResumeLines", "buildAtsPdfBytes", "sanitizeAts", "wrapText", "groupByLiteralHeading", "czPartialLabel", "czRange", "czWorkLabel", "czEduLabel", "czCertLabel", "workHeadingLines", "wrapHeadingRuns", "czDatesText", "helvWidth", "wrapBulletBlock", "pdfBullet"];   // EA: the last two are the bullet mark helpers (the old writer has neither, method() gives nothing for it)
 // the widths below come from the PDF reader's own Helvetica, NOT from the table in the page: an independent check of that table
 const HV = new mupdf.Font("Helvetica"), HB = new mupdf.Font("Helvetica-Bold");
 const measure = (s, bold) => [...s].reduce((n, ch) => n + (bold ? HB : HV).advanceGlyph((bold ? HB : HV).encodeCharacter(ch.charCodeAt(0))) * 11, 0);
@@ -193,7 +193,15 @@ t("nothing else moved: for 56 generated resumes (the 6 test resumes + 50 random)
   for (let i = 0; i < 50; i++) cases.push(randomResume(i));
   assert.equal(cases.length, 56);
   for (const { R } of cases) {
-    const newLines = now.buildResumeLines(R, R), oldLines = old.buildResumeLines(R, R);
+    // EA (October 28, 2026): the lines of a job's description block changed ON PURPOSE (a bullet mark and a hanging indent). This test is about everything else, so both writers are given the resume with the descriptions left
+    // out; the description lines are tested in tools/resume/test-pdf-bullets.mjs, and here their WORDS are compared with the old writer's, in order (a mark is not a word).
+    const Rd = { ...R, work: (R.work || []).map((w) => ({ ...w, description: "" })) };
+    const MARKS = new Set(["-", "*", ...[0x2022, 0x2013, 0x2014, 0x25CF, 0x25AA, 0x25E6, 0xB7].map((c) => String.fromCodePoint(c))]);
+    for (const w of R.work || []) if (w.description) {
+      const nw = now.wrapBulletBlock(w.description).map((l) => l.text).join(" ").split(/\s+/).filter((x) => x && !MARKS.has(x)), ow = old.wrapText(w.description, 90).join(" ").split(/\s+/).filter((x) => x && !MARKS.has(x));
+      assert.deepEqual(nw, ow, "description words: " + (w.title || ""));
+    }
+    const newLines = now.buildResumeLines(Rd, Rd), oldLines = old.buildResumeLines(Rd, Rd);
     const strip = (lines, heads) => { const out = [...lines]; for (const h of heads) { const at = out.findIndex((l, ix) => h.every((s, k) => out[ix + k] && out[ix + k].text === s)); assert.ok(at >= 0, "heading present: " + h[0]); out.splice(at, h.length); } return out; };
     const rows = [...R.work].sort((a, b) => (a.position ?? 1e9) - (b.position ?? 1e9));
     const newHeads = rows.map((w) => now.workHeadingLines(w).map((l) => l.text)).filter((h) => h.length), oldHeads = rows.map((w) => old.wrapText(old.czWorkLabel(w), 90)).filter((h) => h.length);

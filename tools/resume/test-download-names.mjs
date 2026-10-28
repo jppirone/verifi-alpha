@@ -164,10 +164,23 @@ t("6c. planted: the unsaved profile fields in the JSON name are caught", async (
 
 // ---- content unchanged and nothing else changed
 t("7. the PDF writer, the line builders and the JSON builder are the same text as before (same input gives the same bytes)", () => {
-  for (const m of ["buildAtsPdfBytes", "buildResumeLines", "buildDataExport", "syncPdfBlobToAtidSwitches", "renderPdfPreview"]) {
+  for (const m of ["buildDataExport", "syncPdfBlobToAtidSwitches", "renderPdfPreview"]) {
     const a = method(OLD, m), b = method(CAND, m); assert.ok(a.length > 50 || m === "renderPdfPreview" || a.length > 0, m);
     if (m !== "renderPdfPreview") assert.equal(b, a, m);
   }
+  // EA (October 28, 2026): buildAtsPdfBytes and buildResumeLines were changed ON PURPOSE (a bullet mark in front of every line of a job's description block). This test only guards the BR change, so it now
+  // allows exactly the EA difference and nothing more: no line of either method was removed except the two replaced lines of buildResumeLines, and every added line belongs to the EA block (tools/resume/test-pdf-bullets.mjs
+  // tests that block itself).
+  const diffLines = (m) => { const a = method(OLD, m).split("\n"), b = method(CAND, m).split("\n"); return { removed: a.filter((l) => !b.includes(l)), added: b.filter((l) => !a.includes(l)) }; };
+  const ats = diffLines("buildAtsPdfBytes"), rl = diffLines("buildResumeLines");
+  assert.deepEqual(ats.removed, [], "buildAtsPdfBytes: nothing removed");
+  { // the new method with the one EA block cut out is the old method, character for character
+    const nw = method(CAND, "buildAtsPdfBytes"), s = nw.indexOf("        if (line.bullet) {\n"), e = nw.indexOf("          return;\n        }\n", s) + "          return;\n        }\n".length;
+    assert.ok(s > 0 && e > s, "the EA block is there");
+    assert.equal(nw.slice(0, s) + nw.slice(e), method(OLD, "buildAtsPdfBytes"), "buildAtsPdfBytes without the EA block is the old text");
+  }
+  assert.deepEqual(rl.removed.map((l) => l.trim()), ["const push = (text, bold) => lines.push({ text: this.sanitizeAts(text), bold: !!bold });", "if (b.body) this.wrapText(b.body, 90).forEach(w => push(w));"]);
+  assert.equal(rl.added.length, 2); assert.ok(rl.added.every((l) => l.includes("EA:")), "buildResumeLines: the two replaced lines say EA");
 });
 t("8. the only changed file besides this test is candidate.html, and the changed lines are exactly the BR lines", () => {
   const files = git("diff", "--name-only", BASE, BR_HEAD).split("\n").filter(Boolean).filter((f) => f !== "tools/resume/test-download-names.mjs" && f !== "tools/resume/test-job-heading.mjs");
