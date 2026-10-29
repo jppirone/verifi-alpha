@@ -504,7 +504,7 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
 - "candidate_phone" and "candidate_email" (top-level, not inside any category, 2026-09-23) = the
   candidate's OWN phone number and email address, exactly as printed on their name/contact line —
   the same header line candidate_location and printed_header both read from. Copy each verbatim, in
-  whatever format the resume actually prints it (e.g. "732-804-4973", "(219) 204-2607",
+  whatever format the resume actually prints it (e.g. "732-804-4973", "(555) 010-0199",
   "+1 201-446-6784" for phone; "jpirone@yahoo.com" for email) — never reformat, normalize, add or
   remove punctuation, or guess a missing country code. These are a SIBLING pair to
   candidate_location, structured out of the same header line for the same reason: printed_header

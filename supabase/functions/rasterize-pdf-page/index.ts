@@ -205,7 +205,7 @@ FIELD AND CATEGORY DEFINITIONS — read carefully, these are not interchangeable
   candidate's OWN phone number and email address, exactly as printed on their name/contact line —
   the same header line candidate_location and printed_header both read from, if THIS page is the
   one that shows it. Copy each verbatim, in whatever format the resume actually prints it (e.g.
-  "732-804-4973", "(219) 204-2607", "+1 201-446-6784" for phone; "jpirone@yahoo.com" for email) —
+  "732-804-4973", "(555) 010-0199", "+1 201-446-6784" for phone; "jpirone@yahoo.com" for email) —
   never reformat, normalize, add or remove punctuation, or guess a missing country code. A SIBLING
   pair to candidate_location, structured out of the same header line for the same reason. Use an
   empty string "" for either one when THIS page doesn't show that header block at all, or when the

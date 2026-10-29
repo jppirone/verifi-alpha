@@ -309,7 +309,7 @@ t("C3 only the migration, the rollback, the edge function and test files changed
   // the ignore line); the two moved fixture files show up as removed, so their old names are built from pieces (the guard test forbids that name in any tracked file).
   EA_FILES.push(".gitignore", "supabase/functions/_shared/resume-role-buckets.ts", "supabase/functions/extract-resume-fields/index.ts", "supabase/functions/upload-resume/index.ts",
     "supabase/migrations/20260928010000_resume_extraction_pages_section_boundaries.sql", "tools/resume/build-aw-heading-proofs.mjs", "tools/resume/fixtures/job-heading-desc.json",
-    "tools/resume/fixtures/job-heading-six.json", "tools/resume/fixtures/section-helpers.ts", "tools/resume/fixtures/skill-text-pages.ts", "tools/resume/private-fixtures.mjs",
+    "tools/resume/fixtures/job-heading-six.json", "tools/resume/fixtures/section-helpers.ts", "tools/resume/fixtures/skill-text-pages.ts", "tools/resume/private-fixtures.mjs", "supabase/functions/rasterize-pdf-page/index.ts", /* EM: one prompt example */
     "tools/resume/fixtures/" + ["ac", "lark-6fc7", "7af5.ts"].join(""), "tools/resume/fixtures/" + ["ac", "lark-797f", "c5d5.ts"].join(""));
   const EA_CANDIDATE_BLOB = "4ea9c234a0fcc3e65b17c7beb8b7790caebd7684";
   assert.equal(git("hash-object", "candidate.html").trim(), EA_CANDIDATE_BLOB, "candidate.html is not the pushed EA version");
