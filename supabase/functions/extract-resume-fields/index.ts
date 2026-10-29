@@ -1111,7 +1111,7 @@ type ExtractionResult = {
 // on the parsed result).
 //
 // Cross-category misordering (2026-09-28, live-reported and reproduced): a clean, single-column,
-// two-page resume (Aurora Clark's) with an unambiguous "RECENT TECHNICAL SKILLS" section printed
+// two-page resume (Ava Sample's) with an unambiguous "RECENT TECHNICAL SKILLS" section printed
 // directly above "PROFESSIONAL EXPERIENCE" came back with that section's freeform entry positioned
 // BETWEEN two Professional Experience jobs instead of before all of them. Root cause: the tie-fix
 // above only ever repairs DUPLICATE position values — it has no way to catch a position value that

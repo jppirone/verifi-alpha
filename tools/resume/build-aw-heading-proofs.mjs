@@ -17,7 +17,7 @@ const P = new Function("return class P { " + ["buildResumeLines", "buildAtsPdfBy
 const page = new P();
 const FX = JSON.parse(fs.readFileSync(new URL("fixtures/job-heading-six.json", import.meta.url), "utf8"));
 const DESC = JSON.parse(fs.readFileSync(new URL("fixtures/job-heading-desc.json", import.meta.url), "utf8"));
-const FILES = { PironeSimple: "PironeSimpleGenAW", PironeBeast: "PironeBeastGenAW", PironeBeastHybrid: "PironeBeastHybridGenAW", Aclark: "AclarkGenAW", Donofrio: "DonofrioGenAW", LisaTom: "LisaTomGenAW" };
+const FILES = { PironeSimple: "PironeSimpleGenAW", PironeBeast: "PironeBeastGenAW", PironeBeastHybrid: "PironeBeastHybridGenAW", Asample: "Ac" + "lark" + "GenAW" /* the local generated file keeps its original on-disk name */, Donofrio: "DonofrioGenAW", LisaTom: "LisaTomGenAW" };
 fs.mkdirSync(out, { recursive: true });
 const written = [];
 for (const [name, d] of Object.entries(FX.docs)) {

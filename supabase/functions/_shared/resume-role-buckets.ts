@@ -2,7 +2,7 @@
 //
 // A job must fit one bucket (company, title, dates, responsibilities) so staff can confirm each role and period. The page
 // extraction model decides this unreliably in both directions (PironeSimple: Thomson Reuters one header plus a dated
-// progression note came back as two entries with a wrong 1997 start and the note line dropped; Aclarktest: WESTCX, a company
+// progression note came back as two entries with a wrong 1997 start and the note line dropped; Asampletest: WESTCX, a company
 // line with two dated role blocks, came back as ONE entry titled "Recruiter to Senior Recruiter"). This module repairs exactly
 // two text shapes from the page's OCR text, with no model call, and flags anything it cannot settle:
 //

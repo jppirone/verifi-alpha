@@ -1,6 +1,6 @@
 // node --experimental-strip-types tools/resume/test-resume-role-buckets-pages.ts   (no dependencies, no network, no model call)
 // AP9 phase D: what the role bucket check does when a company / role group crosses a PAGE BREAK. Made-up page pairs are cut from the real
-// Aclarktest and PironeSimple text and from invented text. Each case runs the pipeline the way upload-resume does (check page by page,
+// Asampletest and PironeSimple text and from invented text. Each case runs the pipeline the way upload-resume does (check page by page,
 // then the existing cross-page merge, then the position numbering, then the final latest-first order) and again with the check switched
 // off ("doing nothing"). The result must never be WORSE than doing nothing:
 //   worse = a duplicated entry, a phantom or empty entry that should not exist, an invented date, a lost line, a role under the wrong
@@ -53,7 +53,7 @@ function flags(entries: RoleEntry[], c: Case) {
   };
 }
 
-// ---------- the real Aclarktest WESTCX lines ----------
+// ---------- the real Asampletest WESTCX lines ----------
 const WCO = "WESTCX, Remote September 2023 August 2026";
 const WDESC = "WestCx is a cloud-based technology partner that delivers AI-powered solutions for regulated industries like\nhealthcare, pharmacy, and financial services. The company was acquired in July 2026.";
 const SR_H = "Senior Recruiter, July 2024 August 2026";

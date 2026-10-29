@@ -1,7 +1,7 @@
 // node --experimental-strip-types tools/resume/test-leading-bullets.ts   (needs git and the repo history, no network, no model call)
 // AP9AA-1: leading continuation bullets that the page answer put in a freeform block go onto the previous page's last job (applyLeadingBullets, called first in
 // mergeBoundaryContinuations of upload-resume). The REAL merge code is cut out of upload-resume (this commit) and out of acaafbe (deployed) and compared on the
-// exact stored results of document 2f1fdc89 (generated Aclark PDF, pages 1 to 3: real extraction text, real boundary sections, OCR heads of the real pages).
+// exact stored results of document 2f1fdc89 (generated Asample PDF, pages 1 to 3: real extraction text, real boundary sections, OCR heads of the real pages).
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -39,11 +39,11 @@ const RANDSTAD = "Randstad is a global human resources consulting and recruitmen
 const TECH = "Workday, iCIMS, Taleo, Oracle HCM, SeekOut, JuiceBox/People GPT, Chat GPT\nMetaview AI, Claude, Glean Enterprise\nLusha, LinkedIn Recruiter, HireEZ, DeGarmo, HireVue";
 const OCR2 = "TeleVox and Mosaicx (including the India entity, TVX Private Ltd.), and built\ncross-functional expertise by partnering with technical, operational, and executive\nleaders.\nStandardized the global recruiting SOP by streamlining the end-to-end process across two\ncountries, replacing ad hoc handoffs with defined approval gates and clear ownership,\nreducing requisition-to-offer cycle time by 7-10 days ";
 const OCR3 = "Assisted CDW talent team with full life cycle recruitment for hard to fill senior level\nconsulting engineer teams.\nRecognized across enterprise-wide accounts for resourceful, high-caliber sourcing\nconsistently locating hard-to-reach candidates and contact information to exceed hiring\ntargets despite varying client SLAs, four consecutive years running.\nManaged relationships with 50+ hiring managers";
-const OCR1 = "AURORA CLARK\nRensselaer, IN | (219) 204-2607\nalc.recruits@gmail.com | linkedin.com/in/auroraclarkindiana\nSENIOR RECRUITER & TALENT ACQUISITION PARTNER\nSenior Recruiter & Talent Acquisition Partner who fills roles other channels can't reach";
+const OCR1 = "AVA SAMPLE\nTestington, IN | (555) 010-0199\nava.sample@exampl.test | linkedin.com/in/avasampleexample01\nSENIOR RECRUITER & TALENT ACQUISITION PARTNER\nSenior Recruiter & Talent Acquisition Partner who fills roles other channels can't reach";
 const S1 = [sec("", "unknown"), sec("SENIOR RECRUITER & TALENT ACQUISITION PARTNER", "summary"), sec("CORE COMPETENCIES", "skills"), sec("RECENT TECHNICAL SKILLS", "skills"), sec("PROFESSIONAL EXPERIENCE", "work_history")];
 const S2 = [sec("CONTRACT ENGAGEMENTS, Sourcing Recruiter, Remote (Nov 2020-May 2023)", "work_history", true), sec("CDW, Senior Talent Acquisition Specialist, Remote (Nov 2015-Sep 2020)", "work_history"), sec("ALLEGIS GLOBAL SOLUTIONS, Senior Technical Recruiter, Remote (Jan 2011-Nov 2015)", "work_history")];
 const S3 = [sec("", "unknown", true), sec("RANDSTAD STAFFING (FORMERLY SPHERION), Senior Recruiter, Remote (Oct 2006-Dec 2010)", "work_history"), sec("EDUCATION", "education")];
-const aclarkPages = () => [
+const asamplePages = () => [
   { pageNumber: 1, ocrText: OCR1, sections: S1.map((x) => ({ ...x })), extraction: emptyEx({
     work_history: [job("WESTCX", "Recruiter to Senior Recruiter", WESTCX, { start_date: "2023-09", end_date: "2026-08", heading: "PROFESSIONAL EXPERIENCE", position: 2, extraction_confidence: "medium" })],
     skills: ["Full-Cycle Recruitment Leadership", "Sourcing & Pipeline Management", "AI-Enabled Recruiting Workflows", "Employer Branding", "Vendor Management & Procurement Strategy", "Global Expansion & International Hiring Infrastructure", "DEI & Inclusive Hiring Strategy", "Team Leadership & Mentorship"], skills_heading: "CORE COMPETENCIES", skills_position: 1,
@@ -62,10 +62,10 @@ t("fixtures match the stored lengths (WESTCX 1056, page 2 block 941, ALLEGIS 47,
 });
 
 t("document 2f1fdc89: today's merge puts both blocks in skills_secondary (1701 chars); now they go onto WESTCX and ALLEGIS and skills_secondary is the real 163 characters", () => {
-  const old = run(mOld, aclarkPages());
+  const old = run(mOld, asamplePages());
   assert.equal(ff(old, "skills_secondary").content.length, 1701); assert.equal(wh(old, "WESTCX").length, 1056); assert.equal(wh(old, "ALLEGIS GLOBAL SOLUTIONS").length, 47);
   const rep: Rep = [];
-  const nw = run(mNew, aclarkPages(), rep);
+  const nw = run(mNew, asamplePages(), rep);
   assert.equal(ff(nw, "skills_secondary").content, TECH); assert.equal(ff(nw, "skills_secondary").content.length, 163);
   // AP9AD: the WESTCX text ends "...solo for both" (cut mid-sentence), so the block is joined with ONE SPACE now (it was a line break in AP9AA); same length (1 character)
   assert.equal(wh(nw, "WESTCX"), WESTCX + " " + P2_BLOCK); assert.equal(wh(nw, "WESTCX").length, 1056 + 1 + 941);
@@ -85,7 +85,7 @@ t("document 2f1fdc89: today's merge puts both blocks in skills_secondary (1701 c
 });
 
 t("the rest of the merge output is byte for byte what it was (everything except WESTCX, ALLEGIS and the two freeform blocks)", () => {
-  const a = run(mOld, aclarkPages()), b = run(mNew, aclarkPages());
+  const a = run(mOld, asamplePages()), b = run(mNew, asamplePages());
   const strip = (m: any) => JSON.stringify({ ...m, work_history: m.work_history.filter((w: any) => !["WESTCX", "ALLEGIS GLOBAL SOLUTIONS"].includes(w.company)), freeform: m.freeform.filter((f: any) => f.section_type !== "skills_secondary") });
   assert.equal(strip(b), strip(a));
   assert.equal(JSON.stringify(b.work_history.map((w: any) => [w.company, w.title, w.start_date, w.end_date, w.position])), JSON.stringify(a.work_history.map((w: any) => [w.company, w.title, w.start_date, w.end_date, w.position])));
@@ -102,7 +102,7 @@ t("14-style shape: headed work continuation, heading at the top of the page OCR 
 });
 t("14-style shape WITH an empty-heading block (hypothetical): heading at the top of the OCR means a new job, so the block does not move", () => {
   const pages = () => {
-    const p = aclarkPages().slice(0, 2); p[1].ocrText = "CONTRACT ENGAGEMENTS, Sourcing Recruiter, Remote\nTeleVox and Mosaicx (including the India entity"; return p;
+    const p = asamplePages().slice(0, 2); p[1].ocrText = "CONTRACT ENGAGEMENTS, Sourcing Recruiter, Remote\nTeleVox and Mosaicx (including the India entity"; return p;
   };
   const rep: Rep = [];
   const nw = run(mNew, pages(), rep); const old = run(mOld, pages());
@@ -112,7 +112,7 @@ t("14-style shape WITH an empty-heading block (hypothetical): heading at the top
 
 // ---------- guards ----------
 const noMove = (name: string, mutate: (p: any[]) => void) => t("guard: " + name + " (nothing moves for page 2; same output as today's merge)", () => {
-  const p = aclarkPages().slice(0, 2); mutate(p);
+  const p = asamplePages().slice(0, 2); mutate(p);
   const rep: Rep = [];
   const nw = run(mNew, p, rep), old = run(mOld, p);
   assert.equal(JSON.stringify(nw), JSON.stringify(old)); assert.ok(!rep.some(([, m]) => m.startsWith("leading bullets")), JSON.stringify(rep));
@@ -139,7 +139,7 @@ t("looksLikeJobHeadingLine: all-caps company + comma, date range in parentheses;
 });
 
 t("a block that is not first on its page is left alone (only the first freeform block of the page can move)", () => {
-  const p = aclarkPages().slice(0, 2);
+  const p = asamplePages().slice(0, 2);
   p[1].extraction.freeform = [blockOf("Some earlier unrelated needs review text.", { position: 1, heading: "SOMETHING ELSE" }), blockOf(P2_BLOCK, { position: 3 })];
   const nw = run(mNew, p), old = run(mOld, p);
   assert.equal(JSON.stringify(nw), JSON.stringify(old));
@@ -147,10 +147,10 @@ t("a block that is not first on its page is left alone (only the first freeform 
 
 // ---------- fail open ----------
 t("fail open: a forced throw inside the rule leaves today's output and reports the error", () => {
-  const p = aclarkPages(); const bad: any = new Proxy([sec("", "unknown", true)], { get(target: any, prop: any) { if (prop === "length") throw new Error("forced"); return target[prop]; } });
+  const p = asamplePages(); const bad: any = new Proxy([sec("", "unknown", true)], { get(target: any, prop: any) { if (prop === "length") throw new Error("forced"); return target[prop]; } });
   p[2].sections = bad;
   const rep: Rep = [];
-  const nw = run(mNew, p, rep), old = run(mOld, aclarkPages());
+  const nw = run(mNew, p, rep), old = run(mOld, asamplePages());
   assert.equal(JSON.stringify(nw), JSON.stringify(old));
   assert.deepEqual(rep, [["error", "leading bullets move FAILED, joining as before: Error: forced"]]);
 });

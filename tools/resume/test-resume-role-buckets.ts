@@ -1,5 +1,5 @@
 // node --experimental-strip-types tools/resume/test-resume-role-buckets.ts   (no dependencies, no network, no model call)
-// Feeds stored OCR text and stored page-extraction output of the Oct 15 test uploads (PironeSimple, Aclarktest) and OCR text of the
+// Feeds stored OCR text and stored page-extraction output of the Oct 15 test uploads (PironeSimple, Asampletest) and OCR text of the
 // other test documents into the role bucket check (AP9, John's rule of Oct 16, 2026). Expected results: docs/ap9-expected.txt.
 import assert from "node:assert/strict";
 import { repairRoleBuckets, orderRoleGroupsLatestFirst, type RoleEntry } from "../../supabase/functions/_shared/resume-role-buckets.ts";
@@ -130,8 +130,8 @@ t("Indian River pair (two complete headers, a Role transition caption) is never 
   assert.deepEqual(r.actions, []);
 });
 
-// ---------- Aclarktest, page 1 (stored OCR text and stored merged model output) ----------
-const ACLARK_P1 = `PROFESSIONAL EXPERIENCE
+// ---------- Asampletest, page 1 (stored OCR text and stored merged model output) ----------
+const ASAMPLE_P1 = `PROFESSIONAL EXPERIENCE
 WESTCX, Remote September 2023 August 2026
 -
 WestCx is a cloud-based technology partner that delivers AI-powered solutions for regulated industries like
@@ -168,8 +168,8 @@ const westStored = (): RoleEntry[] => [
   { company: "WESTCX", title: "Recruiter to Senior Recruiter", location: "Remote", start_date: "2023-09", end_date: "2026-08", heading: "PROFESSIONAL EXPERIENCE", extraction_confidence: "high", position: 2,
     job_responsibilities: `${WC_DESC}\n\nRecruiter, September 2023 - June 2024:\n${WC_REC}\n\nSenior Recruiter, July 2024 - August 2026:\n${WC_SR}` },
 ];
-t("Aclarktest WESTCX stored merged entry: two entries, one per dated role, no combined title, company copied, description on the latest role only", () => {
-  const r = repairRoleBuckets(ACLARK_P1, westStored());
+t("Asampletest WESTCX stored merged entry: two entries, one per dated role, no combined title, company copied, description on the latest role only", () => {
+  const r = repairRoleBuckets(ASAMPLE_P1, westStored());
   assert.equal(r.work_history.length, 2);
   const [sr, rec] = r.work_history;
   assert.equal(sr.title, "Senior Recruiter"); assert.equal(sr.start_date, "2024-07"); assert.equal(sr.end_date, "2026-08");
@@ -182,13 +182,13 @@ t("Aclarktest WESTCX stored merged entry: two entries, one per dated role, no co
 });
 
 t("WESTCX: the repaired entries are kept as they are when the check runs again", () => {
-  const once = repairRoleBuckets(ACLARK_P1, westStored());
-  const twice = repairRoleBuckets(ACLARK_P1, once.work_history);
+  const once = repairRoleBuckets(ASAMPLE_P1, westStored());
+  const twice = repairRoleBuckets(ASAMPLE_P1, once.work_history);
   assert.deepEqual(twice.work_history, once.work_history);
 });
 
-// ---------- Aclarktest page 2: single role jobs with a company line carrying the dates and an undated title line ----------
-const ACLARK_P2 = `CONTRACT ENGAGEMENTS, Remote November 2020 May 2023
+// ---------- Asampletest page 2: single role jobs with a company line carrying the dates and an undated title line ----------
+const ASAMPLE_P2 = `CONTRACT ENGAGEMENTS, Remote November 2020 May 2023
 Various short term contracts allowing flexibility while caring for my mother in her final months
 Sourcing Recruiter
 Sourced niche professional roles in financial, technical, healthtech, and scientific verticals for enterprise clients
@@ -201,12 +201,12 @@ Owned the complete hiring life cycle for CDW's prestigious Associate Consulting 
  Built and scaled the Associate Consulting Engineer (ACE) program from the ground up, hiring 30-50 early-
 EDUCATION
 Bachelor of Science, Example University`;
-t("Aclarktest single role jobs (company line with dates, a title line with no dates of its own) are not role blocks and stay as extracted", () => {
+t("Asampletest single role jobs (company line with dates, a title line with no dates of its own) are not role blocks and stay as extracted", () => {
   const input: RoleEntry[] = [
     { company: "CONTRACT ENGAGEMENTS", title: "Sourcing Recruiter", location: "Remote", start_date: "2020-11", end_date: "2023-05", job_responsibilities: "Various short term contracts.", heading: "" },
     { company: "CDW", title: "Senior Talent Acquisition Specialist", location: "Remote", start_date: "2015-11", end_date: "2020-09", job_responsibilities: "CDW is a major provider.", heading: "" },
   ];
-  const r = repairRoleBuckets(ACLARK_P2, input);
+  const r = repairRoleBuckets(ASAMPLE_P2, input);
   assert.deepEqual(r.work_history, input);
   assert.deepEqual(r.actions, []);
 });
@@ -433,7 +433,7 @@ t("ordering: the Thomson Reuters pair comes out latest role first (header role, 
 });
 
 t("ordering: the WESTCX pair comes out Senior Recruiter first, then Recruiter", () => {
-  const f = fin(repairRoleBuckets(ACLARK_P1, westStored(), 1));
+  const f = fin(repairRoleBuckets(ASAMPLE_P1, westStored(), 1));
   assert.deepEqual(f.map((w) => w.title), ["Senior Recruiter", "Recruiter"]);
 });
 

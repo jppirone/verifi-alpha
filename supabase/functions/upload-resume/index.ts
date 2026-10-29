@@ -2153,7 +2153,7 @@ function dedupeCertifications(certifications: ExtractionResult["certifications"]
 // cross-page adjacency; once that's done, nothing downstream needs the page-encoded magnitude, only
 // the relative order, which this preserves exactly.
 // Cross-category misordering (2026-09-28, live-reported and reproduced): a clean, single-column,
-// two-page resume (Aurora Clark's) with an unambiguous "RECENT TECHNICAL SKILLS" section printed
+// two-page resume (Ava Sample's) with an unambiguous "RECENT TECHNICAL SKILLS" section printed
 // directly above "PROFESSIONAL EXPERIENCE" came back with that section's freeform entry positioned
 // BETWEEN two Professional Experience jobs instead of before all of them, on the PDF path (this file
 // — rasterize-pdf-page per page, merged here). Root cause: the tie-fix below only ever repairs
@@ -2280,7 +2280,7 @@ function stitchSeamFragment(prevText: string, contText: string, nextPageOcr: str
 
 // AP9AF-2: a work row that continues the previous page's job (same company and title, or both blank) starts with a lowercase letter and the previous text, whose last
 // line is at least 20 characters long, does not end with terminal punctuation (. ! ? : ; ) ] " ' and the curly quotes): the page break cut a sentence and the model
-// returned the rest as the start of the continuation row (6fc77af5: "...high-caliber sourcing" / "consistently locating hard-to-reach candidates ..."). The two are joined
+// returned the rest as the start of the continuation row (docA: "...high-caliber sourcing" / "consistently locating hard-to-reach candidates ..."). The two are joined
 // with ONE space instead of a blank line. Anything else returns null and the caller joins exactly as before. Fix D's stitch (a fragment the model left out) runs first.
 function joinLowercaseContinuation(prevText: string, contText: string): string | null {
   if (typeof prevText !== "string" || typeof contText !== "string") return null;
@@ -2631,7 +2631,7 @@ function splitCrossPageSkillsGuarded(pages: SkillPage[], report?: (level: "log" 
   }
 }
 
-// AP9AF-1: restore the job title from the heading line of the page. The extraction model sometimes writes a title that is not on the page (document 6fc77af5: the
+// AP9AF-1: restore the job title from the heading line of the page. The extraction model sometimes writes a title that is not on the page (document docA: the
 // page says "WESTCX, Recruiter, Remote (Sep 2023-Jun 2024)" and the row came back titled "Recruiter to Senior Recruiter", the example title of its own prompt).
 // A row's title is replaced only when ALL hold: the row has a company; its stored title does not appear in the page OCR (letters and digits, case ignored); the page
 // OCR has exactly one line that starts with the company name (case-insensitive) and a comma and ends with a parenthesised date range ("COMPANY, Title, Location

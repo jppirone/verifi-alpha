@@ -3,14 +3,18 @@
 // (category unknown or additional_info) are removed from the list when the page OCR has the label as a line ending with a colon and a job is open at that point.
 // The functions under test are cut out of the real sources (rasterize-pdf-page for the rule and resolveContinuationCategory, upload-resume for describeTrailingItem).
 // The Donofrio fixture is built from the stored boundary answers of document 031b895c (donofriotest1017.pdf, the Applitrust PDF) and the label, heading and bullet
-// lines of its stored page OCR; the Aclark and PironeSimple fixtures are the stored boundary answers and OCR of those resumes.
+// lines of its stored page OCR; the Asample and PironeSimple fixtures are the stored boundary answers and OCR of those resumes.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
-import { sec, OCR2 as ACLARK_OCR2, OCR3 as ACLARK_OCR3, S2 as ACLARK_S2, S3 as ACLARK_S3 } from "./fixtures/aclark-6fc77af5.ts";
+import { sec } from "./fixtures/section-helpers.ts";
+import { loadPrivate, skipUnless } from "./private-fixtures.mjs";
+const FA: any = await loadPrivate("sample-a.ts");
+const { OCR2: ASAMPLE_OCR2, OCR3: ASAMPLE_OCR3, S2: ASAMPLE_S2, S3: ASAMPLE_S3 } = FA ?? ({} as any);
 
 const tests: Array<[string, () => void | Promise<void>]> = [];
 const t = (name: string, fn: () => void | Promise<void>) => tests.push([name, fn]);
+const tp = (fx: any, name: string, fn: () => void | Promise<void>) => t(name, skipUnless(fx, name, fn));
 const read = (p: string) => fs.readFileSync(new URL("../../" + p, import.meta.url), "utf8").replace(/\r\n/g, "\n");
 const RAS = read("supabase/functions/rasterize-pdf-page/index.ts"), UPL = read("supabase/functions/upload-resume/index.ts");
 function fnText(src: string, name: string): string {
@@ -121,9 +125,9 @@ t("AP9AJ: the stored Donofrio page 4 section is flagged continuation true, so it
 });
 
 // ---------- negative tests ----------
-t("Aclark pages (stored OCR and boundary answers of 6fc77af5): no colon-ended line, the same object comes back", () => {
-  const a = B(ACLARK_S2.map((x: any) => ({ ...x }))), b = B(ACLARK_S3.map((x: any) => ({ ...x })));
-  assert.strictEqual(run(a, ACLARK_OCR2, WH), a); assert.strictEqual(run(b, ACLARK_OCR3, WH), b);
+tp(FA, "Asample pages (stored OCR and boundary answers of docA): no colon-ended line, the same object comes back", () => {
+  const a = B(ASAMPLE_S2.map((x: any) => ({ ...x }))), b = B(ASAMPLE_S3.map((x: any) => ({ ...x })));
+  assert.strictEqual(run(a, ASAMPLE_OCR2, WH), a); assert.strictEqual(run(b, ASAMPLE_OCR3, WH), b);
 });
 t("PironeSimple pages (stored boundary answers and OCR heads of 8a8b7717, pages 2 and 4): same object", () => {
   const s2 = B([sec("", "work_history", true), sec("Truven Health Analytics (IBM Watson Health), Business Integration Manager, Ann Arbor, MI (2008-2016)", "work_history"), sec("QPharma, Technical Project Manager, Summit, NJ (2007-2008)", "work_history")], { noMergeCompanies: ["Thomson Reuters"] });

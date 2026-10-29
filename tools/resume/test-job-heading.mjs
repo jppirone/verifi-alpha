@@ -61,8 +61,8 @@ for (const [name, d] of Object.entries(FX.docs)) {
     }
   });
 }
-t("finder: the printed title wins over a compound stored title (Aclark 'Recruiter to Senior Recruiter' prints the line the candidate wrote, 'Recruiter')", () => {
-  const d = FX.docs.Aclark; const row = d.rows.find((r) => r.id === "a2");
+t("finder: the printed title wins over a compound stored title (Asample 'Recruiter to Senior Recruiter' prints the line the candidate wrote, 'Recruiter')", () => {
+  const d = FX.docs.Asample; const row = d.rows.find((r) => r.id === "a2");
   assert.equal(row.title, "Recruiter to Senior Recruiter");
   const got = findPrintedHeading(d.ocr.join("\n"), row, new Set());
   assert.deepEqual(got, ["WESTCX, Recruiter, Remote (Sep 2023-Jun 2024)"]); assert.equal(got[0].includes("to Senior"), false);

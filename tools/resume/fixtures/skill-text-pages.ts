@@ -7,11 +7,11 @@ export type FixturePage = { name: string; docs: string[]; ocrMd5: string; skills
 
 export const pages: FixturePage[] = [
   {
-    name: "Aclarktest page 1", docs: ["0ce1ecb7", "52734f63"], ocrMd5: "e35ecf03f5a83958f15da0cd658881f1", skillsMd5: "cae3419da9694d3699860b9e55835543",
+    name: "Asampletest page 1", docs: ["0ce1ecb7", "52734f63"], ocrMd5: "491e9eb85a955d49b09659dcada9b984", skillsMd5: "cae3419da9694d3699860b9e55835543",
     ocr: [
-      "AURORA CLARK",
-      "Rensselaer, IN | (219) 204-2607",
-      "alc.recruits@gmail.com | linkedin.com/in/auroraclarkindiana",
+      "AVA SAMPLE",
+      "Testington, IN | (555) 010-0199",
+      "ava.sample@exampl.test | linkedin.com/in/avasampleexample01",
       "SENIOR RECRUITER & TALENT ACQUISITION PARTNER",
       "Senior Recruiter & Talent Acquisition Partner who fills roles other channels can't reach building referral pipelines",
       "-",

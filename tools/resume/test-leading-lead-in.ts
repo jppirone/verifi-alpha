@@ -1,5 +1,5 @@
 // node --experimental-strip-types tools/resume/test-leading-lead-in.ts   (needs git and the repo history, no network, no model call)
-// AP9AD: two additions to applyLeadingBullets (upload-resume), checked on constructed documents shaped like the Aclark PDF (the real texts of 0cab3106 and 2f1fdc89 are
+// AP9AD: two additions to applyLeadingBullets (upload-resume), checked on constructed documents shaped like the Asample PDF (the real texts of 0cab3106 and 2f1fdc89 are
 // checked in test-leading-work-row.ts and test-leading-bullets.ts):
 //  (a) LEAD-IN RESTORE, work row shape only: the OCR text between the start of the page and the start of the moved row's text is put in front of the row's text.
 //  (b) MID-SENTENCE JOIN, both shapes: when the target's last line is cut in the middle of a sentence the moved text is joined with one space instead of a line break.

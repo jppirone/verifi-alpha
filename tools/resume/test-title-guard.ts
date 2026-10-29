@@ -1,16 +1,20 @@
 // node --experimental-strip-types tools/resume/test-title-guard.ts   (needs git and the repo history, no network, no model call)
 // AP9AF-1: restore the job title from the heading line of the page when the stored title is not on the page (restoreTitlesFromHeadingLines in upload-resume, applied at
 // the start of mergeExtractions). The REAL merge code is cut out of upload-resume (this commit) and out of f2d4bfb (deployed) and compared on the exact stored pages of
-// 6fc77af5 (the defect) and 797fc5d5 (a clean upload of the same resume layout, whose live saved rows are known).
+// docA (the defect) and docB (a clean upload of the same resume layout, whose live saved rows are known).
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
 import { stripTypeScriptTypes } from "node:module";
-import { pages6fc, emptyEx, sec, OCR2 as OCR2_6FC } from "./fixtures/aclark-6fc77af5.ts";
-import { pages797, WESTCX as WESTCX797, LEAD, TV, P3_BLOCK } from "./fixtures/aclark-797fc5d5.ts";
+import { emptyEx, sec } from "./fixtures/section-helpers.ts";
+import { loadPrivate, skipUnless } from "./private-fixtures.mjs";
+const FA: any = await loadPrivate("sample-a.ts"), FB: any = await loadPrivate("sample-b.ts");
+const { pages6fc, OCR2: OCR2_6FC } = FA ?? ({} as any);
+const { pages797, WESTCX: WESTCX797, LEAD, TV, P3_BLOCK } = FB ?? ({} as any);
 
 const tests: Array<[string, () => void | Promise<void>]> = [];
 const t = (name: string, fn: () => void | Promise<void>) => tests.push([name, fn]);
+const tp = (fx: any, name: string, fn: () => void | Promise<void>) => t(name, skipUnless(fx, name, fn));
 const SRC = "supabase/functions/upload-resume/index.ts";
 const srcNew = fs.readFileSync(new URL("../../" + SRC, import.meta.url), "utf8").replace(/\r\n/g, "\n");
 const srcOld = execFileSync("git", ["show", "f2d4bfb:" + SRC], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }).replace(/\r\n/g, "\n");
@@ -27,8 +31,8 @@ const job = (company: string, title: string, jr: string, o: any = {}) => ({ comp
 const find = (m: any, company: string, sd?: string) => m.work_history.find((w: any) => w.company === company && (sd === undefined || w.start_date === sd));
 const guard = mNew.titleFromHeadingLine as (row: any, ocr: string) => string | null;
 
-// ---------- the real stored document 6fc77af5 ----------
-t("6fc77af5: the live merge saves the second WESTCX job as 'Recruiter to Senior Recruiter'; now it is 'Recruiter' (the page line); nothing else changes", () => {
+// ---------- the real stored document docA ----------
+tp(FA, "docA: the live merge saves the second WESTCX job as 'Recruiter to Senior Recruiter'; now it is 'Recruiter' (the page line); nothing else changes", () => {
   const old = run(mOld, pages6fc());
   assert.equal(find(old, "WESTCX", "2023-09").title, "Recruiter to Senior Recruiter");
   const rep: Rep = [];
@@ -73,19 +77,19 @@ none("the company is empty", row({ company: "" }), OCR);
 none("the line dates cannot be read", row(), "WESTCX, Recruiter, Remote (autumn 2023-Jun 2024)\nbody");
 none("the line starts with a longer company name (WESTCX Holdings)", row(), "WESTCX Holdings, Recruiter, Remote (Sep 2023-Jun 2024)\nbody");
 
-t("a page without OCR text (vision routed) is left alone; the stored title stays", () => {
+tp(FA, "a page without OCR text (vision routed) is left alone; the stored title stays", () => {
   const p = pages6fc(); p[1].ocrText = null as any;
   const nw = run(mNew, p, []);
   assert.equal(find(nw, "WESTCX", "2023-09").title, "Recruiter to Senior Recruiter");
 });
-t("the other 6fc77af5 titles are all on the page or have no matching line: no other row changes (no log line for them)", () => {
+tp(FA, "the other docA titles are all on the page or have no matching line: no other row changes (no log line for them)", () => {
   const rep: Rep = [];
   run(mNew, pages6fc(), rep);
   assert.equal(rep.filter(([, m]) => m.startsWith("title restored")).length, 1);
 });
 
 // ---------- fail open ----------
-t("fail open: a forced throw inside the guard saves the live merge output and reports the error", () => {
+tp(FA, "fail open: a forced throw inside the guard saves the live merge output and reports the error", () => {
   const p = pages6fc(); let n = 0;
   Object.defineProperty(p[1], "ocrText", { get() { n++; if (n === 1) throw new Error("forced"); return OCR2_6FC; }, configurable: true });
   const rep: Rep = [];
@@ -96,8 +100,8 @@ t("fail open: a forced throw inside the guard saves the live merge output and re
   assert.deepEqual(rep.filter(([l]) => l === "error"), [["error", "title restore FAILED, saving as before: Error: forced"]]);
 });
 
-// ---------- the clean upload 797fc5d5 and the combination with AP9AA, AP9AC and AP9AD ----------
-t("797fc5d5 (live saved rows known): the real stored pages give WESTCX 1998 (lead-in kept, space join), ALLEGIS 641, and the title guard changes nothing (its titles are on the page)", () => {
+// ---------- the clean upload docB and the combination with AP9AA, AP9AC and AP9AD ----------
+tp(FB, "docB (live saved rows known): the real stored pages give WESTCX 1998 (lead-in kept, space join), ALLEGIS 641, and the title guard changes nothing (its titles are on the page)", () => {
   const rep: Rep = [];
   const nw = run(mNew, pages797(), rep), old = run(mOld, pages797(), []);
   assert.equal(JSON.stringify(nw), JSON.stringify(old), "same as the deployed merge, byte for byte");

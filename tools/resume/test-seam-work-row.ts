@@ -1,16 +1,20 @@
 // node --experimental-strip-types tools/resume/test-seam-work-row.ts   (needs git and the repo history, no network, no model call)
 // AP9AF-2: a work row that continues the previous page's job and starts with a lowercase letter, after a previous text that ends without terminal punctuation, is joined
 // with ONE space instead of a blank line (joinLowercaseContinuation, called in the work history seam merge of upload-resume after AP9X-2's repeat rule and Fix D's stitch).
-// The REAL merge code is cut out of upload-resume (this commit) and out of 6438729 (AP9AF-1, the commit below it) and compared on the exact stored pages of 6fc77af5.
+// The REAL merge code is cut out of upload-resume (this commit) and out of 6438729 (AP9AF-1, the commit below it) and compared on the exact stored pages of docA.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
 import { stripTypeScriptTypes } from "node:module";
-import { pages6fc, emptyEx, sec, ALLEGIS2, ALLEGIS3 } from "./fixtures/aclark-6fc77af5.ts";
-import { pages797 } from "./fixtures/aclark-797fc5d5.ts";
+import { emptyEx, sec } from "./fixtures/section-helpers.ts";
+import { loadPrivate, skipUnless } from "./private-fixtures.mjs";
+const FA: any = await loadPrivate("sample-a.ts"), FB: any = await loadPrivate("sample-b.ts");
+const { pages6fc, ALLEGIS2, ALLEGIS3 } = FA ?? ({} as any);
+const { pages797 } = FB ?? ({} as any);
 
 const tests: Array<[string, () => void | Promise<void>]> = [];
 const t = (name: string, fn: () => void | Promise<void>) => tests.push([name, fn]);
+const tp = (fx: any, name: string, fn: () => void | Promise<void>) => t(name, skipUnless(fx, name, fn));
 const SRC = "supabase/functions/upload-resume/index.ts";
 const srcNew = fs.readFileSync(new URL("../../" + SRC, import.meta.url), "utf8").replace(/\r\n/g, "\n");
 const srcOld = execFileSync("git", ["show", "6438729:" + SRC], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }).replace(/\r\n/g, "\n");
@@ -27,8 +31,8 @@ const job = (company: string, title: string, jr: string, o: any = {}) => ({ comp
 const find = (m: any, company: string) => m.work_history.find((w: any) => w.company === company);
 const join = mNew.joinLowercaseContinuation as (prev: string, cont: string) => string | null;
 
-// ---------- the real stored document 6fc77af5 ----------
-t("6fc77af5: the live merge joins the cut bullet with a blank line (642 characters); now with one space (641), the same as the clean upload 52734f63 (641)", () => {
+// ---------- the real stored document docA ----------
+tp(FA, "docA: the live merge joins the cut bullet with a blank line (642 characters); now with one space (641), the same as the clean upload 52734f63 (641)", () => {
   const old = run(mOld, pages6fc());
   const a = find(old, "ALLEGIS GLOBAL SOLUTIONS").job_responsibilities;
   assert.equal(a, ALLEGIS2 + "\n\n" + ALLEGIS3); assert.equal(a.length, 642);
@@ -114,7 +118,7 @@ t("without a report function (older callers) the merge is exactly today's", () =
   assert.equal(text(out), PREV + "\n\nconsistently locating candidates.");
 });
 
-// ---------- together with AP9AA, AP9AC and AP9AD, and the clean upload 797fc5d5 ----------
+// ---------- together with AP9AA, AP9AC and AP9AD, and the clean upload docB ----------
 t("combination: a lowercase continuation at the 1-2 seam and a leading freeform block moved with a space join at the 2-3 seam", () => {
   const BLOCK = "Kept the beta books in order for four years running.";
   const BPREV = "Beta overview line.\nKept the books and ran the offsite for the whole group and also did both";
@@ -129,7 +133,7 @@ t("combination: a lowercase continuation at the 1-2 seam and a leading freeform 
   assert.equal(find(nw, "Beta Inc").job_responsibilities, BPREV + " " + BLOCK);
   assert.ok(rep.some(([, m]) => m.startsWith("seam stitch (work row) - page 2"))); assert.ok(rep.some(([, m]) => m === "leading join: space (previous line unterminated) - page 3"));
 });
-t("797fc5d5 (clean upload, live rows known): no lowercase continuation row, so the output is byte for byte the deployed merge (WESTCX 1998, ALLEGIS 641)", () => {
+tp(FB, "docB (clean upload, live rows known): no lowercase continuation row, so the output is byte for byte the deployed merge (WESTCX 1998, ALLEGIS 641)", () => {
   const rep: Rep = [];
   const nw = run(mNew, pages797(), rep), old = run(mOld, pages797(), []);
   assert.equal(JSON.stringify(nw), JSON.stringify(old));

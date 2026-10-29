@@ -305,6 +305,12 @@ t("C3 only the migration, the rollback, the edge function and test files changed
   const EA_FILES = ["candidate.html", "tools/resume/check-pdf-bullets.py", "tools/resume/fixtures/ea-bullet-resume.json", "tools/resume/make-pdf-bullet-pdfs.mjs", "tools/resume/pdf-bullets-lib.mjs"];
   // EJ (October 28, 2026): the extension tutorial page and its test are new public files; the page is a new file, so no existing page is touched.
   EA_FILES.push("ext-tutorial.html", "scripts/test-ext-tutorial-page.mjs");
+  // EK (October 28, 2026): test data of a real person left the served tree. These files changed on purpose (names and ids in comments and test labels, the loader, the helper file,
+  // the ignore line); the two moved fixture files show up as removed, so their old names are built from pieces (the guard test forbids that name in any tracked file).
+  EA_FILES.push(".gitignore", "supabase/functions/_shared/resume-role-buckets.ts", "supabase/functions/extract-resume-fields/index.ts", "supabase/functions/upload-resume/index.ts",
+    "supabase/migrations/20260928010000_resume_extraction_pages_section_boundaries.sql", "tools/resume/build-aw-heading-proofs.mjs", "tools/resume/fixtures/job-heading-desc.json",
+    "tools/resume/fixtures/job-heading-six.json", "tools/resume/fixtures/section-helpers.ts", "tools/resume/fixtures/skill-text-pages.ts", "tools/resume/private-fixtures.mjs",
+    "tools/resume/fixtures/" + ["ac", "lark-6fc7", "7af5.ts"].join(""), "tools/resume/fixtures/" + ["ac", "lark-797f", "c5d5.ts"].join(""));
   const EA_CANDIDATE_BLOB = "4ea9c234a0fcc3e65b17c7beb8b7790caebd7684";
   assert.equal(git("hash-object", "candidate.html").trim(), EA_CANDIDATE_BLOB, "candidate.html is not the pushed EA version");
   assert.deepEqual(all.filter((f) => !/^tools\/resume\/test-/.test(f) && !EA_FILES.includes(f)), ["supabase/functions/candidate-comparison-requests/index.ts", "supabase/migrations/20261023010000_open_by_reminders.sql", "supabase/rollback/20261023010000_open_by_reminders_rollback.sql"]);

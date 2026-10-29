@@ -93,7 +93,7 @@ function sideBySide(R) {
 const candidateWithoutSummary = (c) => { const i = c.findIndex((l) => l.text === SUMMARY.heading); if (i < 0) return c; let j = i + 1; while (j < c.length && c[j].text !== "") j++; return [...c.slice(0, i), ...c.slice(j)]; };
 t("job headings: for the printed-heading case, the fallback case and a job with no printed heading, the employer document's lines equal the candidate PDF's lines (the summary block aside)", () => {
   const e = new (EmpC())(), c = new (CandC())();
-  for (const [label, R] of [["Lisa shaped (one printed, one no printed heading)", LISA()], ["PironeSimple (printed headings, includes the Desktop Publishing Manager fallback)", fixtureResume("PironeSimple")], ["Aclark", fixtureResume("Aclark")], ["Donofrio", fixtureResume("Donofrio")], ["LisaTom", fixtureResume("LisaTom")], ["PironeBeast", fixtureResume("PironeBeast")]]) {
+  for (const [label, R] of [["Lisa shaped (one printed, one no printed heading)", LISA()], ["PironeSimple (printed headings, includes the Desktop Publishing Manager fallback)", fixtureResume("PironeSimple")], ["Asample", fixtureResume("Asample")], ["Donofrio", fixtureResume("Donofrio")], ["LisaTom", fixtureResume("LisaTom")], ["PironeBeast", fixtureResume("PironeBeast")]]) {
     const el = e.buildComparisonLines(noDesc(R)), cl = candidateWithoutSummary(c.buildResumeLines(noDesc(R), noDesc(R)));
     assert.deepEqual(el, cl, label);
   }

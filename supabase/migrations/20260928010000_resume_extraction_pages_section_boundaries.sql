@@ -1,5 +1,5 @@
 -- Cross-category position misordering fix, part 1 of 2 (2026-09-28, live-reported and reproduced on
--- Aurora Clark's resume): a clean, single-column resume with "RECENT TECHNICAL SKILLS" printed
+-- Ava Sample's resume): a clean, single-column resume with "RECENT TECHNICAL SKILLS" printed
 -- directly above "PROFESSIONAL EXPERIENCE" came back with that section wedged between two jobs
 -- instead of before all of them. Root cause (see extract-resume-fields/index.ts's dedupePositions
 -- header for the full story, mirrored in upload-resume/index.ts's own copy): the per-item "position"
